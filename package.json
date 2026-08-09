@@ -1,0 +1,19 @@
+{
+  "name": "socialpilot-ai-saas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "tests/integration"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspace=@socialpilot/contracts && npm run typecheck --workspace=@socialpilot/core && npm run typecheck --workspace=@socialpilot/runtime",
+    "test:core": "npm test --workspace=@socialpilot/core",
+    "test:runtime": "npm test --workspace=@socialpilot/runtime",
+    "test:unit": "npm run test:core && npm run test:runtime"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
