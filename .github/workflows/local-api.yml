@@ -1,0 +1,39 @@
+name: local-api
+
+on:
+  push:
+    branches:
+      - feat/saas-foundation
+    paths:
+      - 'apps/local-api/**'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'packages/contracts/**'
+      - '.github/workflows/local-api.yml'
+  pull_request:
+    paths:
+      - 'apps/local-api/**'
+      - 'packages/runtime/**'
+      - 'packages/core/**'
+      - 'packages/contracts/**'
+      - '.github/workflows/local-api.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install workspaces
+        run: npm install --no-audit --no-fund
+      - name: Typecheck runtime
+        run: npm run typecheck --workspace=@socialpilot/runtime
+      - name: Test runtime
+        run: npm test --workspace=@socialpilot/runtime
+      - name: Typecheck local API
+        run: npm run typecheck --workspace=@socialpilot/local-api
