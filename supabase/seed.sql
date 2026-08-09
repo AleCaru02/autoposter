@@ -11,25 +11,26 @@ values
 ('local-costs','Costi durante lo sviluppo','La modalità local E2E usa Supabase CLI, Docker, provider mock e GitHub Actions. Non richiede un terzo progetto Supabase remoto né API social reali. Il cost ledger può usare prezzi teorici configurabili senza hardcodare prezzi provider.','pricing',true,encode(digest('local-costs-v1','sha256'),'hex'),now())
 on conflict (slug) do update set title=excluded.title, content=excluded.content, category=excluded.category, is_public=excluded.is_public, content_hash=excluded.content_hash, published_at=excluded.published_at, updated_at=now();
 
--- LOCAL SEED ONLY: this helper is intentionally not defined by migrations.
--- It exists solely inside `supabase db reset --local` / CI test databases and
--- prevents exposing app_private through PostgREST just to bootstrap an admin UI test.
+-- LOCAL SEED ONLY: helpers below are intentionally not defined by migrations.
 create or replace function public.claim_local_platform_admin()
 returns boolean
 language plpgsql
 security definer
 set search_path = app_private, public, pg_temp
 as $$
-declare
-  v_user uuid := auth.uid();
+declare v_user uuid := auth.uid();
 begin
   if v_user is null then raise exception 'authentication_required'; end if;
-  if exists(select 1 from app_private.platform_admins) and not exists(select 1 from app_private.platform_admins where user_id = v_user) then
-    raise exception 'local_admin_already_claimed';
-  end if;
+  if exists(select 1 from app_private.platform_admins) and not exists(select 1 from app_private.platform_admins where user_id = v_user) then raise exception 'local_admin_already_claimed'; end if;
   insert into app_private.platform_admins(user_id, created_by) values(v_user, v_user) on conflict(user_id) do nothing;
   return true;
 end;
 $$;
 revoke all on function public.claim_local_platform_admin() from public, anon;
 grant execute on function public.claim_local_platform_admin() to authenticated;
+
+-- Service-role-only local view used by the dev API. No anon/authenticated grants.
+create or replace view public.platform_admins_local as
+select user_id, created_by, created_at from app_private.platform_admins;
+revoke all on public.platform_admins_local from public, anon, authenticated;
+grant select, insert on public.platform_admins_local to service_role;
