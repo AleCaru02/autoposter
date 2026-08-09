@@ -5,13 +5,15 @@ on:
     branches:
       - feat/saas-foundation
     paths:
+      - 'package.json'
       - 'packages/runtime/**'
-      - 'packages/contracts/src/**'
+      - 'packages/contracts/**'
       - '.github/workflows/runtime.yml'
   pull_request:
     paths:
+      - 'package.json'
       - 'packages/runtime/**'
-      - 'packages/contracts/src/**'
+      - 'packages/contracts/**'
       - '.github/workflows/runtime.yml'
   workflow_dispatch:
 
@@ -26,12 +28,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: packages/runtime
+      - name: Install workspace dependencies
         run: npm install --no-audit --no-fund
-      - name: Typecheck
-        working-directory: packages/runtime
-        run: npm run typecheck
-      - name: Test
-        working-directory: packages/runtime
-        run: npm test
+      - name: Typecheck runtime
+        run: npm run typecheck --workspace=@socialpilot/runtime
+      - name: Test runtime
+        run: npm test --workspace=@socialpilot/runtime
