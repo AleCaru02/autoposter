@@ -1,4 +1,5 @@
 export * from './ai-orchestrator-mock.js';
+export * from './approval-workflow.js';
 export * from './scheduler-mock.js';
 export * from './social-provider-mock.js';
 export * from './support-assistant-mock.js';
