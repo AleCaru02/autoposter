@@ -1,0 +1,177 @@
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+const API = process.env.E2E_API_URL ?? 'http://127.0.0.1:8787';
+const password = 'LocalE2E-password-123!';
+
+const consoleErrors = (page: Page) => {
+  const errors: string[] = [];
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('pageerror', (error) => errors.push(error.message));
+  return errors;
+};
+
+async function session(page: Page) {
+  return page.evaluate(() => ({
+    token: localStorage.getItem('socialpilot.local.token'),
+    tenantId: localStorage.getItem('socialpilot.local.tenant'),
+  }));
+}
+
+async function api<T>(request: APIRequestContext, token: string, path: string, data?: unknown): Promise<T> {
+  const response = await request.fetch(`${API}${path}`, {
+    method: data === undefined ? 'GET' : 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    ...(data === undefined ? {} : { data }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok()) throw new Error(`${response.status()} ${path}: ${JSON.stringify(body)}`);
+  return body as T;
+}
+
+test('browser completes onboarding → content → approval → publishing → analytics → learning', async ({ page, request }) => {
+  const errors = consoleErrors(page);
+  const email = `browser-${Date.now()}@example.test`;
+
+  await page.goto('/register');
+  await expect(page.getByRole('heading', { name: 'Crea il tuo workspace' })).toBeVisible();
+  await page.getByTestId('register-name').fill('Browser Pizzeria Owner');
+  await page.getByTestId('register-email').fill(email);
+  await page.getByTestId('register-password').fill(password);
+  await page.getByTestId('register-submit').click();
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByText('Dati di base')).toBeVisible();
+
+  await page.getByTestId('business-name').fill('Pizzeria Browser Milano');
+  await page.getByTestId('business-website').fill(`${API}/fixture-site/pizza-browser/`);
+  await page.getByTestId('onboarding-business-next').click();
+  await expect(page.getByText('Cosa deve ottenere il piano editoriale?')).toBeVisible();
+  await page.getByTestId('onboarding-goals-next').click();
+  await expect(page.getByText('Pubblico principale')).toBeVisible();
+  await page.getByTestId('target-input').fill('famiglie locali, gruppi, professionisti del quartiere');
+  await page.getByTestId('onboarding-target-next').click();
+
+  await expect(page.getByText('Analisi reale locale')).toBeVisible();
+  await page.getByTestId('scan-website').click();
+  await expect(page.getByText(/Copertura \d+%/)).toBeVisible();
+  await expect(page.getByText('Pizzeria Browser Milano')).toBeVisible();
+  await page.getByTestId('confirm-brand').click();
+
+  await expect(page.getByText('Canali iniziali')).toBeVisible();
+  await page.getByTestId('platform-linkedin').check();
+  await page.getByTestId('onboarding-social-next').click();
+  await expect(page.getByText('Ritmo editoriale')).toBeVisible();
+  await page.getByTestId('posts-per-week').fill('3');
+  await page.getByTestId('onboarding-frequency-next').click();
+
+  await expect(page.getByText('Preferenza per piattaforma')).toBeVisible();
+  await page.getByTestId('mode-instagram').selectOption('manual');
+  await page.getByTestId('mode-facebook').selectOption('auto');
+  await page.getByTestId('mode-linkedin').selectOption('auto');
+  await page.getByTestId('mode-google_business_profile').selectOption('manual');
+  await page.getByTestId('onboarding-publishing-next').click();
+  await expect(page.getByText('Pronto a generare la prima strategia')).toBeVisible();
+  await page.getByTestId('complete-onboarding').click();
+  await expect(page).toHaveURL(/\/app\/strategy$/);
+  await expect(page.getByText('Content pillars')).toBeVisible();
+
+  await page.getByRole('link', { name: /Genera il calendario/ }).click();
+  await page.getByTestId('generate-calendar').click();
+  await expect(page.getByText('Calendario di 4 settimane generato nel database locale.')).toBeVisible();
+  await expect(page.getByText(/12 contenuti reali locali/)).toBeVisible();
+  await page.getByTestId('calendar-view-month').click();
+  await page.getByTestId('calendar-view-list').click();
+  await page.getByTestId('generate-content').click();
+  await expect(page.getByText('Contenuti generati e passati nel quality gate.')).toBeVisible({ timeout: 30_000 });
+
+  await page.goto('/approvals');
+  await expect(page.getByRole('heading', { name: 'Approval Center' })).toBeVisible();
+  const firstApprove = page.locator('[data-testid^="approve-"]').first();
+  await expect(firstApprove).toBeVisible();
+  await firstApprove.click();
+  await expect(page.getByText(/Approvato/)).toBeVisible();
+
+  const current = await session(page);
+  expect(current.token).toBeTruthy();
+  expect(current.tenantId).toBeTruthy();
+  const token = current.token!;
+  const tenantId = current.tenantId!;
+  let workspace = await api<any>(request, token, `/tenants/${tenantId}/workspace`);
+  for (const post of workspace.posts) {
+    for (const variant of post.variants.filter((item: any) => item.platform_decision !== 'skip' && item.approval_status === 'pending')) {
+      await api(request, token, `/tenants/${tenantId}/variants/${variant.id}/approve`, {});
+    }
+  }
+  workspace = await api<any>(request, token, `/tenants/${tenantId}/workspace`);
+  for (const post of workspace.posts.filter((item: any) => item.status === 'approved')) await api(request, token, `/tenants/${tenantId}/posts/${post.id}/schedule`, {});
+  await api(request, token, `/tenants/${tenantId}/publish-now`, {});
+  await api(request, token, `/tenants/${tenantId}/learning/refresh`, {});
+
+  await page.goto('/app');
+  await expect(page.getByText('Panoramica · E2E locale')).toBeVisible();
+  await expect(page.getByText(/Pubblicati mock/)).toBeVisible();
+  await expect(page.getByText('Learning')).toBeVisible();
+  await page.goto('/app/analytics');
+  await expect(page.getByRole('heading', { name: 'Analytics & Learning' })).toBeVisible();
+  await expect(page.getByText('Performance per piattaforma')).toBeVisible();
+  await expect(page.getByText('Learning loop')).toBeVisible();
+
+  await page.goto('/app/support');
+  await page.getByTestId('tenant-chat-input').fill('Quanti post posso pubblicare questa settimana?');
+  await page.getByTestId('tenant-chat-send').click();
+  await expect(page.getByTestId('tenant-chat-answer')).toContainText('3 post');
+
+  await page.goto('/app/billing');
+  await expect(page.getByText('AI usage ledger')).toBeVisible();
+  await expect(page.getByText(/operazioni/)).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/app');
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(2);
+  expect(errors, `browser console/page errors: ${errors.join('\n')}`).toEqual([]);
+});
+
+test('browser exposes coherent publishing error state and RBAC admin gate', async ({ page, request }) => {
+  const errors = consoleErrors(page);
+  const email = `browser-errors-${Date.now()}@example.test`;
+  await page.goto('/register');
+  await page.getByTestId('register-email').fill(email);
+  await page.getByTestId('register-submit').click();
+  await page.getByTestId('business-name').fill('Error Flow Local');
+  await page.getByTestId('business-website').fill(`${API}/fixture-site/local-errors/`);
+  await page.getByTestId('onboarding-business-next').click();
+  await page.getByTestId('onboarding-goals-next').click();
+  await page.getByTestId('onboarding-target-next').click();
+  await page.getByTestId('scan-website').click();
+  await page.getByTestId('confirm-brand').click();
+  await page.getByTestId('platform-instagram').uncheck();
+  await page.getByTestId('platform-google_business_profile').uncheck();
+  await page.getByTestId('onboarding-social-next').click();
+  await page.getByTestId('posts-per-week').fill('1');
+  await page.getByTestId('onboarding-frequency-next').click();
+  await page.getByTestId('mode-facebook').selectOption('auto');
+  await page.getByTestId('onboarding-publishing-next').click();
+  await page.getByTestId('complete-onboarding').click();
+  await page.goto('/app/calendar');
+  await page.getByTestId('generate-calendar').click();
+  await page.getByTestId('generate-content').click();
+  await expect(page.getByText('Contenuti generati e passati nel quality gate.')).toBeVisible();
+
+  const s = await session(page); const token = s.token!; const tenantId = s.tenantId!;
+  const workspace = await api<any>(request, token, `/tenants/${tenantId}/workspace`);
+  const post = workspace.posts[0];
+  await page.goto(`/app/posts/${post.id}`);
+  await page.getByTestId('failure-mode').selectOption('rate_limit');
+  await page.getByTestId('publish-now').click();
+  await expect(page.getByText('Operazione salvata nel database locale.')).toBeVisible();
+  const after = await api<any>(request, token, `/tenants/${tenantId}/workspace`);
+  expect(after.jobs.some((job: any) => job.status === 'retry_wait' && job.last_error_code === 'rate_limit')).toBe(true);
+
+  await page.goto('/admin');
+  await page.getByTestId('load-admin').click();
+  await expect(page.getByRole('alert')).toContainText('platform_admin_required');
+  await page.getByRole('button', { name: 'Claim admin locale' }).click();
+  await expect(page.getByText('Dati admin non caricati')).not.toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('AI cost ledger')).toBeVisible();
+  expect(errors, `browser console/page errors: ${errors.join('\n')}`).toEqual([]);
+});
