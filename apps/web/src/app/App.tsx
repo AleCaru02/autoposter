@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from '../components/AppShell';
+import { SaasServicesProvider } from '../services/SaasServicesProvider';
 import { DashboardPage } from '../pages/DashboardPage';
 import { OnboardingPage } from '../pages/OnboardingPage';
 import { BrandPage, CalendarPage } from '../pages/BrandCalendarPages';
@@ -10,7 +11,7 @@ import { NotificationsPage } from '../pages/NotificationsPage';
 import { AdminPage, AnalyticsPage, ApprovalsPage, AssetsPage, BillingPage, ConnectionsPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 
 export function App() {
-  return <Routes>
+  return <SaasServicesProvider><Routes>
     <Route path="/" element={<LandingPage />} />
     <Route path="/pricing" element={<PricingPage />} />
     <Route path="/login" element={<LoginPage />} />
@@ -34,5 +35,5 @@ export function App() {
       <Route path="/admin" element={<AdminPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes>;
+  </Routes></SaasServicesProvider>;
 }
