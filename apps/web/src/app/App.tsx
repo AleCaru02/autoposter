@@ -3,6 +3,7 @@ import { AppShell } from '../components/AppShell';
 import { DashboardPage } from '../pages/DashboardPage';
 import { OnboardingPage } from '../pages/OnboardingPage';
 import { BrandPage, CalendarPage } from '../pages/BrandCalendarPages';
+import { PostEditorPage } from '../pages/PostEditorPage';
 import { LandingPage, PricingPage } from '../pages/PublicPages';
 import { AdminPage, AnalyticsPage, ApprovalsPage, AssetsPage, BillingPage, ConnectionsPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 
@@ -17,6 +18,7 @@ export function App() {
       <Route path="/app/assets" element={<AssetsPage />} />
       <Route path="/app/strategy" element={<StrategyPage />} />
       <Route path="/app/calendar" element={<CalendarPage />} />
+      <Route path="/app/posts/:id" element={<PostEditorPage />} />
       <Route path="/app/approvals" element={<ApprovalsPage />} />
       <Route path="/app/connections" element={<ConnectionsPage />} />
       <Route path="/app/analytics" element={<AnalyticsPage />} />
