@@ -4,11 +4,9 @@
 
 **VALIDATO LOCALMENTE — 2026-08-09**
 
-La foundation gira su Supabase locale tramite CLI + Docker e viene ricostruita da database vuoto in CI. Nessuno dei due progetti Supabase cloud già esistenti viene usato per questo SaaS.
+Supabase CLI + Docker ricostruiscono il database da zero. Nessuno dei due progetti Supabase cloud esistenti viene usato per questo SaaS.
 
-## Comandi locali
-
-Prerequisiti: Docker e Supabase CLI.
+## Comandi
 
 ```bash
 supabase start
@@ -20,9 +18,9 @@ supabase db advisors --local --type performance
 supabase test db --local
 ```
 
-`supabase/seed.sql` contiene esclusivamente fixture locali non sensibili. Gli utenti Tenant A/Tenant B vengono creati dinamicamente dai test e rimossi a fine suite.
+La procedura completa applicazione + API + web è in `LOCAL_E2E.md`.
 
-## Migration history locale validata
+## Migration history validata
 
 1. `20260809193000_001_tenancy_foundation.sql`
 2. `20260809194000_002_core_domain.sql`
@@ -30,100 +28,94 @@ supabase test db --local
 4. `20260809200000_004_tenant_consistency.sql`
 5. `20260809201000_005_quota_engine.sql`
 6. `20260809202000_006_local_validation_fixes.sql`
+7. `20260809203000_007_local_e2e_state.sql`
+8. `20260809204000_008_auto_variant_scheduling.sql`
 
-La sesta migration deriva da problemi reali trovati dalla prima esecuzione locale: grant server-side mancanti, extension `vector` nello schema `public` e tre policy segnalate dai Performance Advisors.
+## Stato E2E aggiunto
 
-## ERD iniziale
+Migration 007 introduce/persistisce:
 
-```mermaid
-erDiagram
-  profiles ||--o{ tenant_members : joins
-  tenants ||--o{ tenant_members : has
-  plans ||--o{ subscriptions : assigned
-  tenants ||--o{ subscriptions : owns
-  tenants ||--o{ websites : owns
-  websites ||--o{ website_scans : scanned
-  website_scans ||--o{ website_pages : contains
-  tenants ||--o{ brand_profiles : owns
-  brand_profiles ||--o{ brand_profile_locks : locks
-  tenants ||--o{ brand_assets : owns
-  tenants ||--o{ social_connections : owns
-  social_connections ||--o{ social_accounts : exposes
-  tenants ||--o{ content_strategies : owns
-  content_strategies ||--o{ content_pillars : contains
-  tenants ||--o{ posts : owns
-  posts ||--o{ post_variants : has
-  posts ||--o{ publication_jobs : publishes
-  publication_jobs ||--o{ publication_attempts : attempts
-  posts ||--o{ published_posts : results
-  tenants ||--o{ analytics_snapshots : measures
-  tenants ||--o{ ai_usage_events : costs
-  tenants ||--o{ editorial_memory : remembers
-  tenants ||--o{ content_fingerprints : deduplicates
-  tenants ||--o{ audit_logs : audits
-```
+- scheduling fields sui post;
+- onboarding session;
+- Brand Profile version history;
+- learning insights;
+- RLS/FK tenant-aware per i nuovi oggetti.
 
-## Isolamento multi-tenant
+Migration 008 rende il percorso AUTO/MANUALE realmente per piattaforma: le varianti AUTO che superano QA vengono accodate indipendentemente dai MANUAL siblings, con idempotency key.
 
-Il modello non si affida soltanto a una colonna `tenant_id`:
+## Multi-tenancy
 
-- RLS su tutte le tabelle applicative `public`;
-- membership/role helpers server-side;
-- foreign key composte `(tenant_id, id)` sulle relazioni sensibili;
-- tabelle service-only senza grant di scrittura ad `authenticated`;
-- schema `app_private` senza `USAGE` per `anon`/`authenticated`;
-- test reali con due utenti Auth e due tenant separati.
+Il modello combina:
 
-Il test applicativo copre SELECT, INSERT, UPDATE e DELETE cross-tenant e un tentativo di collegamento FK verso un parent di un altro tenant.
+- `tenant_id`;
+- RLS su tabelle applicative;
+- `tenant_members` e ruoli;
+- composite foreign keys `(tenant_id, id)` sulle relazioni sensibili;
+- tabelle server-only senza grant client;
+- `app_private` senza `USAGE` per `anon`/`authenticated`;
+- test Auth reali con Tenant A/Tenant B.
 
-## Sicurezza dati
+La suite E2E-state verifica anche:
 
-- `service_role` non viene mai usata nel frontend.
-- La migration 006 assegna a `service_role` i grant PostgreSQL necessari alle operazioni trusted server-side; tali grant non vengono propagati ai ruoli client.
-- Credenziali social sono conservate in `app_private.integration_credentials` esclusivamente come ciphertext/metadata; la cifratura applicativa autenticata viene implementata prima dell'OAuth reale.
-- `platform_admins` è nello schema privato.
-- Extension `vector` vive nello schema `extensions`, non in `public`.
-- I tre bucket applicativi sono privati.
+- onboarding A invisibile/non scrivibile da B;
+- Brand Profile history non collegabile a parent cross-tenant;
+- learning insights leggibili solo dal tenant;
+- authenticated non può falsificare insight.
+
+## `app_private`
+
+Contiene materiale privileged come integration credentials e platform admin mapping. Il frontend non vi accede.
+
+Il seed locale crea esclusivamente per test:
+
+- `claim_local_platform_admin()`;
+- una view service-role-only `platform_admins_local`.
+
+Questi helper non sono migrations production-like.
 
 ## Quota engine
 
-Il flusso trusted è:
-
 ```text
 reserve_tenant_usage
-  -> commit_tenant_usage
-  oppure
-  -> release_tenant_usage
+→ commit_tenant_usage
+oppure
+→ release_tenant_usage
 ```
 
-La reservation contiene una `idempotency_key`. I test locali verificano replay di reserve/commit/release, limiti e contatori `used`/`reserved`. Le RPC di mutazione quota non sono eseguibili da `anon` o `authenticated`.
-
-## Knowledge
-
-Due livelli:
-
-1. RAW: `website_pages`, asset, documenti e snapshot.
-2. COMPACT: `brand_context_versions`, usato nella maggior parte delle generazioni.
+Le RPC di mutazione sono server-only. Replay, limiti, contatori used/reserved e isolamento sono testati localmente.
 
 ## Publishing
 
-`publication_jobs.idempotency_key` è unico per tenant. `published_posts` conserva l'ID esterno. Il worker deve controllare entrambi prima di una chiamata provider.
+Persistenza principale:
 
-## Validazione CI
+- `post_variants`;
+- `publication_jobs`;
+- `publication_attempts`;
+- `published_posts`;
+- `analytics_snapshots`;
+- `editorial_memory`.
 
-Workflow: `.github/workflows/tenant-isolation.yml`.
+`publication_jobs.idempotency_key` è tenant-unique. Il mock provider salva external mock ID e gli stessi meccanismi di retry/reconciliation usati dal futuro adapter reale.
 
-Ultimo ciclo database di riferimento del 2026-08-09:
+## AI / learning
 
-- `supabase start`: PASS;
-- `supabase db reset --local`: PASS;
-- migration history 6/6: PASS;
+- `ai_usage_events`: operazioni/token/work unit/costo teorico configurabile;
+- `content_fingerprints`: dedup server-side;
+- `feedback_events`: approve/reject/user edit;
+- `learning_insights`: insight evidence-gated e server-written.
+
+## Validazione CI finale
+
+Workflow `.github/workflows/tenant-isolation.yml`:
+
+- **8/8 migrations da zero: PASS**;
+- migration history: PASS;
 - DB lint: PASS, nessun errore;
 - Security Advisors: PASS, nessuna issue;
 - Performance Advisors: PASS, nessuna issue;
-- pgTAP: 20/20 PASS;
-- Tenant A/Tenant B + quota integration: 14/14 PASS.
+- pgTAP: **27/27 PASS**;
+- Auth/RLS/quota/E2E-state: **3 file / 20 test PASS**.
 
-## Da validare su Supabase remoto
+## Da validare sul futuro remoto
 
-Prima di beta/public E2E andranno ripetuti migrations, history, advisors, RLS/Auth e storage su un progetto Supabase dedicato. Questa verifica remota è intenzionalmente posticipata e non blocca lo sviluppo locale.
+Prima di beta/provider reali dovranno essere ripetuti migrations/history/advisors/Auth/RLS/Storage sul progetto Supabase dedicato. Fino ad allora questa verifica è intenzionalmente posticipata e non blocca lo sviluppo.
