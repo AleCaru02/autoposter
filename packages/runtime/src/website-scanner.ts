@@ -19,12 +19,21 @@ export interface WebsiteScanPage {
   discoveredLinks: string[];
 }
 
+export interface WebsiteScanError {
+  url: string;
+  code: 'fetch_failed' | 'external_redirect' | 'http_error';
+  message: string;
+  status?: number;
+}
+
 export interface WebsiteScanResult {
   rootUrl: string;
   pages: WebsiteScanPage[];
+  errors: WebsiteScanError[];
   visitedCount: number;
   skippedExternalCount: number;
   skippedDuplicateCount: number;
+  redirectedCount: number;
   truncated: boolean;
 }
 
@@ -69,7 +78,7 @@ const extractLinks = (html: string, baseUrl: string): string[] => {
     try {
       links.add(normalizeWebsiteUrl(raw, baseUrl));
     } catch {
-      // Invalid links are ignored; the scanner never follows malformed URLs.
+      // Invalid links are ignored; malformed URLs are never followed.
     }
   }
   return [...links];
@@ -100,10 +109,12 @@ export class WebsiteScanner {
     const queued = new Set(queue);
     const visited = new Set<string>();
     const pages: WebsiteScanPage[] = [];
+    const errors: WebsiteScanError[] = [];
     let skippedExternalCount = 0;
     let skippedDuplicateCount = 0;
+    let redirectedCount = 0;
 
-    while (queue.length > 0 && pages.length < input.maxPages) {
+    while (queue.length > 0 && visited.size < input.maxPages) {
       const next = queue.shift();
       if (!next) break;
       queued.delete(next);
@@ -113,11 +124,24 @@ export class WebsiteScanner {
       }
       visited.add(next);
 
-      const response = await this.fetcher.fetch(next);
+      let response: PageFetchResult;
+      try {
+        response = await this.fetcher.fetch(next);
+      } catch (error) {
+        errors.push({
+          url: next,
+          code: 'fetch_failed',
+          message: error instanceof Error ? error.message : 'unknown_fetch_error',
+        });
+        continue;
+      }
+
       const finalUrl = normalizeWebsiteUrl(response.finalUrl ?? next, next);
       const final = new URL(finalUrl);
+      if (finalUrl !== next) redirectedCount += 1;
       if (final.origin !== root.origin) {
         skippedExternalCount += 1;
+        errors.push({ url: next, code: 'external_redirect', message: `Redirected outside allowed origin: ${final.origin}` });
         continue;
       }
 
@@ -133,6 +157,10 @@ export class WebsiteScanner {
         contentHash: stableContentHash(`${response.status}\n${response.contentType}\n${text}`),
         discoveredLinks: links,
       });
+
+      if (response.status >= 400) {
+        errors.push({ url: finalUrl, code: 'http_error', message: `HTTP ${response.status}`, status: response.status });
+      }
 
       for (const link of links) {
         const candidate = new URL(link);
@@ -152,20 +180,23 @@ export class WebsiteScanner {
     return {
       rootUrl,
       pages,
+      errors,
       visitedCount: visited.size,
       skippedExternalCount,
       skippedDuplicateCount,
+      redirectedCount,
       truncated: queue.length > 0,
     };
   }
 }
 
 export class FixturePageFetcher implements PageFetcher {
-  constructor(private readonly fixtures: Record<string, PageFetchResult>) {}
+  constructor(private readonly fixtures: Record<string, PageFetchResult | Error>) {}
 
   async fetch(url: string): Promise<PageFetchResult> {
     const fixture = this.fixtures[normalizeWebsiteUrl(url)];
     if (!fixture) throw new Error(`fixture_not_found:${url}`);
+    if (fixture instanceof Error) throw fixture;
     return { ...fixture };
   }
 }
