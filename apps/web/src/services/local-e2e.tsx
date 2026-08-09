@@ -43,7 +43,7 @@ const baseUrl = (import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.repl
 const TOKEN_KEY = 'socialpilot.local.token';
 const TENANT_KEY = 'socialpilot.local.tenant';
 
-const request = async <T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> => {
+const request = async <T,>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> => {
   if (!baseUrl) throw new Error('Local E2E API non configurata');
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
