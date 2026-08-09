@@ -69,7 +69,7 @@ export class InMemoryBrandProfileStore {
       }
     }
 
-    if (current.status === 'confirmed') current.status = 'superseded';
+    current.status = 'superseded';
     const next: BrandProfileVersion = {
       tenantId: input.tenantId,
       version: current.version + 1,
