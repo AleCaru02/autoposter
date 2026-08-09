@@ -2,72 +2,103 @@
 
 ## Stato
 
-**Foundation database VALIDATA LOCALMENTE — 2026-08-09.**
+**Foundation + local E2E VALIDATI LOCALMENTE — 2026-08-09.**
 
-La validazione viene eseguita su Supabase CLI + Docker in GitHub Actions, senza usare progetti cloud esistenti e senza secret remoti.
+La validazione usa Supabase CLI/Docker, local API e Chromium senza utilizzare progetti Supabase cloud esistenti o secret provider reali.
 
-## Controlli obbligatori
+## Controlli già provati
 
-- RLS su ogni tabella applicativa `public`.
-- Tenant authorization server-side.
-- Foreign key composte `(tenant_id, id)` per impedire riferimenti cross-tenant anche conoscendo un UUID valido.
-- `service_role`, OpenAI key, OAuth client secret e social token mai nel browser.
-- `service_role` con grant PostgreSQL espliciti solo per workload trusted server-side.
-- OAuth `state` one-time e redirect allowlist.
-- CSRF dove applicabile.
-- Telegram/Stripe/provider webhook signature o secret verification.
-- Rate limit per endpoint costosi/sensibili.
-- Input e file validation.
-- Signed URL per asset privati.
-- RBAC admin separato dai ruoli tenant.
-- Audit log per azioni privilegiate.
-- Correlation ID per job e richieste esterne.
-- Safe redirect validation.
+- RLS su tutte le tabelle applicative `public`;
+- utenti Auth reali Tenant A/Tenant B;
+- SELECT/INSERT/UPDATE/DELETE cross-tenant bloccati;
+- composite FK tenant-aware;
+- onboarding tenant-scoped;
+- Brand Profile version history non collegabile a parent di altro tenant;
+- learning leggibile tenant-scoped e non scrivibile dal client;
+- `authenticated` non può creare `publication_jobs`;
+- quota mutation RPC server-only;
+- `anon`/`authenticated` senza `USAGE` su `app_private`;
+- integration credentials non leggibili dal client;
+- nessuna colonna plaintext token/secret nella tabella credenziali;
+- bucket applicativi privati;
+- `vector` nello schema `extensions`;
+- Security Advisors: nessuna issue;
+- Performance Advisors: nessuna issue;
+- chatbot cross-tenant rifiutato;
+- workspace cross-tenant rifiutato;
+- admin senza platform-admin rifiutato;
+- browser E2E senza console/page errors.
 
-## Controlli già provati localmente
+Numeri finali DB security: **27/27 pgTAP + 3 file / 20 Auth/RLS integration PASS**.
 
-- Tutte le tabelle applicative `public` risultano con RLS abilitata nel test strutturale.
-- Utente Tenant A non può SELECT righe Tenant B.
-- Tenant A non può INSERT righe attribuite a Tenant B.
-- UPDATE/DELETE di Tenant A contro Tenant B non modificano alcuna riga.
-- Tenant A può CRUD sulle proprie risorse.
-- Tentativo di FK cross-tenant viene rifiutato.
-- `authenticated` non può scrivere `publication_jobs`.
-- `authenticated` non può chiamare le RPC di mutazione quota.
-- `anon` e `authenticated` non hanno `USAGE` su `app_private`.
-- `authenticated` non può leggere `app_private.integration_credentials`.
-- La tabella delle credenziali non contiene colonne plaintext `token`, `access_token`, `refresh_token`, `secret` o `client_secret`.
-- Tre bucket applicativi verificati come privati.
-- Extension `vector` spostata nello schema `extensions`.
-- Security Advisors locali: **No issues found**.
-- Performance Advisors locali: **No issues found**.
+## Browser / local API boundary
 
-## Token social
+Il frontend conserva soltanto sessione Auth locale e tenant selezionato. Non possiede `service_role`.
 
-La tabella metadata è pubblica/RLS; il materiale segreto vive in `app_private.integration_credentials`. Non esiste una colonna plaintext. Prima di attivare OAuth va implementata cifratura autenticata server-side con chiave in secret manager e rotazione/versione chiave.
+Il local API:
 
-Il client non avrà accesso diretto allo schema privato; le operazioni con token passano esclusivamente da codice trusted server-side.
+1. autentica l'utente;
+2. verifica membership/ruolo;
+3. usa la sessione utente per normali CRUD RLS;
+4. usa `service_role` soltanto per workload server-only.
 
-## Quota e abuso
+Cross-tenant anti-duplicate viene calcolato server-side e non restituisce il contenuto raw di altri tenant.
 
-Le funzioni `reserve_tenant_usage`, `commit_tenant_usage` e `release_tenant_usage` sono server-only. La suite locale verifica idempotenza, limiti e isolamento dei contatori fra due tenant.
+## `app_private`
 
-## Impersonation
+Resta non accessibile al browser. Token social futuri e materiale sensibile appartengono a questo boundary.
 
-Non nell'MVP Core. Se introdotta: motivo obbligatorio, time-box, banner evidente, log immutabile e impossibilità di leggere secret/token.
+Per il test admin locale il seed crea un helper e una view service-role-only. Sono **seed-only**, non migrations production-like e non devono essere copiati nel futuro ambiente remoto.
 
-## Da validare prima del beta pubblico
+## Publishing safety
 
-- stesso set di RLS/FK/grant su Supabase remoto dedicato;
-- Auth e refresh reali;
-- Signed URL e Storage remoto;
-- cifratura token con secret manager;
+I provider sono mock. La pipeline usa:
+
+- connection health;
+- approval mode per piattaforma;
+- idempotency key;
+- publication attempts;
+- external mock ID;
+- retry classification;
+- reconciliation dopo successful publish + timeout response.
+
+Il test conferma che il retry non crea una seconda pubblicazione mock.
+
+## AUTO/MANUALE
+
+La migration 008 crea job AUTO indipendenti per variante dopo QA. La coda rimane server-side e `authenticated` non riceve il grant di inserimento.
+
+## Telegram mock
+
+Il runtime verifica HMAC, tenant/user binding, expiry e nonce one-time. Un bug del test di tampering è stato corretto garantendo che la firma alterata sia realmente diversa.
+
+## Admin RBAC
+
+I ruoli tenant non equivalgono a platform-admin. L'endpoint admin rifiuta utenti normali. Il claim iniziale esiste esclusivamente nel seed local-E2E.
+
+## Cost/abuse controls
+
+- quota reserve/commit/release server-only;
+- idempotency;
+- plan entitlements;
+- AI usage ledger;
+- theoretical price configuration da env, non hardcoded;
+- page limits sul website scanner;
+- same-origin crawler;
+- input/time limits nelle fixture local API.
+
+## Prima del beta pubblico
+
+Restano obbligatori:
+
+- ripetere RLS/FK/grant su Supabase remoto dedicato;
+- secret manager e cifratura autenticata token;
 - OAuth state/PKCE/redirect reali;
-- firme webhook reali;
+- webhook signature reali;
 - rate limiting pubblico;
-- Security/Performance Advisors remoti;
-- tentativi cross-tenant sul deployment pubblico.
+- Signed URL/Storage remoto;
+- provider app review e least-privilege scopes;
+- penetration/abuse tests sul deployment pubblico;
+- GDPR/export/delete/revoca e policy legali.
 
-## GDPR/legal
-
-Il software deve offrire export, account deletion, revoca social e cancellazione dati. Privacy policy, terms, cookie e basi giuridiche richiedono revisione professionale prima del lancio commerciale.
+Il progetto remoto non è necessario per la fase locale già completata.
