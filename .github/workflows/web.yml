@@ -28,6 +28,8 @@ jobs:
           node-version: 22
       - name: Install workspace dependencies
         run: npm install --no-audit --no-fund
+      - name: Test web routes
+        run: npm test --workspace=@socialpilot/web
       - name: Typecheck web app
         run: npm run typecheck --workspace=@socialpilot/web
       - name: Build web app
