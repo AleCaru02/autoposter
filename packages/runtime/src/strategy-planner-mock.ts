@@ -4,18 +4,18 @@ export interface StrategyPlannerInput {
   tenantId: string;
   brandName: string;
   industry: string;
-  subIndustry?: string;
-  location?: string;
+  subIndustry?: string | undefined;
+  location?: string | undefined;
   goals: string[];
   target: string[];
   services: string[];
   differentiators: string[];
   selectedPlatforms: SocialPlatform[];
   postsPerWeek: number;
-  preferredDays?: number[];
-  preferredTimes?: string[];
-  editorialMemoryTopics?: string[];
-  competitorThemes?: string[];
+  preferredDays?: number[] | undefined;
+  preferredTimes?: string[] | undefined;
+  editorialMemoryTopics?: string[] | undefined;
+  competitorThemes?: string[] | undefined;
 }
 
 export interface StrategyPillarPlan {
@@ -34,11 +34,7 @@ export interface PlannedContentStrategy {
   pillars: StrategyPillarPlan[];
   ctaStrategy: string[];
   avoidThemes: string[];
-  scheduling: {
-    postsPerWeek: number;
-    preferredDays: number[];
-    preferredTimes: string[];
-  };
+  scheduling: { postsPerWeek: number; preferredDays: number[]; preferredTimes: string[] };
 }
 
 export interface CalendarSlot {
@@ -101,44 +97,20 @@ export class DeterministicStrategyPlannerMock {
     if (!input.tenantId.trim() || !input.brandName.trim() || !input.industry.trim()) throw new Error('strategy_context_required');
     if (!Number.isInteger(input.postsPerWeek) || input.postsPerWeek < 1 || input.postsPerWeek > 14) throw new Error('strategy_invalid_frequency');
     if (input.selectedPlatforms.length === 0) throw new Error('strategy_platform_required');
-
     const profile = sectorProfile(input.industry, input.subIndustry);
     const serviceSeeds = input.services.map((service) => service.trim()).filter(Boolean);
     const goalSeeds = input.goals.map((goal) => goal.trim()).filter(Boolean);
     const excluded = new Set((input.editorialMemoryTopics ?? []).map(normalize));
-    const topicPool = unique([...serviceSeeds, ...profile.seeds, ...goalSeeds, ...(input.competitorThemes ?? [])])
-      .filter((topic) => !excluded.has(normalize(topic)));
-
+    const topicPool = unique([...serviceSeeds, ...profile.seeds, ...goalSeeds, ...(input.competitorThemes ?? [])]).filter((topic) => !excluded.has(normalize(topic)));
     const baseShares = [35, 25, 20, 20];
     const pillars = profile.pillars.map(([key, name, objective, formats], index): StrategyPillarPlan => ({
-      key,
-      name,
-      share: baseShares[index] ?? 25,
-      objective,
-      formats: [...formats],
+      key, name, share: baseShares[index] ?? 25, objective, formats: [...formats],
       platforms: input.selectedPlatforms.filter((platform) => platform !== 'google_business_profile' || key === 'locale' || key === 'conversione' || key === 'territorio' || key === 'lead'),
       topicSeeds: topicPool.filter((_, topicIndex) => topicIndex % profile.pillars.length === index).slice(0, 5),
     }));
-
     const localGoal = input.goals.some((goal) => /visit|prenot|lead|vend|traff|locale/i.test(goal));
-    const ctaStrategy = unique([
-      ...(input.goals.includes('educazione') ? ['Salva o condividi il contenuto'] : []),
-      ...(localGoal ? ['Contatta o prenota con un invito specifico e verificabile'] : []),
-      'Usa CTA coerenti con il livello di intenzione, senza promesse non dimostrate',
-    ]);
-
-    return {
-      objectives: [...input.goals],
-      audience: [...input.target],
-      pillars,
-      ctaStrategy,
-      avoidThemes: ['promesse garantite', 'claim non verificati', 'ripetizioni recenti'],
-      scheduling: {
-        postsPerWeek: input.postsPerWeek,
-        preferredDays: input.preferredDays?.length ? [...input.preferredDays] : [1, 3, 5],
-        preferredTimes: input.preferredTimes?.length ? [...input.preferredTimes] : ['10:00'],
-      },
-    };
+    const ctaStrategy = unique([...(input.goals.includes('educazione') ? ['Salva o condividi il contenuto'] : []), ...(localGoal ? ['Contatta o prenota con un invito specifico e verificabile'] : []), 'Usa CTA coerenti con il livello di intenzione, senza promesse non dimostrate']);
+    return { objectives: [...input.goals], audience: [...input.target], pillars, ctaStrategy, avoidThemes: ['promesse garantite', 'claim non verificati', 'ripetizioni recenti'], scheduling: { postsPerWeek: input.postsPerWeek, preferredDays: input.preferredDays?.length ? [...input.preferredDays] : [1, 3, 5], preferredTimes: input.preferredTimes?.length ? [...input.preferredTimes] : ['10:00'] } };
   }
 
   buildCalendar(input: { strategy: PlannedContentStrategy; startDate: string; weeks: number }): CalendarSlot[] {
@@ -147,7 +119,6 @@ export class DeterministicStrategyPlannerMock {
     const total = input.strategy.scheduling.postsPerWeek * input.weeks;
     const activePillars = input.strategy.pillars.filter((pillar) => pillar.platforms.length > 0);
     if (activePillars.length === 0) throw new Error('calendar_no_active_pillars');
-
     const slots: CalendarSlot[] = [];
     for (let index = 0; index < total; index += 1) {
       const week = Math.floor(index / input.strategy.scheduling.postsPerWeek);
@@ -159,20 +130,10 @@ export class DeterministicStrategyPlannerMock {
       monday.setUTCDate(monday.getUTCDate() - startDay + 1 + week * 7 + (day - 1));
       const [hourText = '10', minuteText = '00'] = time.split(':');
       monday.setUTCHours(Number(hourText), Number(minuteText), 0, 0);
-
       const pillar = activePillars[index % activePillars.length]!;
       const platform = pillar.platforms[index % pillar.platforms.length]!;
       const topic = pillar.topicSeeds[index % Math.max(1, pillar.topicSeeds.length)] ?? `${pillar.name} ${index + 1}`;
-      slots.push({
-        index,
-        scheduledAt: monday.toISOString(),
-        platform,
-        pillarKey: pillar.key,
-        topic,
-        objective: pillar.objective,
-        format: pillar.formats[index % pillar.formats.length] ?? 'single_image',
-        status: 'idea',
-      });
+      slots.push({ index, scheduledAt: monday.toISOString(), platform, pillarKey: pillar.key, topic, objective: pillar.objective, format: pillar.formats[index % pillar.formats.length] ?? 'single_image', status: 'idea' });
     }
     return slots;
   }
