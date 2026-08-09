@@ -106,15 +106,33 @@ jobs:
         env:
           E2E_API_URL: http://127.0.0.1:8787
           E2E_WEB_URL: http://127.0.0.1:5173
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/e2e.log
 
       - name: Print service logs on failure
         if: failure()
         run: |
+          echo '--- playwright ---'
+          cat /tmp/e2e.log || true
           echo '--- local api ---'
           cat /tmp/local-api.log || true
           echo '--- web ---'
           cat /tmp/web.log || true
+
+      - name: Upload E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-e2e-diagnostics-${{ github.run_id }}
+          path: |
+            /tmp/e2e.log
+            /tmp/local-api.log
+            /tmp/web.log
+            apps/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Stop local services
         if: always()
