@@ -5,7 +5,7 @@
 Durante lo sviluppo la foundation viene validata senza costi con tre livelli indipendenti:
 
 1. Supabase CLI + Docker per schema/RLS/Auth/Data API;
-2. runtime TypeScript deterministico per AI/social/scheduler/scanner/support/Telegram mock;
+2. runtime TypeScript deterministico per AI/social/scheduler/scanner/support/Telegram/onboarding/brand mock;
 3. web app React/Vite con route smoke tests, strict typecheck e production build.
 
 Nessun test CI pubblica sui social reali, usa token provider reali o modifica i progetti Supabase cloud esistenti.
@@ -13,21 +13,6 @@ Nessun test CI pubblica sui social reali, usa token provider reali o modifica i 
 ## Database locale
 
 Workflow: `.github/workflows/tenant-isolation.yml`.
-
-Sequenza:
-
-1. installa Supabase CLI;
-2. `supabase start`;
-3. `supabase db reset --local`;
-4. migration history;
-5. `supabase db lint`;
-6. Security Advisors;
-7. Performance Advisors;
-8. pgTAP;
-9. chiavi effimere dello stack locale;
-10. due utenti Auth locali;
-11. test Tenant A/Tenant B e quota;
-12. distruzione stack senza backup.
 
 Risultato validato 2026-08-09:
 
@@ -37,44 +22,24 @@ Risultato validato 2026-08-09:
 - Security Advisors: PASS — `No issues found`;
 - Performance Advisors: PASS — `No issues found`;
 - pgTAP: **20/20 PASS**;
-- Auth/RLS/quota integration: **14/14 PASS**.
+- Auth/RLS/quota integration: **2 file / 17 test PASS**.
 
-### pgTAP
+### Copertura RLS/Auth
 
-`supabase/tests/database_security.test.sql` verifica:
-
-- RLS sulle tabelle applicative `public`;
-- isolamento `app_private`;
-- integration credentials non leggibili dal client;
-- assenza colonne token/secret plaintext;
-- foreign key tenant-aware;
-- quota RPC non eseguibili da `authenticated`;
-- quota RPC disponibili a `service_role`;
-- grant server-side necessari;
-- `publication_jobs` non scrivibile dal client;
-- bucket privati;
-- migration history;
-- `vector` fuori da `public`;
-- seed e policy plans.
-
-### Tenant A / Tenant B
-
-`tests/integration/tenant-isolation.test.ts` verifica:
+I test creano utenti e tenant effimeri e coprono:
 
 - owner vede solo il proprio tenant;
-- SELECT A → B = zero righe;
-- INSERT con `tenant_id` B rifiutato;
-- CRUD proprio;
-- UPDATE/DELETE A → B senza modifiche;
-- FK cross-tenant rifiutata;
-- service-only tables protette;
+- SELECT/INSERT/UPDATE/DELETE cross-tenant;
+- CRUD sulle risorse proprie;
+- FK cross-tenant;
 - `app_private` non esposto;
-- read anon solo risorse pubbliche intenzionali;
 - entitlements tenant-scoped;
-- client non può riservare quota;
-- `reserve → replay → release → replay`;
-- `reserve → commit → replay`;
-- quota limit e contatori isolati.
+- quota server-only, idempotenza e limiti;
+- `websites` come baseline CRUD;
+- `brand_assets` e `posts` come contenuti editabili;
+- `social_connections` come metadata owner/admin;
+- `ai_usage_events` come tabella server-only;
+- contatori quota tenant-scoped.
 
 ## Runtime mock
 
@@ -83,18 +48,23 @@ Workflow: `.github/workflows/runtime.yml`.
 Risultato validato 2026-08-09:
 
 - strict typecheck: PASS;
-- **5 test file / 15 test PASS**.
+- **10 test file / 29 test PASS**.
 
 Copertura:
 
 - SocialProvider mock e publish idempotente;
 - connection health e skip validation;
 - scheduler dedupe/exactly-once/dead state;
+- timeout-after-provider-success senza doppia pubblicazione;
 - AI platform adaptation incl. GBP `skip` e LinkedIn `separate_concept`;
+- anti-clone acceptance su 3 pizzerie + 3 property manager;
+- approval manual/auto tenant-scoped;
 - website scanner same-origin, page limit, URL normalization e hashing;
 - chatbot pubblico senza tenant resolver;
 - tenant support scope;
-- Telegram HMAC, tenant/user binding, expiry e nonce one-time.
+- Telegram HMAC, tenant/user binding, expiry e nonce one-time;
+- onboarding provenance, conferme, lock, coverage e step gate;
+- Brand Profile versioning, latest-only confirmation, locks e tenant-isolated history.
 
 ## Web app
 
@@ -109,12 +79,10 @@ Risultato validato 2026-08-09:
 Le route smoke verificano almeno:
 
 - landing e chatbot pubblico senza tenant data;
-- app dashboard shell in modalità mock;
+- dashboard in modalità mock;
 - post editor con `separate_concept`, quality gate, anti-duplicate e publishing safety;
 - Google Business Profile nella pagina connessioni e OAuth mock;
 - Admin con infrastruttura remota esplicitamente posticipata.
-
-Il frontend include inoltre shell di login/registrazione/reset, onboarding, Brand Profile, asset, strategy, calendar, approvals, notifications, analytics, support, billing, settings e admin; nessun componente importa Supabase o SDK provider direttamente.
 
 ## Problemi realmente intercettati dalla CI
 
@@ -125,28 +93,16 @@ Il frontend include inoltre shell di login/registrazione/reset, onboarding, Bran
 - risoluzione monorepo contracts/zod errata → npm workspaces;
 - Vite CSS side-effect type declaration mancante → `vite-env.d.ts`;
 - stylesheet legacy con errore sintattico → sostituito e rimosso;
-- smoke assertion non allineata al copy reale → corretta senza indebolire la safety assertion.
+- smoke assertion non allineata al copy reale → corretta senza indebolire la safety assertion;
+- Brand Profile versioning inizialmente lasciava due versioni non superseded → corretto a una sola versione corrente.
 
 ## Suite successiva a costo zero
 
-- onboarding → Brand Profile state machine;
-- tenant isolation esteso su social metadata/analytics/posts/assets/jobs;
-- publishing mock: timeout-after-provider-success + reconciliation;
-- duplicate: semantic/topic/hook/visual acceptance più ampia;
-- approval state transitions AUTO/MANUALE;
+- repository/service mock contract tests e rimozione fixture dirette dalle pagine;
+- asset operations + usage references;
 - website scanner redirect/error/coverage fixtures;
-- anti-clone acceptance multi-business;
-- accessibilità/keyboard checks frontend;
-- repository/service mock contract tests.
-
-## Anti-clone acceptance
-
-Fixture previste:
-
-- Pizzeria A/B/C stessa città, 10 post ciascuna;
-- Property Manager A/B/C stessa città, 10 post ciascuno.
-
-Verificare topic, hook, caption, visual direction e CTA differenti. Il controllo cross-tenant deve usare fingerprint/score server-side e non esporre contenuti di un tenant ad altri tenant.
+- knowledge retrieval più completo;
+- accessibilità/keyboard checks frontend.
 
 ## Da ripetere su Supabase remoto
 
