@@ -26,7 +26,7 @@ Aggiornato: 2026-08-09
 - RPC di mutazione quota non eseguibili da `authenticated`.
 - `reserve`, `commit` e `release` verificati con replay idempotente.
 - Contatori `used`/`reserved`, limiti e isolamento tra tenant verificati.
-- Integration Auth/RLS/quota: **14/14 PASS**.
+- Integration Auth/RLS/quota baseline: **14/14 PASS**.
 
 ### Core / contratti
 
@@ -45,11 +45,14 @@ Aggiornato: 2026-08-09
 - `MockSocialProvider` sui quattro canali.
 - publishing idempotente con external ID e analytics deterministici.
 - `InMemoryPublicationScheduler` con deduplica, retry/dead ed exactly-once mock.
+- timeout-after-provider-success recuperato tramite idempotency key senza doppia pubblicazione.
+- `InMemoryApprovalWorkflow` tenant-scoped con modalità manual/auto, rejection reason e replay idempotente.
+- anti-clone acceptance su 6 attività: 3 pizzerie + 3 property manager con topic/angle/hook/copy distinti oltre al semplice nome brand.
 - website scanner con fetcher iniettato, same-origin, page limit, URL normalization e content hash.
 - chatbot pubblico separato dal tenant support resolver.
 - tenant support resolver scoped per tenant.
 - Telegram approval mock con HMAC SHA-256, tenant/user binding, expiry e nonce one-time.
-- CI runtime: typecheck strict PASS; **5 file / 15 test PASS**.
+- CI runtime: typecheck strict PASS; **8 file / 21 test PASS**.
 
 ### Web app locale
 
@@ -98,10 +101,7 @@ Il Supabase remoto dedicato verrà richiesto solo quando OAuth, callback pubblic
 - onboarding state machine + validazione form;
 - Brand Profile editor/versioning mock;
 - asset operations mock e referenze usage;
-- approval state transitions e audit mock;
-- publishing timeout-after-provider-success/reconciliation mock;
 - website scanner coverage/error/redirect fixtures più ampie;
-- anti-clone acceptance suite multi-business;
 - support/knowledge retrieval mock più completo;
 - accessibilità e visual QA frontend;
 - documentazione operativa per passaggio mock → provider reali.
