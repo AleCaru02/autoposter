@@ -4,116 +4,166 @@ Aggiornato: 2026-08-09
 
 ## VALIDATO LOCALMENTE
 
+### E2E utilizzabile dalla web app
+
+Il percorso cliente è realmente collegato su stack locale:
+
+`React/Vite → local API → Supabase Auth/Postgres/RLS → runtime deterministico → scheduler/provider mock → analytics/learning`
+
+Percorso verificato in Chromium:
+
+1. registrazione Auth locale;
+2. creazione tenant;
+3. onboarding persistente;
+4. website scanner locale;
+5. Brand Profile versionato con DRAFT/REVIEW/CONFIRMED e lock;
+6. obiettivi, target, social, frequenza e AUTO/MANUALE per piattaforma;
+7. strategia settoriale;
+8. calendario editoriale;
+9. contenuti e varianti specifiche per piattaforma;
+10. anti-duplicate + quality gate;
+11. Approval Center;
+12. scheduling idempotente;
+13. `Publish now` mock;
+14. analytics mock persistite;
+15. learning evidence-gated;
+16. chatbot pubblico e tenant-aware;
+17. cost ledger teorico;
+18. admin locale con RBAC.
+
+Il workflow `.github/workflows/local-e2e.yml` ricostruisce tutto da zero e ha concluso **5/5 Playwright E2E PASS** su Chromium.
+
 ### Database / tenancy
 
-- Supabase local development configurato con CLI + Docker (`supabase/config.toml`).
-- Database ricostruibile da zero con `supabase start` + `supabase db reset --local`.
-- 6 migrations applicate in ordine e presenti nella migration history locale.
-- Seed locale deterministico con piano `local-dev` e knowledge fixture.
-- `supabase db lint`: nessun errore di schema.
-- Security Advisors locali: nessuna issue residua.
-- Performance Advisors locali: nessuna issue residua.
-- pgTAP: **20/20 PASS**.
-- Integration Auth/RLS/quota: **2 file / 17 test PASS**.
-- Due utenti Auth e due tenant locali realmente separati.
-- SELECT/INSERT/UPDATE/DELETE cross-tenant bloccati; CRUD proprio consentito.
-- RLS estesa verificata su `websites`, `brand_assets`, `posts`, `social_connections`, `ai_usage_events` e quota counters.
-- Tre classi di policy validate: contenuti editabili, metadata owner/admin, tabelle server-only.
-- Foreign key composte tenant-aware verificate.
-- `app_private` non utilizzabile da `anon`/`authenticated` e integration credentials non leggibili dal client.
-- `service_role` dispone solo dei grant server-side necessari.
-- `vector` vive nello schema `extensions`, non in `public`.
+- Supabase CLI + Docker, PostgreSQL 17.
+- Database ricostruibile con `supabase start` + `supabase db reset --local`.
+- **8/8 migrations** applicate da zero.
+- Seed locale deterministico, inclusi piano `local-dev` e knowledge commerciale.
+- DB lint: PASS — nessun errore schema.
+- Security Advisors: PASS — nessuna issue.
+- Performance Advisors: PASS — nessuna issue.
+- pgTAP: **27/27 PASS**.
+- Auth/RLS/quota/E2E-state: **3 file / 20 test PASS**.
+- Tenant A/B separati con utenti Auth reali.
+- CRUD cross-tenant bloccato.
+- Brand Profile version history tenant-consistent.
+- onboarding tenant-scoped.
+- learning leggibile solo dal tenant e non falsificabile dal client.
+- `app_private` non esposto ai client.
+- quota `reserve → commit/release` idempotente.
+- AUTO variants schedulate indipendentemente dai MANUAL siblings tramite trigger DB.
 
-### Quota engine
+### Runtime / local API
 
-- RPC di mutazione quota non eseguibili da `authenticated`.
-- `reserve`, `commit` e `release` verificati con replay idempotente.
-- Contatori `used`/`reserved`, limiti e isolamento tra tenant verificati.
+- TypeScript strict: PASS.
+- Runtime: **17 file / 66 test PASS**.
+- Local API strict typecheck: PASS.
+- orchestrator deterministico differenziato per tenant/topic/piattaforma;
+- strategy planner Pizzeria / Property Manager / Networker / attività locale;
+- SocialProvider mock per Instagram, Facebook, LinkedIn, Google Business Profile;
+- GBP planner `native_variant | separate_concept | skip`;
+- approval manual/auto;
+- scheduler, retry, dead/failure state, idempotency;
+- timeout-after-provider-success reconciliato senza doppia pubblicazione;
+- anti-clone e anti-duplicate server-side;
+- scanner same-origin con redirect/error handling;
+- Brand Profile versioning/locks;
+- knowledge retrieval pubblico/interno;
+- Telegram approval mock firmato;
+- analytics optimizer evidence-gated;
+- AI cost ledger senza prezzi provider hardcoded.
 
-### Core / contratti
+### Web app
 
-- TypeScript strict + Zod contracts.
-- Model router configurabile.
-- Error classifier e anti-duplicate deterministic core.
-- SocialProvider per Facebook, Instagram, LinkedIn e Google Business Profile.
-- GBP Local Optimizer con `native_variant | separate_concept | skip`.
-- CI contracts/core verde.
+- React/Vite/TypeScript strict.
+- **16/16 web test PASS**.
+- Typecheck: PASS.
+- Vite production build: PASS.
+- sessione locale Auth + tenant persistiti;
+- onboarding interattivo;
+- dashboard operativa;
+- Brand Profile editor/versioning;
+- strategia;
+- calendario week/month/list;
+- Post Editor;
+- `/approvals` + `/app/approvals`;
+- connessioni mock;
+- analytics/learning;
+- chatbot pubblico e tenant-aware;
+- cost ledger;
+- admin RBAC;
+- responsive smoke in Chromium;
+- E2E richiede zero console/page errors.
 
-### Runtime mock a costo zero
+### Test E2E specifici
 
-- npm workspaces configurato alla root.
-- `DeterministicAIOrchestratorMock` con decisione per canale, incluso GBP/LinkedIn.
-- `MockSocialProvider` sui quattro canali.
-- publishing idempotente con external ID e analytics deterministici.
-- `InMemoryPublicationScheduler` con deduplica, retry/dead ed exactly-once mock.
-- timeout-after-provider-success recuperato tramite idempotency key senza doppia pubblicazione.
-- `InMemoryApprovalWorkflow` tenant-scoped con manual/auto, rejection reason e replay idempotente.
-- anti-clone acceptance su 6 attività: 3 pizzerie + 3 property manager con topic/angle/hook/copy distinti.
-- website scanner con fetcher iniettato, same-origin, page limit, URL normalization e content hash.
-- chatbot pubblico separato dal tenant support resolver.
-- tenant support resolver scoped per tenant.
-- Telegram approval mock con HMAC SHA-256, tenant/user binding, expiry e nonce one-time.
-- onboarding state machine con provenance, inferred/confirmed, lock, coverage e gate tra step.
-- Brand Profile versioning con una sola versione corrente, history tenant-scoped e lock persistenti tra versioni.
-- CI runtime: typecheck strict PASS; **10 file / 29 test PASS**.
+Playwright API/browser: **5/5 PASS**.
 
-### Web app locale
+Copertura:
 
-- React/Vite/TypeScript strict in `apps/web`.
-- service/mock boundary: i componenti non importano Supabase o SDK provider.
-- landing pubblica + pricing + chatbot pubblico mock.
-- login, registrazione e reset password shell, senza invio credenziali.
-- app shell multi-tenant demo.
-- onboarding con inferred/confirmed/lock e coverage mock.
-- dashboard, Brand Profile, Asset Library, Strategy, calendario editoriale.
-- post editor con core concept, varianti Instagram/Facebook/LinkedIn/GBP, `native_variant|separate_concept|skip`, visual brief, quality gate, fact confidence, anti-duplicate e safety publishing.
-- approval inbox, Social Connections, Analytics, Notifications, support, billing, settings e Admin.
-- `SOCIAL_PUBLISHING_ENABLED=false` mostrato e mantenuto come default di sicurezza.
-- CI web: **5/5 route smoke tests PASS**, TypeScript PASS, production build Vite PASS.
+- due pizzerie distinte con pipeline completa e nessuna perdita cross-tenant;
+- brand/topic/hook/caption/visual/CTA differenziati;
+- quattro settori: Pizzeria, Property Manager, Networker, attività locale generica;
+- provider timeout;
+- rate limit;
+- validation error;
+- successful publish + timeout response con stesso external mock ID al retry;
+- onboarding UI completo;
+- Approval Center;
+- analytics/learning;
+- chatbot tenant-aware;
+- admin RBAC;
+- responsive 390×844;
+- zero console/page errors.
+
+## ANCORA MOCK / NON REMOTO
+
+- provider Instagram/Facebook/LinkedIn/Google Business Profile;
+- OAuth social;
+- OpenAI;
+- Telegram live;
+- Stripe checkout;
+- analytics provenienti dalle API social reali;
+- Cron/Queues Supabase remoto;
+- storage remoto/signed URL reali;
+- Edge Functions/secrets remoti;
+- deploy production Vercel.
+
+Asset Library UI resta ancora prevalentemente in-memory/mock. Il quality repair selettivo per singolo componente non è ancora completo: la rigenerazione UI può rigenerare l'intero post anziché soltanto hook/caption/visual specifico.
 
 ## DA VALIDARE SU SUPABASE REMOTO
 
-Intenzionalmente rimandato e **non bloccante durante lo sviluppo locale**:
+Intenzionalmente posticipato e non bloccante:
 
-- applicazione migrations sul futuro progetto Supabase dedicato;
-- migration history locale/remota;
-- Security/Performance Advisors remoti;
-- Auth/RLS/Storage con chiavi reali;
-- Signed URL ed Edge Functions reali;
-- secret management/cifratura token con secret remoto;
-- OAuth Meta/Instagram/LinkedIn/Google Business Profile;
-- callback/webhook pubblici;
-- Scheduler/Cron/Queues reali;
-- beta/end-to-end pubblico.
+- migrations/history/advisors sul futuro progetto dedicato;
+- Auth/RLS/Storage remoto;
+- Edge Functions e secret encryption reali;
+- OAuth/callback/webhook pubblici;
+- Cron/Queues reali;
+- provider live;
+- beta pubblica.
 
-Il Supabase remoto dedicato verrà richiesto solo quando OAuth, callback pubblici, provider reali, beta tester/clienti o un altro blocco non riproducibile localmente lo renderanno indispensabile.
+Il remoto diventa necessario solo quando serve una callback pubblica/provider reale/beta tester/cliente o emerge un limite non riproducibile localmente.
 
-## PROSSIMI BLOCCHI A COSTO ZERO
+## COSTI
 
-- collegare le pagine ai repository/service mock tipizzati invece che a fixture dirette;
-- asset operations mock e referenze usage;
-- website scanner redirect/error/coverage fixtures più ampie;
-- support/knowledge retrieval mock più completo;
-- accessibilità e visual QA frontend;
-- documentazione operativa per passaggio mock → provider reali.
+Costo fisso infrastrutturale aggiunto in questa fase: **€0**.
 
-## BLOCCATO MA NON CRITICO
-
-- Lovable UI bootstrap: workspace ancora senza crediti disponibili al 2026-08-09. Nessun acquisto effettuato e nessun ulteriore tentativo eseguito. GitHub resta source of truth.
-
-## INTENZIONALMENTE POSTICIPATO
-
-- nuovo Supabase remoto dedicato;
-- OAuth/provider social reali;
-- OpenAI live;
-- Telegram live;
-- Stripe live;
-- Vercel production deployment.
+- nessun nuovo progetto Supabase;
+- nessun upgrade Supabase;
+- nessun acquisto Lovable;
+- nessun provider a pagamento;
+- nessun checkout;
+- GitHub Actions + Supabase CLI/Docker + provider mock.
 
 ## PR
 
-- Draft PR #1 aperta e intenzionalmente non mergeata.
+Draft PR #1 resta aperta, non mergeata e source of truth sul branch `feat/saas-foundation`.
 
-## Definition of Done V1
+## Definition of Done della fase
 
-La V1 richiederà un futuro test end-to-end pubblico con due tenant isolati, generazione differenziata, approval, pubblicazione idempotente sui provider abilitati, external IDs e analytics reali. Database, runtime mock e shell web sono già **VALIDATI LOCALMENTE**.
+**RAGGIUNTA LOCALMENTE.**
+
+È possibile partire da un database vuoto e, senza editing manuale del DB, entrare nella web app, completare onboarding, generare Brand Profile/strategia/calendario/contenuti, approvare o rifiutare, pubblicare in mock, vedere analytics e learning.
+
+Procedura unica: `LOCAL_E2E.md`.
