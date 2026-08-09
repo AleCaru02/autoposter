@@ -1,56 +1,129 @@
 # AI Pipeline
 
-## Pipeline
+## Pipeline locale validata
 
-1. Load tenant context autorizzato.
-2. Load brand profile + locked facts.
-3. Load compact brand context.
-4. Load strategy, editorial memory e recent posts rilevanti.
-5. Seleziona pillar/topic.
-6. Duplicate pre-screen.
-7. Genera core concept strutturato.
-8. Genera/adatta varianti per provider.
-9. GBP Local Optimizer decide `reuse_adapted`, `separate_local_post` o `not_applicable`.
-10. Visual Director sceglie asset reale, grafica deterministica o immagine AI.
-11. QA/fact check con facts `CONFIRMED`, `INFERRED`, `UNKNOWN`.
-12. Duplicate semantic/final screen.
-13. Quality score.
-14. Solo parti fallite vengono rigenerate quando possibile.
-15. Approval AUTO/MANUALE per provider.
-16. Schedule → queue → publish.
-17. Analytics snapshots → optimizer con campione minimo.
-18. Feedback aggregato aggiorna preferenze revisionabili.
+1. verifica utente/tenant/ruolo;
+2. carica Brand Profile + lock;
+3. carica strategia;
+4. carica editorial memory e contenuti recenti;
+5. seleziona topic/pillar dal calendario;
+6. genera core concept;
+7. genera varianti specifiche per piattaforma;
+8. Google Business Profile decide `native_variant | separate_concept | skip`;
+9. genera hook, caption, CTA, hashtag e visual brief;
+10. anti-duplicate same-tenant + fingerprint cross-tenant server-side;
+11. quality gate;
+12. salva concept/varianti/score;
+13. applica AUTO/MANUALE per singola piattaforma;
+14. scheduler idempotente;
+15. publish mock con external ID;
+16. analytics snapshot;
+17. editorial memory;
+18. evidence-gated learning.
 
-## Moduli logici
+Il runtime mock è deterministico ma varia per tenant, correlation/topic e piattaforma. Non restituisce una caption statica comune a tutti i brand.
 
-- Brand Intelligence
-- Market & Competitor Intelligence
-- Content Strategist
-- Topic Researcher
-- Core Content Planner
-- Copywriter
-- Platform Optimizer
-- Google Business Profile Local Optimizer
-- Visual Director
-- Graphic Composer
-- QA / Fact Checker
-- Anti-Duplicate
-- Scheduler
-- Analytics Optimizer
-- Support Assistant
-- SEO/Local Search Advisor (MVP+/Phase 2; usa sito + GBP, non deve moltiplicare chiamate per post)
+## Strategy planner
+
+Input:
+
+- brand/industry/sub-industry;
+- target;
+- goals;
+- services/differentiators;
+- social attivi;
+- posts/settimana;
+- giorni/orari;
+- editorial memory;
+- competitor themes mock.
+
+Profili settoriali già testati:
+
+- Pizzeria;
+- Property Manager;
+- Networker;
+- attività locale generica.
+
+Output:
+
+- pillars;
+- content mix;
+- objective per pillar;
+- formati;
+- piattaforme;
+- topic seed;
+- CTA strategy;
+- temi da evitare;
+- calendario.
+
+## Platform adaptation
+
+Instagram privilegia resa visuale/conversazionale; Facebook community/local general audience; LinkedIn angolo professionale/argomentato; GBP intento locale, servizio/attività e CTA compatibile.
+
+GBP non è obbligatorio per ogni concept.
+
+## Quality gate
+
+Score interni:
+
+- `brandMatch`;
+- `relevance`;
+- `novelty`;
+- `clarity`;
+- `platformFit`;
+- `visualFit`;
+- `factConfidence`;
+- `ctaQuality`;
+- `duplicateRisk`.
+
+La UI riduce questi segnali a stati cliente come Pronto / Da controllare / Problema rilevato.
+
+## Anti-duplicate
+
+Same tenant: topic/hook/caption/visual recenti.
+
+Cross tenant: esclusivamente fingerprint/score server-side. Il contenuto raw di un altro tenant non viene restituito al browser.
+
+## Approval
+
+Ogni variante ha `approval_mode` e `approval_status`.
+
+- MANUALE → Approval Center;
+- AUTO + QA verde → publication job indipendente.
+
+Edit utente salva valore AI, valore utente e diff. Reject salva feedback/motivo.
+
+## Publishing resilience
+
+Testati:
+
+- provider timeout;
+- rate limit;
+- auth expired;
+- validation error;
+- platform rejection;
+- provider crea il post ma la risposta va in timeout.
+
+L'ultimo caso viene riconciliato con la stessa idempotency key/external mock ID senza doppia pubblicazione.
+
+## Analytics / learning
+
+Gli snapshot contengono solo metriche previste dal provider mock contract. Il learning usa performance, approvazioni, rifiuti e modifiche utente.
+
+L'optimizer richiede un campione minimo prima di proporre/applicare variazioni: con campione insufficiente produce un insight di attesa, non una falsa conclusione.
 
 ## Cost control
 
-- Model routing per task.
-- Prompt prefix stabile per beneficiare del caching quando disponibile.
-- Cache per scan/competitor/trend.
-- `brand_context_compact` target indicativo 2k–5k token.
-- Batch per classificazioni/tagging.
-- Regeneration parziale.
-- Budget soft/hard per tenant.
-- Ogni chiamata crea `ai_usage_event` con task, model, token/costo stimato e correlation id.
+Ogni generazione crea `ai_usage_event` mock con task/model/work unit e correlation ID. Eventuali prezzi teorici arrivano da env/config, non sono hardcoded come prezzi provider reali.
 
-## Structured outputs
+## Cosa resta live da collegare
 
-Gli output backend sono validati tramite schema (Zod/JSON Schema). Vietato affidarsi a parsing fragile di testo libero per dati applicativi.
+L'interfaccia è pronta ma non sono attivi:
+
+- OpenAI reale;
+- web search AI live;
+- image generation live;
+- social provider reali;
+- Telegram reale.
+
+Il quality repair selettivo per singola sottoparte è ancora da completare: la UI può rigenerare l'intero contenuto anziché soltanto il componente fallito.
