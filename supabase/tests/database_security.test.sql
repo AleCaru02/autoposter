@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(18);
+select plan(20);
 
 select is(
   (
@@ -82,6 +82,11 @@ select ok(
 );
 
 select ok(
+  has_table_privilege('service_role', 'public.plans', 'SELECT'),
+  'service_role can read plan data required by quota and server workflows'
+);
+
+select ok(
   not has_table_privilege('authenticated', 'public.publication_jobs', 'INSERT'),
   'authenticated cannot insert publication jobs'
 );
@@ -109,8 +114,14 @@ select is(
 
 select is(
   (select count(*)::bigint from supabase_migrations.schema_migrations where version like '20260809%'),
-  5::bigint,
-  'all five application migrations are present in local migration history'
+  6::bigint,
+  'all six application migrations are present in local migration history'
+);
+
+select is(
+  (select n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'vector'),
+  'extensions',
+  'vector extension is outside the public schema'
 );
 
 select is(
