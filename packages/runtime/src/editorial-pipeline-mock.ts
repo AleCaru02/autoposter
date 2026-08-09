@@ -1,7 +1,7 @@
 import type { PostVariant, QualityScore, SocialPlatform } from '@socialpilot/contracts';
 import { DeterministicAIOrchestratorMock } from './ai-orchestrator-mock.js';
 import { InMemoryApprovalWorkflow, type ApprovalMode } from './approval-workflow.js';
-import { InMemoryPublicationScheduler, type ScheduledPublicationJob } from './scheduler-mock.js';
+import { InMemoryPublicationScheduler, type MockScheduledJob } from './scheduler-mock.js';
 
 type OrchestratorContext = Parameters<DeterministicAIOrchestratorMock['generateCoreConcept']>[0];
 type CoreConcept = Awaited<ReturnType<DeterministicAIOrchestratorMock['generateCoreConcept']>>;
@@ -93,13 +93,7 @@ export class EditorialPipelineMock {
     if (run.approvalStatus === 'blocked_quality') throw new Error('editorial_quality_blocked');
     if (!run.approvalRequestId) throw new Error('editorial_approval_missing');
 
-    const decision = this.approvals.decide({
-      tenantId: input.tenantId,
-      requestId: run.approvalRequestId,
-      actorId: input.actorId,
-      decision: 'approve',
-      now: input.now,
-    });
+    const decision = this.approvals.decide({ tenantId: input.tenantId, requestId: run.approvalRequestId, actorId: input.actorId, decision: 'approve', now: input.now });
     run.approvalStatus = decision.request.status;
     return this.snapshot(run.id);
   }
@@ -110,42 +104,23 @@ export class EditorialPipelineMock {
     if (run.approvalStatus === 'blocked_quality') throw new Error('editorial_quality_blocked');
     if (!run.approvalRequestId) throw new Error('editorial_approval_missing');
 
-    const decision = this.approvals.decide({
-      tenantId: input.tenantId,
-      requestId: run.approvalRequestId,
-      actorId: input.actorId,
-      decision: 'reject',
-      reason: input.reason,
-      now: input.now,
-    });
+    const decision = this.approvals.decide({ tenantId: input.tenantId, requestId: run.approvalRequestId, actorId: input.actorId, decision: 'reject', reason: input.reason, now: input.now });
     run.approvalStatus = decision.request.status;
     return this.snapshot(run.id);
   }
 
-  schedule(input: {
-    tenantId: string;
-    runId: string;
-    destinations: Partial<Record<SocialPlatform, { connectionId: string; accountId: string }>>;
-  }): ScheduledPublicationJob[] {
+  schedule(input: { tenantId: string; runId: string; destinations: Partial<Record<SocialPlatform, { connectionId: string; accountId: string }>> }): MockScheduledJob[] {
     const run = this.requireRun(input.runId);
     this.requireTenant(run, input.tenantId);
     if (run.approvalStatus !== 'approved') throw new Error('editorial_not_approved');
 
-    const jobs: ScheduledPublicationJob[] = [];
+    const jobs: MockScheduledJob[] = [];
     for (const variant of run.variants) {
       if (variant.decision === 'skip') continue;
       const destination = input.destinations[variant.platform];
       if (!destination) throw new Error(`editorial_destination_missing:${variant.platform}`);
       jobs.push(this.scheduler.enqueue(
-        {
-          tenantId: run.tenantId,
-          postVariantId: `${run.id}:${variant.platform}`,
-          platform: variant.platform,
-          scheduledAt: run.scheduledAt,
-          idempotencyKey: `${run.tenantId}:${run.id}:${variant.platform}`,
-          maxAttempts: 3,
-          correlationId: run.correlationId,
-        },
+        { tenantId: run.tenantId, postVariantId: `${run.id}:${variant.platform}`, platform: variant.platform, scheduledAt: run.scheduledAt, idempotencyKey: `${run.tenantId}:${run.id}:${variant.platform}`, maxAttempts: 3, correlationId: run.correlationId },
         { connectionId: destination.connectionId, accountId: destination.accountId, variant },
       ));
     }
