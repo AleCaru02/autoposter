@@ -2,112 +2,128 @@
 
 ## Strategia
 
-Durante lo sviluppo la foundation viene validata senza costi con tre livelli indipendenti:
+La fase locale viene validata a quattro livelli indipendenti e tutti a costo fisso €0:
 
-1. Supabase CLI + Docker per schema/RLS/Auth/Data API;
-2. runtime TypeScript deterministico per AI/social/scheduler/scanner/support/Telegram/onboarding/brand mock;
-3. web app React/Vite con route smoke tests, strict typecheck e production build.
+1. Supabase CLI + Docker: schema, migrations, RLS, Auth, Data API;
+2. runtime/local API: AI, strategy, social mock, approval, scheduler, scanner, support, analytics;
+3. React/Vite: route smoke, accessibilità base, strict typecheck, production build;
+4. Playwright Chromium: E2E API + percorso browser reale.
 
-Nessun test CI pubblica sui social reali, usa token provider reali o modifica i progetti Supabase cloud esistenti.
+Nessun test usa provider social reali, OpenAI live o i Supabase cloud esistenti.
 
-## Database locale
+## Database
 
 Workflow: `.github/workflows/tenant-isolation.yml`.
 
-Risultato validato 2026-08-09:
+Risultato finale:
 
-- 6/6 migrations da zero: PASS;
-- migration history: PASS;
-- schema lint: PASS — `No schema errors found`;
-- Security Advisors: PASS — `No issues found`;
-- Performance Advisors: PASS — `No issues found`;
-- pgTAP: **20/20 PASS**;
-- Auth/RLS/quota integration: **2 file / 17 test PASS**.
+- **8/8 migrations da zero PASS**;
+- migration history PASS;
+- DB lint PASS;
+- Security Advisors PASS — nessuna issue;
+- Performance Advisors PASS — nessuna issue;
+- pgTAP **27/27 PASS**;
+- Auth/RLS/quota/E2E-state **3 file / 20 test PASS**.
 
-### Copertura RLS/Auth
+Copertura include CRUD cross-tenant, FK tenant-aware, `app_private`, quota, social metadata, server-only tables, onboarding, Brand Profile version history, learning evidence e AUTO variant scheduler.
 
-I test creano utenti e tenant effimeri e coprono:
+## Runtime + local API
 
-- owner vede solo il proprio tenant;
-- SELECT/INSERT/UPDATE/DELETE cross-tenant;
-- CRUD sulle risorse proprie;
-- FK cross-tenant;
-- `app_private` non esposto;
-- entitlements tenant-scoped;
-- quota server-only, idempotenza e limiti;
-- `websites` come baseline CRUD;
-- `brand_assets` e `posts` come contenuti editabili;
-- `social_connections` come metadata owner/admin;
-- `ai_usage_events` come tabella server-only;
-- contatori quota tenant-scoped.
+Workflow: `.github/workflows/local-api.yml`.
 
-## Runtime mock
+Risultato finale:
 
-Workflow: `.github/workflows/runtime.yml`.
+- runtime strict typecheck PASS;
+- runtime **17 file / 66 test PASS**;
+- local API strict typecheck PASS.
 
-Risultato validato 2026-08-09:
+Copertura principale:
 
-- strict typecheck: PASS;
-- **10 test file / 29 test PASS**.
+- deterministic AI platform adaptation;
+- strategy planner multisettore;
+- GBP local decision;
+- scheduler/exactly-once/retry/dead;
+- timeout-after-provider-success;
+- approval manual/auto;
+- anti-clone/anti-duplicate;
+- scanner redirect/error/coverage;
+- public vs tenant support;
+- Telegram signed approval mock;
+- Brand Profile/onboarding state;
+- Asset Library runtime lifecycle;
+- analytics evidence gate;
+- AI cost ledger;
+- editorial E2E pipeline.
 
-Copertura:
-
-- SocialProvider mock e publish idempotente;
-- connection health e skip validation;
-- scheduler dedupe/exactly-once/dead state;
-- timeout-after-provider-success senza doppia pubblicazione;
-- AI platform adaptation incl. GBP `skip` e LinkedIn `separate_concept`;
-- anti-clone acceptance su 3 pizzerie + 3 property manager;
-- approval manual/auto tenant-scoped;
-- website scanner same-origin, page limit, URL normalization e hashing;
-- chatbot pubblico senza tenant resolver;
-- tenant support scope;
-- Telegram HMAC, tenant/user binding, expiry e nonce one-time;
-- onboarding provenance, conferme, lock, coverage e step gate;
-- Brand Profile versioning, latest-only confirmation, locks e tenant-isolated history.
-
-## Web app
+## Web
 
 Workflow: `.github/workflows/web.yml`.
 
-Risultato validato 2026-08-09:
+Risultato finale:
 
-- route smoke tests: **5/5 PASS**;
-- TypeScript strict typecheck: PASS;
-- Vite production build: PASS.
+- **16/16 tests PASS**;
+- TypeScript strict PASS;
+- Vite production build PASS.
 
-Le route smoke verificano almeno:
+Copertura include route pubbliche/app/admin, service repository, accessibility smoke, `/approvals`, GBP e safety fallback senza local API.
 
-- landing e chatbot pubblico senza tenant data;
-- dashboard in modalità mock;
-- post editor con `separate_concept`, quality gate, anti-duplicate e publishing safety;
-- Google Business Profile nella pagina connessioni e OAuth mock;
-- Admin con infrastruttura remota esplicitamente posticipata.
+## Local E2E Chromium
 
-## Problemi realmente intercettati dalla CI
+Workflow: `.github/workflows/local-e2e.yml`.
 
-- `service_role` privo dei grant SQL espliciti necessari → migration 006;
-- extension `vector` in `public` → spostata in `extensions`;
-- tre policy RLS con `auth.uid()` non ottimizzato → corrette;
-- migration correttiva fuori ordine → rinumerata e retestata;
-- risoluzione monorepo contracts/zod errata → npm workspaces;
-- Vite CSS side-effect type declaration mancante → `vite-env.d.ts`;
-- stylesheet legacy con errore sintattico → sostituito e rimosso;
-- smoke assertion non allineata al copy reale → corretta senza indebolire la safety assertion;
-- Brand Profile versioning inizialmente lasciava due versioni non superseded → corretto a una sola versione corrente.
+Il job parte da runner pulito e avvia:
 
-## Suite successiva a costo zero
+```text
+Supabase Docker
+→ db reset + seed
+→ local API :8787
+→ Vite :5173
+→ Chromium Playwright
+```
 
-- repository/service mock contract tests e rimozione fixture dirette dalle pagine;
-- asset operations + usage references;
-- website scanner redirect/error/coverage fixtures;
-- knowledge retrieval più completo;
-- accessibilità/keyboard checks frontend.
+Risultato verificato: **5/5 Playwright E2E PASS**.
 
-## Da ripetere su Supabase remoto
+### 3 API E2E
 
-Quando verrà creato il progetto dedicato, la stessa suite database dovrà essere ripetuta contro l'ambiente remoto prima di beta/test pubblico. Fino a quel momento la validazione remota è intenzionalmente posticipata, non un blocco dello sviluppo.
+1. due Pizzerie con pipeline completa, differenziazione creativa e cross-tenant 403;
+2. multisettore Pizzeria / Property Manager / Networker / attività locale;
+3. failure modes publishing, retry e reconciliation dopo timeout-success.
 
-## Production safety
+### 2 Browser E2E
 
-I test automatici usano provider mock. Nessun test CI deve pubblicare sui social reali o usare token provider di produzione.
+1. registrazione → onboarding → scanner → Brand Profile → social/modes → strategy → calendar → generation → Approval Center → publish → dashboard → analytics → chatbot → cost ledger → mobile responsive;
+2. rate-limit UI/state + admin RBAC local claim.
+
+Il browser test richiede zero console/page errors.
+
+## Bug intercettati durante questa fase
+
+- pgTAP plan dichiarava 25 ma eseguiva 26 assert → corretto e poi esteso a 27;
+- runtime importava un tipo scheduler errato → corretto;
+- `structuredClone` usato direttamente come callback → reso strict-safe;
+- test GBP passava proprietà opzionale `undefined` → corretta semantica exactOptionalPropertyTypes;
+- test Telegram poteva non alterare realmente la firma se terminava già in `0` → tampering garantito;
+- generic TSX `async <T>` interpretato come JSX → `<T,>`;
+- RequestInit body opzionale incompatibile con strict mode → adapter typed dedicato;
+- API E2E creava email con spazi → normalizzazione local part;
+- selettore browser brand ambiguo → heading univoco;
+- test RBAC provocava volutamente 403 nel browser e contaminava console-error check → denial testato via API, UI mantiene zero errori;
+- AUTO variants aspettavano MANUAL siblings → migration 008 con scheduling per variante;
+- orchestrator troppo statico su hook/CTA → differenziazione tenant/topic/platform.
+
+## Diagnostica
+
+Il workflow E2E salva per 3 giorni artifact con:
+
+- output Playwright;
+- local API log;
+- web log;
+- test-results/traces su failure.
+
+## Ripetizione locale
+
+Procedura unica in `LOCAL_E2E.md`.
+
+## Da ripetere sul remoto futuro
+
+Migrations, RLS/Auth/Storage, OAuth, callback, webhook, Cron/Queues e provider live dovranno essere validati sul futuro progetto Supabase dedicato prima del beta pubblico.
