@@ -1,0 +1,23 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+
+# Vercel
+.vercel/
+
+# Supabase local/temp
+supabase/.temp/
+supabase/.branches/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
