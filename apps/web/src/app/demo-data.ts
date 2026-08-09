@@ -31,6 +31,7 @@ export const navigation = [
   ['Approvazioni', '/app/approvals'],
   ['Connessioni social', '/app/connections'],
   ['Analytics', '/app/analytics'],
+  ['Notifiche', '/app/notifications'],
   ['Supporto', '/app/support'],
   ['Piano e quote', '/app/billing'],
   ['Impostazioni', '/app/settings'],
