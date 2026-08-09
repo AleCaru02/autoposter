@@ -2,6 +2,7 @@ export * from './ai-orchestrator-mock.js';
 export * from './approval-workflow.js';
 export * from './asset-library.js';
 export * from './brand-profile-store.js';
+export * from './knowledge-retrieval.js';
 export * from './onboarding-state.js';
 export * from './scheduler-mock.js';
 export * from './social-provider-mock.js';
