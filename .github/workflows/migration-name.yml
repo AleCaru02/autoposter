@@ -1,0 +1,25 @@
+name: generate-supabase-migration-name
+
+on:
+  push:
+    branches:
+      - feat/saas-foundation
+    paths:
+      - '.github/workflows/migration-name.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2
+        with:
+          version: 2.110.0
+          github-token: ${{ github.token }}
+      - name: Generate migration filename
+        run: |
+          supabase migration new local_validation_fixes
+          find supabase/migrations -maxdepth 1 -name '*_local_validation_fixes.sql' -printf '%f\n'
