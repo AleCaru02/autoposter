@@ -15,6 +15,7 @@ Aggiornato: 2026-08-09
 - Coerenza relazionale cross-tenant rinforzata con foreign key composte `(tenant_id, id)`.
 - Quota engine server-side con reservation/commit/release e idempotency key scritto.
 - Contratti TypeScript strict + Zod per AI, quality score, SocialProvider e GBP Local Optimizer scritti.
+- GitHub Actions `contracts` typecheck eseguita con successo sul branch.
 - Harness integration test tenant isolation scritto.
 - Strategia AI Orchestrator + model routing definita.
 - Provider model include Facebook, Instagram, LinkedIn e Google Business Profile.
@@ -25,7 +26,6 @@ Aggiornato: 2026-08-09
 
 - Validazione esecutiva delle migrations su un Supabase dedicato/staging.
 - Esecuzione reale tenant isolation test con due utenti Auth.
-- CI typecheck: workflow presente ma non ancora eseguito sul branch/PR.
 - Hardening del quota engine e test di concorrenza/idempotenza.
 
 ## BLOCKED
