@@ -11,105 +11,118 @@ Aggiornato: 2026-08-09
 - 6 migrations applicate in ordine e presenti nella migration history locale.
 - Seed locale deterministico con piano `local-dev` e knowledge fixture.
 - `supabase db lint`: nessun errore di schema.
-- Supabase Security Advisors locali: nessuna issue residua.
-- Supabase Performance Advisors locali: nessuna issue residua.
-- 20/20 test pgTAP superati.
-- RLS attiva su tutte le tabelle applicative `public` verificate dal test strutturale.
-- `app_private` non utilizzabile da `anon` o `authenticated`.
-- `app_private.integration_credentials` non leggibile dal client e priva di colonne token/secret plaintext.
-- `service_role` ha i grant server-side necessari senza estenderli ai ruoli client.
-- Foreign key composte `(tenant_id, id)` verificate su relazioni sensibili.
-- `vector` spostata fuori dallo schema `public` nello schema `extensions`.
-
-### Tenant A / Tenant B
-
-- Due utenti Auth locali creati realmente e autenticati con sessioni separate.
-- Due tenant locali creati tramite `create_tenant`.
-- SELECT/INSERT/UPDATE/DELETE cross-tenant verificati e bloccati.
-- CRUD sulle proprie risorse verificato.
-- Collegamenti FK cross-tenant con ID conosciuto/indovinato rifiutati.
-- Tabelle service-only non scrivibili da `authenticated`.
-- Contatori quota isolati tra tenant.
+- Security Advisors locali: nessuna issue residua.
+- Performance Advisors locali: nessuna issue residua.
+- pgTAP: **20/20 PASS**.
+- Due utenti Auth e due tenant locali realmente separati.
+- SELECT/INSERT/UPDATE/DELETE cross-tenant bloccati; CRUD proprio consentito.
+- Foreign key composte tenant-aware verificate.
+- `app_private` non utilizzabile da `anon`/`authenticated` e integration credentials non leggibili dal client.
+- `service_role` dispone solo dei grant server-side necessari.
+- `vector` vive nello schema `extensions`, non in `public`.
 
 ### Quota engine
 
 - RPC di mutazione quota non eseguibili da `authenticated`.
 - `reserve`, `commit` e `release` verificati con replay idempotente.
-- Contatori `used`/`reserved` verificati.
-- Superamento limite rifiutato.
-- Isolamento quota tra tenant verificato.
+- Contatori `used`/`reserved`, limiti e isolamento tra tenant verificati.
+- Integration Auth/RLS/quota: **14/14 PASS**.
 
 ### Core / contratti
 
-- Architettura target e modello multi-tenant definiti.
-- Contratti TypeScript strict + Zod per AI, quality score, SocialProvider e GBP Local Optimizer.
-- Model router configurabile, error classifier e anti-duplicate implementati con test unitari.
-- Facebook, Instagram, LinkedIn e Google Business Profile presenti nel provider model.
-- Separazione chatbot pubblico / assistenza tenant definita.
+- TypeScript strict + Zod contracts.
+- Model router configurabile.
+- Error classifier e anti-duplicate deterministic core.
+- SocialProvider per Facebook, Instagram, LinkedIn e Google Business Profile.
+- GBP Local Optimizer con `native_variant | separate_concept | skip`.
+- CI contracts/core verde.
 
 ### Runtime mock a costo zero
 
-- npm workspaces configurato alla root del repository.
-- `DeterministicAIOrchestratorMock` implementato.
-- Decisione per canale `native_variant | separate_concept | skip`, incluso GBP locale e LinkedIn.
-- `MockSocialProvider` per Facebook, Instagram, LinkedIn e Google Business Profile.
-- Publishing mock idempotente con external post ID e analytics deterministici.
-- `InMemoryPublicationScheduler` con deduplica enqueue, retry/dead state ed exactly-once mock.
-- Website scanner con fetcher iniettato, same-origin, page limit, URL normalization e content hash.
-- Chatbot pubblico separato dal resolver tenant-aware.
-- Tenant support resolver isolato per tenant.
+- npm workspaces configurato alla root.
+- `DeterministicAIOrchestratorMock`.
+- decisione per canale, incluso GBP/LinkedIn.
+- `MockSocialProvider` sui quattro canali.
+- publishing idempotente con external ID e analytics deterministici.
+- `InMemoryPublicationScheduler` con deduplica, retry/dead ed exactly-once mock.
+- website scanner con fetcher iniettato, same-origin, page limit, URL normalization e content hash.
+- chatbot pubblico separato dal tenant support resolver.
+- tenant support resolver scoped per tenant.
 - Telegram approval mock con HMAC SHA-256, tenant/user binding, expiry e nonce one-time.
-- CI `runtime`: typecheck strict PASS.
-- CI `runtime`: **5 file / 15 test PASS**.
+- CI runtime: typecheck strict PASS; **5 file / 15 test PASS**.
+
+### Web app locale
+
+- React/Vite/TypeScript strict in `apps/web`.
+- service/mock boundary: i componenti non importano Supabase o SDK provider.
+- landing pubblica + pricing + chatbot pubblico mock.
+- login, registrazione e reset password shell, senza invio credenziali.
+- app shell multi-tenant demo.
+- onboarding con inferred/confirmed/lock e coverage mock.
+- dashboard.
+- Brand Profile.
+- Asset Library.
+- Strategy.
+- calendario editoriale.
+- post editor con core concept, varianti Instagram/Facebook/LinkedIn/GBP, `native_variant|separate_concept|skip`, visual brief, quality gate, fact confidence, anti-duplicate e safety publishing.
+- approval inbox.
+- Social Connections con health state e OAuth mock.
+- Analytics chiaramente marcate mock.
+- Notifications.
+- support AI tenant-aware mock + handoff umano.
+- billing/piano/quote senza checkout.
+- settings e Admin panel.
+- `SOCIAL_PUBLISHING_ENABLED=false` mostrato e mantenuto come default di sicurezza.
+- CI web: **5/5 route smoke tests PASS**, TypeScript PASS, production build Vite PASS.
 
 ## DA VALIDARE SU SUPABASE REMOTO
 
-Questi punti sono intenzionalmente rimandati e **non bloccano lo sviluppo locale**:
+Intenzionalmente rimandato e **non bloccante durante lo sviluppo locale**:
 
-- Applicazione migrations su nuovo progetto Supabase dedicato.
-- Confronto migration history locale/remota.
-- Security/Performance Advisors remoti.
-- Auth/RLS/Storage con chiavi reali.
-- Signed URL ed Edge Functions reali.
-- Secret management/cifratura token con secret remoto.
-- OAuth Meta/Instagram/LinkedIn/Google Business Profile.
-- Callback/webhook pubblici.
-- Scheduler/Cron/Queues reali.
-- Test beta/end-to-end pubblico.
+- applicazione migrations sul futuro progetto Supabase dedicato;
+- migration history locale/remota;
+- Security/Performance Advisors remoti;
+- Auth/RLS/Storage con chiavi reali;
+- Signed URL ed Edge Functions reali;
+- secret management/cifratura token con secret remoto;
+- OAuth Meta/Instagram/LinkedIn/Google Business Profile;
+- callback/webhook pubblici;
+- Scheduler/Cron/Queues reali;
+- beta/end-to-end pubblico.
 
-Il progetto remoto verrà richiesto solo quando serve realmente per OAuth, callback pubblici, provider reali, beta tester/clienti o altro blocco non riproducibile localmente.
+Il Supabase remoto dedicato verrà richiesto solo quando OAuth, callback pubblici, provider reali, beta tester/clienti o un altro blocco non riproducibile localmente lo renderanno indispensabile.
 
-## IN SVILUPPO A COSTO ZERO
+## PROSSIMI BLOCCHI A COSTO ZERO
 
-- Frontend architecture e typed service/mock layer.
-- Onboarding.
-- Dashboard.
-- Brand Profile.
-- Asset Library.
-- Strategy e calendario editoriale.
-- Post editor + approval inbox.
-- Social Connections mock.
-- Analytics mock.
-- Admin panel e piani.
-- Test frontend automatici.
+- rendere più completo il typed frontend service layer e collegare le pagine ai repository mock invece che a fixture dirette;
+- onboarding state machine + validazione form;
+- Brand Profile editor/versioning mock;
+- asset operations mock e referenze usage;
+- approval state transitions e audit mock;
+- publishing timeout-after-provider-success/reconciliation mock;
+- website scanner coverage/error/redirect fixtures più ampie;
+- anti-clone acceptance suite multi-business;
+- support/knowledge retrieval mock più completo;
+- accessibilità e visual QA frontend;
+- documentazione operativa per passaggio mock → provider reali.
 
 ## BLOCCATO MA NON CRITICO
 
-- Lovable UI bootstrap: workspace ancora senza crediti disponibili al 2026-08-09. Nessun acquisto effettuato. Lo sviluppo GitHub continua senza Lovable.
+- Lovable UI bootstrap: workspace ancora senza crediti disponibili al 2026-08-09. Nessun acquisto effettuato e nessun ulteriore tentativo eseguito. GitHub resta source of truth.
 
 ## INTENZIONALMENTE POSTICIPATO
 
-- Nuovo Supabase remoto dedicato.
-- OAuth/provider social reali.
-- OpenAI live.
-- Telegram live.
-- Stripe live.
+- nuovo Supabase remoto dedicato;
+- OAuth/provider social reali;
+- OpenAI live;
+- Telegram live;
+- Stripe live;
 - Vercel production deployment.
 
 ## PR
 
-- Draft PR #1 aperta, aggiornata e intenzionalmente non mergeata.
+- Draft PR #1 aperta e intenzionalmente non mergeata.
 
 ## Definition of Done V1
 
-La V1 sarà considerata completa solo dopo un futuro test end-to-end pubblico con due tenant isolati, generazione differenziata, approval, pubblicazione idempotente sui provider abilitati, external IDs e analytics reali. Database e runtime mock sono invece **VALIDATI LOCALMENTE**.
+La V1 richiederà un futuro test end-to-end pubblico con due tenant isolati, generazione differenziata, approval, pubblicazione idempotente sui provider abilitati, external IDs e analytics reali. Database, runtime mock e shell web sono già **VALIDATI LOCALMENTE**.
