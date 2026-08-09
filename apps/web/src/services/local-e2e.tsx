@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 export type ApiPlatform = 'facebook' | 'instagram' | 'linkedin' | 'google_business_profile';
 export type ApprovalMode = 'auto' | 'manual';
+export type LocalRequestInit = Omit<RequestInit, 'body'> & { body?: BodyInit | null | undefined };
 
 export interface LocalWorkspace {
   tenant: Record<string, unknown> | null;
@@ -35,7 +36,7 @@ interface LocalE2EContextValue {
   createTenant(input: { name: string; slug: string }): Promise<string>;
   selectTenant(tenantId: string): Promise<void>;
   refresh(): Promise<void>;
-  api<T>(path: string, init?: RequestInit): Promise<T>;
+  api<T>(path: string, init?: LocalRequestInit): Promise<T>;
 }
 
 const Context = createContext<LocalE2EContextValue | null>(null);
@@ -43,12 +44,14 @@ const baseUrl = (import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.repl
 const TOKEN_KEY = 'socialpilot.local.token';
 const TENANT_KEY = 'socialpilot.local.tenant';
 
-const request = async <T,>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> => {
+const request = async <T,>(path: string, init: LocalRequestInit = {}, token?: string | null): Promise<T> => {
   if (!baseUrl) throw new Error('Local E2E API non configurata');
+  const { body: requestBody, ...rest } = init;
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  if (requestBody && !headers.has('content-type')) headers.set('content-type', 'application/json');
   if (token) headers.set('authorization', `Bearer ${token}`);
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  const fetchInit: RequestInit = requestBody === undefined ? { ...rest, headers } : { ...rest, headers, body: requestBody };
+  const response = await fetch(`${baseUrl}${path}`, fetchInit);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(String(body.error ?? `HTTP ${response.status}`));
   return body as T;
@@ -62,7 +65,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const authedApi = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<T> => request<T>(path, init, token), [token]);
+  const authedApi = useCallback(async <T,>(path: string, init: LocalRequestInit = {}): Promise<T> => request<T>(path, init, token), [token]);
 
   const refresh = useCallback(async () => {
     if (!enabled || !token || !tenantId) { setWorkspace(null); return; }
