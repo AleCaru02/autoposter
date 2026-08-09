@@ -1,134 +1,61 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { Badge, Card, PageHeader, Progress } from '../components/ui';
 import type { Platform } from '../services/domain';
 import { useSaasRepository, useSaasSnapshot } from '../services/SaasServicesProvider';
+import { useLocalE2E } from '../services/local-e2e';
 import './post-editor.css';
 
-const platforms: Platform[] = ['Instagram', 'Facebook', 'LinkedIn', 'Google Business Profile'];
-
-const variants: Record<Platform, { decision: 'native_variant' | 'separate_concept' | 'skip'; hook: string; caption: string; cta: string; reason: string }> = {
-  Instagram: {
-    decision: 'native_variant',
-    hook: 'Tre segnali che ti aiutano a scegliere meglio',
-    caption: 'Prima di scegliere un servizio, guarda metodo, trasparenza e capacità di misurare ciò che viene fatto. Demo Studio parte da questi tre elementi per costruire un piano comprensibile e verificabile.',
-    cta: 'Salva il post e confronta questi criteri.',
-    reason: 'Formato educativo breve adatto a feed e salvataggi.',
-  },
-  Facebook: {
-    decision: 'native_variant',
-    hook: 'Come capire se un servizio è davvero adatto a te?',
-    caption: 'Non basta confrontare il prezzo. È utile capire cosa viene fatto, come viene misurato e quali responsabilità restano chiare. In questo esempio il concept viene reso più discorsivo per Facebook.',
-    cta: 'Scrivici se vuoi chiarire i criteri da valutare.',
-    reason: 'Stesso concept, copy più conversazionale e orientato alla discussione.',
-  },
-  LinkedIn: {
-    decision: 'separate_concept',
-    hook: 'Un buon servizio si valuta anche dalla qualità del processo',
-    caption: 'Per un’azienda, scegliere un partner significa valutare governance, responsabilità, indicatori e qualità della comunicazione. Questa variante separa il concept consumer da una prospettiva professionale.',
-    cta: 'Confronta il processo prima della promessa.',
-    reason: 'Il concept originale era troppo consumer: LinkedIn riceve un angolo professionale distinto.',
-  },
-  'Google Business Profile': {
-    decision: 'native_variant',
-    hook: 'Consulenza professionale disponibile a Milano',
-    caption: 'Demo Studio supporta attività e professionisti a Milano con un processo chiaro di analisi e pianificazione. Contenuto locale dimostrativo: nessuna pubblicazione reale è attiva.',
-    cta: 'Contattaci',
-    reason: 'Esiste una sede/località e il concept ha una CTA locale coerente.',
-  },
-};
+const mockPlatforms: Platform[] = ['Instagram', 'Facebook', 'LinkedIn', 'Google Business Profile'];
 
 export function PostEditorPage() {
-  const { id = 'p1' } = useParams();
-  const { posts } = useSaasSnapshot();
-  const repository = useSaasRepository();
-  const post = posts.find((item) => item.id === id) ?? posts[0];
-  if (!post) return <Card><strong>Nessun post disponibile nel repository mock.</strong></Card>;
-
-  const initialPlatform = platforms.includes(post.platform) ? post.platform : 'Instagram';
-  const [platform, setPlatform] = useState<Platform>(initialPlatform);
-  const variant = variants[platform];
-
-  return <>
-    <PageHeader
-      eyebrow="Post editor · mock"
-      title={post.title}
-      description="Rivedi concept, adattamento per canale, qualità, fatti e rischio duplicazione prima dell’approvazione. Nessun pulsante pubblica realmente."
-      action={<Link className="button secondary" to="/app/calendar">← Calendario</Link>}
-    />
-
-    <div className="editor-layout">
-      <div className="stack">
-        <Card>
-          <div className="row-between">
-            <div><span className="eyebrow">Core concept</span><h2>Valutare un servizio oltre il prezzo</h2></div>
-            <Badge tone="good">Concept unico</Badge>
-          </div>
-          <div className="concept-grid">
-            <ConceptField label="Stato" value={post.state} />
-            <ConceptField label="Obiettivo" value="Educazione + lead qualificati" />
-            <ConceptField label="Pillar" value="Educazione" />
-            <ConceptField label="Hook intent" value="Far emergere tre criteri concreti" />
-            <ConceptField label="CTA intent" value="Portare l’utente al confronto consapevole" />
-          </div>
-        </Card>
-
-        <Card>
-          <div className="platform-tabs" role="tablist" aria-label="Varianti per canale">
-            {platforms.map((item) => <button key={item} role="tab" aria-selected={platform === item} className={platform === item ? 'active' : ''} type="button" onClick={() => setPlatform(item)}>{item}</button>)}
-          </div>
-          <div className="variant-heading">
-            <div><span className="eyebrow">Decisione canale</span><h2>{platform}</h2></div>
-            <Badge tone={variant.decision === 'separate_concept' ? 'warn' : variant.decision === 'skip' ? 'neutral' : 'info'}>{variant.decision}</Badge>
-          </div>
-          <p className="decision-reason">{variant.reason}</p>
-          <label className="editor-field"><span>Hook</span><textarea readOnly value={variant.hook} /></label>
-          <label className="editor-field"><span>Caption</span><textarea className="large" readOnly value={variant.caption} /></label>
-          <label className="editor-field"><span>CTA</span><input readOnly value={variant.cta} /></label>
-          <div className="editor-actions"><button className="button secondary" type="button">Rigenera mock</button><button className="button secondary" type="button">Salva modifica mock</button></div>
-        </Card>
-
-        <Card>
-          <span className="eyebrow">Visual direction</span><h2>Real asset first</h2>
-          <div className="visual-brief"><div className="visual-placeholder">VISUAL<br/>PREVIEW</div><div><strong>Soggetto</strong><p>Persona che confronta tre criteri su una scheda chiara, ambiente professionale reale.</p><strong>Regole</strong><p>Usare asset reali se disponibili; niente volti sintetici se il Brand Profile richiede autenticità; palette brand rispettata.</p><Badge tone="good">Visual fit 0,88</Badge></div></div>
-        </Card>
-      </div>
-
-      <aside className="stack editor-sidebar">
-        <Card>
-          <span className="eyebrow">Quality gate</span><h2>Pronto per approvazione</h2>
-          <Score label="Brand match" value={95} /><Score label="Rilevanza" value={90} /><Score label="Chiarezza" value={90} /><Score label="Platform fit" value={88} /><Score label="Fact confidence" value={95} />
-        </Card>
-        <Card>
-          <div className="row-between"><span className="eyebrow">Anti-duplicate</span><Badge tone="good">Basso</Badge></div>
-          <h2>Rischio 0,10</h2>
-          <Signal label="Exact" value="0,00" /><Signal label="Normalized" value="0,05" /><Signal label="Semantic" value="0,10" /><Signal label="Topic" value="0,10" /><Signal label="Hook" value="0,05" /><Signal label="Visual" value="0,05" />
-          <p className="muted">Il controllo cross-tenant usa fingerprint/score server-side; la UI non riceve contenuti di altri tenant.</p>
-        </Card>
-        <Card>
-          <span className="eyebrow">Fatti</span><h2>1 claim confermato</h2>
-          <div className="fact-row"><Badge tone="good">Confermato</Badge><span>Sede: Milano</span></div>
-          <p className="muted">Fonte: brand lock. Nessun claim sconosciuto viene presentato come fatto.</p>
-        </Card>
-        <Card>
-          <span className="eyebrow">Decisione</span><h2>Approvazione manuale</h2>
-          <div className="decision-buttons"><button className="button secondary" type="button" onClick={() => repository.rejectPost(post.id)}>Rifiuta mock</button><button className="button" type="button" onClick={() => repository.approvePost(post.id)}>Approva mock</button></div>
-          <button className="button full" type="button" onClick={() => repository.schedulePost(post.id)}>Programma mock</button>
-          <p className="muted">`SOCIAL_PUBLISHING_ENABLED=false`: nessuna azione può raggiungere un provider reale.</p>
-        </Card>
-      </aside>
-    </div>
-  </>;
+  const local = useLocalE2E();
+  const params = useParams();
+  if (local.enabled && local.workspace && local.tenantId) return <LocalPostEditor id={params.id ?? ''} />;
+  return <MockPostEditor id={params.id ?? 'p1'} />;
 }
 
-function ConceptField({ label, value }: { label: string; value: string }) {
-  return <div className="concept-field"><span>{label}</span><strong>{value}</strong></div>;
+function LocalPostEditor({ id }: { id: string }) {
+  const local = useLocalE2E();
+  const post = local.workspace?.posts.find((item:any)=>item.id===id) as any;
+  const variants = post?.variants ?? [];
+  const [variantId,setVariantId] = useState<string>('');
+  const [draft,setDraft] = useState({hook:'',caption:'',cta:'',hashtags:''});
+  const [message,setMessage] = useState<string|null>(null);
+  const [failureMode,setFailureMode] = useState('');
+  const variant = variants.find((item:any)=>item.id===variantId) ?? variants[0];
+  useEffect(()=>{if(variant){setVariantId(variant.id);setDraft({hook:variant.hook??'',caption:variant.caption??'',cta:variant.cta??'',hashtags:(variant.hashtags??[]).join(', ')})}},[variant?.id]);
+  if(!post) return <Card><strong>Post non trovato nel tenant corrente.</strong></Card>;
+
+  const quality = post.quality_score ?? {};
+  const status = qualityLabel(quality);
+  const run = async(action:()=>Promise<unknown>)=>{setMessage(null);try{await action();await local.refresh();setMessage('Operazione salvata nel database locale.')}catch(error){setMessage(error instanceof Error?error.message:String(error));}};
+  const generate=()=>run(()=>local.api(`/tenants/${local.tenantId}/posts/${post.id}/generate`,{method:'POST'}));
+  const save=()=>variant&&run(()=>local.api(`/tenants/${local.tenantId}/variants/${variant.id}`,{method:'PATCH',body:JSON.stringify({hook:draft.hook,caption:draft.caption,cta:draft.cta,hashtags:draft.hashtags.split(',').map((item)=>item.trim()).filter(Boolean)})}));
+  const approve=()=>variant&&run(()=>local.api(`/tenants/${local.tenantId}/variants/${variant.id}/approve`,{method:'POST'}));
+  const reject=()=>variant&&run(()=>local.api(`/tenants/${local.tenantId}/variants/${variant.id}/reject`,{method:'POST',body:JSON.stringify({reason:'Rifiutato dalla UI locale'})}));
+  const schedule=()=>run(()=>local.api(`/tenants/${local.tenantId}/posts/${post.id}/schedule`,{method:'POST'}));
+  const publish=()=>run(()=>local.api(`/tenants/${local.tenantId}/publish-now`,{method:'POST',body:JSON.stringify({postId:post.id,...(failureMode?{failureMode}:{})})}));
+  const concept = post.core_concept ?? {};
+  const scores = [
+    ['Brand match',quality.brandMatch],['Rilevanza',quality.relevance],['Novelty',quality.novelty],['Chiarezza',quality.clarity],['Platform fit',quality.platformFit],['Visual fit',quality.visualFit],['Fact confidence',quality.factConfidence],['CTA quality',quality.ctaQuality],
+  ] as const;
+
+  return <><PageHeader eyebrow="Post editor · E2E locale" title={post.topic} description="Concept, varianti, quality gate, approval, scheduler e publish mock sono persistiti nel database locale." action={<Link className="button secondary" to="/app/calendar">← Calendario</Link>}/>{message&&<Card><p role="status">{message}</p></Card>}
+  <div className="editor-layout"><div className="stack"><Card><div className="row-between"><div><span className="eyebrow">Core concept</span><h2>{concept.angle??post.topic}</h2></div><Badge tone={status==='Pronto'?'good':status==='Problema rilevato'?'warn':'info'}>{status}</Badge></div><div className="concept-grid"><ConceptField label="Stato" value={String(post.status).toUpperCase()}/><ConceptField label="Obiettivo" value={String(post.objective??concept.objective??'—')}/><ConceptField label="Topic" value={String(concept.topic??post.topic)}/><ConceptField label="Hook intent" value={String(concept.hookIntent??'—')}/><ConceptField label="CTA intent" value={String(concept.ctaIntent??'—')}/></div>{variants.length===0&&<button data-testid="generate-single-post" className="button" onClick={()=>void generate()}>Genera contenuto</button>}</Card>
+  {variants.length>0&&<Card><div className="platform-tabs" role="tablist" aria-label="Varianti per canale">{variants.map((item:any)=><button key={item.id} role="tab" aria-selected={variant?.id===item.id} className={variant?.id===item.id?'active':''} onClick={()=>setVariantId(item.id)}>{platformName(item.platform)}</button>)}</div>{variant&&<><div className="variant-heading"><div><span className="eyebrow">Decisione canale</span><h2>{platformName(variant.platform)}</h2></div><Badge tone={variant.platform_decision==='skip'?'neutral':variant.platform_decision==='separate_concept'?'warn':'info'}>{variant.platform_decision}</Badge></div><p className="decision-reason">Approval: {String(variant.approval_mode).toUpperCase()} · {String(variant.approval_status).toUpperCase()} · stato {String(variant.status).toUpperCase()}</p><label className="editor-field"><span>Hook</span><textarea data-testid="variant-hook" value={draft.hook} onChange={(e)=>setDraft({...draft,hook:e.target.value})}/></label><label className="editor-field"><span>Caption</span><textarea data-testid="variant-caption" className="large" value={draft.caption} onChange={(e)=>setDraft({...draft,caption:e.target.value})}/></label><label className="editor-field"><span>CTA</span><input value={draft.cta} onChange={(e)=>setDraft({...draft,cta:e.target.value})}/></label><label className="editor-field"><span>Hashtag</span><input value={draft.hashtags} onChange={(e)=>setDraft({...draft,hashtags:e.target.value})}/></label><div className="editor-actions"><button className="button secondary" onClick={()=>void generate()}>Rigenera con quality gate</button><button data-testid="save-variant" className="button secondary" onClick={()=>void save()}>Salva User version + diff</button></div></>}</Card>}
+  {variant&&<Card><span className="eyebrow">Visual brief</span><h2>{String(variant.visual_brief?.angle??variant.visual_brief?.subject??'Direzione visual')}</h2><div className="visual-brief"><div className="visual-placeholder">MOCK<br/>VISUAL</div><pre className="muted">{JSON.stringify(variant.visual_brief,null,2)}</pre></div></Card>}</div>
+  <aside className="stack editor-sidebar"><Card><span className="eyebrow">Quality gate interno</span><h2>{status}</h2>{scores.map(([label,value])=><Score key={label} label={label} value={Math.round(Number(value??0)*100)}/>) }<Signal label="Duplicate risk" value={Number(quality.duplicateRisk??0).toFixed(2)}/></Card><Card><span className="eyebrow">Anti-duplicate</span><h2>Server-side</h2><p>Rischio {Number(quality.duplicateRisk??0).toFixed(2)}</p><p className="muted">Il client riceve solo score/segnali del proprio post. Nessun contenuto di altri tenant viene esposto.</p></Card><Card><span className="eyebrow">Decisione</span><h2>{variant?String(variant.approval_mode).toUpperCase():'Non generato'}</h2>{variant&&variant.platform_decision!=='skip'&&<div className="decision-buttons"><button data-testid="reject-variant" className="button secondary" onClick={()=>void reject()}>Rifiuta</button><button data-testid="approve-variant" className="button" onClick={()=>void approve()}>Approva</button></div>}<button data-testid="schedule-post" className="button full" onClick={()=>void schedule()}>Programma</button><label className="field"><span>Simula errore provider</span><select data-testid="failure-mode" value={failureMode} onChange={(e)=>setFailureMode(e.target.value)}><option value="">Successo</option><option value="provider_timeout">Provider timeout</option><option value="rate_limit">Rate limit</option><option value="auth_expired">Auth expired</option><option value="validation_error">Validation error</option><option value="platform_rejection">Platform rejection</option><option value="success_after_timeout">Success + timeout response</option></select></label><button data-testid="publish-now" className="button full" onClick={()=>void publish()}>Publish now · MOCK</button><p className="muted">Nessuna azione raggiunge un provider reale.</p></Card></aside></div></>;
 }
 
-function Score({ label, value }: { label: string; value: number }) {
-  return <Progress label={label} value={value} max={100} />;
+function MockPostEditor({id}:{id:string}) {
+  const {posts}=useSaasSnapshot(); const repository=useSaasRepository(); const post=posts.find((item)=>item.id===id)??posts[0]; const [platform,setPlatform]=useState<Platform>('Instagram');
+  if(!post)return <Card>Nessun post mock.</Card>;
+  return <><PageHeader eyebrow="Post editor · mock" title={post.title} description="Configura VITE_LOCAL_API_URL per il flusso DB-backed."/><Card><div className="platform-tabs">{mockPlatforms.map((item)=><button key={item} className={platform===item?'active':''} onClick={()=>setPlatform(item)}>{item}</button>)}</div><p>Shell mock per {platform}.</p><button onClick={()=>repository.approvePost(post.id)}>Approva mock</button></Card></>;
 }
 
-function Signal({ label, value }: { label: string; value: string }) {
-  return <div className="signal-row"><span>{label}</span><strong>{value}</strong></div>;
-}
+function ConceptField({label,value}:{label:string;value:string}){return <div className="concept-field"><span>{label}</span><strong>{value}</strong></div>}
+function Score({label,value}:{label:string;value:number}){return <Progress label={label} value={value} max={100}/>}
+function Signal({label,value}:{label:string;value:string}){return <div className="signal-row"><span>{label}</span><strong>{value}</strong></div>}
+function platformName(value:unknown){return value==='google_business_profile'?'Google Business Profile':String(value??'').replace(/^./,(c)=>c.toUpperCase())}
+function qualityLabel(q:any){if(!q||Object.keys(q).length===0)return 'Da controllare';const fail=Number(q.brandMatch??0)<.8||Number(q.relevance??0)<.8||Number(q.factConfidence??0)<.75||Number(q.duplicateRisk??1)>=.84;return fail?'Problema rilevato':'Pronto'}
