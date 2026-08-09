@@ -14,8 +14,11 @@ Aggiornato: 2026-08-09
 - Security Advisors locali: nessuna issue residua.
 - Performance Advisors locali: nessuna issue residua.
 - pgTAP: **20/20 PASS**.
+- Integration Auth/RLS/quota: **2 file / 17 test PASS**.
 - Due utenti Auth e due tenant locali realmente separati.
 - SELECT/INSERT/UPDATE/DELETE cross-tenant bloccati; CRUD proprio consentito.
+- RLS estesa verificata su `websites`, `brand_assets`, `posts`, `social_connections`, `ai_usage_events` e quota counters.
+- Tre classi di policy validate: contenuti editabili, metadata owner/admin, tabelle server-only.
 - Foreign key composte tenant-aware verificate.
 - `app_private` non utilizzabile da `anon`/`authenticated` e integration credentials non leggibili dal client.
 - `service_role` dispone solo dei grant server-side necessari.
@@ -26,7 +29,6 @@ Aggiornato: 2026-08-09
 - RPC di mutazione quota non eseguibili da `authenticated`.
 - `reserve`, `commit` e `release` verificati con replay idempotente.
 - Contatori `used`/`reserved`, limiti e isolamento tra tenant verificati.
-- Integration Auth/RLS/quota baseline: **14/14 PASS**.
 
 ### Core / contratti
 
@@ -40,19 +42,20 @@ Aggiornato: 2026-08-09
 ### Runtime mock a costo zero
 
 - npm workspaces configurato alla root.
-- `DeterministicAIOrchestratorMock`.
-- decisione per canale, incluso GBP/LinkedIn.
+- `DeterministicAIOrchestratorMock` con decisione per canale, incluso GBP/LinkedIn.
 - `MockSocialProvider` sui quattro canali.
 - publishing idempotente con external ID e analytics deterministici.
 - `InMemoryPublicationScheduler` con deduplica, retry/dead ed exactly-once mock.
 - timeout-after-provider-success recuperato tramite idempotency key senza doppia pubblicazione.
-- `InMemoryApprovalWorkflow` tenant-scoped con modalità manual/auto, rejection reason e replay idempotente.
-- anti-clone acceptance su 6 attività: 3 pizzerie + 3 property manager con topic/angle/hook/copy distinti oltre al semplice nome brand.
+- `InMemoryApprovalWorkflow` tenant-scoped con manual/auto, rejection reason e replay idempotente.
+- anti-clone acceptance su 6 attività: 3 pizzerie + 3 property manager con topic/angle/hook/copy distinti.
 - website scanner con fetcher iniettato, same-origin, page limit, URL normalization e content hash.
 - chatbot pubblico separato dal tenant support resolver.
 - tenant support resolver scoped per tenant.
 - Telegram approval mock con HMAC SHA-256, tenant/user binding, expiry e nonce one-time.
-- CI runtime: typecheck strict PASS; **8 file / 21 test PASS**.
+- onboarding state machine con provenance, inferred/confirmed, lock, coverage e gate tra step.
+- Brand Profile versioning con una sola versione corrente, history tenant-scoped e lock persistenti tra versioni.
+- CI runtime: typecheck strict PASS; **10 file / 29 test PASS**.
 
 ### Web app locale
 
@@ -62,19 +65,9 @@ Aggiornato: 2026-08-09
 - login, registrazione e reset password shell, senza invio credenziali.
 - app shell multi-tenant demo.
 - onboarding con inferred/confirmed/lock e coverage mock.
-- dashboard.
-- Brand Profile.
-- Asset Library.
-- Strategy.
-- calendario editoriale.
+- dashboard, Brand Profile, Asset Library, Strategy, calendario editoriale.
 - post editor con core concept, varianti Instagram/Facebook/LinkedIn/GBP, `native_variant|separate_concept|skip`, visual brief, quality gate, fact confidence, anti-duplicate e safety publishing.
-- approval inbox.
-- Social Connections con health state e OAuth mock.
-- Analytics chiaramente marcate mock.
-- Notifications.
-- support AI tenant-aware mock + handoff umano.
-- billing/piano/quote senza checkout.
-- settings e Admin panel.
+- approval inbox, Social Connections, Analytics, Notifications, support, billing, settings e Admin.
 - `SOCIAL_PUBLISHING_ENABLED=false` mostrato e mantenuto come default di sicurezza.
 - CI web: **5/5 route smoke tests PASS**, TypeScript PASS, production build Vite PASS.
 
@@ -97,11 +90,9 @@ Il Supabase remoto dedicato verrà richiesto solo quando OAuth, callback pubblic
 
 ## PROSSIMI BLOCCHI A COSTO ZERO
 
-- rendere più completo il typed frontend service layer e collegare le pagine ai repository mock invece che a fixture dirette;
-- onboarding state machine + validazione form;
-- Brand Profile editor/versioning mock;
+- collegare le pagine ai repository/service mock tipizzati invece che a fixture dirette;
 - asset operations mock e referenze usage;
-- website scanner coverage/error/redirect fixtures più ampie;
+- website scanner redirect/error/coverage fixtures più ampie;
 - support/knowledge retrieval mock più completo;
 - accessibilità e visual QA frontend;
 - documentazione operativa per passaggio mock → provider reali.
