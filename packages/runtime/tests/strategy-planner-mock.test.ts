@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { SocialPlatform } from '@socialpilot/contracts';
 import { DeterministicStrategyPlannerMock } from '../src/strategy-planner-mock.js';
 
 const planner = new DeterministicStrategyPlannerMock();
@@ -6,7 +7,7 @@ const planner = new DeterministicStrategyPlannerMock();
 const base = {
   tenantId: 'tenant-a',
   brandName: 'Brand A',
-  selectedPlatforms: ['instagram','facebook','linkedin','google_business_profile'] as const,
+  selectedPlatforms: ['instagram','facebook','linkedin','google_business_profile'] as SocialPlatform[],
   postsPerWeek: 3,
   goals: ['lead','notorietà'],
   target: ['clienti locali'],
@@ -20,7 +21,6 @@ describe('DeterministicStrategyPlannerMock', () => {
     const property = planner.plan({ ...base, tenantId: 'tenant-b', brandName: 'PM B', industry: 'Property management', services: ['gestione affitti brevi'] });
     const networker = planner.plan({ ...base, tenantId: 'tenant-c', brandName: 'Network C', industry: 'Networker', services: ['formazione community'] });
     const local = planner.plan({ ...base, tenantId: 'tenant-d', brandName: 'Local D', industry: 'Servizi locali', services: ['assistenza locale'] });
-
     expect(pizza.pillars.map((pillar) => pillar.name)).not.toEqual(property.pillars.map((pillar) => pillar.name));
     expect(property.pillars.map((pillar) => pillar.name)).not.toEqual(networker.pillars.map((pillar) => pillar.name));
     expect(local.pillars.some((pillar) => pillar.name.includes('Presenza locale'))).toBe(true);
