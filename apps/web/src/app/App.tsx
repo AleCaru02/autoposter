@@ -5,12 +5,17 @@ import { OnboardingPage } from '../pages/OnboardingPage';
 import { BrandPage, CalendarPage } from '../pages/BrandCalendarPages';
 import { PostEditorPage } from '../pages/PostEditorPage';
 import { LandingPage, PricingPage } from '../pages/PublicPages';
+import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
+import { NotificationsPage } from '../pages/NotificationsPage';
 import { AdminPage, AnalyticsPage, ApprovalsPage, AssetsPage, BillingPage, ConnectionsPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 
 export function App() {
   return <Routes>
     <Route path="/" element={<LandingPage />} />
     <Route path="/pricing" element={<PricingPage />} />
+    <Route path="/login" element={<LoginPage />} />
+    <Route path="/register" element={<RegisterPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route element={<AppShell />}>
       <Route path="/app" element={<DashboardPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
@@ -22,6 +27,7 @@ export function App() {
       <Route path="/app/approvals" element={<ApprovalsPage />} />
       <Route path="/app/connections" element={<ConnectionsPage />} />
       <Route path="/app/analytics" element={<AnalyticsPage />} />
+      <Route path="/app/notifications" element={<NotificationsPage />} />
       <Route path="/app/support" element={<SupportPage />} />
       <Route path="/app/billing" element={<BillingPage />} />
       <Route path="/app/settings" element={<SettingsPage />} />
