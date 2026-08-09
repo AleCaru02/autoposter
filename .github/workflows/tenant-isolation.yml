@@ -1,0 +1,30 @@
+name: tenant-isolation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tests/integration
+    env:
+      TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+      TEST_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.TEST_SUPABASE_PUBLISHABLE_KEY }}
+      TEST_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.TEST_SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assert staging secrets exist
+        run: |
+          test -n "$TEST_SUPABASE_URL"
+          test -n "$TEST_SUPABASE_PUBLISHABLE_KEY"
+          test -n "$TEST_SUPABASE_SERVICE_ROLE_KEY"
+      - run: npm install
+      - run: npm test
