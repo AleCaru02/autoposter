@@ -38,7 +38,7 @@ describe('SaaS web routes', () => {
     const html = renderRoute('/app/connections');
     expect(html).toContain('Google Business Profile');
     expect(html).toContain('Milano Centro');
-    expect(html).toContain('I pulsanti sono mock');
+    expect(html).toContain('i pulsanti sono mock e non avviano OAuth');
   });
 
   it('renders the admin console with remote infrastructure explicitly deferred', () => {
