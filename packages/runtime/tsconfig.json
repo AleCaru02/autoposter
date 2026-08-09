@@ -8,11 +8,7 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@socialpilot/contracts": ["../contracts/src/index.ts"]
-    }
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
 }
