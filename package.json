@@ -4,14 +4,16 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "apps/*",
     "packages/*",
     "tests/integration"
   ],
   "scripts": {
-    "typecheck": "npm run typecheck --workspace=@socialpilot/contracts && npm run typecheck --workspace=@socialpilot/core && npm run typecheck --workspace=@socialpilot/runtime",
+    "typecheck": "npm run typecheck --workspace=@socialpilot/contracts && npm run typecheck --workspace=@socialpilot/core && npm run typecheck --workspace=@socialpilot/runtime && npm run typecheck --workspace=@socialpilot/web",
     "test:core": "npm test --workspace=@socialpilot/core",
     "test:runtime": "npm test --workspace=@socialpilot/runtime",
-    "test:unit": "npm run test:core && npm run test:runtime"
+    "test:unit": "npm run test:core && npm run test:runtime",
+    "build:web": "npm run build --workspace=@socialpilot/web"
   },
   "engines": {
     "node": ">=22.12"
