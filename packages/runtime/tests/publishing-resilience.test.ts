@@ -54,7 +54,7 @@ describe('publishing reconciliation semantics', () => {
     const base = new MockSocialProvider('facebook');
     base.seedConnection('fb-conn');
     const flaky = new TimeoutAfterSuccessProvider(base);
-    const providers = createDefaultMockProviders();
+    const providers: Record<'facebook' | 'instagram' | 'linkedin' | 'google_business_profile', SocialProvider> = createDefaultMockProviders();
     providers.facebook = flaky;
     const scheduler = new InMemoryPublicationScheduler();
 
