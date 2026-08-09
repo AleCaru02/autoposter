@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { demoPosts, type Platform } from '../app/demo-data';
 import { Badge, Card, PageHeader, Progress } from '../components/ui';
+import type { Platform } from '../services/domain';
+import { useSaasRepository, useSaasSnapshot } from '../services/SaasServicesProvider';
 import './post-editor.css';
 
 const platforms: Platform[] = ['Instagram', 'Facebook', 'LinkedIn', 'Google Business Profile'];
@@ -39,7 +40,11 @@ const variants: Record<Platform, { decision: 'native_variant' | 'separate_concep
 
 export function PostEditorPage() {
   const { id = 'p1' } = useParams();
-  const post = useMemo(() => demoPosts.find((item) => item.id === id) ?? demoPosts[0]!, [id]);
+  const { posts } = useSaasSnapshot();
+  const repository = useSaasRepository();
+  const post = posts.find((item) => item.id === id) ?? posts[0];
+  if (!post) return <Card><strong>Nessun post disponibile nel repository mock.</strong></Card>;
+
   const initialPlatform = platforms.includes(post.platform) ? post.platform : 'Instagram';
   const [platform, setPlatform] = useState<Platform>(initialPlatform);
   const variant = variants[platform];
@@ -60,6 +65,7 @@ export function PostEditorPage() {
             <Badge tone="good">Concept unico</Badge>
           </div>
           <div className="concept-grid">
+            <ConceptField label="Stato" value={post.state} />
             <ConceptField label="Obiettivo" value="Educazione + lead qualificati" />
             <ConceptField label="Pillar" value="Educazione" />
             <ConceptField label="Hook intent" value="Far emergere tre criteri concreti" />
@@ -106,8 +112,8 @@ export function PostEditorPage() {
         </Card>
         <Card>
           <span className="eyebrow">Decisione</span><h2>Approvazione manuale</h2>
-          <div className="decision-buttons"><button className="button secondary" type="button">Rifiuta</button><button className="button" type="button">Approva mock</button></div>
-          <button className="button full" type="button">Programma mock</button>
+          <div className="decision-buttons"><button className="button secondary" type="button" onClick={() => repository.rejectPost(post.id)}>Rifiuta mock</button><button className="button" type="button" onClick={() => repository.approvePost(post.id)}>Approva mock</button></div>
+          <button className="button full" type="button" onClick={() => repository.schedulePost(post.id)}>Programma mock</button>
           <p className="muted">`SOCIAL_PUBLISHING_ENABLED=false`: nessuna azione può raggiungere un provider reale.</p>
         </Card>
       </aside>
