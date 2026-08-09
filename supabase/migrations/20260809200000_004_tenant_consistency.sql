@@ -24,7 +24,6 @@ create unique index if not exists posts_tenant_id_id_uidx on public.posts(tenant
 create unique index if not exists post_variants_tenant_id_id_uidx on public.post_variants(tenant_id, id);
 create unique index if not exists publication_jobs_tenant_id_id_uidx on public.publication_jobs(tenant_id, id);
 create unique index if not exists published_posts_tenant_id_id_uidx on public.published_posts(tenant_id, id);
-create unique index if not exists support_conversations_tenant_id_id_uidx on public.support_conversations(tenant_id, id) where tenant_id is not null;
 
 -- Website graph.
 alter table public.website_scans drop constraint if exists website_scans_website_id_fkey;
@@ -40,7 +39,7 @@ alter table public.website_pages
 alter table public.website_pages drop constraint if exists website_pages_scan_id_fkey;
 alter table public.website_pages
   add constraint website_pages_tenant_scan_fkey
-  foreign key (tenant_id, scan_id) references public.website_scans(tenant_id, id) on delete set null;
+  foreign key (tenant_id, scan_id) references public.website_scans(tenant_id, id) on delete set null (scan_id);
 
 -- Brand graph.
 alter table public.brand_profile_locks drop constraint if exists brand_profile_locks_brand_profile_id_fkey;
@@ -79,17 +78,17 @@ alter table public.content_pillars
 alter table public.content_ideas drop constraint if exists content_ideas_pillar_id_fkey;
 alter table public.content_ideas
   add constraint content_ideas_tenant_pillar_fkey
-  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null;
+  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null (pillar_id);
 
 alter table public.posts drop constraint if exists posts_pillar_id_fkey;
 alter table public.posts
   add constraint posts_tenant_pillar_fkey
-  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null;
+  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null (pillar_id);
 
 alter table public.posts drop constraint if exists posts_idea_id_fkey;
 alter table public.posts
   add constraint posts_tenant_idea_fkey
-  foreign key (tenant_id, idea_id) references public.content_ideas(tenant_id, id) on delete set null;
+  foreign key (tenant_id, idea_id) references public.content_ideas(tenant_id, id) on delete set null (idea_id);
 
 alter table public.post_variants drop constraint if exists post_variants_post_id_fkey;
 alter table public.post_variants
@@ -104,7 +103,7 @@ alter table public.post_assets
 alter table public.post_assets drop constraint if exists post_assets_asset_id_fkey;
 alter table public.post_assets
   add constraint post_assets_tenant_asset_fkey
-  foreign key (tenant_id, asset_id) references public.brand_assets(tenant_id, id) on delete set null;
+  foreign key (tenant_id, asset_id) references public.brand_assets(tenant_id, id) on delete set null (asset_id);
 
 alter table public.post_approvals drop constraint if exists post_approvals_post_variant_id_fkey;
 alter table public.post_approvals
@@ -135,7 +134,7 @@ alter table public.published_posts
 alter table public.published_posts drop constraint if exists published_posts_publication_job_id_fkey;
 alter table public.published_posts
   add constraint published_posts_tenant_job_fkey
-  foreign key (tenant_id, publication_job_id) references public.publication_jobs(tenant_id, id) on delete set null;
+  foreign key (tenant_id, publication_job_id) references public.publication_jobs(tenant_id, id) on delete set null (publication_job_id);
 
 alter table public.analytics_snapshots drop constraint if exists analytics_snapshots_published_post_id_fkey;
 alter table public.analytics_snapshots
@@ -146,17 +145,17 @@ alter table public.analytics_snapshots
 alter table public.feedback_events drop constraint if exists feedback_events_post_variant_id_fkey;
 alter table public.feedback_events
   add constraint feedback_events_tenant_variant_fkey
-  foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete set null;
+  foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete set null (post_variant_id);
 
 alter table public.editorial_memory drop constraint if exists editorial_memory_post_id_fkey;
 alter table public.editorial_memory
   add constraint editorial_memory_tenant_post_fkey
-  foreign key (tenant_id, post_id) references public.posts(tenant_id, id) on delete set null;
+  foreign key (tenant_id, post_id) references public.posts(tenant_id, id) on delete set null (post_id);
 
 alter table public.editorial_memory drop constraint if exists editorial_memory_pillar_id_fkey;
 alter table public.editorial_memory
   add constraint editorial_memory_tenant_pillar_fkey
-  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null;
+  foreign key (tenant_id, pillar_id) references public.content_pillars(tenant_id, id) on delete set null (pillar_id);
 
 alter table public.content_fingerprints drop constraint if exists content_fingerprints_post_id_fkey;
 alter table public.content_fingerprints
