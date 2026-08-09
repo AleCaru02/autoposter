@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from '../components/AppShell';
 import { SaasServicesProvider } from '../services/SaasServicesProvider';
+import { LocalE2EProvider } from '../services/local-e2e';
 import { DashboardPage } from '../pages/DashboardPage';
 import { OnboardingPage } from '../pages/OnboardingPage';
 import { BrandPage, CalendarPage } from '../pages/BrandCalendarPages';
@@ -11,7 +12,7 @@ import { NotificationsPage } from '../pages/NotificationsPage';
 import { AdminPage, AnalyticsPage, ApprovalsPage, AssetsPage, BillingPage, ConnectionsPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 
 export function App() {
-  return <SaasServicesProvider><Routes>
+  return <LocalE2EProvider><SaasServicesProvider><Routes>
     <Route path="/" element={<LandingPage />} />
     <Route path="/pricing" element={<PricingPage />} />
     <Route path="/login" element={<LoginPage />} />
@@ -26,6 +27,7 @@ export function App() {
       <Route path="/app/calendar" element={<CalendarPage />} />
       <Route path="/app/posts/:id" element={<PostEditorPage />} />
       <Route path="/app/approvals" element={<ApprovalsPage />} />
+      <Route path="/approvals" element={<ApprovalsPage />} />
       <Route path="/app/connections" element={<ConnectionsPage />} />
       <Route path="/app/analytics" element={<AnalyticsPage />} />
       <Route path="/app/notifications" element={<NotificationsPage />} />
@@ -35,5 +37,5 @@ export function App() {
       <Route path="/admin" element={<AdminPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></SaasServicesProvider>;
+  </Routes></SaasServicesProvider></LocalE2EProvider>;
 }
