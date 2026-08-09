@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(26);
+select plan(27);
 
 select is(
   (
@@ -59,8 +59,8 @@ select is(
 
 select is(
   (select count(*)::bigint from supabase_migrations.schema_migrations where version like '20260809%'),
-  7::bigint,
-  'all seven application migrations are present in local migration history'
+  8::bigint,
+  'all eight application migrations are present in local migration history'
 );
 
 select is(
@@ -88,6 +88,10 @@ select ok(
 select ok(
   exists(select 1 from pg_policies where schemaname='public' and tablename='learning_insights' and policyname='learning_insights_tenant_select'),
   'learning insights are tenant-readable through RLS'
+);
+select ok(
+  exists(select 1 from pg_trigger where tgname='post_variants_enqueue_auto_publication' and not tgisinternal),
+  'AUTO variants are independently enqueued after QA via trigger'
 );
 
 select * from finish();
