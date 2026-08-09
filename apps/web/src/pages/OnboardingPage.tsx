@@ -1,0 +1,11 @@
+import { Badge, Card, PageHeader, Progress } from '../components/ui';
+
+const steps = ['Attività','Sito','Brand intelligence','Target','Voce','Visual','Asset','Canali','Approvazioni','Riepilogo'];
+
+export function OnboardingPage() {
+  return <><PageHeader eyebrow="Setup guidato" title="Costruiamo il contesto del brand" description="Ogni informazione viene marcata come confermata o inferita. I campi importanti possono essere bloccati." /><Card><div className="onboarding-top"><div><strong>Passaggio 3 di 10</strong><span>Brand intelligence review</span></div><Progress value={3} max={10} label="Completamento" /></div><div className="step-strip">{steps.map((step, index) => <span className={index < 3 ? 'done' : index === 2 ? 'current' : ''} key={step}>{index + 1}<small>{step}</small></span>)}</div></Card><div className="two-col onboarding-body"><Card><span className="eyebrow">Estratto dal sito · mock</span><h2>Rivedi ciò che abbiamo capito</h2><Field label="Nome brand" value="Demo Studio Milano" status="Confermato" locked /><Field label="Settore" value="Servizi professionali" status="Confermato" /><Field label="Target principale" value="PMI e professionisti nell’area di Milano" status="Inferito" /><Field label="Differenziatore" value="Analisi trasparente e piano operativo misurabile" status="Inferito" /><div className="form-actions"><button className="button secondary" type="button">Indietro</button><button className="button" type="button">Conferma e continua</button></div></Card><Card><span className="eyebrow">Coverage</span><h2>Fonti analizzate</h2><div className="coverage-score"><strong>18</strong><span>pagine mock analizzate su limite 50</span></div><ul className="check-list"><li>Homepage · acquisita</li><li>Servizi · acquisita</li><li>Chi siamo · acquisita</li><li>FAQ · acquisita</li><li>Privacy · esclusa dal contesto marketing</li></ul><p className="muted">Nessuna scansione web reale viene eseguita dalla UI in questa fase.</p></Card></div></>;
+}
+
+function Field({ label, value, status, locked = false }: { label: string; value: string; status: string; locked?: boolean }) {
+  return <label className="field"><span>{label}<span><Badge tone={status === 'Inferito' ? 'warn' : 'good'}>{status}</Badge>{locked && <Badge>Bloccato</Badge>}</span></span><input value={value} readOnly /></label>;
+}

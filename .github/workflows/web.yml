@@ -1,0 +1,34 @@
+name: web
+
+on:
+  push:
+    branches:
+      - feat/saas-foundation
+    paths:
+      - 'package.json'
+      - 'apps/web/**'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'apps/web/**'
+      - '.github/workflows/web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install workspace dependencies
+        run: npm install --no-audit --no-fund
+      - name: Typecheck web app
+        run: npm run typecheck --workspace=@socialpilot/web
+      - name: Build web app
+        run: npm run build --workspace=@socialpilot/web
