@@ -1,6 +1,11 @@
 -- Local E2E persistence for onboarding, brand version history and learning insights.
 -- This migration remains environment-agnostic and is safe to apply later to a dedicated remote project.
 
+alter table public.posts add column if not exists planned_at timestamptz;
+alter table public.posts add column if not exists primary_platform text check (primary_platform is null or primary_platform in ('facebook','instagram','linkedin','google_business_profile'));
+alter table public.posts add column if not exists format text;
+create index if not exists posts_tenant_planned_idx on public.posts(tenant_id, planned_at) where planned_at is not null;
+
 create table if not exists public.onboarding_sessions (
   tenant_id uuid primary key references public.tenants(id) on delete cascade,
   current_step text not null default 'business' check (current_step in ('business','goals','target','brand','social','frequency','publishing','summary','completed')),
@@ -19,7 +24,7 @@ create table if not exists public.onboarding_sessions (
 create table if not exists public.brand_profile_versions (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  brand_profile_id uuid not null references public.brand_profiles(id) on delete cascade,
+  brand_profile_id uuid not null,
   version integer not null,
   status text not null default 'draft' check (status in ('draft','review','confirmed','superseded')),
   snapshot jsonb not null,
@@ -28,8 +33,11 @@ create table if not exists public.brand_profile_versions (
   reviewed_at timestamptz,
   confirmed_at timestamptz,
   created_at timestamptz not null default now(),
-  unique (brand_profile_id, version)
+  unique (brand_profile_id, version),
+  constraint brand_profile_versions_tenant_profile_fkey foreign key (tenant_id, brand_profile_id)
+    references public.brand_profiles(tenant_id, id) on delete cascade
 );
+create unique index if not exists brand_profile_versions_tenant_id_uidx on public.brand_profile_versions(tenant_id, id);
 create index if not exists brand_profile_versions_tenant_created_idx on public.brand_profile_versions(tenant_id, created_at desc);
 
 create table if not exists public.learning_insights (
@@ -45,6 +53,7 @@ create table if not exists public.learning_insights (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create unique index if not exists learning_insights_tenant_id_uidx on public.learning_insights(tenant_id, id);
 create index if not exists learning_insights_tenant_created_idx on public.learning_insights(tenant_id, created_at desc);
 
 create or replace trigger onboarding_sessions_set_updated_at before update on public.onboarding_sessions for each row execute function public.set_updated_at();
