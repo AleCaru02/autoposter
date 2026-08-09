@@ -97,13 +97,13 @@ export class InMemoryKnowledgeIndex {
     if (!query.trim()) return { query, hits: [], confident: false };
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error('knowledge_invalid_limit');
 
-    const candidates = [...this.documents.values()]
+    const candidates: KnowledgeHit[] = [...this.documents.values()]
       .filter((document) => scope === 'internal' || document.visibility === 'public')
       .map((document) => scoreDocument(document, query))
       .filter((hit) => hit.score > 0)
       .sort((left, right) => right.score - left.score || right.document.version - left.document.version || left.document.id.localeCompare(right.document.id))
       .slice(0, limit)
-      .map(structuredClone);
+      .map((hit) => structuredClone(hit));
 
     const top = candidates[0];
     return {
