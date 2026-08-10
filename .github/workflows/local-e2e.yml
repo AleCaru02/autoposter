@@ -72,6 +72,7 @@ jobs:
           LOCAL_SUPABASE_URL="$TEST_SUPABASE_URL" \
           LOCAL_SUPABASE_ANON_KEY="$TEST_SUPABASE_PUBLISHABLE_KEY" \
           LOCAL_SUPABASE_SERVICE_ROLE_KEY="$TEST_SUPABASE_SERVICE_ROLE_KEY" \
+          LOCAL_ASSET_MAX_BYTES=524288 \
           LOCAL_API_HOST=127.0.0.1 \
           LOCAL_API_PORT=8787 \
           npm run dev --workspace=@socialpilot/local-api > /tmp/local-api.log 2>&1 &
