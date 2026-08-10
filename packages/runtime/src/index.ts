@@ -6,6 +6,7 @@ export * from './approval-workflow.js';
 export * from './asset-library.js';
 export * from './brand-profile-store.js';
 export * from './chatbot-entitlement.js';
+export * from './connection-health.js';
 export * from './document-ingestion.js';
 export * from './editorial-pipeline-mock.js';
 export * from './gbp-local-planner.js';
