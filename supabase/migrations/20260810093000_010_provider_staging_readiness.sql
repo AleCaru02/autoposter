@@ -34,6 +34,8 @@ alter table public.social_connections
 create unique index if not exists social_connections_provider_subject_uidx
   on public.social_connections(tenant_id, platform, provider_subject_id)
   where provider_subject_id is not null;
+create unique index if not exists social_connections_tenant_id_id_uidx
+  on public.social_connections(tenant_id,id);
 
 alter table public.social_accounts
   add column if not exists health_status text not null default 'connected',
@@ -50,6 +52,8 @@ alter table public.social_accounts drop constraint if exists social_accounts_hea
 alter table public.social_accounts add constraint social_accounts_health_status_check check (
   health_status in ('connected','degraded','expiring','expired','reauth_required','permission_missing','rate_limited','provider_error','disconnected')
 );
+create unique index if not exists social_accounts_tenant_id_id_uidx
+  on public.social_accounts(tenant_id,id);
 
 create table if not exists app_private.oauth_states (
   id uuid primary key default gen_random_uuid(),
@@ -131,7 +135,7 @@ set search_path = app_private, pg_temp
 as $$
 begin
   update app_private.integration_credentials
-  set revoked_at = now(), token_ciphertext = '\\x00'::bytea, refresh_token_ciphertext = null, updated_at = now()
+  set revoked_at = now(), token_ciphertext = decode('00','hex'), refresh_token_ciphertext = null, updated_at = now()
   where connection_id = p_connection_id and revoked_at is null;
   return found;
 end;
@@ -260,6 +264,7 @@ create table if not exists public.knowledge_sources (
   created_at timestamptz not null default now()
 );
 create index if not exists knowledge_sources_tenant_type_idx on public.knowledge_sources(tenant_id, source_type, observed_at desc);
+create unique index if not exists knowledge_sources_tenant_id_id_uidx on public.knowledge_sources(tenant_id,id);
 
 create table if not exists public.knowledge_facts (
   id uuid primary key default gen_random_uuid(),
@@ -361,7 +366,7 @@ $$;
 revoke all on function app_private.assert_tenant_feature(uuid,text,text) from public, anon, authenticated;
 grant execute on function app_private.assert_tenant_feature(uuid,text,text) to service_role;
 
--- RLS: readable by tenant members; mutations are server-only except existing connection/account policies.
+-- RLS: readable by tenant members; mutations are server-only.
 alter table public.provider_permission_grants enable row level security;
 alter table public.provider_webhook_events enable row level security;
 alter table public.provider_audit_events enable row level security;
@@ -381,8 +386,3 @@ create policy knowledge_facts_read on public.knowledge_facts for select to authe
 grant select on public.provider_permission_grants, public.provider_webhook_events, public.provider_audit_events, public.document_ingestions, public.document_chunks, public.knowledge_sources, public.knowledge_facts to authenticated;
 grant all on public.provider_permission_grants, public.provider_webhook_events, public.provider_audit_events, public.document_ingestions, public.document_chunks, public.knowledge_sources, public.knowledge_facts to service_role;
 grant usage, select on sequence public.provider_permission_grants_id_seq, public.provider_audit_events_id_seq to service_role;
-
--- Composite uniqueness required by tenant-aware FKs introduced above.
-create unique index if not exists social_connections_tenant_id_id_uidx on public.social_connections(tenant_id,id);
-create unique index if not exists social_accounts_tenant_id_id_uidx on public.social_accounts(tenant_id,id);
-create unique index if not exists knowledge_sources_tenant_id_id_uidx on public.knowledge_sources(tenant_id,id);
