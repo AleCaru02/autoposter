@@ -9,7 +9,7 @@ const imageMimes=new Set(['image/jpeg','image/png','image/webp','image/svg+xml']
 
 interface ReadinessAssetRow {
   id:string;tenant_id:string;storage_bucket:string;storage_path:string;mime_type:string|null;content_hash:string|null;
-  thumbnail_small_path:string|null;thumbnail_medium_path:string|null;thumbnail_status:string;thumbnail_metadata:Record<string,unknown>;
+  thumbnail_small_path?:string|null;thumbnail_medium_path?:string|null;thumbnail_status?:string;thumbnail_metadata?:Record<string,unknown>;
   [key:string]:unknown;
 }
 
@@ -18,7 +18,7 @@ export class LocalAssetVisualReadinessService {
   private readonly db=new LocalSupabaseClient();
 
   async listAssets(token:string,tenantId:string,filter:{search?:string;type?:string;status?:string}={}){
-    const assets=await this.base.listAssets(token,tenantId,filter) as ReadinessAssetRow[];
+    const assets:ReadinessAssetRow[]=await this.base.listAssets(token,tenantId,filter);
     return Promise.all(assets.map(async(asset)=>{
       const isImage=imageMimes.has(asset.mime_type??'');
       const small=isImage&&asset.thumbnail_small_path?await this.sign(asset.storage_bucket,asset.thumbnail_small_path):null;
@@ -29,7 +29,8 @@ export class LocalAssetVisualReadinessService {
   }
 
   async uploadAsset(token:string,tenantId:string,input:{filename:string;mimeType:string;dataBase64:string;description?:string;altText?:string}){
-    const result=await this.base.uploadAsset(token,tenantId,input) as {asset:ReadinessAssetRow;deduplicated:boolean};
+    const baseResult=await this.base.uploadAsset(token,tenantId,input);
+    const result:{asset:ReadinessAssetRow;deduplicated:boolean}={asset:baseResult.asset,deduplicated:baseResult.deduplicated};
     if(!imageMimes.has(input.mimeType))return result;
     const current=result.asset;
     if(current.thumbnail_status==='ready'&&current.thumbnail_small_path&&current.thumbnail_medium_path)return result;
