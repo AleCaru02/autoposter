@@ -46,7 +46,7 @@ export class ProviderReadinessService {
     return connections.map((connection)=>({
       ...connection,
       provider:String(connection.metadata.auth_provider??connection.platform),
-      health:this.connectionHealth(connection,accounts.filter((item)=>item.connection_id===connection.id)),
+      health:this.calculateConnectionHealth(connection,accounts.filter((item)=>item.connection_id===connection.id)),
       accounts:accounts.filter((item)=>item.connection_id===connection.id).map((item)=>this.mapAccount(item)),
     }));
   }
@@ -115,7 +115,7 @@ export class ProviderReadinessService {
     await this.db.requireTenantRole(token,tenantId);
     const connection=this.first(await this.db.userRest<ConnectionRow[]>(token,`/rest/v1/social_connections?select=*&tenant_id=eq.${q(tenantId)}&id=eq.${q(connectionId)}&limit=1`),'provider_connection_not_found');
     const accounts=await this.db.userRest<AccountRow[]>(token,`/rest/v1/social_accounts?select=*&tenant_id=eq.${q(tenantId)}&connection_id=eq.${q(connectionId)}`);
-    return{connectionId,provider:String(connection.metadata.auth_provider??connection.platform),status:this.connectionHealth(connection,accounts),lastCheckedAt:connection.last_checked_at,expiresAt:connection.token_expires_at,lastPublishAt:connection.last_publish_at,lastError:connection.last_error_message,recommendedAction:connection.recommended_action,accounts:accounts.map((item)=>this.mapAccount(item))};
+    return{connectionId,provider:String(connection.metadata.auth_provider??connection.platform),status:this.calculateConnectionHealth(connection,accounts),lastCheckedAt:connection.last_checked_at,expiresAt:connection.token_expires_at,lastPublishAt:connection.last_publish_at,lastError:connection.last_error_message,recommendedAction:connection.recommended_action,accounts:accounts.map((item)=>this.mapAccount(item))};
   }
 
   async simulate(token:string,tenantId:string,connectionId:string,scenario:FixtureScenario){
@@ -197,7 +197,7 @@ export class ProviderReadinessService {
 
   private mapAccount(row:AccountRow):ProviderAccount{return{id:row.id,connectionId:row.connection_id,provider:row.platform,externalAccountId:row.external_account_id,accountType:row.account_type??'unknown',displayName:row.display_name??row.external_account_id,...(row.username?{username:row.username}:{}),...(row.location_id?{locationId:row.location_id}:{}),selected:row.is_selected,capabilities:row.capabilities as ProviderAccount['capabilities'],grantedScopes:row.granted_scopes??[],missingPermissions:row.missing_permissions??[],health:mapHealth(row.health_status),...(row.token_expires_at?{tokenExpiresAt:row.token_expires_at}:{}),...(row.last_checked_at?{lastCheckedAt:row.last_checked_at}:{}),...(row.last_publish_at?{lastPublishAt:row.last_publish_at}:{}),...(row.last_error_code?{lastErrorCode:row.last_error_code}:{}),...(row.last_error_message?{lastErrorMessage:row.last_error_message}:{}),metadata:row.metadata??{}};}
 
-  private connectionHealth(connection:ConnectionRow,accounts:AccountRow[]){
+  private calculateConnectionHealth(connection:ConnectionRow,accounts:AccountRow[]){
     const missing=[...new Set(accounts.flatMap((item)=>item.missing_permissions??[]))];
     return this.lifecycle.status({nowMs:Date.now(),...(connection.token_expires_at?{expiresAtMs:new Date(connection.token_expires_at).getTime()}:{}),missingPermissions:missing,rateLimited:connection.connection_status==='rate_limited',providerError:connection.connection_status==='provider_error',connected:!['disconnected','disabled'].includes(connection.connection_status)});
   }
