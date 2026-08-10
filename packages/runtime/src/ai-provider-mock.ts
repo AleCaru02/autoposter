@@ -2,14 +2,16 @@ import { createHash } from 'node:crypto';
 import type { AIErrorCode, AIExecutionPolicy, AICapability, AIOutputSchema, AIProvider } from '@socialpilot/contracts';
 
 export type MockAIScenario='success'|'timeout'|'malformed'|'validation'|'rate_limit'|'unavailable'|'safety'|'empty'|'partial'|'cost_limit';
+type FailureScenario=Exclude<MockAIScenario,'success'>;
 
 export class AIProviderError extends Error {
   constructor(readonly code:AIErrorCode,message:string=code){super(message);this.name='AIProviderError';}
 }
 
-const codeForScenario=(scenario:Exclude<MockAIScenario,'success'>):AIErrorCode=>({
+const scenarioCodes:Record<FailureScenario,AIErrorCode>={
   timeout:'TIMEOUT',malformed:'MALFORMED_OUTPUT',validation:'VALIDATION_FAILURE',rate_limit:'RATE_LIMIT',unavailable:'PROVIDER_UNAVAILABLE',safety:'SAFETY_REJECTION',empty:'EMPTY_RESPONSE',partial:'PARTIAL_RESPONSE',cost_limit:'COST_LIMIT',
-})[scenario];
+};
+const codeForScenario=(scenario:FailureScenario):AIErrorCode=>scenarioCodes[scenario];
 
 const digestVector=(text:string,dimensions=8):number[]=>{
   const hash=createHash('sha256').update(text).digest();
