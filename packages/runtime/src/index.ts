@@ -13,4 +13,5 @@ export * from './social-provider-mock.js';
 export * from './strategy-planner-mock.js';
 export * from './support-assistant-mock.js';
 export * from './telegram-approval-mock.js';
+export * from './visual-engine.js';
 export * from './website-scanner.js';
