@@ -2,103 +2,98 @@
 
 ## Stato
 
-**Foundation + local E2E VALIDATI LOCALMENTE — 2026-08-09.**
+**Foundation database + visual asset pipeline VALIDATE LOCALMENTE — 2026-08-10.**
 
-La validazione usa Supabase CLI/Docker, local API e Chromium senza utilizzare progetti Supabase cloud esistenti o secret provider reali.
+La validazione usa Supabase CLI + Docker in GitHub Actions, senza progetti cloud esistenti e senza secret remoti.
 
-## Controlli già provati
+## Controlli obbligatori
 
-- RLS su tutte le tabelle applicative `public`;
-- utenti Auth reali Tenant A/Tenant B;
-- SELECT/INSERT/UPDATE/DELETE cross-tenant bloccati;
-- composite FK tenant-aware;
-- onboarding tenant-scoped;
-- Brand Profile version history non collegabile a parent di altro tenant;
-- learning leggibile tenant-scoped e non scrivibile dal client;
-- `authenticated` non può creare `publication_jobs`;
-- quota mutation RPC server-only;
-- `anon`/`authenticated` senza `USAGE` su `app_private`;
-- integration credentials non leggibili dal client;
+- RLS su ogni tabella applicativa `public`.
+- Tenant authorization server-side.
+- Foreign key composte `(tenant_id, id)` sulle relazioni sensibili.
+- Storage privato con path tenant-safe.
+- `service_role`, OpenAI key, OAuth client secret e social token mai nel browser.
+- `service_role` solo per workload trusted server-side.
+- OAuth `state` one-time e redirect allowlist prima del provider live.
+- Webhook signature verification prima del provider live.
+- Rate limit per endpoint costosi/sensibili.
+- Input/file validation.
+- Signed URL per asset privati.
+- RBAC admin separato dai ruoli tenant.
+- Audit/versioning per azioni e repair privilegiati.
+- Correlation/idempotency per job e richieste esterne.
+
+## Controlli provati localmente
+
+Database/Auth/RLS:
+
+- tutte le tabelle applicative `public` hanno RLS;
+- Tenant A non può SELECT/INSERT/UPDATE/DELETE righe Tenant B;
+- Tenant A può CRUD sulle proprie risorse dove previsto;
+- FK cross-tenant rifiutate;
+- `authenticated` non può scrivere `publication_jobs`;
+- `authenticated` non può chiamare RPC quota di mutazione;
+- `anon`/`authenticated` non hanno `USAGE` su `app_private`;
+- `authenticated` non può leggere `app_private.integration_credentials`;
 - nessuna colonna plaintext token/secret nella tabella credenziali;
-- bucket applicativi privati;
-- `vector` nello schema `extensions`;
-- Security Advisors: nessuna issue;
-- Performance Advisors: nessuna issue;
-- chatbot cross-tenant rifiutato;
-- workspace cross-tenant rifiutato;
-- admin senza platform-admin rifiutato;
-- browser E2E senza console/page errors.
+- `vector` vive in `extensions`;
+- Security Advisors: **No issues found**;
+- Performance Advisors: **No issues found**.
 
-Numeri finali DB security: **27/27 pgTAP + 3 file / 20 Auth/RLS integration PASS**.
+Visual/asset/Storage:
 
-## Browser / local API boundary
+- `brand-assets`, `post-assets`, `tenant-documents` privati;
+- upload path costruito server-side come `{tenant_id}/...` dopo membership/role check;
+- Tenant A non può caricare nel path Storage Tenant B;
+- Tenant A non può leggere/modificare/eliminare asset Tenant B;
+- cross-tenant logo reference rifiutata dalla FK composta;
+- `visual_renders`, `asset_usage_history`, `visual_qa_issues` e component versions sono server-generated/read-only per il client dove previsto;
+- supersede render filtrato per tenant + variante;
+- delete asset referenziato rifiutato (`asset_in_use`);
+- signed preview per asset/render privati;
+- MIME allowlist, size limit configurabile, filename sanitization, hash/dedup e corruption checks.
 
-Il frontend conserva soltanto sessione Auth locale e tenant selezionato. Non possiede `service_role`.
+Suite finale database/security:
 
-Il local API:
+- pgTAP **45/45 PASS**;
+- Auth/RLS/quota/asset-storage integration **24/24 PASS**.
 
-1. autentica l'utente;
-2. verifica membership/ruolo;
-3. usa la sessione utente per normali CRUD RLS;
-4. usa `service_role` soltanto per workload server-only.
+## Fact-safe graphics
 
-Cross-tenant anti-duplicate viene calcolato server-side e non restituisce il contenuto raw di altri tenant.
+Il renderer riceve forbidden claims dal Brand Profile. Headline/supporting text che introducono una claim vietata producono un blocker `FORBIDDEN_FACT_CLAIM`; il visual non viene considerato QA-green.
 
-## `app_private`
+Il MockImageGenerationProvider e l'ImagePromptBuilder vietano per contratto loghi inventati, prodotti non verificati e false testimonianze. Prima del provider image live serviranno moderazione/provider-safety e secret server-side.
 
-Resta non accessibile al browser. Token social futuri e materiale sensibile appartengono a questo boundary.
+## Logo safety
 
-Per il test admin locale il seed crea un helper e una view service-role-only. Sono **seed-only**, non migrations production-like e non devono essere copiati nel futuro ambiente remoto.
+Il renderer mantiene aspect ratio (`preserveAspectRatio="xMidYMid meet"`) e non applica crop/recolor arbitrario al logo. Logo principale/alternativo devono appartenere allo stesso tenant del Brand Profile tramite composite FK.
 
-## Publishing safety
+## Token social
 
-I provider sono mock. La pipeline usa:
+Metadata connessioni resta separato dai secret. Il materiale segreto vive in `app_private.integration_credentials`; prima dell'OAuth reale va aggiunta cifratura autenticata server-side con chiave remota versionata/ruotabile.
 
-- connection health;
-- approval mode per piattaforma;
-- idempotency key;
-- publication attempts;
-- external mock ID;
-- retry classification;
-- reconciliation dopo successful publish + timeout response.
+## Quota / abuse
 
-Il test conferma che il retry non crea una seconda pubblicazione mock.
+`reserve_tenant_usage`, `commit_tenant_usage`, `release_tenant_usage` sono server-only. Idempotenza, limiti e isolamento contatori sono coperti dai test locali.
 
-## AUTO/MANUALE
+## Admin
 
-La migration 008 crea job AUTO indipendenti per variante dopo QA. La coda rimane server-side e `authenticated` non riceve il grant di inserimento.
-
-## Telegram mock
-
-Il runtime verifica HMAC, tenant/user binding, expiry e nonce one-time. Un bug del test di tampering è stato corretto garantendo che la firma alterata sia realmente diversa.
-
-## Admin RBAC
-
-I ruoli tenant non equivalgono a platform-admin. L'endpoint admin rifiuta utenti normali. Il claim iniziale esiste esclusivamente nel seed local-E2E.
-
-## Cost/abuse controls
-
-- quota reserve/commit/release server-only;
-- idempotency;
-- plan entitlements;
-- AI usage ledger;
-- theoretical price configuration da env, non hardcoded;
-- page limits sul website scanner;
-- same-origin crawler;
-- input/time limits nelle fixture local API.
+RBAC platform-admin è separato dai ruoli tenant. Il primo admin locale può essere assegnato soltanto tramite helper seed-only dev; tale shortcut non appartiene alle migrations production-like.
 
 ## Prima del beta pubblico
 
-Restano obbligatori:
+Da ripetere/aggiungere sul futuro ambiente remoto:
 
-- ripetere RLS/FK/grant su Supabase remoto dedicato;
-- secret manager e cifratura autenticata token;
-- OAuth state/PKCE/redirect reali;
-- webhook signature reali;
+- migrations/history/advisors;
+- Auth/RLS/Storage/signed URL;
+- secret encryption e rotation;
+- OAuth state/PKCE/redirect;
+- webhook signatures;
 - rate limiting pubblico;
-- Signed URL/Storage remoto;
-- provider app review e least-privilege scopes;
-- penetration/abuse tests sul deployment pubblico;
-- GDPR/export/delete/revoca e policy legali.
+- provider/image moderation;
+- cross-tenant test sul deployment pubblico;
+- security headers/cookie/session policy production.
 
-Il progetto remoto non è necessario per la fase locale già completata.
+## GDPR/legal
+
+Il prodotto dovrà offrire export, account deletion, revoca social e cancellazione dati. Privacy policy, termini, cookie e basi giuridiche richiedono revisione professionale prima del lancio commerciale.
