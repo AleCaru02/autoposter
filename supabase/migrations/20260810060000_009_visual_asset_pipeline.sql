@@ -1,4 +1,4 @@
--- Local visual/asset pipeline. Provider-neutral and safe to replay on a future dedicated Supabase project.
+-- Persistent local visual/asset pipeline. Provider-neutral and safe for a future dedicated Supabase project.
 
 alter table public.brand_assets
   add column if not exists asset_type text not null default 'generic_photo',
@@ -44,16 +44,14 @@ alter table public.brand_profiles
   add column if not exists alternate_logo_asset_id uuid,
   add column if not exists preferred_visual_style jsonb not null default '{}'::jsonb;
 
-do $$ begin
-  alter table public.brand_profiles add constraint brand_profiles_primary_logo_tenant_fk
-    foreign key (tenant_id, primary_logo_asset_id) references public.brand_assets(tenant_id, id)
-    on delete set null (primary_logo_asset_id);
-exception when duplicate_object then null; end $$;
-do $$ begin
-  alter table public.brand_profiles add constraint brand_profiles_alt_logo_tenant_fk
-    foreign key (tenant_id, alternate_logo_asset_id) references public.brand_assets(tenant_id, id)
-    on delete set null (alternate_logo_asset_id);
-exception when duplicate_object then null; end $$;
+alter table public.brand_profiles drop constraint if exists brand_profiles_primary_logo_tenant_fk;
+alter table public.brand_profiles add constraint brand_profiles_primary_logo_tenant_fk
+  foreign key (tenant_id, primary_logo_asset_id) references public.brand_assets(tenant_id, id)
+  on delete set null (primary_logo_asset_id);
+alter table public.brand_profiles drop constraint if exists brand_profiles_alt_logo_tenant_fk;
+alter table public.brand_profiles add constraint brand_profiles_alt_logo_tenant_fk
+  foreign key (tenant_id, alternate_logo_asset_id) references public.brand_assets(tenant_id, id)
+  on delete set null (alternate_logo_asset_id);
 
 create table if not exists public.visual_template_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -81,8 +79,10 @@ create table if not exists public.asset_usage_history (
   visual_fingerprint text,
   used_at timestamptz not null default now(),
   metadata jsonb not null default '{}'::jsonb,
-  constraint asset_usage_asset_tenant_fk foreign key (tenant_id, asset_id) references public.brand_assets(tenant_id, id) on delete cascade,
-  constraint asset_usage_variant_tenant_fk foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete set null (post_variant_id)
+  constraint asset_usage_asset_tenant_fk foreign key (tenant_id, asset_id)
+    references public.brand_assets(tenant_id, id) on delete cascade,
+  constraint asset_usage_variant_tenant_fk foreign key (tenant_id, post_variant_id)
+    references public.post_variants(tenant_id, id) on delete set null (post_variant_id)
 );
 create index if not exists asset_usage_recent_idx on public.asset_usage_history(tenant_id, used_at desc);
 create index if not exists asset_usage_asset_recent_idx on public.asset_usage_history(tenant_id, asset_id, used_at desc);
@@ -107,9 +107,12 @@ create table if not exists public.visual_renders (
   fingerprint text not null,
   created_at timestamptz not null default now(),
   unique (post_variant_id, render_version),
-  constraint visual_renders_variant_tenant_fk foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete cascade,
-  constraint visual_renders_asset_tenant_fk foreign key (tenant_id, selected_asset_id) references public.brand_assets(tenant_id, id) on delete set null (selected_asset_id)
+  constraint visual_renders_variant_tenant_fk foreign key (tenant_id, post_variant_id)
+    references public.post_variants(tenant_id, id) on delete cascade,
+  constraint visual_renders_asset_tenant_fk foreign key (tenant_id, selected_asset_id)
+    references public.brand_assets(tenant_id, id) on delete set null (selected_asset_id)
 );
+create unique index if not exists visual_renders_tenant_id_id_uidx on public.visual_renders(tenant_id, id);
 create index if not exists visual_renders_tenant_recent_idx on public.visual_renders(tenant_id, created_at desc);
 create index if not exists visual_renders_fingerprint_idx on public.visual_renders(tenant_id, fingerprint, created_at desc);
 
@@ -126,9 +129,11 @@ create table if not exists public.content_component_versions (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   unique (post_variant_id, component, version),
-  constraint component_versions_variant_tenant_fk foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete cascade
+  constraint component_versions_variant_tenant_fk foreign key (tenant_id, post_variant_id)
+    references public.post_variants(tenant_id, id) on delete cascade
 );
-create index if not exists component_versions_current_idx on public.content_component_versions(tenant_id, post_variant_id, component) where is_current;
+create index if not exists component_versions_current_idx
+  on public.content_component_versions(tenant_id, post_variant_id, component) where is_current;
 
 create table if not exists public.visual_qa_issues (
   id bigint generated always as identity primary key,
@@ -143,8 +148,10 @@ create table if not exists public.visual_qa_issues (
   details jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   resolved_at timestamptz,
-  constraint visual_qa_variant_tenant_fk foreign key (tenant_id, post_variant_id) references public.post_variants(tenant_id, id) on delete cascade,
-  constraint visual_qa_render_tenant_fk foreign key (tenant_id, visual_render_id) references public.visual_renders(tenant_id, id) on delete cascade
+  constraint visual_qa_variant_tenant_fk foreign key (tenant_id, post_variant_id)
+    references public.post_variants(tenant_id, id) on delete cascade,
+  constraint visual_qa_render_tenant_fk foreign key (tenant_id, visual_render_id)
+    references public.visual_renders(tenant_id, id) on delete cascade
 );
 
 alter table public.visual_template_profiles enable row level security;
@@ -153,21 +160,30 @@ alter table public.visual_renders enable row level security;
 alter table public.content_component_versions enable row level security;
 alter table public.visual_qa_issues enable row level security;
 
-create policy visual_template_profiles_read on public.visual_template_profiles for select to authenticated using (public.is_tenant_member(tenant_id));
-create policy visual_template_profiles_write on public.visual_template_profiles for all to authenticated using (public.has_tenant_role(tenant_id, array['owner','admin','editor'])) with check (public.has_tenant_role(tenant_id, array['owner','admin','editor']));
-create policy asset_usage_history_read on public.asset_usage_history for select to authenticated using (public.is_tenant_member(tenant_id));
-create policy visual_renders_read on public.visual_renders for select to authenticated using (public.is_tenant_member(tenant_id));
-create policy component_versions_read on public.content_component_versions for select to authenticated using (public.is_tenant_member(tenant_id));
-create policy visual_qa_issues_read on public.visual_qa_issues for select to authenticated using (public.is_tenant_member(tenant_id));
+create policy visual_template_profiles_read on public.visual_template_profiles
+  for select to authenticated using (public.is_tenant_member(tenant_id));
+create policy visual_template_profiles_insert on public.visual_template_profiles
+  for insert to authenticated with check (public.has_tenant_role(tenant_id, array['owner','admin','editor']));
+create policy visual_template_profiles_update on public.visual_template_profiles
+  for update to authenticated using (public.has_tenant_role(tenant_id, array['owner','admin','editor']))
+  with check (public.has_tenant_role(tenant_id, array['owner','admin','editor']));
+create policy visual_template_profiles_delete on public.visual_template_profiles
+  for delete to authenticated using (public.has_tenant_role(tenant_id, array['owner','admin','editor']));
+
+create policy asset_usage_history_read on public.asset_usage_history
+  for select to authenticated using (public.is_tenant_member(tenant_id));
+create policy visual_renders_read on public.visual_renders
+  for select to authenticated using (public.is_tenant_member(tenant_id));
+create policy component_versions_read on public.content_component_versions
+  for select to authenticated using (public.is_tenant_member(tenant_id));
+create policy visual_qa_issues_read on public.visual_qa_issues
+  for select to authenticated using (public.is_tenant_member(tenant_id));
 
 grant select, insert, update, delete on public.visual_template_profiles to authenticated;
 grant select on public.asset_usage_history, public.visual_renders, public.content_component_versions, public.visual_qa_issues to authenticated;
 grant usage, select on sequence public.asset_usage_history_id_seq, public.content_component_versions_id_seq, public.visual_qa_issues_id_seq to service_role;
 grant all on public.visual_template_profiles, public.asset_usage_history, public.visual_renders, public.content_component_versions, public.visual_qa_issues to service_role;
 
-do $$ begin
-  alter table public.visual_renders add constraint visual_renders_tenant_id_id_unique unique (tenant_id, id);
-exception when duplicate_object then null; end $$;
-
--- Keep bucket private; application-level limit is stricter and configurable.
-update storage.buckets set public = false where id in ('brand-assets','post-assets','tenant-documents');
+update storage.buckets
+set public = false
+where id in ('brand-assets','post-assets','tenant-documents');
