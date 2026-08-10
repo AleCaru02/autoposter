@@ -79,4 +79,4 @@ export type PublicationErrorClass = 'retryable'|'non_retryable'|'auth'|'rate_lim
 export interface PublicationJob { id:string;tenantId:string;postVariantId:string;platform:SocialPlatform;scheduledAt:string;idempotencyKey:string;attempts:number;maxAttempts:number;externalPostId?:string;correlationId:string; }
 export interface AIUsageEvent { tenantId:string;task:string;model:string;promptVersion?:string;inputTokens?:number;cachedInputTokens?:number;outputTokens?:number;imageCount:number;webSearchCalls:number;estimatedCostMicrounits?:number;correlationId?:string; }
 
-export * from './provider-readiness.js';
+export type * from './provider-types.js';
