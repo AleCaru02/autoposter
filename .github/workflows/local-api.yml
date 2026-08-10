@@ -9,6 +9,8 @@ on:
       - 'packages/runtime/**'
       - 'packages/core/**'
       - 'packages/contracts/**'
+      - 'scripts/check-provider-readiness.mjs'
+      - '.env.example'
       - '.github/workflows/local-api.yml'
   pull_request:
     paths:
@@ -16,6 +18,8 @@ on:
       - 'packages/runtime/**'
       - 'packages/core/**'
       - 'packages/contracts/**'
+      - 'scripts/check-provider-readiness.mjs'
+      - '.env.example'
       - '.github/workflows/local-api.yml'
 
 permissions:
@@ -39,3 +43,11 @@ jobs:
         run: npm run typecheck --workspace=@socialpilot/local-api
       - name: Test local API
         run: npm test --workspace=@socialpilot/local-api
+      - name: Provider readiness checker uses safe defaults
+        run: APP_ENV=LOCAL npm run check-provider-readiness
+      - name: Provider readiness checker blocks staging auto-publish
+        run: |
+          if APP_ENV=STAGING AUTO_PUBLISH=true npm run check-provider-readiness; then
+            echo "Expected checker to block AUTO_PUBLISH outside PRODUCTION"
+            exit 1
+          fi
