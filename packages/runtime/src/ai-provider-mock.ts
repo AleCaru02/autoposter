@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { AIErrorCode, AIExecutionPolicy, AICapability, AIProvider } from '@socialpilot/contracts';
-import type { ZodType } from 'zod';
+import type { AIErrorCode, AIExecutionPolicy, AICapability, AIOutputSchema, AIProvider } from '@socialpilot/contracts';
 
 export type MockAIScenario='success'|'timeout'|'malformed'|'validation'|'rate_limit'|'unavailable'|'safety'|'empty'|'partial'|'cost_limit';
 
 export class AIProviderError extends Error {
-  constructor(readonly code:AIErrorCode,message=code){super(message);this.name='AIProviderError';}
+  constructor(readonly code:AIErrorCode,message:string=code){super(message);this.name='AIProviderError';}
 }
 
 const codeForScenario=(scenario:Exclude<MockAIScenario,'success'>):AIErrorCode=>({
@@ -37,7 +36,7 @@ export class MockAIProvider implements AIProvider {
     return{text:`MOCK:${input.capability}:${input.prompt.slice(0,120)}`,usage:{inputTokens:12,outputTokens:24,cachedInputTokens:0}};
   }
 
-  async generateStructured<T>(input:{capability:AICapability;prompt:string;schema:ZodType<T>;policy:AIExecutionPolicy}):Promise<T>{
+  async generateStructured<T>(input:{capability:AICapability;prompt:string;schema:AIOutputSchema<T>;policy:AIExecutionPolicy}):Promise<T>{
     this.beforeCall(input.policy);
     if(this.scenario==='malformed')throw new AIProviderError('MALFORMED_OUTPUT');
     if(this.scenario==='validation')throw new AIProviderError('VALIDATION_FAILURE');
