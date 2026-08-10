@@ -57,17 +57,19 @@ export class DeterministicAssetClassifier implements AssetClassifier {
 }
 
 export class AssetSelectionEngine {
-  select(input:{tenantId:string;topic:string;pillar:string;platform:VisualPlatform;format:VisualFormat;brief:VisualBrief;assets:VisualAsset[];usage:AssetUsageSignal[];now:string}):AssetSelectionResult {
+  select(input:{tenantId:string;topic:string;pillar:string;brandContext?:string;platform:VisualPlatform;format:VisualFormat;brief:VisualBrief;assets:VisualAsset[];usage:AssetUsageSignal[];now:string}):AssetSelectionResult {
     const recentCutoff=isoWeekAgo(input.now);
-    const topicWords=unique([...words(input.topic),...words(input.pillar),...words(input.brief.headline)]);
+    const context=`${input.topic} ${input.pillar} ${input.brandContext??''} ${input.brief.headline}`.toLowerCase();
+    const topicWords=unique(words(context));
     const candidates=input.assets.filter((asset)=>asset.tenantId===input.tenantId&&asset.status==='ACTIVE'&&asset.suitablePlatforms.includes(input.platform));
     const scored=candidates.map((asset)=>{
       const semantic=topicWords.filter((word)=>asset.tags.some((tag)=>tag.includes(word)||word.includes(tag))||asset.suitableTopics.some((tag)=>tag.includes(word)||word.includes(tag))).length;
-      const foodBonus=/pizza|food|ristor|menu|margherita/.test(input.topic.toLowerCase())&&asset.assetType==='food'?48:0;
-      const propertyBonus=/property|immobil|camera|soggiorno|appart/.test(`${input.topic} ${input.pillar}`.toLowerCase())&&['property','interior','exterior'].includes(asset.assetType)?42:0;
-      const peopleBonus=/team|persona|network|founder|community/.test(`${input.topic} ${input.pillar}`.toLowerCase())&&['person','team'].includes(asset.assetType)?36:0;
+      const foodBonus=/pizz|food|ristor|menu|margherita|cibo|piatto/.test(context)&&asset.assetType==='food'?48:0;
+      const propertyBonus=/property|immobil|camera|soggiorno|appart|affitt|vacanz/.test(context)&&['property','interior','exterior'].includes(asset.assetType)?42:0;
+      const peopleBonus=/team|persona|network|founder|community|professionist/.test(context)&&['person','team'].includes(asset.assetType)?36:0;
+      const productBonus=/prodotto|product|servizio|service/.test(context)&&['product','service'].includes(asset.assetType)?30:0;
       const recent=input.usage.filter((item)=>item.assetId===asset.id&&item.usedAt>=recentCutoff).length;
-      const score=semantic*18+foodBonus+propertyBonus+peopleBonus+asset.qualityScore*24+(asset.isPreferred?15:0)+(asset.isBrandLocked?5:0)-recent*28-asset.usageCount*.6;
+      const score=semantic*18+foodBonus+propertyBonus+peopleBonus+productBonus+asset.qualityScore*24+(asset.isPreferred?15:0)+(asset.isBrandLocked?5:0)-recent*28-asset.usageCount*.6;
       return {asset,score};
     }).sort((a,b)=>b.score-a.score||a.asset.id.localeCompare(b.asset.id));
     const best=scored[0];
@@ -101,7 +103,7 @@ export class DeterministicVisualDirector {
   direct(input:{tenantId:string;platform:VisualPlatform;format:VisualFormat;topic:string;brief:VisualBrief;selection:AssetSelectionResult;profile:VisualTemplateProfile;recentFingerprints:string[]}):VisualDirection {
     let visualType:VisualType;
     if(input.brief.carouselType) visualType='carousel';
-    else if(input.selection.decision==='real_asset') visualType=input.platform==='instagram'&&/pizza|food|property|interior|camera/.test(input.topic.toLowerCase())?'real_photo':'photo_plus_overlay';
+    else if(input.selection.decision==='real_asset') visualType=input.platform==='instagram'&&/pizz|food|property|interior|camera/.test(input.topic.toLowerCase())?'real_photo':'photo_plus_overlay';
     else if(input.selection.decision==='generated_visual') visualType='generated_image';
     else if(/quote|testimonial|recensione/.test(input.topic.toLowerCase())) visualType='quote_card';
     else if(/promo|offerta|prenota|sconto/.test(`${input.topic} ${input.brief.objective}`.toLowerCase())) visualType='promotional';
