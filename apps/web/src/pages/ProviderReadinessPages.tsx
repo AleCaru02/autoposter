@@ -29,7 +29,7 @@ function HealthRows({connection}:{connection:Connection}){return <div className=
 export function ProviderTestConsolePage(){
   const local=useLocalE2E();const [adminReady,setAdminReady]=useState(false);const [connections,setConnections]=useState<Connection[]>([]);const [selectedAccount,setSelectedAccount]=useState('');const [result,setResult]=useState<unknown>(null);const [message,setMessage]=useState<string|null>(null);const [scenario,setScenario]=useState('success');
   const accounts=useMemo(()=>connections.flatMap((connection)=>connection.accounts.map((account)=>({connection,account}))),[connections]);
-  const hydrateConnections=async()=>{if(!local.tenantId)return;const rows=await local.api<Connection[]>(`/tenants/${local.tenantId}/provider-connections`);setConnections(rows);setSelectedAccount((current)=>current||rows.flatMap((item)=>item.accounts)[0]?.id??'');};
+  const hydrateConnections=async()=>{if(!local.tenantId)return;const rows=await local.api<Connection[]>(`/tenants/${local.tenantId}/provider-connections`);setConnections(rows);const firstAccountId=rows.flatMap((item)=>item.accounts)[0]?.id??'';setSelectedAccount((current)=>current||firstAccountId);};
   const load=async()=>{try{await local.api('/admin');setAdminReady(true);await hydrateConnections();setMessage(null)}catch(e){setAdminReady(false);setMessage(e instanceof Error?e.message:String(e))}};
   useEffect(()=>{if(local.enabled&&local.tenantId)void load()},[local.enabled,local.tenantId]);
   if(!local.enabled||!local.tenantId)return <PageHeader eyebrow="Admin" title="Provider Test Console" description="Local E2E richiesto."/>;
