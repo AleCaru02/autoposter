@@ -9,7 +9,8 @@ import { PostEditorPage } from '../pages/PostEditorPage';
 import { LandingPage, PricingPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
-import { AdminPage, AnalyticsPage, BillingPage, ConnectionsPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
+import { AdminPage, AnalyticsPage, BillingPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
+import { ProviderConnectionsPage, ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
 import { BrandVisualPage, VisualApprovalsPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
 
 export function App() {
@@ -29,13 +30,14 @@ export function App() {
       <Route path="/app/posts/:id" element={<PostEditorPage />} />
       <Route path="/app/approvals" element={<VisualApprovalsPage />} />
       <Route path="/approvals" element={<VisualApprovalsPage />} />
-      <Route path="/app/connections" element={<ConnectionsPage />} />
+      <Route path="/app/connections" element={<ProviderConnectionsPage />} />
       <Route path="/app/analytics" element={<AnalyticsPage />} />
       <Route path="/app/notifications" element={<NotificationsPage />} />
       <Route path="/app/support" element={<SupportPage />} />
       <Route path="/app/billing" element={<BillingPage />} />
       <Route path="/app/settings" element={<SettingsPage />} />
       <Route path="/admin" element={<AdminPage />} />
+      <Route path="/admin/providers" element={<ProviderTestConsolePage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></SaasServicesProvider></LocalE2EProvider>;
