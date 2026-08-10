@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { LocalE2EService } from './service.js';
-import { LocalAssetVisualService } from './asset-visual-service.js';
+import { LocalAssetVisualReadinessService } from './asset-visual-readiness-service.js';
 
 const port = Number(process.env.LOCAL_API_PORT ?? 8787);
 const host = process.env.LOCAL_API_HOST ?? '127.0.0.1';
 if (process.env.LOCAL_E2E_ENABLED !== 'true') throw new Error('LOCAL_E2E_ENABLED=true is required for the local API');
 const service = new LocalE2EService();
-const visual = new LocalAssetVisualService();
+const visual = new LocalAssetVisualReadinessService();
 const send = (res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers }); res.end(JSON.stringify(body)); };
 const sendHtml = (res: ServerResponse, status: number, body: string) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(body); };
 const readJson = async <T extends Record<string, unknown>>(req: IncomingMessage): Promise<T> => { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); const text = Buffer.concat(chunks).toString('utf-8'); return (text ? JSON.parse(text) : {}) as T; };
