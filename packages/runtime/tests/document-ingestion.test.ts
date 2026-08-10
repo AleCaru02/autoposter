@@ -1,0 +1,12 @@
+import { describe,expect,it } from 'vitest';
+import { MockDocumentIngestionProvider, ingestDocument } from '../src/document-ingestion.js';
+
+const bytes=(value:string)=>new TextEncoder().encode(value);
+
+describe('document ingestion abstraction',()=>{
+  it('extracts, chunks, classifies, summarizes and indexes local text',async()=>{const provider=new MockDocumentIngestionProvider();const result=await ingestDocument(provider,{tenantId:'tenant-a',assetId:'asset-a',mimeType:'text/plain',filename:'listino.txt',bytes:bytes('Listino servizi\n\nPizza Margherita € 10\n\nFAQ\nDomanda: consegna?')});expect(result.status).toBe('INDEXED');expect(result.classification.documentType).toBe('price_list');expect(result.chunks.length).toBeGreaterThan(0);expect(provider.getIndexed('tenant-a','asset-a')).toHaveLength(result.chunks.length);});
+  it('extracts simple printable PDF text locally when possible',async()=>{const provider=new MockDocumentIngestionProvider();const pdf=bytes('%PDF-1.4\nBT (Brochure servizi property management) Tj ET');const result=await ingestDocument(provider,{tenantId:'tenant-a',assetId:'pdf-a',mimeType:'application/pdf',filename:'brochure.pdf',bytes:pdf});expect(result.status).toBe('INDEXED');expect(result.text).toContain('Brochure servizi');});
+  it('marks scanned/nonextractable PDF as REQUIRES_AI instead of inventing text',async()=>{const provider=new MockDocumentIngestionProvider();const pdf=bytes('%PDF-1.4\n% binary image-only fixture');const result=await ingestDocument(provider,{tenantId:'tenant-a',assetId:'pdf-b',mimeType:'application/pdf',filename:'scan.pdf',bytes:pdf});expect(result.status).toBe('REQUIRES_AI');expect(result.chunks).toHaveLength(0);});
+  it('marks unsupported binary document as REQUIRES_AI',async()=>{const provider=new MockDocumentIngestionProvider();const result=await ingestDocument(provider,{tenantId:'tenant-a',assetId:'doc-a',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',filename:'file.docx',bytes:bytes('PK')});expect(result.status).toBe('REQUIRES_AI');});
+  it('reports corrupt PDF as FAILED',async()=>{const provider=new MockDocumentIngestionProvider();const result=await ingestDocument(provider,{tenantId:'tenant-a',assetId:'pdf-c',mimeType:'application/pdf',filename:'bad.pdf',bytes:bytes('not-pdf')});expect(result.status).toBe('FAILED');expect(result.errorCode).toBe('DOCUMENT_CORRUPT_PDF');});
+});
