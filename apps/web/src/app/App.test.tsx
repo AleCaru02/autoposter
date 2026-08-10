@@ -29,11 +29,16 @@ describe('SaaS web routes', () => {
     expect(html).toContain('Google Business Profile');
   });
 
-  it('renders the social connection screen with all provider contracts', () => {
+  it('renders the provider-ready connection route without enabling OAuth live', () => {
     const html = renderRoute('/app/connections');
-    expect(html).toContain('Google Business Profile');
-    expect(html).toContain('Instagram');
-    expect(html).toContain('LinkedIn');
+    expect(html).toContain('Social Connections');
+    expect(html).toContain('Local E2E richiesto');
+  });
+
+  it('renders the dev/admin provider test console route', () => {
+    const html = renderRoute('/admin/providers');
+    expect(html).toContain('Provider Test Console');
+    expect(html).toContain('Local E2E richiesto');
   });
 
   it('exposes approvals on both canonical routes', () => {
