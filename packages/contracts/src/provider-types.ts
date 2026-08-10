@@ -1,5 +1,3 @@
-import type { ZodType } from 'zod';
-
 export type ProviderSocialPlatform='facebook'|'instagram'|'linkedin'|'google_business_profile';
 export type ProviderKey='meta'|'facebook'|'instagram'|'linkedin'|'google_business_profile'|'telegram'|'stripe'|'openai';
 export type ProviderCapability='TEXT_POST'|'IMAGE_POST'|'MULTI_IMAGE'|'CAROUSEL'|'VIDEO'|'REEL'|'DOCUMENT_POST'|'ANALYTICS'|'DELETE'|'SCHEDULE_NATIVE'|'LOCAL_POST'|'CTA'|'WEBHOOKS';
@@ -34,6 +32,7 @@ export interface ProviderWebhookEnvelope {provider:ProviderKey;eventType:string;
 export type AICapability='TEXT_CHEAP'|'TEXT_STANDARD'|'TEXT_REASONING'|'STRUCTURED_OUTPUT'|'EMBEDDING'|'VISION'|'IMAGE_GENERATION'|'IMAGE_EDIT'|'WEB_RESEARCH';
 export type AIErrorCode='TIMEOUT'|'MALFORMED_OUTPUT'|'VALIDATION_FAILURE'|'RATE_LIMIT'|'PROVIDER_UNAVAILABLE'|'SAFETY_REJECTION'|'EMPTY_RESPONSE'|'PARTIAL_RESPONSE'|'COST_LIMIT';
 export interface AIExecutionPolicy {timeoutMs:number;maxAttempts:number;maxCostMicrounits?:number;retryableErrors:AIErrorCode[];}
+export interface AIOutputSchema<T> {safeParse(value:unknown):{success:true;data:T}|{success:false;error:{message:string}};}
 export type SourceType='WEBSITE'|'DOCUMENT'|'USER_CONFIRMED'|'USER_INPUT'|'PUBLIC_RESEARCH'|'SOCIAL'|'SYSTEM_INFERENCE';
 export interface SourceEvidence {sourceType:SourceType;sourceId?:string;confidence:number;confirmed:boolean;observedAt:string;}
 export type DocumentIngestionStatus='UPLOADED'|'PROCESSING'|'INDEXED'|'FAILED'|'REQUIRES_AI';
@@ -52,7 +51,7 @@ export interface AIProvider {
   readonly key:string;
   supports(capability:AICapability):boolean;
   generateText(input:{capability:AICapability;prompt:string;policy:AIExecutionPolicy}):Promise<{text:string;usage?:Record<string,number>}>;
-  generateStructured<T>(input:{capability:AICapability;prompt:string;schema:ZodType<T>;policy:AIExecutionPolicy}):Promise<T>;
+  generateStructured<T>(input:{capability:AICapability;prompt:string;schema:AIOutputSchema<T>;policy:AIExecutionPolicy}):Promise<T>;
   embed(input:{texts:string[];policy:AIExecutionPolicy}):Promise<number[][]>;
   analyzeVision(input:{prompt:string;images:Array<{url?:string;dataBase64?:string}>;policy:AIExecutionPolicy}):Promise<Record<string,unknown>>;
   generateImage(input:{prompt:string;aspectRatio:'square'|'portrait'|'landscape';policy:AIExecutionPolicy}):Promise<{dataBase64:string;mimeType:string}>;
