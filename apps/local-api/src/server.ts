@@ -42,8 +42,19 @@ const route = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === 'POST' && parts[2] === 'brand' && parts[3] === 'lock') { const body=await readJson<{fieldPath:string;locked:boolean}>(req);send(res,200,await service.setBrandLock(token(),tenantId,body.fieldPath,body.locked),cors);return; }
     if (method === 'POST' && parts[2] === 'strategy') { send(res,200,await service.generateStrategy(token(),tenantId),cors);return; }
     if (method === 'POST' && parts[2] === 'calendar') { send(res,200,await service.generateCalendar(token(),tenantId,await readJson(req)),cors);return; }
-    if (method === 'POST' && parts[2] === 'posts' && parts[3] === 'generate-all') { const body=await readJson<{limit?:number}>(req);send(res,200,await service.generateAllDrafts(token(),tenantId,body.limit??20),cors);return; }
-    if (parts[2] === 'posts' && parts[3]) { const postId=parts[3];if(method==='GET'&&parts.length===4){send(res,200,await service.getPost(token(),tenantId,postId),cors);return}if(method==='POST'&&parts[4]==='generate'){send(res,200,await service.generatePost(token(),tenantId,postId),cors);return}if(method==='POST'&&parts[4]==='schedule'){send(res,200,await service.scheduleApprovedPost(token(),tenantId,postId),cors);return} }
+    if (method === 'POST' && parts[2] === 'posts' && parts[3] === 'generate-all') {
+      const body=await readJson<{limit?:number}>(req);
+      const limit=body.limit??20;
+      const generated=await service.generateAllDrafts(token(),tenantId,limit);
+      await visual.renderPendingVariants(token(),tenantId,Math.max(limit*4,20));
+      send(res,200,generated,cors);return;
+    }
+    if (parts[2] === 'posts' && parts[3]) {
+      const postId=parts[3];
+      if(method==='GET'&&parts.length===4){send(res,200,await service.getPost(token(),tenantId,postId),cors);return}
+      if(method==='POST'&&parts[4]==='generate'){const generated=await service.generatePost(token(),tenantId,postId);await visual.renderPendingVariants(token(),tenantId,20);send(res,200,generated,cors);return}
+      if(method==='POST'&&parts[4]==='schedule'){send(res,200,await service.scheduleApprovedPost(token(),tenantId,postId),cors);return}
+    }
     if (parts[2] === 'variants' && parts[3]) { const variantId=parts[3];if(method==='PATCH'&&parts.length===4){send(res,200,await service.editVariant(token(),tenantId,variantId,await readJson(req)),cors);return}if(method==='POST'&&parts[4]==='approve'){send(res,200,await service.approveVariant(token(),tenantId,variantId),cors);return}if(method==='POST'&&parts[4]==='reject'){const body=await readJson<{reason?:string}>(req);send(res,200,await service.rejectVariant(token(),tenantId,variantId,body.reason??''),cors);return} }
     if (method === 'POST' && parts[2] === 'publish-now') { send(res,200,await service.publishNow(token(),tenantId,await readJson(req)),cors);return; }
     if (method === 'POST' && parts[2] === 'learning' && parts[3] === 'refresh') { send(res,200,await service.refreshLearning(token(),tenantId),cors);return; }
