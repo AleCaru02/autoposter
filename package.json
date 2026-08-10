@@ -13,7 +13,8 @@
     "test:core": "npm test --workspace=@socialpilot/core",
     "test:runtime": "npm test --workspace=@socialpilot/runtime",
     "test:unit": "npm run test:core && npm run test:runtime",
-    "build:web": "npm run build --workspace=@socialpilot/web"
+    "build:web": "npm run build --workspace=@socialpilot/web",
+    "check-provider-readiness": "node scripts/check-provider-readiness.mjs"
   },
   "engines": {
     "node": ">=22.12"
