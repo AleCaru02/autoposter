@@ -8,6 +8,7 @@ export * from './editorial-pipeline-mock.js';
 export * from './gbp-local-planner.js';
 export * from './knowledge-retrieval.js';
 export * from './onboarding-state.js';
+export * from './provider-readiness.js';
 export * from './scheduler-mock.js';
 export * from './social-provider-mock.js';
 export * from './strategy-planner-mock.js';
