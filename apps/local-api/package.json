@@ -8,6 +8,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "sharp": "^0.35.3"
+  },
   "devDependencies": {
     "@types/node": "^24.13.3",
     "tsx": "^4.20.6",
