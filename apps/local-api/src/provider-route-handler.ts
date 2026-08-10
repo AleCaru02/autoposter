@@ -21,7 +21,9 @@ export async function tryProviderReadinessRoute(req:IncomingMessage,url:URL,part
 
   if(method==='POST'&&parts[0]==='webhooks'&&parts[1]==='mock'&&parts[2]){
     const rawBody=await readText(req);const provider=parts[2] as ProviderKey;
-    return{handled:true,status:200,body:await webhooks.process(provider,{rawBody,headers:{'x-provider-signature':header(req,'x-provider-signature'),'x-provider-timestamp':header(req,'x-provider-timestamp')},...(header(req,'x-event-id')?{externalId:header(req,'x-event-id')}:{}),eventType:header(req,'x-event-type')??'fixture.event',...(header(req,'x-tenant-id')?{tenantId:header(req,'x-tenant-id')}:{}),...(header(req,'x-account-id')?{accountId:header(req,'x-account-id')}:{}),})};
+    const signature=header(req,'x-provider-signature');const timestamp=header(req,'x-provider-timestamp');const externalId=header(req,'x-event-id');const tenantId=header(req,'x-tenant-id');const accountId=header(req,'x-account-id');
+    const webhookInput={rawBody,headers:{'x-provider-signature':signature,'x-provider-timestamp':timestamp},eventType:header(req,'x-event-type')??'fixture.event',...(externalId?{externalId}:{}),...(tenantId?{tenantId}:{}),...(accountId?{accountId}:{})};
+    return{handled:true,status:200,body:await webhooks.process(provider,webhookInput)};
   }
 
   if(parts[0]!=='tenants'||!parts[1])return{handled:false};
