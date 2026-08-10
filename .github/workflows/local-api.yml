@@ -37,3 +37,5 @@ jobs:
         run: npm test --workspace=@socialpilot/runtime
       - name: Typecheck local API
         run: npm run typecheck --workspace=@socialpilot/local-api
+      - name: Test local API
+        run: npm test --workspace=@socialpilot/local-api
