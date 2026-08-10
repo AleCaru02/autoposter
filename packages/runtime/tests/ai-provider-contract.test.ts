@@ -1,7 +1,8 @@
 import { describe,expect,it } from 'vitest';
 import { z } from 'zod';
 import { AIProviderError, MockAIProvider, executeAIWithPolicy } from '../src/ai-provider-mock.js';
-import { BrandIntelligenceOutputSchema, StructuredOutputSchemas, type AIExecutionPolicy } from '@socialpilot/contracts';
+import { BrandIntelligenceOutputSchema, StructuredOutputSchemas } from '@socialpilot/contracts/provider-readiness';
+import type { AIExecutionPolicy } from '@socialpilot/contracts';
 
 const policy:AIExecutionPolicy={timeoutMs:100,maxAttempts:2,retryableErrors:['TIMEOUT','RATE_LIMIT','PROVIDER_UNAVAILABLE']};
 const brandFixture={brandName:'Forno Vesuvio',industry:'Pizzeria',description:'Pizzeria locale',services:['pizza'],products:['margherita'],audiences:['residenti'],differentiators:['impasto'],toneRules:['chiaro'],allowedClaims:['pizza napoletana'],forbiddenClaims:['migliore al mondo'],evidence:[]};
