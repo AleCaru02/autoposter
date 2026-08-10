@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 
 export type ApiPlatform = 'facebook' | 'instagram' | 'linkedin' | 'google_business_profile';
 export type ApprovalMode = 'auto' | 'manual';
@@ -35,7 +35,7 @@ interface LocalE2EContextValue {
   logout(): void;
   createTenant(input: { name: string; slug: string }): Promise<string>;
   selectTenant(tenantId: string): Promise<void>;
-  refresh(): Promise<void>;
+  refresh(tenantOverride?: string): Promise<void>;
   api<T>(path: string, init?: LocalRequestInit): Promise<T>;
 }
 
@@ -64,16 +64,28 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const [workspace, setWorkspace] = useState<LocalWorkspace | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshSequence = useRef(0);
 
   const authedApi = useCallback(async <T,>(path: string, init: LocalRequestInit = {}): Promise<T> => request<T>(path, init, token), [token]);
 
-  const refresh = useCallback(async () => {
-    if (!enabled || !token || !tenantId) { setWorkspace(null); return; }
+  const refresh = useCallback(async (tenantOverride?: string) => {
+    const sequence = ++refreshSequence.current;
+    const targetTenantId = tenantOverride ?? tenantId;
+    if (!enabled || !token || !targetTenantId) {
+      if (sequence === refreshSequence.current) setWorkspace(null);
+      return;
+    }
     setLoading(true);
     setError(null);
-    try { setWorkspace(await request<LocalWorkspace>(`/tenants/${tenantId}/workspace`, {}, token)); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); throw err; }
-    finally { setLoading(false); }
+    try {
+      const nextWorkspace = await request<LocalWorkspace>(`/tenants/${targetTenantId}/workspace`, {}, token);
+      if (sequence === refreshSequence.current) setWorkspace(nextWorkspace);
+    } catch (err) {
+      if (sequence === refreshSequence.current) setError(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      if (sequence === refreshSequence.current) setLoading(false);
+    }
   }, [enabled, token, tenantId]);
 
   useEffect(() => { void refresh().catch(() => undefined); }, [refresh]);
@@ -102,6 +114,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   };
 
   const logout = () => {
+    refreshSequence.current += 1;
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TENANT_KEY);
     setToken(null); setTenantId(null); setWorkspace(null); setError(null);
   };
@@ -115,6 +128,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   };
 
   const selectTenant = async (id: string) => {
+    refreshSequence.current += 1;
     localStorage.setItem(TENANT_KEY, id);
     setTenantId(id);
   };
