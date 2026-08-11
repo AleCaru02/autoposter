@@ -6,7 +6,7 @@ import { DashboardPage } from '../pages/DashboardPage';
 import { OnboardingPage } from '../pages/OnboardingPage';
 import { CalendarPage } from '../pages/BrandCalendarPages';
 import { PostEditorPage } from '../pages/PostEditorPage';
-import { LandingPage, PricingPage } from '../pages/PublicPages';
+import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
 import { AdminPage, AnalyticsPage, BillingPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
@@ -16,7 +16,13 @@ import { BrandVisualPage, VisualApprovalsPage, VisualAssetsPage } from '../pages
 export function App() {
   return <LocalE2EProvider><SaasServicesProvider><Routes>
     <Route path="/" element={<LandingPage />} />
-    <Route path="/pricing" element={<PricingPage />} />
+    <Route path="/come-funziona" element={<HowItWorksPage />} />
+    <Route path="/funzionalita" element={<FeaturesPage />} />
+    <Route path="/prezzi" element={<PricingPage />} />
+    <Route path="/pricing" element={<Navigate to="/prezzi" replace />} />
+    <Route path="/faq" element={<FaqPage />} />
+    <Route path="/social-media-manager-ai" element={<SocialMediaManagerAiPage />} />
+    <Route path="/gestione-social-automatica" element={<AutomaticSocialManagementPage />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/register" element={<RegisterPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
