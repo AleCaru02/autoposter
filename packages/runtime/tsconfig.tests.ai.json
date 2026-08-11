@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/ai-cost-ledger.test.ts",
+    "tests/ai-orchestrator-mock.test.ts",
+    "tests/ai-provider-contract.test.ts",
+    "tests/ai-structured-hardening.test.ts"
+  ]
+}
