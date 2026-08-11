@@ -39,6 +39,7 @@ jobs:
       - name: Public HTTP website scanner smoke
         env:
           RUN_LIVE_WEBSITE_SMOKE: 'true'
-        run: npx vitest run packages/runtime/tests/website-scanner-live.test.ts --config packages/runtime/vitest.config.ts
+        working-directory: packages/runtime
+        run: npx vitest run tests/website-scanner-live.test.ts
       - name: Check provider readiness without live credentials
         run: npm run check-provider-readiness
