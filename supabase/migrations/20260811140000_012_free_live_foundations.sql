@@ -201,10 +201,10 @@ create index if not exists account_deletion_requests_user_idx on public.account_
 alter table public.account_deletion_requests enable row level security;
 create policy account_deletion_requests_read on public.account_deletion_requests
 for select to authenticated
-using (requesting_user_id=auth.uid() or public.is_platform_admin());
+using (requesting_user_id=(select auth.uid()) or public.is_platform_admin());
 create policy account_deletion_requests_insert on public.account_deletion_requests
 for insert to authenticated
-with check (requesting_user_id=auth.uid() and (tenant_id is null or public.is_tenant_member(tenant_id)));
+with check (requesting_user_id=(select auth.uid()) and (tenant_id is null or public.is_tenant_member(tenant_id)));
 grant select,insert on public.account_deletion_requests to authenticated;
 grant all on public.account_deletion_requests to service_role;
 
