@@ -8,11 +8,41 @@ async function json<T>(request:APIRequestContext,token:string|null,path:string,m
 async function setup(request:APIRequestContext,label:string){const email=`webhook-${Date.now()}-${Math.random().toString(16).slice(2)}@example.test`;const session=await json<any>(request,null,'/auth/register','POST',{email,password,name:label});const tenant=await json<{tenantId:string}>(request,session.access_token,'/tenants','POST',{name:label,slug:`webhook-${Date.now()}-${Math.random().toString(16).slice(2,7)}`});await json(request,session.access_token,`/tenants/${tenant.tenantId}/providers/meta/connect-mock`,'POST',{});const connections=await json<any[]>(request,session.access_token,`/tenants/${tenant.tenantId}/provider-connections`);const account=connections[0].accounts[0];return{token:session.access_token as string,tenantId:tenant.tenantId,accountId:account.id};}
 const sign=(raw:string,timestamp:number)=>`sha256=${createHmac('sha256',secret).update(`${timestamp}.${raw}`).digest('hex')}`;
 
-test('webhook core verifies signature, deduplicates and rejects wrong tenant mapping',async({request})=>{
-  const a=await setup(request,'Webhook Tenant A'),b=await setup(request,'Webhook Tenant B');const raw=JSON.stringify({type:'fixture.publish',accountId:a.accountId});const timestamp=Date.now();const headers={'content-type':'application/json','x-provider-timestamp':String(timestamp),'x-provider-signature':sign(raw,timestamp),'x-event-id':`evt-${timestamp}`,'x-event-type':'fixture.publish','x-tenant-id':a.tenantId,'x-account-id':a.accountId};
-  const first=await request.post(`${API}/webhooks/mock/facebook`,{headers,data:Buffer.from(raw)});expect(first.status()).toBe(200);expect((await first.json()).status).toBe('PROCESSED');const duplicate=await request.post(`${API}/webhooks/mock/facebook`,{headers,data:Buffer.from(raw)});expect(duplicate.status()).toBe(200);expect((await duplicate.json()).status).toBe('IGNORED_DUPLICATE');
-  const forged=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`forged-${timestamp}`,'x-provider-signature':'sha256=forged'},data:Buffer.from(raw)});expect(forged.status()).toBe(401);
-  const old=timestamp-10*60_000;const stale=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`stale-${timestamp}`,'x-provider-timestamp':String(old),'x-provider-signature':sign(raw,old)},data:Buffer.from(raw)});expect(stale.status()).toBe(401);
-  const wrongTenant=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`wrong-${timestamp}`,'x-tenant-id':b.tenantId},data:Buffer.from(raw)});expect(wrongTenant.status()).toBe(400);expect((await wrongTenant.json()).error).toContain('WEBHOOK_TENANT_MAPPING_INVALID');
-  const malformedRaw='not-json';const malformedTs=Date.now();const malformed=await request.post(`${API}/webhooks/mock/facebook`,{headers:{'content-type':'application/json','x-provider-timestamp':String(malformedTs),'x-provider-signature':sign(malformedRaw,malformedTs),'x-event-id':`malformed-${malformedTs}`,'x-event-type':'fixture.publish'},data:Buffer.from(malformedRaw)});expect(malformed.status()).toBe(400);expect((await malformed.json()).error).toContain('WEBHOOK_MALFORMED_PAYLOAD');
+test('webhook security verifies raw bytes, duplicate/replay, stale timestamp and mapping boundaries',async({request})=>{
+  const a=await setup(request,'Webhook Tenant A'),b=await setup(request,'Webhook Tenant B');
+  const raw=JSON.stringify({type:'fixture.publish',accountId:a.accountId});
+  const timestamp=Date.now();
+  const headers={'content-type':'application/json','x-provider-timestamp':String(timestamp),'x-provider-signature':sign(raw,timestamp),'x-event-id':`evt-${timestamp}`,'x-event-type':'fixture.publish','x-tenant-id':a.tenantId,'x-account-id':a.accountId};
+
+  const first=await request.post(`${API}/webhooks/mock/facebook`,{headers,data:Buffer.from(raw)});
+  expect(first.status()).toBe(200);expect((await first.json()).status).toBe('PROCESSED');
+  const duplicate=await request.post(`${API}/webhooks/mock/facebook`,{headers,data:Buffer.from(raw)});
+  expect(duplicate.status()).toBe(200);expect((await duplicate.json()).status).toBe('IGNORED_DUPLICATE');
+
+  const forged=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`forged-${timestamp}`,'x-provider-signature':'sha256=forged'},data:Buffer.from(raw)});
+  expect(forged.status()).toBe(401);
+
+  const old=timestamp-10*60_000;
+  const stale=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`stale-${timestamp}`,'x-provider-timestamp':String(old),'x-provider-signature':sign(raw,old)},data:Buffer.from(raw)});
+  expect(stale.status()).toBe(401);
+
+  const retryEventId=`retry-${timestamp}`;
+  const wrongTenant=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':retryEventId,'x-tenant-id':b.tenantId},data:Buffer.from(raw)});
+  expect(wrongTenant.status()).toBe(400);expect((await wrongTenant.json()).error).toContain('WEBHOOK_TENANT_MAPPING_INVALID');
+  const processingRetry=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':retryEventId},data:Buffer.from(raw)});
+  expect(processingRetry.status()).toBe(200);expect((await processingRetry.json()).status).toBe('PROCESSED');
+
+  const wrongAccount=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`bad-account-${timestamp}`,'x-account-id':'00000000-0000-4000-8000-000000000000'},data:Buffer.from(raw)});
+  expect(wrongAccount.status()).toBe(400);expect((await wrongAccount.json()).error).toContain('WEBHOOK_ACCOUNT_MAPPING_INVALID');
+});
+
+test('webhook malformed payload is rejected both when correctly signed and when unsigned',async({request})=>{
+  const malformedRaw='not-json';
+  const malformedTs=Date.now();
+  const signedHeaders={'content-type':'application/json','x-provider-timestamp':String(malformedTs),'x-provider-signature':sign(malformedRaw,malformedTs),'x-event-id':`malformed-${malformedTs}`,'x-event-type':'fixture.publish'};
+  const malformedSigned=await request.post(`${API}/webhooks/mock/facebook`,{headers:signedHeaders,data:Buffer.from(malformedRaw)});
+  expect(malformedSigned.status()).toBe(400);expect((await malformedSigned.json()).error).toContain('WEBHOOK_MALFORMED_PAYLOAD');
+
+  const malformedUnsigned=await request.post(`${API}/webhooks/mock/facebook`,{headers:{'content-type':'application/json','x-provider-timestamp':String(malformedTs),'x-event-id':`unsigned-${malformedTs}`,'x-event-type':'fixture.publish'},data:Buffer.from(malformedRaw)});
+  expect(malformedUnsigned.status()).toBe(401);expect((await malformedUnsigned.json()).error).toContain('WEBHOOK_SIGNATURE_INVALID');
 });
