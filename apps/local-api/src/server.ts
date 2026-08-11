@@ -2,12 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { LocalE2EService } from './service.js';
 import { LocalAssetVisualReadinessService } from './asset-visual-readiness-service.js';
 import { tryProviderReadinessRoute } from './provider-route-handler.js';
+import { LocalSupabaseClient, jsonBody } from './db.js';
 
 const port = Number(process.env.LOCAL_API_PORT ?? 8787);
 const host = process.env.LOCAL_API_HOST ?? '127.0.0.1';
 if (process.env.LOCAL_E2E_ENABLED !== 'true') throw new Error('LOCAL_E2E_ENABLED=true is required for the local API');
 const service = new LocalE2EService();
 const visual = new LocalAssetVisualReadinessService();
+const localDb = new LocalSupabaseClient();
 const send = (res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers }); res.end(JSON.stringify(body)); };
 const sendHtml = (res: ServerResponse, status: number, body: string) => { res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(body); };
 const readJson = async <T extends Record<string, unknown>>(req: IncomingMessage): Promise<T> => { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); const text = Buffer.concat(chunks).toString('utf-8'); return (text ? JSON.parse(text) : {}) as T; };
@@ -63,7 +65,16 @@ const route = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === 'POST' && parts[2] === 'chat') { const body=await readJson<{message:string}>(req);send(res,200,await service.chatTenant(token(),tenantId,body.message),cors);return; }
   }
   if (method === 'POST' && url.pathname === '/chat/public') { const body=await readJson<{message:string}>(req);send(res,200,await service.chatPublic(body.message),cors);return; }
-  if (method === 'POST' && url.pathname === '/dev/grant-platform-admin') { send(res,200,await service.grantSelfPlatformAdmin(bearer(req)),cors);return; }
+  if (method === 'POST' && url.pathname === '/dev/grant-platform-admin') {
+    const token = bearer(req);
+    const user = await localDb.getUser(token);
+    await localDb.serviceRest('/rest/v1/platform_admins', {
+      method: 'POST',
+      headers: { prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: jsonBody({ user_id: user.id, created_by: user.id }),
+    });
+    send(res,200,{ok:true,userId:user.id},cors);return;
+  }
   if (method === 'GET' && url.pathname === '/admin') { send(res,200,await service.adminSnapshot(bearer(req)),cors);return; }
   send(res,404,{error:'not_found',path:url.pathname},cors);
 };
