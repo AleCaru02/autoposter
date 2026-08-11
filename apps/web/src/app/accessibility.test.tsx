@@ -6,12 +6,14 @@ import { App } from './App';
 const renderRoute = (route: string): string => renderToString(<MemoryRouter initialEntries={[route]}><App /></MemoryRouter>);
 
 describe('accessibility smoke', () => {
-  it('provides public navigation and main landmarks', () => {
+  it('provides public navigation, main landmarks and a named chatbot disclosure', () => {
     const html = renderRoute('/');
     expect(html).toContain('<header');
     expect(html).toContain('<nav');
     expect(html).toContain('<main');
-    expect(html).toContain('aria-label="Domanda al chatbot"');
+    expect(html).toContain('class="sales-chat-launcher"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('Chiedi al prodotto');
   });
 
   it('provides a named primary application navigation', () => {
@@ -25,7 +27,7 @@ describe('accessibility smoke', () => {
     expect(html).toContain('autocomplete="email"');
     expect(html).toContain('autocomplete="current-password"');
     expect((html.match(/<label/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect(html).toContain('nessuna credenziale');
+    expect(html).toContain('nessun collegamento live');
   });
 
   it('keeps the local post editor fallback keyboard reachable', () => {
