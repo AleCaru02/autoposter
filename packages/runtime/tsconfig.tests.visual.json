@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/visual-anti-clone.test.ts",
+    "tests/visual-engine.test.ts",
+    "tests/visual-hardening.test.ts",
+    "tests/website-scanner.test.ts"
+  ]
+}
