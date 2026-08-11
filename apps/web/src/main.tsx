@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { App } from './app/App';
 import './styles-v2.css';
+import './design-system.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element not found');
