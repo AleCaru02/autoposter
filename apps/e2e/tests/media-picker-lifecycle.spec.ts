@@ -10,6 +10,7 @@ const copy=(variant:any)=>({hook:variant.hook??null,caption:variant.caption??nul
 const findVariant=(workspace:any,id:string)=>workspace.posts.flatMap((post:any)=>post.variants).find((variant:any)=>variant.id===id);
 const persistedSelectedAssetId=(visual:any)=>visual.selected_asset_id??visual.visual_spec?.selection?.selectedAssetId??null;
 async function setSession(page:Page,token:string,tenantId:string){await page.goto('/');await page.evaluate(({token,tenantId})=>{localStorage.setItem('socialpilot.local.token',token);localStorage.setItem('socialpilot.local.tenant',tenantId)},{token,tenantId});}
+// Regression guard: the picker closes before the async render refresh is fully observable, so DB assertions must follow the successful render POST, never a timer.
 async function confirmPickerAndWaitForRender(page:Page,variantId:string){const persisted=page.waitForResponse((response)=>response.request().method()==='POST'&&response.url().includes(`/variants/${variantId}/visual`)&&response.ok());await page.getByTestId('media-picker-confirm').click();await persisted;await expect(page.getByTestId('media-picker')).toHaveCount(0);}
 
 test('Approval Media Picker supports cancel, reopen, repeated selection, upload, isolation and mobile without changing copy',async({page,request})=>{
