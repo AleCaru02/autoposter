@@ -22,7 +22,7 @@ export function AppShell() {
       <nav className="side-nav" aria-label="Navigazione principale">
         {groups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map(([label, href, icon]) => <NavLink key={href} to={href} end={href === '/app'} className={({ isActive }) => isActive ? 'active' : ''}><span className="nav-icon">{icon}</span><span>{label}</span></NavLink>)}</div>)}
       </nav>
-      <div className="sidebar-footer"><div><span className="status-dot" /><strong>Sistema operativo</strong></div><small>Provider live non ancora attivati</small></div>
+      <div className="sidebar-footer" aria-label="Canali sani · Local E2E richiesto per le operazioni provider"><div><span className="status-dot" /><strong>Sistema operativo</strong></div><small>Provider live non ancora attivati</small></div>
     </aside>
     <main className="main-column">
       <div className="topbar"><div className="topbar-title"><span className="crumb">Demo Studio</span><strong>{pageName(location.pathname)}</strong></div><div className="top-actions"><span className="pill"><span className="status-dot"/>Local Dev</span><NavLink className="icon-button" to="/app/notifications" aria-label="Notifiche">3</NavLink><span className="user-chip">AC</span></div></div>
