@@ -1,23 +1,16 @@
-# Environment
+node_modules
 .env
 .env.*
 !.env.example
-
-# Node
-node_modules/
-dist/
-coverage/
-*.log
-
-# Vercel
-.vercel/
-
-# Supabase local/temp
-supabase/.temp/
-supabase/.branches/
-
-# OS/editor
+dist
+coverage
+playwright-report
+test-results
 .DS_Store
-Thumbs.db
 .vscode/
 .idea/
+*.log
+supabase/.branches/
+supabase/.temp/
+apps/web/public/robots.txt
+apps/web/public/sitemap.xml
