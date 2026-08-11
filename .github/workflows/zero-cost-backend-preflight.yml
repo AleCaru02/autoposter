@@ -1,0 +1,25 @@
+name: zero-cost-backend-preflight
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/check-remote-supabase-target.mjs'
+      - 'docs/ZERO_COST_BACKEND_DECISION.md'
+      - 'docs/NEON_VERCEL_ADAPTATION_PLAN.md'
+      - 'package.json'
+      - '.github/workflows/zero-cost-backend-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  target-guard-self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify protected Supabase projects cannot be selected
+        run: node scripts/check-remote-supabase-target.mjs --self-test
