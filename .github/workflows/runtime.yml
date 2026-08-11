@@ -6,12 +6,14 @@ on:
       - feat/saas-foundation
     paths:
       - 'package.json'
+      - 'scripts/check-provider-readiness.mjs'
       - 'packages/runtime/**'
       - 'packages/contracts/**'
       - '.github/workflows/runtime.yml'
   pull_request:
     paths:
       - 'package.json'
+      - 'scripts/check-provider-readiness.mjs'
       - 'packages/runtime/**'
       - 'packages/contracts/**'
       - '.github/workflows/runtime.yml'
@@ -34,3 +36,5 @@ jobs:
         run: npm run typecheck --workspace=@socialpilot/runtime
       - name: Test runtime
         run: npm test --workspace=@socialpilot/runtime
+      - name: Check provider readiness without live credentials
+        run: npm run check-provider-readiness
