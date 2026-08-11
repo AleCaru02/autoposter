@@ -26,13 +26,18 @@ test('webhook security verifies raw bytes, duplicate/replay, stale timestamp and
   const stale=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`stale-${timestamp}`,'x-provider-timestamp':String(old),'x-provider-signature':sign(raw,old)},data:Buffer.from(raw)});
   expect(stale.status()).toBe(401);
 
+  // Processing retry needs its own payload hash. Reusing the first successful raw body would
+  // correctly hit the database payload-hash dedupe constraint and would not test retry semantics.
+  const retryRaw=JSON.stringify({type:'fixture.publish',accountId:a.accountId,attempt:'processing-retry'});
   const retryEventId=`retry-${timestamp}`;
-  const wrongTenant=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':retryEventId,'x-tenant-id':b.tenantId},data:Buffer.from(raw)});
+  const retryHeaders={...headers,'x-event-id':retryEventId,'x-provider-signature':sign(retryRaw,timestamp)};
+  const wrongTenant=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...retryHeaders,'x-tenant-id':b.tenantId},data:Buffer.from(retryRaw)});
   expect(wrongTenant.status()).toBe(400);expect((await wrongTenant.json()).error).toContain('WEBHOOK_TENANT_MAPPING_INVALID');
-  const processingRetry=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':retryEventId},data:Buffer.from(raw)});
+  const processingRetry=await request.post(`${API}/webhooks/mock/facebook`,{headers:retryHeaders,data:Buffer.from(retryRaw)});
   expect(processingRetry.status()).toBe(200);expect((await processingRetry.json()).status).toBe('PROCESSED');
 
-  const wrongAccount=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`bad-account-${timestamp}`,'x-account-id':'00000000-0000-4000-8000-000000000000'},data:Buffer.from(raw)});
+  const wrongAccountRaw=JSON.stringify({type:'fixture.publish',accountId:'unknown',attempt:'wrong-account'});
+  const wrongAccount=await request.post(`${API}/webhooks/mock/facebook`,{headers:{...headers,'x-event-id':`bad-account-${timestamp}`,'x-account-id':'00000000-0000-4000-8000-000000000000','x-provider-signature':sign(wrongAccountRaw,timestamp)},data:Buffer.from(wrongAccountRaw)});
   expect(wrongAccount.status()).toBe(400);expect((await wrongAccount.json()).error).toContain('WEBHOOK_ACCOUNT_MAPPING_INVALID');
 });
 
