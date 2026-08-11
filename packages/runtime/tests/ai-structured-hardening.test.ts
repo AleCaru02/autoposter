@@ -11,7 +11,7 @@ const policy:AIExecutionPolicy={timeoutMs:100,maxAttempts:2,retryableErrors:['TI
 const evidence={sourceType:'DOCUMENT' as const,sourceId:'asset-1',confidence:.9,confirmed:true,observedAt:'2026-08-10T20:00:00.000Z'};
 
 type StructuredCase={name:string;run:(provider:MockAIProvider)=>Promise<void>};
-const structuredCase=<T>(name:string,schema:ZodType<T>,fixture:T):StructuredCase=>({
+const structuredCase=(name:string,schema:ZodType<unknown>,fixture:unknown):StructuredCase=>({
   name,
   run:async(provider)=>{
     provider.setStructuredFixture(fixture);
