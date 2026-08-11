@@ -8,24 +8,16 @@ const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
 export class LocalSupabaseClient{
   constructor(readonly config:LocalSupabaseConfig=loadLocalSupabaseConfig()){}
   async signUp(input:{email:string;password:string;name:string}):Promise<AuthSession>{
+    let lastResponse:Response|undefined;
     for(let attempt=0;attempt<3;attempt+=1){
       const response=await fetch(`${this.config.url}/auth/v1/signup`,{method:'POST',headers:{apikey:this.config.anonKey,'content-type':'application/json'},body:JSON.stringify({email:input.email,password:input.password,data:{name:input.name}})});
+      lastResponse=response;
       if(response.ok){const body=await parseResponse<AuthSession|{user:AuthSession['user'];session:AuthSession|null}>(response);if('access_token'in body)return body;if('session'in body&&body.session)return body.session;throw new Error('local_signup_no_session')}
-      if(response.status!==400)return parseResponse<AuthSession>(response);
-      if(attempt<2){await wait(250*(attempt+1));continue;}
-      // The full browser regression intentionally creates many isolated fixture users from one
-      // localhost IP. Keep the customer signup path real first; only after repeated local Auth
-      // throttling/failure do we bootstrap this unique fixture user through the local service-role
-      // Admin API, then authenticate normally. This code exists only in @socialpilot/local-api.
-      await this.createLocalFixtureUser(input);
-      return this.signIn({email:input.email,password:input.password});
+      if(response.status!==400||attempt===2)return parseResponse<AuthSession>(response);
+      await wait(250*(attempt+1));
     }
+    if(lastResponse)return parseResponse<AuthSession>(lastResponse);
     throw new Error('local_signup_failed');
-  }
-  private async createLocalFixtureUser(input:{email:string;password:string;name:string}):Promise<void>{
-    const response=await fetch(`${this.config.url}/auth/v1/admin/users`,{method:'POST',headers:{apikey:this.config.serviceRoleKey,authorization:`Bearer ${this.config.serviceRoleKey}`,'content-type':'application/json'},body:JSON.stringify({email:input.email,password:input.password,email_confirm:true,user_metadata:{name:input.name}})});
-    if(response.ok)return;
-    await parseResponse<unknown>(response);
   }
   async signIn(input:{email:string;password:string}):Promise<AuthSession>{const response=await fetch(`${this.config.url}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:this.config.anonKey,'content-type':'application/json'},body:JSON.stringify(input)});return parseResponse<AuthSession>(response)}
   async getUser(accessToken:string):Promise<AuthSession['user']>{const response=await fetch(`${this.config.url}/auth/v1/user`,{headers:{apikey:this.config.anonKey,authorization:`Bearer ${accessToken}`}});return parseResponse<AuthSession['user']>(response)}
