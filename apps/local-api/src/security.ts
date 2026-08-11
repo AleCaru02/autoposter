@@ -16,7 +16,17 @@ export const securityHeaders=():Record<string,string>=>({
   'content-security-policy':"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
 });
 
-export const clientSubject=(req:IncomingMessage):string=>{const forwarded=String(req.headers['x-forwarded-for']??'').split(',')[0]?.trim();const raw=forwarded||req.socket.remoteAddress||'unknown';return createHash('sha256').update(raw).digest('hex');};
+export const clientSubject=(req:IncomingMessage):string=>{
+  const forwarded=String(req.headers['x-forwarded-for']??'').split(',')[0]?.trim();
+  const remote=forwarded||req.socket.remoteAddress||'unknown';
+  let tenantScope='';
+  try{
+    const pathname=new URL(req.url??'/','http://local.invalid').pathname;
+    const match=pathname.match(/^\/tenants\/([^/]+)\//);
+    if(match?.[1])tenantScope=`|tenant:${decodeURIComponent(match[1])}`;
+  }catch{}
+  return createHash('sha256').update(`${remote}${tenantScope}`).digest('hex');
+};
 
 type Bucket={windowStart:number;hits:number};
 export class FixedWindowRateLimiter{
