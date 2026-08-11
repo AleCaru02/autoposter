@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/brand-profile-store.test.ts",
+    "tests/document-ingestion.test.ts",
+    "tests/editorial-pipeline-mock.test.ts",
+    "tests/knowledge-retrieval.test.ts",
+    "tests/onboarding-state.test.ts"
+  ]
+}
