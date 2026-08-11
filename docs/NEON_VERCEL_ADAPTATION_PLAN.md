@@ -6,14 +6,16 @@ Questo documento descrive cosa cambierebbe passando da Supabase a Neon Free + Ve
 
 ## Fattibilita'
 
-Tecnicamente fattibile. Neon e' PostgreSQL e supporta pgvector; Vercel Functions puo' collegarsi a Neon con driver/serverless pooling. Tuttavia l'architettura corrente e' intenzionalmente Supabase-native per Auth, PostgREST/RPC e Storage.
+Tecnicamente fattibile. Neon e' PostgreSQL, supporta pgvector, offre Neon Auth basato su Better Auth e una Data API basata su PostgREST. Il serverless driver e' compatibile con Vercel Functions. Questo riduce l'adattamento rispetto a un backend SQL costruito da zero, ma l'architettura corrente resta Supabase-native per `auth.users`, `auth.uid()`, ruoli API e Supabase Storage.
 
-Inoltre Vercel documenta Hobby come piano per uso personale/non commerciale. Questo rende Vercel Functions/Blob Hobby accettabile per sviluppo personale, ma non una base gratuita durevole per un SaaS commerciale.
+Vercel documenta Hobby come piano per uso personale/non commerciale. Vercel Functions/Blob Hobby possono quindi sostenere sviluppo e uso personale entro quota, ma non sono una base gratuita durevole per un SaaS commerciale.
 
 Fonti ufficiali correnti:
 - https://neon.com/pricing
 - https://neon.com/docs/serverless/serverless-driver
-- https://neon.com/docs/extensions/pgvector
+- https://neon.com/docs/guides/row-level-security
+- https://neon.com/docs/changelog/2025-12-12
+- https://neon.com/docs/changelog/2026-03-06
 - https://vercel.com/docs/plans/hobby
 - https://vercel.com/docs/vercel-blob/usage-and-pricing
 - https://vercel.com/pricing
@@ -28,7 +30,7 @@ Mappa:
 2. `002_core_domain`: dominio quasi tutto PostgreSQL; `vector` e' portabile; FK creator/approver verso `auth.users` e policy/ruoli richiedono adattamento.
 3. `003_prompt_support_storage`: pgvector portabile; la parte `storage.buckets`/`storage.objects` e' Supabase-specific e va sostituita.
 4. `004_tenant_consistency`: quasi tutti composite FK/triggers sono invariati; policy/grant verso `anon`/`authenticated` vanno adattati.
-5. `005_quota_engine`: logica di quota/RPC e' portabile; grants `service_role` e policy `authenticated` vanno adattati.
+5. `005_quota_engine`: logica di quota/RPC e' portabile; grants `service_role` e policy `authenticated` vanno adattati. Neon Data API e' PostgREST-based, quindi le RPC Postgres possono restare un pattern valido dopo l'adattamento di auth/ruoli.
 6. `006_local_validation_fixes`: e' la migration piu' Supabase-specific (service_role, auth.uid, advisor/extension schema); richiede una variante Neon.
 7. `007_local_e2e_state`: onboarding/versioni/learning sono portabili; FK `auth.users` e grants/policy ruoli vanno adattati.
 8. `008_auto_variant_scheduling`: trigger di scheduling portabile; grants service-role specifici da adattare.
@@ -39,31 +41,35 @@ Mappa:
 
 ## Auth / auth.users
 
-Neon Auth e' basato su Better Auth e conserva dati Auth nel database Neon, ma non dobbiamo rendere il dominio dipendente dalla forma interna di una seconda implementazione Auth.
+Neon Auth corrente e' basato su Better Auth e conserva utenti/sessioni/configurazione/JWKS nel database, nello schema `neon_auth`; la tabella utenti e' `neon_auth.user`. Questo evita un provider Auth esterno, ma non e' schema-compatible con i FK gia' scritti verso `auth.users`.
 
-Piano di adattamento consigliato se si scegliesse Neon:
-1. introdurre un adapter `IdentityProvider` server-side;
-2. creare una tabella applicativa `identity_users` con UUID applicativo stabile;
-3. mappare l'identita' autenticata del provider a `identity_users`;
-4. sostituire gradualmente i FK `auth.users(id)` con `identity_users(id)`;
-5. mantenere profiles, tenant_members, platform_admins e audit sopra quell'ID applicativo.
+Piano di adattamento se si scegliesse Neon:
+1. usare Neon Auth come `IdentityProvider`;
+2. scegliere tra FK diretti verso `neon_auth.user(id)` oppure una piccola tabella applicativa `identity_users` stabile; preferenza: adapter applicativo se vogliamo restare provider-neutral;
+3. sostituire i FK `auth.users(id)` nelle migrations compatibili;
+4. adattare il trigger di creazione profilo all'evento/record Neon Auth;
+5. mantenere profiles, tenant_members, platform_admins e audit sopra un UUID utente stabile.
 
-Questo evita di legare le migrations alle tabelle interne di Neon Auth/Better Auth.
+Non serve costruire da zero password/session/JWT: Neon Auth li gestisce realmente.
 
 ## JWT / RLS / auth.uid()
 
-Postgres RLS resta disponibile su Neon. Cambia il modo in cui l'identita' arriva nella sessione DB.
+Postgres RLS resta disponibile. Neon Data API valida i JWT e offre `auth.user_id()`; il serverless driver consente anche di propagare claims verificati nella transaction e richiede un ruolo senza `BYPASSRLS`.
 
-Piano:
-1. Vercel Function verifica il JWT Neon Auth;
-2. connessione DB con un ruolo che **non** abbia `BYPASSRLS`;
-3. claims/user-id vengono propagati alla sessione/transaction DB;
-4. introdurre `app.current_user_id()` come helper provider-neutral;
-5. sostituire `auth.uid()` con `app.current_user_id()`;
-6. ricreare ruoli/grants applicativi al posto di `anon`, `authenticated`, `service_role`;
-7. rieseguire tutti i test Tenant A/Tenant B e pgTAP.
+Piano minimo:
+1. sostituire le policy/helper Supabase basate su `auth.uid()` con un helper provider-neutral che su Neon usa `auth.user_id()`;
+2. ricreare i grants applicativi al posto dei ruoli Supabase `anon`, `authenticated`, `service_role`;
+3. usare Data API per le operazioni client RLS-safe e Vercel Functions/serverless driver per operazioni privilegiate;
+4. evitare `neondb_owner` nelle query utente perche' bypassa RLS;
+5. rieseguire integralmente pgTAP e i test Tenant A/Tenant B.
 
-L'isolamento tenant basato su RLS e composite FK puo' quindi essere conservato, ma va nuovamente validato end-to-end.
+Composite FK, tenant_id e gran parte dell'isolamento dati rimangono invariati.
+
+## Data API / RPC
+
+Neon Data API e' basata su PostgREST e supporta query HTTP su tabelle/view/funzioni. Questo significa che il modello `/rest/v1` dell'attuale repository non deve essere concettualmente riscritto: va sostituito il base endpoint/client e adattata autenticazione/RLS. Le RPC Postgres possono restare funzioni SQL esposte dalla Data API, previa verifica dei grants.
+
+Questo e' un vantaggio importante rispetto a una riscrittura completa con ORM/API custom.
 
 ## Storage / signed URLs
 
@@ -72,24 +78,24 @@ La parte Supabase Storage non e' portabile direttamente.
 Piano Vercel Blob:
 1. mantenere le tabelle `brand_assets`, `post_assets`, `visual_renders` e i campi path/metadata;
 2. aggiungere un adapter `ObjectStorage` (`put`, `getSignedRead`, `delete`, `listTenantPrefix`);
-3. autorizzare upload/download in Vercel Functions dopo JWT + tenant membership;
+3. autorizzare upload/download in Vercel Functions dopo Auth + tenant membership;
 4. usare path namespaced per tenant;
 5. eliminare le policy su `storage.objects` e sostituirle con enforcement backend + audit;
 6. usare private Blob/signed delivery dove necessario.
 
-La sicurezza storage passerebbe quindi da RLS nel database a autorizzazione esplicita del backend: e' piu' codice da mantenere e testare.
+Qui c'e' la riscrittura infrastrutturale piu' netta: la sicurezza Storage passa da RLS Supabase a autorizzazione esplicita del backend.
 
 ## Backend / Edge Functions
 
-All'HEAD `501fd893...` non esiste una directory `supabase/functions/`, quindi non ci sono Edge Functions gia' deployate da portare. Il backend online deve ancora essere costruito in entrambi i percorsi.
+All'application HEAD `501fd893...` non esiste una directory `supabase/functions/`, quindi non ci sono Edge Functions gia' deployate da portare. Il backend online deve ancora essere costruito in entrambi i percorsi.
 
-Con Neon il backend diventerebbe Vercel Functions e dovrebbe sostituire il client attuale che oggi parla direttamente con endpoint Supabase:
-- `/auth/v1/*`
-- `/rest/v1/*`
-- `/rest/v1/rpc/*`
-- `/storage/v1/*`
+Con Neon:
+- Auth passerebbe da `/auth/v1/*` a Neon Auth SDK/API;
+- `/rest/v1/*` e RPC possono essere sostituiti con Neon Data API/PostgREST con adattamento moderato;
+- `/storage/v1/*` deve essere sostituito dall'adapter Vercel Blob;
+- website scanner e operazioni privilegiate diventerebbero Vercel Functions.
 
-Il file `apps/local-api/src/db.ts` mostra questo accoppiamento e sarebbe uno dei touch point principali.
+Il file `apps/local-api/src/db.ts` resta uno dei principali touch point per il transport layer.
 
 ## app_private
 
@@ -97,34 +103,33 @@ Il file `apps/local-api/src/db.ts` mostra questo accoppiamento e sarebbe uno dei
 
 ## pgvector
 
-Neon supporta `pgvector`, quindi embeddings/vector columns possono essere mantenuti. Va solo verificato lo schema/extension target usato dalle migrations Neon.
+Neon supporta `pgvector`, quindi embeddings/vector columns possono essere mantenuti. Va verificata/installata l'estensione prevista dalla variante Neon delle migrations.
 
 ## Realtime
 
-Non e' richiesto dal percorso minimo e nel codice applicativo corrente non e' una dipendenza necessaria per signup -> tenant -> scanner -> AI. Se diventera' necessario verra' progettato separatamente; non deve bloccare il beta.
+Non e' richiesto dal percorso minimo e nel codice applicativo corrente non e' una dipendenza necessaria per signup -> tenant -> scanner -> AI. Non deve bloccare il beta.
 
 ## Scheduler
 
-Le tabelle persistenti `publication_jobs` restano portabili. L'esecutore cambierebbe. Vercel Hobby ha vincoli propri sui cron e, comunque, l'autopublishing e' esplicitamente fuori dal percorso minimo attuale.
+Le tabelle persistenti `publication_jobs` restano portabili. L'esecutore cambierebbe. L'autopublishing e' esplicitamente fuori dal percorso minimo attuale.
 
 ## Admin
 
-RBAC e tabelle Admin sono portabili. L'API Admin dovrebbe essere implementata in Vercel Functions usando JWT verificato, membership/platform-admin DB e un ruolo server-only.
+RBAC e tabelle Admin sono portabili. L'API Admin dovrebbe usare Neon Auth/JWT, membership/platform-admin DB e una Vercel Function con connessione server-only privilegiata.
 
 ## Complessita' relativa
 
 Baseline Supabase collaboratore = **1x**.
 
-Neon + Vercel = circa **2.5x-4x** lavoro backend/integration per arrivare allo stesso livello di sicurezza, perche' richiede contemporaneamente:
-- nuovo adapter Auth;
-- bridge identita';
-- variante RLS/JWT;
-- nuovo transport DB al posto di PostgREST/RPC;
-- nuovo storage authorization layer;
-- nuove verifiche security/tenant isolation;
-- deployment Vercel Functions.
+Stima ingegneristica aggiornata Neon + Vercel = circa **1.8x-3x** lavoro infrastrutturale/integration per arrivare allo stesso E2E e allo stesso livello di sicurezza. Neon Auth + Data API riducono molto la riscrittura, ma restano:
+- adattamento `auth.users` / identity FK;
+- adattamento `auth.uid()` / ruoli e grants;
+- Storage completamente diverso;
+- layer Vercel Functions per scanner/admin/operazioni privilegiate;
+- nuova validazione RLS/tenant isolation;
+- vincolo contrattuale Vercel Hobby per uso personale/non commerciale.
 
-Il dominio business non va riscritto, ma il boundary infrastrutturale si'.
+Il dominio business non va riscritto.
 
 ## Condizione per scegliere Neon
 
