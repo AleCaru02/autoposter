@@ -2,16 +2,14 @@ import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from '../components/AppShell';
 import { SaasServicesProvider } from '../services/SaasServicesProvider';
 import { LocalE2EProvider } from '../services/local-e2e';
-import { DashboardPage } from '../pages/DashboardPage';
 import { OnboardingPage } from '../pages/OnboardingPage';
-import { CalendarPage } from '../pages/BrandCalendarPages';
 import { PostEditorPage } from '../pages/PostEditorPage';
 import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
-import { AdminPage, AnalyticsPage, BillingPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
-import { ProviderConnectionsPage, ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
-import { BrandVisualPage, VisualApprovalsPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
+import { AdminPage, BillingPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
+import { ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
+import { PremiumAnalyticsPage, PremiumApprovalsPage, PremiumAssetsPage, PremiumBrandPage, PremiumCalendarPage, PremiumConnectionsPage, PremiumDashboardPage } from '../pages/PremiumPreviewPages';
 
 export function App() {
   return <LocalE2EProvider><SaasServicesProvider><Routes>
@@ -27,17 +25,17 @@ export function App() {
     <Route path="/register" element={<RegisterPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route element={<AppShell />}>
-      <Route path="/app" element={<DashboardPage />} />
+      <Route path="/app" element={<PremiumDashboardPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
-      <Route path="/app/brand" element={<BrandVisualPage />} />
-      <Route path="/app/assets" element={<VisualAssetsPage />} />
+      <Route path="/app/brand" element={<PremiumBrandPage />} />
+      <Route path="/app/assets" element={<PremiumAssetsPage />} />
       <Route path="/app/strategy" element={<StrategyPage />} />
-      <Route path="/app/calendar" element={<CalendarPage />} />
+      <Route path="/app/calendar" element={<PremiumCalendarPage />} />
       <Route path="/app/posts/:id" element={<PostEditorPage />} />
-      <Route path="/app/approvals" element={<VisualApprovalsPage />} />
-      <Route path="/approvals" element={<VisualApprovalsPage />} />
-      <Route path="/app/connections" element={<ProviderConnectionsPage />} />
-      <Route path="/app/analytics" element={<AnalyticsPage />} />
+      <Route path="/app/approvals" element={<PremiumApprovalsPage />} />
+      <Route path="/approvals" element={<PremiumApprovalsPage />} />
+      <Route path="/app/connections" element={<PremiumConnectionsPage />} />
+      <Route path="/app/analytics" element={<PremiumAnalyticsPage />} />
       <Route path="/app/notifications" element={<NotificationsPage />} />
       <Route path="/app/support" element={<SupportPage />} />
       <Route path="/app/billing" element={<BillingPage />} />
