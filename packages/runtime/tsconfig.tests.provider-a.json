@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/chatbot-entitlement.test.ts",
+    "tests/connection-health-hardening.test.ts",
+    "tests/gbp-local-planner.test.ts",
+    "tests/provider-readiness.test.ts",
+    "tests/publishing-resilience.test.ts"
+  ]
+}
