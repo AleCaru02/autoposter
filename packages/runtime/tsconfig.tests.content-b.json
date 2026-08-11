@@ -6,6 +6,8 @@
     "tests/document-ingestion.test.ts",
     "tests/editorial-pipeline-mock.test.ts",
     "tests/knowledge-retrieval.test.ts",
-    "tests/onboarding-state.test.ts"
+    "tests/onboarding-state.test.ts",
+    "tests/website-scanner.test.ts",
+    "tests/website-scanner-rich.test.ts"
   ]
 }
