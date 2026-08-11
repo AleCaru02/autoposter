@@ -82,6 +82,5 @@ export const softwareSchemas = (baseUrl: string) => ([
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
     description: 'Piattaforma per strategia, creazione, approvazione, programmazione e analisi dei contenuti social.',
-    offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR', availability: 'https://schema.org/PreOrder' },
   },
 ]);
