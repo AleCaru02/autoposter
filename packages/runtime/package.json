@@ -6,7 +6,13 @@
   "scripts": {
     "test": "vitest run",
     "typecheck:source": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "typecheck:tests": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:tests:ai": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.ai.json --noEmit",
+    "typecheck:tests:content-a": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.content-a.json --noEmit",
+    "typecheck:tests:content-b": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.content-b.json --noEmit",
+    "typecheck:tests:provider-a": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.provider-a.json --noEmit",
+    "typecheck:tests:provider-b": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.provider-b.json --noEmit",
+    "typecheck:tests:visual": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.visual.json --noEmit",
+    "typecheck:tests": "npm run typecheck:tests:ai && npm run typecheck:tests:content-a && npm run typecheck:tests:content-b && npm run typecheck:tests:provider-a && npm run typecheck:tests:provider-b && npm run typecheck:tests:visual",
     "typecheck": "npm run typecheck:source && npm run typecheck:tests"
   },
   "dependencies": {
