@@ -30,11 +30,13 @@ describe('accessibility smoke', () => {
     expect(html).toContain('nessun collegamento live');
   });
 
-  it('keeps the local post editor fallback keyboard reachable', () => {
+  it('keeps the fail-closed private data gate keyboard reachable', () => {
     const html = renderRoute('/app/posts/p3');
-    expect((html.match(/<button/g) ?? []).length).toBeGreaterThanOrEqual(4);
-    expect(html).toContain('Instagram');
-    expect(html).toContain('Google Business Profile');
+    expect(html).toContain('REAL DATA MODE');
+    expect(html).toContain('Backend non collegato');
+    expect(html).toContain('href="/onboarding"');
+    expect(html).toContain('href="/"');
+    expect(html).toContain('Provider: NON COLLEGATO');
   });
 
   it('keeps the onboarding fallback explicit when local API is absent', () => {
