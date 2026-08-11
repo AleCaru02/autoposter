@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { Badge, Card, PageHeader, Progress } from '../components/ui';
 import { MediaPicker } from '../components/MediaPicker';
@@ -38,7 +38,11 @@ function LocalPostEditor({ id }: { id: string }) {
   const approve=()=>variant&&run(()=>local.api(`/tenants/${local.tenantId}/variants/${variant.id}/approve`,{method:'POST'}));
   const reject=()=>variant&&run(()=>local.api(`/tenants/${local.tenantId}/variants/${variant.id}/reject`,{method:'POST',body:JSON.stringify({reason:'Rifiutato dalla UI locale'})}));
   const schedule=()=>run(()=>local.api(`/tenants/${local.tenantId}/posts/${post.id}/schedule`,{method:'POST'}));
-  const publish=()=>run(()=>local.api(`/tenants/${local.tenantId}/publish-now`,{method:'POST',body:JSON.stringify({postId:post.id,...(failureMode?{failureMode}:{})})}));
+  const publish=()=>run(async()=>{
+    const existingJobs = local.workspace?.jobs?.filter((job:any)=>job.post_id===post.id||variants.some((item:any)=>item.id===job.post_variant_id)) ?? [];
+    if(existingJobs.length===0) await local.api(`/tenants/${local.tenantId}/posts/${post.id}/schedule`,{method:'POST'});
+    return local.api(`/tenants/${local.tenantId}/publish-now`,{method:'POST',body:JSON.stringify({postId:post.id,...(failureMode?{failureMode}:{})})});
+  });
   const concept = post.core_concept ?? {};
   const scores = [
     ['Brand match',quality.brandMatch],['Rilevanza',quality.relevance],['Novelty',quality.novelty],['Chiarezza',quality.clarity],['Platform fit',quality.platformFit],['Visual fit',quality.visualFit],['Fact confidence',quality.factConfidence],['CTA quality',quality.ctaQuality],
