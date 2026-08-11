@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "node --max-old-space-size=6144 ../../node_modules/typescript/bin/tsc --noEmit"
+    "typecheck:source": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.json --noEmit",
+    "typecheck": "npm run typecheck:source && npm run typecheck:tests"
   },
   "dependencies": {
     "@socialpilot/contracts": "file:../contracts",
