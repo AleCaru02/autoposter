@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/analytics-optimizer.test.ts",
+    "tests/anti-clone-acceptance.test.ts",
+    "tests/approval-workflow.test.ts",
+    "tests/asset-library.test.ts",
+    "tests/asset-selection-brand-context.test.ts"
+  ]
+}
