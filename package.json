@@ -16,6 +16,9 @@
     "build:web": "npm run build --workspace=@socialpilot/web",
     "check-provider-readiness": "node scripts/check-provider-readiness.mjs"
   },
+  "overrides": {
+    "zod": "4.1.5"
+  },
   "engines": {
     "node": ">=22.12"
   }
