@@ -1,0 +1,45 @@
+.product-stage::before,
+.analytics-panel::before {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255,255,255,.94);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.product-stage::before {
+  content: 'Demo UI · dati illustrativi';
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
+}
+
+.analytics-panel {
+  position: relative;
+  padding-top: 50px;
+}
+
+.analytics-panel::before {
+  content: 'Demo analytics · dati illustrativi';
+  position: absolute;
+  top: 16px;
+  left: 24px;
+}
+
+@media (max-width: 640px) {
+  .product-stage::before {
+    right: 4px;
+    top: -2px;
+  }
+  .analytics-panel::before {
+    left: 16px;
+  }
+}
