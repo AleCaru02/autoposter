@@ -5,6 +5,7 @@ import { App } from './app/App';
 import './styles-v2.css';
 import './design-system.css';
 import './marketing-integrity.css';
+import './premium-app-v3.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element not found');
