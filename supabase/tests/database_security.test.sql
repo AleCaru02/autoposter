@@ -59,8 +59,8 @@ select is(
 
 select is(
   (select count(*)::bigint from supabase_migrations.schema_migrations where version like '202608%'),
-  11::bigint,
-  'all eleven application migrations are present in local migration history'
+  12::bigint,
+  'all twelve application migrations are present in local migration history'
 );
 
 select is(
