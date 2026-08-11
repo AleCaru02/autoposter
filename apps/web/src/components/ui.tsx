@@ -1,11 +1,13 @@
-import type { PropsWithChildren, ReactNode } from 'react';
+import type { ComponentPropsWithoutRef, PropsWithChildren, ReactNode } from 'react';
 
 export function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description: string; action?: ReactNode }) {
   return <header className="page-header"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<h1>{title}</h1><p>{description}</p></div>{action && <div>{action}</div>}</header>;
 }
 
-export function Card({ children, className = '' }: PropsWithChildren<{ className?: string }>) {
-  return <section className={`card ${className}`}>{children}</section>;
+type CardProps = PropsWithChildren<ComponentPropsWithoutRef<'section'>>;
+
+export function Card({ children, className = '', ...props }: CardProps) {
+  return <section {...props} className={`card ${className}`}>{children}</section>;
 }
 
 export function MetricCard({ label, value, hint }: { label: string; value: string; hint: string }) {
