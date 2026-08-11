@@ -31,12 +31,12 @@ describe('SaaS web routes', () => {
     expect(html).toContain('Canali sani');
   });
 
-  it('renders post editor fallback without enabling real publishing', () => {
+  it('fails closed on the post editor when no real/local backend is configured', () => {
     const html = renderRoute('/app/posts/p3');
-    expect(html).toContain('Post editor · mock');
-    expect(html).toContain('VITE_LOCAL_API_URL');
-    expect(html).toContain('Instagram');
-    expect(html).toContain('Google Business Profile');
+    expect(html).toContain('REAL DATA MODE');
+    expect(html).toContain('Backend non collegato');
+    expect(html).toContain('Provider: NON COLLEGATO');
+    expect(html).not.toContain('Post editor · mock');
   });
 
   it('renders the provider-ready connection route without enabling OAuth live', () => {
@@ -45,10 +45,11 @@ describe('SaaS web routes', () => {
     expect(html).toContain('Local E2E richiesto');
   });
 
-  it('renders the dev/admin provider test console route', () => {
+  it('fails closed on the provider test console without a configured backend', () => {
     const html = renderRoute('/admin/providers');
-    expect(html).toContain('Provider Test Console');
-    expect(html).toContain('Local E2E richiesto');
+    expect(html).toContain('REAL DATA MODE');
+    expect(html).toContain('Backend non collegato');
+    expect(html).toContain('Provider: NON COLLEGATO');
   });
 
   it('exposes approvals on both canonical routes', () => {
@@ -56,9 +57,10 @@ describe('SaaS web routes', () => {
     expect(renderRoute('/approvals')).toContain('Approvazioni');
   });
 
-  it('keeps admin route present without granting local admin implicitly', () => {
+  it('keeps admin route present but fail-closed without granting local admin implicitly', () => {
     const html = renderRoute('/admin');
-    expect(html).toContain('Console amministrativa');
-    expect(html).toContain('Platform admin');
+    expect(html).toContain('REAL DATA MODE');
+    expect(html).toContain('Backend non collegato');
+    expect(html).not.toContain('Console amministrativa');
   });
 });
