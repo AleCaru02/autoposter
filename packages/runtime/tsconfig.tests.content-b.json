@@ -8,6 +8,7 @@
     "tests/knowledge-retrieval.test.ts",
     "tests/onboarding-state.test.ts",
     "tests/website-scanner.test.ts",
-    "tests/website-scanner-rich.test.ts"
+    "tests/website-scanner-rich.test.ts",
+    "tests/website-scanner-live.test.ts"
   ]
 }
