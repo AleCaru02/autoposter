@@ -84,10 +84,16 @@ jobs:
           cat /tmp/local-api.log
           exit 1
 
+      - name: Generate local SEO crawl files
+        env:
+          VITE_PUBLIC_SITE_URL: http://127.0.0.1:5173
+        run: npm run seo:generate --workspace=@socialpilot/web
+
       - name: Start Vite web app
         shell: bash
         run: |
           VITE_LOCAL_API_URL=http://127.0.0.1:8787 \
+          VITE_PUBLIC_SITE_URL=http://127.0.0.1:5173 \
           npm run dev --workspace=@socialpilot/web -- --host 127.0.0.1 --port 5173 > /tmp/web.log 2>&1 &
           echo $! > /tmp/web.pid
           for i in {1..30}; do
@@ -101,6 +107,8 @@ jobs:
         run: |
           curl -fsS http://127.0.0.1:8787/health
           curl -fsS http://127.0.0.1:5173 | grep -q '<div id="root"></div>'
+          curl -fsS http://127.0.0.1:5173/robots.txt | grep -q 'Disallow: /app'
+          curl -fsS http://127.0.0.1:5173/sitemap.xml | grep -q '/come-funziona'
 
       - name: Run API and browser E2E
         working-directory: apps/e2e
