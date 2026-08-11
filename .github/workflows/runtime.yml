@@ -36,5 +36,9 @@ jobs:
         run: npm run typecheck --workspace=@socialpilot/runtime
       - name: Test runtime
         run: npm test --workspace=@socialpilot/runtime
+      - name: Public HTTP website scanner smoke
+        env:
+          RUN_LIVE_WEBSITE_SMOKE: 'true'
+        run: npx vitest run packages/runtime/tests/website-scanner-live.test.ts --config packages/runtime/vitest.config.ts
       - name: Check provider readiness without live credentials
         run: npm run check-provider-readiness
