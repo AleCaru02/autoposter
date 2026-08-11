@@ -14,7 +14,8 @@
     "test:runtime": "npm test --workspace=@socialpilot/runtime",
     "test:unit": "npm run test:core && npm run test:runtime",
     "build:web": "npm run build --workspace=@socialpilot/web",
-    "check-provider-readiness": "node scripts/check-provider-readiness.mjs"
+    "check-provider-readiness": "node scripts/check-provider-readiness.mjs",
+    "check:remote-supabase-target": "node scripts/check-remote-supabase-target.mjs"
   },
   "overrides": {
     "zod": "4.1.5"
