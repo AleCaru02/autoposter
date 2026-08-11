@@ -1,7 +1,7 @@
 export interface LocalSupabaseConfig { url: string; anonKey: string; serviceRoleKey: string; }
 export interface AuthSession { access_token: string; refresh_token?: string; expires_in?: number; token_type?: string; user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> }; }
 
-export const loadLocalSupabaseConfig=():LocalSupabaseConfig=>{const url=process.env.LOCAL_SUPABASE_URL??process.env.TEST_SUPABASE_URL;const anonKey=process.env.LOCAL_SUPABASE_ANON_KEY??process.env.TEST_SUPABASE_PUBLISHABLE_KEY;const serviceRoleKey=process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY??process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;if(!url||!anonKey||!serviceRoleKey)throw new Error('local_supabase_env_missing');return{url:url.replace(/\/$/,''),anonKey,serviceRoleKey}};
+export const loadLocalSupabaseConfig=():LocalSupabaseConfig=>{const url=process.env.SUPABASE_URL??process.env.LOCAL_SUPABASE_URL??process.env.TEST_SUPABASE_URL;const anonKey=process.env.SUPABASE_PUBLISHABLE_KEY??process.env.LOCAL_SUPABASE_ANON_KEY??process.env.TEST_SUPABASE_PUBLISHABLE_KEY;const serviceRoleKey=process.env.SUPABASE_SERVICE_ROLE_KEY??process.env.LOCAL_SUPABASE_SERVICE_ROLE_KEY??process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;if(!url||!anonKey||!serviceRoleKey)throw new Error('supabase_env_missing');return{url:url.replace(/\/$/,''),anonKey,serviceRoleKey}};
 const parseResponse=async<T>(response:Response):Promise<T>=>{const text=await response.text();if(!response.ok){let detail=text;try{const parsed=JSON.parse(text)as{message?:string;error_description?:string;code?:string|number};detail=String(parsed.message??parsed.error_description??parsed.code??text)}catch{}throw new Error(`supabase_${response.status}:${detail}`)}if(!text)return undefined as T;return JSON.parse(text)as T};
 const wait=(ms:number)=>new Promise<void>((resolve)=>setTimeout(resolve,ms));
 
@@ -16,13 +16,15 @@ export class LocalSupabaseClient{
       if(response.status!==400||attempt===2)return parseResponse<AuthSession>(response);
       await wait(250*(attempt+1));
     }
-    if(lastResponse)return parseResponse<AuthSession>(lastResponse);
-    throw new Error('local_signup_failed');
+    if(lastResponse)return parseResponse<AuthSession>(lastResponse);throw new Error('local_signup_failed');
   }
   async signIn(input:{email:string;password:string}):Promise<AuthSession>{const response=await fetch(`${this.config.url}/auth/v1/token?grant_type=password`,{method:'POST',headers:{apikey:this.config.anonKey,'content-type':'application/json'},body:JSON.stringify(input)});return parseResponse<AuthSession>(response)}
   async getUser(accessToken:string):Promise<AuthSession['user']>{const response=await fetch(`${this.config.url}/auth/v1/user`,{headers:{apikey:this.config.anonKey,authorization:`Bearer ${accessToken}`}});return parseResponse<AuthSession['user']>(response)}
   async userRest<T>(accessToken:string,path:string,init:RequestInit={}):Promise<T>{return this.rest<T>(path,accessToken,this.config.anonKey,init)}
   async serviceRest<T>(path:string,init:RequestInit={}):Promise<T>{return this.rest<T>(path,this.config.serviceRoleKey,this.config.serviceRoleKey,init)}
+  async serviceAuth<T>(path:string,init:RequestInit={}):Promise<T>{return this.serviceRequest<T>(`/auth/v1${path}`,init)}
+  async serviceStorage<T>(path:string,init:RequestInit={}):Promise<T>{return this.serviceRequest<T>(`/storage/v1${path}`,init)}
+  async serviceRequest<T>(path:string,init:RequestInit={}):Promise<T>{const headers=new Headers(init.headers);headers.set('apikey',this.config.serviceRoleKey);headers.set('authorization',`Bearer ${this.config.serviceRoleKey}`);if(init.body&&!headers.has('content-type'))headers.set('content-type','application/json');return parseResponse<T>(await fetch(`${this.config.url}${path}`,{...init,headers}))}
   async rpc<T>(accessToken:string,name:string,body:Record<string,unknown>):Promise<T>{return this.userRest<T>(accessToken,`/rest/v1/rpc/${name}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})}
   async requireTenantRole(accessToken:string,tenantId:string,roles:string[]=['owner','admin','editor','viewer']):Promise<{userId:string;role:string}>{const user=await this.getUser(accessToken);const rows=await this.userRest<Array<{role:string;status:string}>>(accessToken,`/rest/v1/tenant_members?select=role,status&tenant_id=eq.${encodeURIComponent(tenantId)}&user_id=eq.${encodeURIComponent(user.id)}&limit=1`);const membership=rows[0];if(!membership||membership.status!=='active'||!roles.includes(membership.role))throw new Error('tenant_access_denied');return{userId:user.id,role:membership.role}}
   private async rest<T>(path:string,bearer:string,apikey:string,init:RequestInit):Promise<T>{
