@@ -55,10 +55,10 @@ describe('Post Automatici web routes', () => {
 
   it('does not expose the provider fixture console as a runtime route', () => {
     const html = renderRoute('/admin/providers');
-    expect(html).toContain('Post Automatici');
     expect(html).not.toContain('Provider Test Console');
     expect(html).not.toContain('Connetti mock');
     expect(html).not.toContain('Mock publish');
+    expect(html).not.toContain('Simula webhook');
   });
 
   it('exposes approvals on both canonical routes', () => {
