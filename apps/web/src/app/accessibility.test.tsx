@@ -6,14 +6,15 @@ import { App } from './App';
 const renderRoute = (route: string): string => renderToString(<MemoryRouter initialEntries={[route]}><App /></MemoryRouter>);
 
 describe('accessibility smoke', () => {
-  it('provides public navigation, main landmarks and a named chatbot disclosure', () => {
+  it('provides public navigation, main landmarks and a named assistant disclosure', () => {
     const html = renderRoute('/');
     expect(html).toContain('<header');
     expect(html).toContain('<nav');
     expect(html).toContain('<main');
     expect(html).toContain('class="sales-chat-launcher"');
-    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-label="Informazioni prodotto"');
     expect(html).toContain('Chiedi al prodotto');
+    expect(html).toContain('L’assistente pubblico non viene simulato');
   });
 
   it('provides a named primary application navigation', () => {
@@ -27,21 +28,25 @@ describe('accessibility smoke', () => {
     expect(html).toContain('autocomplete="email"');
     expect(html).toContain('autocomplete="current-password"');
     expect((html.match(/<label/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect(html).toContain('nessun collegamento live');
+    expect(html).toContain('backend di produzione: da collegare');
+    expect(html).toContain('le funzioni non collegate restano esplicitamente non disponibili');
   });
 
   it('keeps the fail-closed private data gate keyboard reachable', () => {
     const html = renderRoute('/app/posts/p3');
-    expect(html).toContain('REAL DATA MODE');
     expect(html).toContain('Backend non collegato');
     expect(html).toContain('href="/onboarding"');
     expect(html).toContain('href="/"');
-    expect(html).toContain('Provider: NON COLLEGATO');
+    expect(html).toContain('OpenAI: DA CONFIGURARE');
+    expect(html).toContain('Social: DA CONFIGURARE');
+    expect(html).not.toContain('REAL DATA MODE');
   });
 
-  it('keeps the onboarding fallback explicit when local API is absent', () => {
+  it('keeps the onboarding fallback explicit when production backend is absent', () => {
     const html = renderRoute('/onboarding');
-    expect(html).toContain('VITE_LOCAL_API_URL');
-    expect(html).toContain('Nessun dato viene scritto a servizi remoti');
+    expect(html).toContain('Backend da configurare');
+    expect(html).toContain('NON DISPONIBILE');
+    expect(html).toContain('Persistenza non collegata');
+    expect(html).not.toContain('VITE_LOCAL_API_URL');
   });
 });
