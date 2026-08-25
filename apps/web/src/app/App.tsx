@@ -18,6 +18,7 @@ import { ContentsPage, PersonalSettingsPage, SitePage, SocialConnectionsPage } f
 import { AiBudgetPage } from '../pages/AiBudgetPage';
 import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
+import { VisualPreviewPage } from '../pages/VisualPreviewPage';
 
 export function App() {
   const protectedData=(element:ReactNode)=><RealDataGate>{element}</RealDataGate>;
@@ -37,6 +38,7 @@ export function App() {
     <Route path="/register" element={<RegisterPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route element={<AppShell />}>
+      <Route path="/preview-ui" element={<VisualPreviewPage />} />
       <Route path="/app" element={protectedData(<DashboardPage />)} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/app/site" element={protectedData(<SitePage />)} />
