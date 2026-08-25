@@ -9,9 +9,11 @@ import { PostEditorPage } from '../pages/PostEditorPage';
 import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
-import { BillingPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
+import { AnalyticsPage, BillingPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 import { ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
-import { PremiumAnalyticsPage, PremiumApprovalsPage, PremiumAssetsPage, PremiumBrandPage, PremiumCalendarPage, PremiumDashboardPage } from '../pages/PremiumPreviewPages';
+import { DashboardPage } from '../pages/DashboardPage';
+import { CalendarPage } from '../pages/BrandCalendarPages';
+import { BrandVisualPage, VisualApprovalsPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
 import { ContentsPage, PersonalSettingsPage, SitePage, SocialConnectionsPage } from '../pages/PersonalWorkspacePages';
 import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
@@ -34,19 +36,19 @@ export function App() {
     <Route path="/register" element={<RegisterPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route element={<AppShell />}>
-      <Route path="/app" element={protectedData(<PremiumDashboardPage />)} />
+      <Route path="/app" element={protectedData(<DashboardPage />)} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/app/site" element={protectedData(<SitePage />)} />
       <Route path="/app/contents" element={protectedData(<ContentsPage />)} />
-      <Route path="/app/brand" element={protectedData(<PremiumBrandPage />)} />
-      <Route path="/app/assets" element={protectedData(<PremiumAssetsPage />)} />
+      <Route path="/app/brand" element={protectedData(<BrandVisualPage />)} />
+      <Route path="/app/assets" element={protectedData(<VisualAssetsPage />)} />
       <Route path="/app/strategy" element={protectedData(<StrategyPage />)} />
-      <Route path="/app/calendar" element={protectedData(<PremiumCalendarPage />)} />
+      <Route path="/app/calendar" element={protectedData(<CalendarPage />)} />
       <Route path="/app/posts/:id" element={protectedData(<PostEditorPage />)} />
-      <Route path="/app/approvals" element={protectedData(<PremiumApprovalsPage />)} />
-      <Route path="/approvals" element={protectedData(<PremiumApprovalsPage />)} />
+      <Route path="/app/approvals" element={protectedData(<VisualApprovalsPage />)} />
+      <Route path="/approvals" element={protectedData(<VisualApprovalsPage />)} />
       <Route path="/app/connections" element={protectedData(<SocialConnectionsPage />)} />
-      <Route path="/app/analytics" element={protectedData(<PremiumAnalyticsPage />)} />
+      <Route path="/app/analytics" element={protectedData(<AnalyticsPage />)} />
       <Route path="/app/notifications" element={protectedData(<NotificationsPage />)} />
       <Route path="/app/support" element={protectedData(<SupportPage />)} />
       <Route path="/app/billing" element={protectedData(<BillingPage />)} />
