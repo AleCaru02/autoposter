@@ -1,6 +1,6 @@
 export interface QueuePost {
-  id: string;
-  status?: string;
+  id?: unknown;
+  status?: unknown;
   variants?: Array<Record<string, any>>;
 }
 
@@ -30,16 +30,18 @@ export async function generateContentIncrementally(input: {
   imagesReady: boolean;
   onProgress?: (progress: QueueProgress) => void;
 }) {
-  const posts = input.posts.filter((post) => !['published', 'publishing', 'rejected'].includes(String(post.status ?? '').toLowerCase()));
+  const posts = input.posts.filter((post) => Boolean(String(post.id ?? '').trim()) && !['published', 'publishing', 'rejected'].includes(String(post.status ?? '').toLowerCase()));
   let completedPosts = 0;
   let completedVisuals = 0;
   let generatedVisuals = 0;
 
   for (const post of posts) {
+    const postId = String(post.id ?? '').trim();
+    if (!postId) continue;
     let variants = Array.isArray(post.variants) ? post.variants : [];
     if (textNeeded(post)) {
       input.onProgress?.({ completedPosts, totalPosts: posts.length, completedVisuals, generatedVisuals, currentLabel: 'Generazione testo…' });
-      const result = await input.api<{ variants?: Array<Record<string, any>> }>(`/tenants/${input.tenantId}/posts/${post.id}/generate`, { method: 'POST' });
+      const result = await input.api<{ variants?: Array<Record<string, any>> }>(`/tenants/${input.tenantId}/posts/${postId}/generate`, { method: 'POST' });
       variants = Array.isArray(result.variants) ? result.variants : variants;
     }
     completedPosts += 1;
