@@ -13,6 +13,7 @@ export function LoginPage() {
   const [email, setEmail] = useState(fixtureEmail);
   const [password, setPassword] = useState(fixturePassword);
   const [showPassword,setShowPassword]=useState(false);
+  const [remember,setRemember]=useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const submit = async (event: FormEvent) => {
@@ -30,8 +31,9 @@ export function LoginPage() {
     <form onSubmit={submit} className="auth-form">
       <label className="auth-field"><span>Email</span><input data-testid="login-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
       <PasswordField testId="login-password" label="Password" value={password} onChange={setPassword} show={showPassword} onToggle={()=>setShowPassword((value)=>!value)} autoComplete="current-password" />
-      <div className="auth-row"><span>Sessione protetta</span><Link to="/reset-password">Password dimenticata?</Link></div>
+      <div className="auth-row"><label><input type="checkbox" checked={remember} onChange={(event)=>setRemember(event.target.checked)}/> Ricordami su questo dispositivo</label><Link to="/reset-password">Password dimenticata?</Link></div>
       <button data-testid="login-submit" className="button full" type="submit" disabled={local.loading || !local.enabled}>Accedi</button>
+      {!local.enabled&&<p className="auth-footer">Backend di produzione: da collegare.</p>}
       {message && <p role="alert" className="auth-footer">{message}</p>}
     </form>
     <p className="auth-footer">Non hai un account? <Link to="/register">Crea account</Link></p>
@@ -64,6 +66,7 @@ export function RegisterPage() {
       <p className="auth-hint">Minimo 12 caratteri. Puoi mostrarla solo mentre la stai inserendo; l’admin non può leggere le password degli utenti.</p>
       <label className="auth-check"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} /> <span>Accetto termini e privacy.</span></label>
       <button data-testid="register-submit" className="button full" type="submit" disabled={local.loading || !local.enabled}>Crea account</button>
+      {!local.enabled&&<p className="auth-footer">Backend di produzione: da collegare.</p>}
       {message && <p role="alert" className="auth-footer">{message}</p>}
     </form>
     <p className="auth-footer">Hai già un account? <Link to="/login">Accedi</Link></p>
@@ -92,6 +95,6 @@ function AuthLayout({ path, eyebrow, title, description, children }: { path: str
       <div className="auth-story-copy"><span className="section-label">Control room personale</span><h2>Brand, contenuti, social e risultati nello stesso flusso.</h2><p>Le integrazioni esistono solo quando sono realmente configurate. Nessun numero o collegamento viene simulato nell’uso normale.</p><div className="auth-story-points"><div><span>01</span><p><b>Profili separati</b><small>Ogni attività mantiene memoria e dati indipendenti.</small></p></div><div><span>02</span><p><b>Approvazione umana</b><small>Nessuna pubblicazione parte senza il tuo consenso.</small></p></div><div><span>03</span><p><b>Master control</b><small>L’account master gestisce utenti, attività, API e diagnostica.</small></p></div></div></div>
       <div className="auth-story-status"><span className="status-dot"/><span>{internalE2EFixturesEnabled ? 'Test harness interno' : 'Workspace protetto'}</span></div>
     </section>
-    <main className="auth-workspace"><div className="auth-mobile-logo"><Link className="public-logo" to="/"><span className="logo-glyph">P</span><span>Post Automatici</span></Link></div><section className="auth-card"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="auth-description">{description}</p><div>{children}</div><div className="auth-safety"><span className="status-dot" /> Le password utenti non vengono mai mostrate o salvate in chiaro</div></section></main>
+    <main className="auth-workspace"><div className="auth-mobile-logo"><Link className="public-logo" to="/"><span className="logo-glyph">P</span><span>Post Automatici</span></Link></div><section className="auth-card"><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="auth-description">{description}</p><div>{children}</div><div className="auth-safety"><span className="status-dot" /> Stato: le funzioni non collegate restano esplicitamente non disponibili. Le password utenti non vengono mai mostrate o salvate in chiaro.</div></section></main>
   </div>;
 }
