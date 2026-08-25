@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { Badge, Card, MetricCard, PageHeader } from '../components/ui';
+import '../preview-ui.css';
 
 const posts = [
   { day: '26', month: 'AGO', platform: 'Instagram', topic: '3 errori che fanno perdere prenotazioni', status: 'DA APPROVARE' },
