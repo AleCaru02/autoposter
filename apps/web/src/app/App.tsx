@@ -11,7 +11,6 @@ import { PersonalSupportPage } from '../pages/PersonalSupportPage';
 import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
-import { ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
 import { DashboardPage } from '../pages/DashboardPage';
 import { CalendarPage } from '../pages/BrandCalendarPages';
 import { BrandVisualPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
@@ -55,7 +54,6 @@ export function App() {
       <Route path="/app/billing" element={<Navigate to="/app/settings" replace />} />
       <Route path="/app/settings" element={protectedData(<PersonalSettingsPage />)} />
       <Route path="/admin" element={protectedData(<AdminCustomersPage />)} />
-      <Route path="/admin/providers" element={protectedData(<ProviderTestConsolePage />)} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></LocalE2EProvider>;
