@@ -75,7 +75,7 @@ test('browser completes onboarding → OpenAI workflow → preview → approval 
   await expect(page.getByText('Calendario generato e salvato per questa attività.')).toBeVisible({timeout:30_000});
   await expect(page.getByTestId('generate-content')).toBeEnabled();
   await page.getByTestId('generate-content').click();
-  await expect(page.getByText(/Contenuti generati\. Ogni variante resta ferma/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Contenuti generati progressivamente\. Ogni variante resta ferma/)).toBeVisible({ timeout: 30_000 });
 
   await page.goto('/approvals');
   await expect(page.getByRole('heading', { name: 'Anteprime da approvare' })).toBeVisible();
