@@ -53,11 +53,12 @@ describe('Post Automatici web routes', () => {
     expect(html).not.toContain('REAL DATA MODE');
   });
 
-  it('fails closed on provider console without backend', () => {
+  it('does not expose the provider fixture console as a runtime route', () => {
     const html = renderRoute('/admin/providers');
-    expect(html).toContain('Backend non collegato');
-    expect(html).toContain('Social: DA CONFIGURARE');
-    expect(html).not.toContain('REAL DATA MODE');
+    expect(html).toContain('Post Automatici');
+    expect(html).not.toContain('Provider Test Console');
+    expect(html).not.toContain('Connetti mock');
+    expect(html).not.toContain('Mock publish');
   });
 
   it('exposes approvals on both canonical routes', () => {
