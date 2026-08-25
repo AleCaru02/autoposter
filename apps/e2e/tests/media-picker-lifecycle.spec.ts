@@ -3,30 +3,62 @@ const API=process.env.E2E_API_URL??'http://127.0.0.1:8787';
 const password='MediaPicker-password-123!';
 const svg=(label:string,color:string)=>Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><rect width="1200" height="900" fill="${color}"/><text x="70" y="150" fill="#fff" font-size="64">${label}</text></svg>`);
 async function json<T>(request:APIRequestContext,token:string|null,path:string,method='GET',data?:unknown):Promise<T>{const response=await request.fetch(`${API}${path}`,{method,headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`}:{})},...(data===undefined?{}:{data})});const body=await response.json().catch(()=>({}));if(!response.ok())throw new Error(`${response.status()} ${path}: ${JSON.stringify(body)}`);return body as T;}
-async function register(request:APIRequestContext,label:string){const safeLabel=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');const email=`picker-${safeLabel}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.test`;const session=await json<any>(request,null,'/auth/register','POST',{email,password,name:label});const token=session.access_token as string;const tenant=await json<{tenantId:string}>(request,token,'/tenants','POST',{name:label,slug:`picker-${Date.now()}-${Math.random().toString(16).slice(2,8)}`});return{token,tenantId:tenant.tenantId};}
-async function onboard(request:APIRequestContext,token:string,tenantId:string){await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{business:{name:'Picker Pizza Milano',website:`${API}/fixture-site/picker-pizza/`,industry:'Pizzeria',subIndustry:'Napoletana',location:'Milano',language:'it',serviceArea:'Milano',services:'pizza, impasto, forno',differentiator:'artigianalità'},current_step:'goals'});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{goals:['lead'],current_step:'target'});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{target:{manual:['famiglie locali'],suggestions:[]},current_step:'brand'});await json(request,token,`/tenants/${tenantId}/scan`,'POST',{});await json(request,token,`/tenants/${tenantId}/brand/status`,'POST',{status:'confirmed'});await json(request,token,`/tenants/${tenantId}/social`,'POST',{platforms:['instagram'],publishingModes:{instagram:'manual'}});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{frequency:{postsPerWeek:2,days:[1,3],times:['10:00']},publishing_modes:{instagram:'manual'},current_step:'summary'});await json(request,token,`/tenants/${tenantId}/onboarding/complete`,'POST',{});}
+async function register(request:APIRequestContext,label:string){const safeLabel=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');const email=`asset-${safeLabel}-${Date.now()}-${Math.random().toString(16).slice(2)}@example.test`;const session=await json<any>(request,null,'/auth/register','POST',{email,password,name:label});const token=session.access_token as string;const tenant=await json<{tenantId:string}>(request,token,'/tenants','POST',{name:label,slug:`asset-${Date.now()}-${Math.random().toString(16).slice(2,8)}`});return{token,tenantId:tenant.tenantId};}
+async function onboard(request:APIRequestContext,token:string,tenantId:string){await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{business:{name:'Asset Pizza Milano',website:`${API}/fixture-site/asset-pizza/`,industry:'Pizzeria',subIndustry:'Napoletana',location:'Milano',language:'it',serviceArea:'Milano',services:'pizza, impasto, forno',differentiator:'artigianalità'},current_step:'goals'});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{goals:['lead'],current_step:'target'});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{target:{manual:['famiglie locali'],suggestions:[]},current_step:'brand'});await json(request,token,`/tenants/${tenantId}/scan`,'POST',{});await json(request,token,`/tenants/${tenantId}/brand/status`,'POST',{status:'confirmed'});await json(request,token,`/tenants/${tenantId}/social`,'POST',{platforms:['instagram'],publishingModes:{instagram:'manual'}});await json(request,token,`/tenants/${tenantId}/onboarding`,'PATCH',{frequency:{postsPerWeek:2,days:[1,3],times:['10:00']},publishing_modes:{instagram:'manual'},current_step:'summary'});await json(request,token,`/tenants/${tenantId}/onboarding/complete`,'POST',{});}
 async function upload(request:APIRequestContext,token:string,tenantId:string,name:string,color:string){const result=await json<any>(request,token,`/tenants/${tenantId}/assets`,'POST',{filename:name,mimeType:'image/svg+xml',dataBase64:svg(name,color).toString('base64')});return result.asset;}
 const copy=(variant:any)=>({hook:variant.hook??null,caption:variant.caption??null,cta:variant.cta??null,hashtags:[...(variant.hashtags??[])]});
 const findVariant=(workspace:any,id:string)=>workspace.posts.flatMap((post:any)=>post.variants).find((variant:any)=>variant.id===id);
 const persistedSelectedAssetId=(visual:any)=>visual.selected_asset_id??visual.visual_spec?.selection?.selectedAssetId??null;
-async function setSession(page:Page,token:string,tenantId:string){await page.goto('/');await page.evaluate(({token,tenantId})=>{localStorage.setItem('socialpilot.local.token',token);localStorage.setItem('socialpilot.local.tenant',tenantId)},{token,tenantId});}
-// Regression guard: the picker closes before the async render refresh is fully observable, so DB assertions must follow the successful render POST, never a timer.
-async function confirmPickerAndWaitForRender(page:Page,variantId:string){const persisted=page.waitForResponse((response)=>response.request().method()==='POST'&&response.url().includes(`/variants/${variantId}/visual`)&&response.ok());await page.getByTestId('media-picker-confirm').click();await persisted;await expect(page.getByTestId('media-picker')).toHaveCount(0);}
+async function setSession(page:Page,token:string,tenantId:string){await page.goto('/');await page.evaluate(({token,tenantId})=>{localStorage.setItem('post-automatici.session.token',token);localStorage.setItem('post-automatici.active-tenant',tenantId);},{token,tenantId});}
 
-test('Approval Media Picker supports cancel, reopen, repeated selection, upload, isolation and mobile without changing copy',async({page,request})=>{
+test('Asset Library is tenant-scoped and selected assets change visual preview without changing copy',async({page,request})=>{
   const errors:string[]=[];page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});page.on('pageerror',e=>errors.push(e.message));
   const a=await register(request,'Tenant A');await onboard(request,a.token,a.tenantId);
-  const activeA=await upload(request,a.token,a.tenantId,'picker-active-a-food.svg','#991b1b');const activeB=await upload(request,a.token,a.tenantId,'picker-active-b-food.svg','#7f1d1d');const blocked=await upload(request,a.token,a.tenantId,'picker-blocked-food.svg','#111827');const archived=await upload(request,a.token,a.tenantId,'picker-archived-food.svg','#374151');
-  await json(request,a.token,`/tenants/${a.tenantId}/assets/${blocked.id}`,'PATCH',{status:'BLOCKED'});await json(request,a.token,`/tenants/${a.tenantId}/assets/${archived.id}`,'PATCH',{status:'ARCHIVED'});
-  await json(request,a.token,`/tenants/${a.tenantId}/calendar`,'POST',{weeks:1});await json(request,a.token,`/tenants/${a.tenantId}/posts/generate-all`,'POST',{limit:10});
-  let workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);const pending=workspace.posts.flatMap((post:any)=>post.variants).find((variant:any)=>variant.platform_decision!=='skip'&&variant.approval_status==='pending');expect(pending).toBeTruthy();const variantId=pending.id as string;const originalCopy=copy(pending);let visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);const initialVersion=visual.render_version;
-  await setSession(page,a.token,a.tenantId);await page.goto('/approvals');await expect(page.getByRole('heading',{name:'Approval Center'})).toBeVisible();const open=page.getByTestId(`open-media-picker-${variantId}`);await expect(open).toBeVisible();
-  await open.click();await expect(page.getByTestId('media-picker')).toBeVisible();await expect(page.getByText('picker-active-a-food.svg')).toBeVisible();await expect(page.getByText('picker-blocked-food.svg')).toHaveCount(0);await expect(page.getByText('picker-archived-food.svg')).toHaveCount(0);await page.getByTestId('media-picker-close').click();await expect(page.getByTestId('media-picker')).toHaveCount(0);
-  visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);expect(visual.render_version).toBe(initialVersion);workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);expect(copy(findVariant(workspace,variantId))).toEqual(originalCopy);
-  const beforeSrc=await page.locator('.approval-preview img').first().getAttribute('src');await open.click();await page.getByTestId(`media-picker-asset-${activeA.id}`).click();await confirmPickerAndWaitForRender(page,variantId);await expect(page.getByText(/Asset selezionato manualmente/)).toBeVisible();visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);expect(visual.render_version).toBe(initialVersion+1);expect(persistedSelectedAssetId(visual)).toBe(activeA.id);expect(visual.visual_spec?.selection?.motivationCode).toBe('USER_SELECTED_ASSET');expect(visual.qa_result).toBeTruthy();expect(visual.fingerprint).toBeTruthy();await expect.poll(()=>page.locator('.approval-preview img').first().getAttribute('src')).not.toBe(beforeSrc);
+  const activeA=await upload(request,a.token,a.tenantId,'active-a-food.svg','#991b1b');
+  const activeB=await upload(request,a.token,a.tenantId,'active-b-food.svg','#7f1d1d');
+  const blocked=await upload(request,a.token,a.tenantId,'blocked-food.svg','#111827');
+  const archived=await upload(request,a.token,a.tenantId,'archived-food.svg','#374151');
+  await json(request,a.token,`/tenants/${a.tenantId}/assets/${blocked.id}`,'PATCH',{status:'BLOCKED'});
+  await json(request,a.token,`/tenants/${a.tenantId}/assets/${archived.id}`,'PATCH',{status:'ARCHIVED'});
+
+  await setSession(page,a.token,a.tenantId);
+  await page.goto('/app/assets');
+  await expect(page.getByRole('heading',{name:'Asset Library'})).toBeVisible();
+  await expect(page.getByText('active-a-food.svg')).toBeVisible();
+  await expect(page.getByText('blocked-food.svg')).toBeVisible();
+  await expect(page.getByText('archived-food.svg')).toBeVisible();
+  await page.getByTestId('asset-search').fill('active-b');
+  await page.getByRole('button',{name:'Filtra'}).click();
+  await expect(page.getByText('active-b-food.svg')).toBeVisible();
+  await expect(page.getByText('active-a-food.svg')).toHaveCount(0);
+  await page.getByTestId('asset-search').fill('');
+  await page.getByRole('button',{name:'Filtra'}).click();
+
+  await json(request,a.token,`/tenants/${a.tenantId}/calendar`,'POST',{weeks:1});
+  await json(request,a.token,`/tenants/${a.tenantId}/posts/generate-all`,'POST',{limit:10});
+  let workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);
+  const pending=workspace.posts.flatMap((post:any)=>post.variants).find((variant:any)=>variant.platform_decision!=='skip'&&variant.approval_status==='pending');
+  expect(pending).toBeTruthy();
+  const variantId=pending.id as string;const originalCopy=copy(pending);
+  let visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);
+  const initialVersion=visual.render_version;
+  visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`,'POST',{assetId:activeA.id});
+  expect(visual.render_version).toBe(initialVersion+1);expect(persistedSelectedAssetId(visual)).toBe(activeA.id);expect(visual.qa_result).toBeTruthy();expect(visual.fingerprint).toBeTruthy();
   workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);expect(copy(findVariant(workspace,variantId))).toEqual(originalCopy);
-  await open.click();await page.getByTestId(`media-picker-asset-${activeB.id}`).click();await confirmPickerAndWaitForRender(page,variantId);visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);expect(visual.render_version).toBe(initialVersion+2);expect(persistedSelectedAssetId(visual)).toBe(activeB.id);expect(visual.visual_spec?.selection?.motivationCode).toBe('USER_SELECTED_ASSET');workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);expect(copy(findVariant(workspace,variantId))).toEqual(originalCopy);
-  await open.click();await page.getByTestId('media-picker-upload').setInputFiles({name:'picker-uploaded-food.svg',mimeType:'image/svg+xml',buffer:svg('UPLOADED','#166534')});await expect(page.getByText('Nuovo asset caricato e selezionato.')).toBeVisible();await confirmPickerAndWaitForRender(page,variantId);visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`);expect(visual.render_version).toBe(initialVersion+3);expect(persistedSelectedAssetId(visual)).toBeTruthy();expect(visual.visual_spec?.selection?.motivationCode).toBe('USER_SELECTED_ASSET');expect(visual.qa_result).toBeTruthy();workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);expect(copy(findVariant(workspace,variantId))).toEqual(originalCopy);
-  const b=await register(request,'Tenant B');const foreign=await upload(request,b.token,b.tenantId,'foreign-food.svg','#0f172a');const foreignAttempt=await request.post(`${API}/tenants/${a.tenantId}/variants/${variantId}/visual`,{headers:{authorization:`Bearer ${a.token}`,'content-type':'application/json'},data:{assetId:foreign.id}});expect(foreignAttempt.ok()).toBe(false);expect(JSON.stringify(await foreignAttempt.json().catch(()=>({})))).toContain('asset_not_found');
-  await page.setViewportSize({width:390,height:844});await open.click();await expect(page.getByTestId('media-picker')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)).toBeLessThanOrEqual(2);await page.getByTestId('media-picker-close').click();expect(errors,errors.join('\n')).toEqual([]);
+  visual=await json<any>(request,a.token,`/tenants/${a.tenantId}/variants/${variantId}/visual`,'POST',{assetId:activeB.id});
+  expect(visual.render_version).toBe(initialVersion+2);expect(persistedSelectedAssetId(visual)).toBe(activeB.id);
+  workspace=await json<any>(request,a.token,`/tenants/${a.tenantId}/workspace`);expect(copy(findVariant(workspace,variantId))).toEqual(originalCopy);
+
+  await page.goto('/approvals');
+  await expect(page.getByRole('heading',{name:'Anteprime da approvare'})).toBeVisible();
+  await expect(page.locator('.approval-preview img').first()).toBeVisible();
+  await expect(page.getByTestId(`approve-${variantId}`)).toBeVisible();
+
+  const b=await register(request,'Tenant B');const foreign=await upload(request,b.token,b.tenantId,'foreign-food.svg','#0f172a');
+  const foreignAttempt=await request.post(`${API}/tenants/${a.tenantId}/variants/${variantId}/visual`,{headers:{authorization:`Bearer ${a.token}`,'content-type':'application/json'},data:{assetId:foreign.id}});
+  expect(foreignAttempt.ok()).toBe(false);expect(JSON.stringify(await foreignAttempt.json().catch(()=>({})))).toContain('asset_not_found');
+
+  await page.setViewportSize({width:390,height:844});await page.goto('/app/assets');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)).toBeLessThanOrEqual(2);
+  expect(errors,errors.join('\n')).toEqual([]);
 });
