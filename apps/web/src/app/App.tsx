@@ -15,6 +15,7 @@ import { DashboardPage } from '../pages/DashboardPage';
 import { CalendarPage } from '../pages/BrandCalendarPages';
 import { BrandVisualPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
 import { ContentsPage, PersonalSettingsPage, SitePage, SocialConnectionsPage } from '../pages/PersonalWorkspacePages';
+import { AiBudgetPage } from '../pages/AiBudgetPage';
 import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
 
@@ -50,6 +51,7 @@ export function App() {
       <Route path="/app/connections" element={protectedData(<SocialConnectionsPage />)} />
       <Route path="/app/analytics" element={protectedData(<PersonalAnalyticsPage />)} />
       <Route path="/app/notifications" element={protectedData(<NotificationsPage />)} />
+      <Route path="/app/budget-ai" element={protectedData(<AiBudgetPage />)} />
       <Route path="/app/support" element={protectedData(<PersonalSupportPage />)} />
       <Route path="/app/billing" element={<Navigate to="/app/settings" replace />} />
       <Route path="/app/settings" element={protectedData(<PersonalSettingsPage />)} />
