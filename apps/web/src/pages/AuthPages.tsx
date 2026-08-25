@@ -1,11 +1,11 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Seo } from '../components/Seo';
-import { localE2EEnabled, useLocalE2E } from '../services/local-e2e';
+import { internalE2EFixturesEnabled, useLocalE2E } from '../services/local-e2e';
 import './auth-pages.css';
 
-const fixtureEmail = localE2EEnabled ? 'e2e@example.test' : '';
-const fixturePassword = localE2EEnabled ? 'LocalE2E-password-123!' : '';
+const fixtureEmail = internalE2EFixturesEnabled ? 'e2e@example.test' : '';
+const fixturePassword = internalE2EFixturesEnabled ? 'LocalE2E-password-123!' : '';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -44,10 +44,10 @@ export function LoginPage() {
 export function RegisterPage() {
   const navigate = useNavigate();
   const local = useLocalE2E();
-  const [name, setName] = useState(localE2EEnabled ? 'Utente E2E' : '');
-  const [email, setEmail] = useState(localE2EEnabled ? `e2e-${Date.now()}@example.test` : '');
+  const [name, setName] = useState(internalE2EFixturesEnabled ? 'Utente E2E' : '');
+  const [email, setEmail] = useState(internalE2EFixturesEnabled ? `e2e-${Date.now()}@example.test` : '');
   const [password, setPassword] = useState(fixturePassword);
-  const [accepted, setAccepted] = useState(localE2EEnabled);
+  const [accepted, setAccepted] = useState(internalE2EFixturesEnabled);
   const [message, setMessage] = useState<string | null>(null);
 
   const submit = async (event: FormEvent) => {
@@ -98,14 +98,14 @@ function AuthLayout({ path, eyebrow, title, description, children }: { path: str
     <section className="auth-story" aria-label="Panoramica prodotto">
       <Link className="public-logo auth-logo" to="/"><span className="logo-glyph">P</span><span>Post Automatici</span></Link>
       <div className="auth-story-copy"><span className="section-label">Una sola control room</span><h2>Dal brand alla pubblicazione, senza rincorrere cinque strumenti.</h2><p>Ogni tua attività ha un profilo indipendente. Strategia, calendario, contenuti, anteprime, approvazioni, pubblicazioni e risultati restano nello stesso workflow.</p><div className="auth-story-points"><div><span>01</span><p><b>Conosci il brand</b><small>Sito analizzato pagina per pagina, tono, servizi e regole verificabili.</small></p></div><div><span>02</span><p><b>Anteprima sempre</b><small>Ogni contenuto richiede la tua decisione prima della pubblicazione.</small></p></div><div><span>03</span><p><b>Impara dai dati reali</b><small>Metriche provider trasformate in decisioni successive.</small></p></div></div></div>
-      <div className="auth-story-status"><span className="status-dot"/><span>{localE2EEnabled ? 'Test harness interno' : 'Workspace protetto'}</span></div>
+      <div className="auth-story-status"><span className="status-dot"/><span>{internalE2EFixturesEnabled ? 'Test harness interno' : 'Workspace protetto'}</span></div>
     </section>
     <main className="auth-workspace">
       <div className="auth-mobile-logo"><Link className="public-logo" to="/"><span className="logo-glyph">P</span><span>Post Automatici</span></Link></div>
       <section className="auth-card">
         <span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p className="auth-description">{description}</p>
         <div>{children}</div>
-        <div className="auth-safety"><span className="status-dot" /> {localE2EEnabled ? 'Test automatici interni attivi' : 'Le funzioni non collegate restano esplicitamente non disponibili'}</div>
+        <div className="auth-safety"><span className="status-dot" /> {internalE2EFixturesEnabled ? 'Test automatici interni attivi' : 'Le funzioni non collegate restano esplicitamente non disponibili'}</div>
       </section>
     </main>
   </div>;
