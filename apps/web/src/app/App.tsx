@@ -6,6 +6,7 @@ import { LocalE2EProvider } from '../services/local-e2e';
 import { RealDataGate } from '../services/RealDataGate';
 import { OnboardingPage } from '../pages/OnboardingPage';
 import { PostEditorPage } from '../pages/PostEditorPage';
+import { PersonalApprovalsPage } from '../pages/PersonalApprovalsPage';
 import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
@@ -13,7 +14,7 @@ import { AnalyticsPage, BillingPage, StrategyPage, SupportPage } from '../pages/
 import { ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
 import { DashboardPage } from '../pages/DashboardPage';
 import { CalendarPage } from '../pages/BrandCalendarPages';
-import { BrandVisualPage, VisualApprovalsPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
+import { BrandVisualPage, VisualAssetsPage } from '../pages/VisualWorkflowPages';
 import { ContentsPage, PersonalSettingsPage, SitePage, SocialConnectionsPage } from '../pages/PersonalWorkspacePages';
 import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
@@ -45,8 +46,8 @@ export function App() {
       <Route path="/app/strategy" element={protectedData(<StrategyPage />)} />
       <Route path="/app/calendar" element={protectedData(<CalendarPage />)} />
       <Route path="/app/posts/:id" element={protectedData(<PostEditorPage />)} />
-      <Route path="/app/approvals" element={protectedData(<VisualApprovalsPage />)} />
-      <Route path="/approvals" element={protectedData(<VisualApprovalsPage />)} />
+      <Route path="/app/approvals" element={protectedData(<PersonalApprovalsPage />)} />
+      <Route path="/approvals" element={protectedData(<PersonalApprovalsPage />)} />
       <Route path="/app/connections" element={protectedData(<SocialConnectionsPage />)} />
       <Route path="/app/analytics" element={protectedData(<AnalyticsPage />)} />
       <Route path="/app/notifications" element={protectedData(<NotificationsPage />)} />
