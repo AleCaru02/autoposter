@@ -45,8 +45,8 @@ describe('accessibility smoke', () => {
   it('keeps the onboarding fallback explicit when production backend is absent', () => {
     const html = renderRoute('/onboarding');
     expect(html).toContain('Backend da configurare');
-    expect(html).toContain('NON DISPONIBILE');
-    expect(html).toContain('Persistenza non collegata');
+    expect(html).toContain('backend persistente');
+    expect(html).toContain('Nessun dato viene simulato');
     expect(html).not.toContain('VITE_LOCAL_API_URL');
   });
 });
