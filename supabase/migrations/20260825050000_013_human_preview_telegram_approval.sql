@@ -1,11 +1,11 @@
 -- Human approval is mandatory before any social publication.
--- DEMO/REAL controls data/provider mode only; it must never bypass the preview gate.
+-- There is one product behavior: preview first, explicit human decision, then optional scheduled delivery.
 
--- Disable the legacy trigger that could queue AUTO variants immediately after QA.
+-- Disable the legacy trigger that could queue variants immediately after QA.
 drop trigger if exists post_variants_enqueue_auto_publication on public.post_variants;
 
 comment on column public.social_connections.approval_mode is
-  'Post-approval delivery preference. AUTO must never bypass human preview/approval.';
+  'Post-approval delivery preference. Scheduling must never bypass human preview/approval.';
 
 create table if not exists public.telegram_approval_requests (
   id uuid primary key default gen_random_uuid(),
@@ -41,9 +41,14 @@ on public.telegram_approval_requests
 for select to authenticated
 using (public.is_tenant_member(tenant_id) or public.is_platform_admin());
 
-create policy telegram_approval_requests_write_editor
+create policy telegram_approval_requests_insert_editor
 on public.telegram_approval_requests
-for all to authenticated
+for insert to authenticated
+with check (public.has_tenant_role(tenant_id, array['owner','admin','editor']) or public.is_platform_admin());
+
+create policy telegram_approval_requests_update_editor
+on public.telegram_approval_requests
+for update to authenticated
 using (public.has_tenant_role(tenant_id, array['owner','admin','editor']) or public.is_platform_admin())
 with check (public.has_tenant_role(tenant_id, array['owner','admin','editor']) or public.is_platform_admin());
 
@@ -95,7 +100,7 @@ for each row
 execute function public.enforce_human_variant_approval();
 
 -- Publication jobs are silently suppressed until a real approval event exists.
--- This prevents legacy/internal AUTO code from bypassing preview without breaking generation.
+-- This prevents legacy/internal scheduling code from bypassing preview without breaking generation.
 create or replace function public.guard_publication_job_human_approval()
 returns trigger
 language plpgsql
@@ -125,7 +130,7 @@ on public.publication_jobs
 for each row
 execute function public.guard_publication_job_human_approval();
 
--- Normalize existing non-published AUTO rows that have no explicit approval event.
+-- Normalize existing non-published rows that have no explicit approval event.
 update public.post_variants pv
 set approval_status = 'pending',
     status = 'awaiting_approval'
