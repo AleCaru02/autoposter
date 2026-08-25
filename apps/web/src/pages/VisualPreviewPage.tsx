@@ -1,5 +1,6 @@
+import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
-import { Badge, Card, MetricCard, PageHeader, Progress } from '../components/ui';
+import { Badge, Card, MetricCard, PageHeader } from '../components/ui';
 
 const posts = [
   { day: '26', month: 'AGO', platform: 'Instagram', topic: '3 errori che fanno perdere prenotazioni', status: 'DA APPROVARE' },
@@ -32,7 +33,7 @@ export function VisualPreviewPage() {
     <div className="control-room-secondary">
       <Card className="performance-story"><div className="panel-head"><div><span className="panel-kicker">PERFORMANCE</span><h2>Non solo numeri: direzione.</h2></div><Badge tone="good">+18%</Badge></div><div className="performance-chart" aria-label="Grafico dimostrativo">{[35,48,42,61,57,73,65,82,76,91,84,96].map((height,index)=><span key={index} style={{height:`${height}%`}}/>)}</div><div className="performance-foot"><div><small>Reach</small><strong>24.8K</strong></div><div><small>Engagement</small><strong>5.2%</strong></div><div><small>Click</small><strong>684</strong></div></div></Card>
       <Card className="ai-next-card"><span className="panel-kicker">PROSSIMA DECISIONE</span><h2>Più contenuti educativi brevi, meno promozionali generici.</h2><p>Quando ci saranno dati reali sufficienti, qui comparirà una raccomandazione con evidenze e livello di confidenza.</p><div className="evidence-row"><span>Formato</span><span>Argomento</span><span>Orario</span></div><Link to="/app/analytics">Apri analisi →</Link></Card>
-      <Card className="plan-usage-card"><span className="panel-kicker">SETUP PROFILO</span><div className="quota-ring" style={{'--quota':'78%'} as React.CSSProperties}><strong>78%</strong><small>completo</small></div><div className="quota-lines"><div><span>Sito analizzato</span><strong>✓</strong></div><div><span>Brand verificato</span><strong>✓</strong></div><div><span>Social collegati</span><strong>2/4</strong></div></div></Card>
+      <Card className="plan-usage-card"><span className="panel-kicker">SETUP PROFILO</span><div className="quota-ring" style={{'--quota':'78%'} as CSSProperties}><strong>78%</strong><small>completo</small></div><div className="quota-lines"><div><span>Sito analizzato</span><strong>✓</strong></div><div><span>Brand verificato</span><strong>✓</strong></div><div><span>Social collegati</span><strong>2/4</strong></div></div></Card>
     </div>
 
     <Card className="brand-health-strip"><div><span className="panel-kicker">PROFILO</span><strong>Attività esempio</strong></div><div><div className="health-track"><span style={{width:'78%'}}/></div></div><p>Il sistema usa solo informazioni confermate o evidenze del sito; ciò che manca resta esplicitamente da configurare.</p><Link to="/app/brand">Apri brand →</Link></Card>
