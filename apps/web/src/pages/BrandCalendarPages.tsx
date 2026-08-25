@@ -1,39 +1,44 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router';
-import { Badge, Card, PageHeader } from '../components/ui';
-import { useSaasSnapshot } from '../services/SaasServicesProvider';
+import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
 import { useLocalE2E } from '../services/local-e2e';
 
 const brandFields = [
-  ['brand_name','Brand name','text'],['description','Description','textarea'],['industry','Settore','text'],['target','Target','list'],['personas','Personas','list'],['services','Servizi','list'],['products','Prodotti','list'],['usp','USP','text'],['differentiators','Differenziatori','list'],['value_propositions','Value proposition','list'],['brand_colors','Colori','list'],['fonts','Font','list'],['visual_style','Stile visivo','object'],['tone_of_voice','Tone of voice','object'],['vocabulary','Parole preferite','list'],['banned_words','Parole da evitare','list'],['cta_preferences','CTA','list'],['topics','Topics','list'],['goals','Goals','list'],
+  ['brand_name','Nome brand','text'],['description','Descrizione','textarea'],['industry','Settore','text'],['target','Target','list'],['personas','Personas','list'],['services','Servizi','list'],['products','Prodotti','list'],['usp','USP','text'],['differentiators','Differenziatori','list'],['value_propositions','Value proposition','list'],['brand_colors','Colori','list'],['fonts','Font','list'],['visual_style','Stile visivo','object'],['tone_of_voice','Tone of voice','object'],['vocabulary','Parole preferite','list'],['banned_words','Parole da evitare','list'],['cta_preferences','CTA','list'],['topics','Temi','list'],['goals','Obiettivi','list'],
 ] as const;
 
 export function BrandPage() {
   const local = useLocalE2E();
-  const fallback = useSaasSnapshot();
   const profile = local.workspace?.brand;
   const [draft, setDraft] = useState<Record<string,unknown>>({});
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => { if (profile) setDraft(profile); }, [profile]);
 
-  if (!local.enabled || !profile || !local.tenantId) return <><PageHeader eyebrow="Brand intelligence" title="Brand Profile" description="Fonte compatta di verità per strategia, generazione e QA. I lock impediscono all’AI di reinterpretare fatti critici." /><div className="brand-grid">{fallback.brandFields.map((field) => <Card key={field.key}><div className="row-between"><span className="eyebrow">{field.label}</span><Badge tone={field.status === 'Inferito' ? 'warn' : field.status === 'Bloccato' ? 'neutral' : 'good'}>{field.status}</Badge></div><p className="brand-value">{field.value}</p></Card>)}</div></>;
+  const createManual=async()=>{
+    if(!local.tenantId)return;
+    setMessage(null);
+    try{await local.api(`/tenants/${local.tenantId}/brand/manual-init`,{method:'POST',body:JSON.stringify({})});await local.refresh();setMessage('Brand Profile creato dai dati dell’attività. Completa e conferma i campi.');}
+    catch(error){setMessage(error instanceof Error?error.message:String(error));}
+  };
+
+  if (!local.tenantId) return <><PageHeader eyebrow="Brand" title="Brand Profile" description="Seleziona un’attività per gestire il brand."/><Card><EmptyState title="Nessuna attività attiva" body="Crea o seleziona un’attività."/></Card></>;
+  if (!profile) return <><PageHeader eyebrow="Brand" title="Brand Profile" description="Il profilo può essere creato dalla scansione del sito oppure manualmente dai dati dell’attività."/>{message&&<Card><p role="status">{message}</p></Card>}<Card><EmptyState title="Brand Profile non ancora creato" body="Se hai un sito, esegui prima la scansione pagina per pagina. In alternativa crea il profilo manuale e completalo tu."/><div className="card-actions"><button className="button" onClick={()=>void createManual()}>Crea Brand Profile manuale</button></div></Card></>;
 
   const locks = new Set(local.workspace?.locks.map((lock)=>String(lock.field_path)) ?? []);
   const source = profile.source_summary ?? {};
   const save = async () => {
     setMessage(null);
-    try { await local.api(`/tenants/${local.tenantId}/brand`, { method:'PATCH', body:JSON.stringify(normalizeBrandPatch(draft)) }); await local.refresh(); setMessage('Nuova versione DRAFT salvata.'); }
+    try { await local.api(`/tenants/${local.tenantId}/brand`, { method:'PATCH', body:JSON.stringify(normalizeBrandPatch(draft)) }); await local.refresh(); setMessage('Modifiche salvate in una nuova versione del Brand Profile.'); }
     catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
-  const setStatus = async (status:'review'|'confirmed') => { await local.api(`/tenants/${local.tenantId}/brand/status`,{method:'POST',body:JSON.stringify({status})}); await local.refresh(); };
-  const toggleLock = async (key:string) => { await local.api(`/tenants/${local.tenantId}/brand/lock`,{method:'POST',body:JSON.stringify({fieldPath:key,locked:!locks.has(key)})}); await local.refresh(); };
+  const setStatus = async (status:'review'|'confirmed') => { try{await local.api(`/tenants/${local.tenantId}/brand/status`,{method:'POST',body:JSON.stringify({status})});await local.refresh();setMessage(status==='confirmed'?'Brand Profile confermato.':'Brand Profile segnato per revisione.');}catch(error){setMessage(error instanceof Error?error.message:String(error));} };
+  const toggleLock = async (key:string) => { try{await local.api(`/tenants/${local.tenantId}/brand/lock`,{method:'POST',body:JSON.stringify({fieldPath:key,locked:!locks.has(key)})});await local.refresh();}catch(error){setMessage(error instanceof Error?error.message:String(error));} };
 
   return <>
-    <PageHeader eyebrow="Brand intelligence · locale" title="Brand Profile versionato" description="DRAFT → REVIEWED → CONFIRMED. I campi bloccati non vengono sovrascritti dalle scansioni successive." action={<div className="card-actions"><button className="button secondary" onClick={()=>void setStatus('review')}>Segna REVIEWED</button><button className="button" data-testid="brand-confirm" onClick={()=>void setStatus('confirmed')}>Conferma</button></div>} />
-    <div className="three-col"><Card><span className="eyebrow">Versione corrente</span><h2>v{String(profile.version ?? 1)}</h2></Card><Card><span className="eyebrow">Stato</span><h2>{String(profile.status).toUpperCase()}</h2></Card><Card><span className="eyebrow">Origine / aggiornamento</span><p>{String(source.source ?? 'onboarding')}</p><small>{new Date(String(profile.updated_at)).toLocaleString('it-IT')}</small></Card></div>
+    <PageHeader eyebrow="Brand" title="Brand Profile versionato" description="È la fonte di verità per strategia, contenuti e QA. I campi bloccati non possono essere riscritti automaticamente." action={<div className="card-actions"><button className="button secondary" onClick={()=>void setStatus('review')}>Da rivedere</button><button className="button" data-testid="brand-confirm" onClick={()=>void setStatus('confirmed')}>Conferma brand</button></div>} />
+    <div className="three-col"><Card><span className="eyebrow">Versione</span><h2>v{String(profile.version ?? 1)}</h2></Card><Card><span className="eyebrow">Stato</span><h2>{String(profile.status).toUpperCase()}</h2></Card><Card><span className="eyebrow">Origine</span><p>{String(source.source ?? 'manuale')}</p><small>{profile.updated_at?new Date(String(profile.updated_at)).toLocaleString('it-IT'):'—'}</small></Card></div>
     {message && <Card><p role="status">{message}</p></Card>}
-    <div className="brand-grid">{brandFields.map(([key,label,type]) => <Card key={key}><div className="row-between"><span className="eyebrow">{label}</span><Badge tone={locks.has(key)?'neutral':profile.status==='confirmed'?'good':'warn'}>{locks.has(key)?'Bloccato':String(profile.status).toUpperCase()}</Badge></div><BrandInput testId={`brand-${key}`} type={type} value={draft[key]} onChange={(value)=>setDraft({...draft,[key]:value})} disabled={locks.has(key)}/><div className="card-actions"><button type="button" onClick={()=>void toggleLock(key)}>{locks.has(key)?'Sblocca':'Blocca'}</button></div></Card>)}</div>
-    <Card><button data-testid="brand-save" className="button" onClick={()=>void save()}>Salva nuova versione DRAFT</button><p className="muted">Storico versioni: {local.workspace?.brandVersions.length ?? 0}. Fonte ultima versione: {String(source.source ?? 'non indicata')}.</p></Card>
+    <div className="brand-grid">{brandFields.map(([key,label,type]) => <Card key={key}><div className="row-between"><span className="eyebrow">{label}</span><Badge tone={locks.has(key)?'neutral':profile.status==='confirmed'?'good':'warn'}>{locks.has(key)?'BLOCCATO':String(profile.status).toUpperCase()}</Badge></div><BrandInput testId={`brand-${key}`} type={type} value={draft[key]} onChange={(value)=>setDraft({...draft,[key]:value})} disabled={locks.has(key)}/><div className="card-actions"><button type="button" onClick={()=>void toggleLock(key)}>{locks.has(key)?'Sblocca':'Blocca campo'}</button></div></Card>)}</div>
+    <Card><button data-testid="brand-save" className="button" onClick={()=>void save()}>Salva modifiche</button><p className="muted">Versioni archiviate: {local.workspace?.brandVersions.length ?? 0}.</p></Card>
   </>;
 }
 
@@ -47,25 +52,43 @@ function normalizeBrandPatch(draft:Record<string,unknown>) { return Object.fromE
 
 export function CalendarPage() {
   const local = useLocalE2E();
-  const fallback = useSaasSnapshot();
-  const [view,setView] = useState<'week'|'month'|'list'>('week');
+  const [view,setView] = useState<'week'|'month'|'list'>('list');
   const [message,setMessage] = useState<string|null>(null);
-  const realPosts = local.workspace?.posts ?? [];
-  const visible = useMemo(()=>{
-    if (!local.enabled) return [];
-    const sorted=[...realPosts].sort((a,b)=>String(a.planned_at??'').localeCompare(String(b.planned_at??'')));
-    if(view==='list'||view==='month') return sorted;
-    const first=sorted.find((post)=>post.planned_at)?.planned_at;
-    if(!first) return sorted;
-    const start=new Date(first).getTime(); return sorted.filter((post)=>new Date(String(post.planned_at)).getTime()<start+7*86400000);
-  },[local.enabled,realPosts,view]);
+  const [editing,setEditing]=useState<string|null>(null);
+  const [dateTime,setDateTime]=useState('');
+  const posts = local.workspace?.posts ?? [];
+  const variants=useMemo(()=>posts.flatMap((post:any)=>(post.variants??[]).filter((variant:any)=>variant.platform_decision!=='skip').map((variant:any)=>({post,variant}))).sort((a:any,b:any)=>String(a.variant.scheduled_at??a.post.planned_at??'').localeCompare(String(b.variant.scheduled_at??b.post.planned_at??''))),[posts]);
+  const visible=useMemo(()=>{
+    if(view==='list'||variants.length===0)return variants;
+    const first=variants.find((item:any)=>item.variant.scheduled_at||item.post.planned_at);
+    if(!first)return variants;
+    const start=new Date(String(first.variant.scheduled_at??first.post.planned_at)).getTime();
+    const windowMs=view==='week'?7*86400000:31*86400000;
+    return variants.filter((item:any)=>{const value=item.variant.scheduled_at??item.post.planned_at;if(!value)return true;const time=new Date(String(value)).getTime();return time>=start&&time<start+windowMs;});
+  },[variants,view]);
 
-  if (!local.enabled || !local.tenantId) return <><PageHeader eyebrow="Piano editoriale" title="Calendario" description="Un concept può diventare una variante nativa, un concept separato o essere saltato su ogni canale." /><Card><div className="calendar-list">{fallback.posts.map((post)=><article className="calendar-row" key={post.id}><div className="date-chip large">{post.date}</div><div className="grow"><strong>{post.title}</strong><div className="meta-line">{post.platform} · {post.state}</div></div><Link className="ghost-button" to={`/app/posts/${post.id}`}>Apri</Link></article>)}</div></Card></>;
+  const beginEdit=(variant:any)=>{setEditing(String(variant.id));setDateTime(toLocalInput(variant.scheduled_at));};
+  const saveSchedule=async(variantId:string)=>{
+    if(!local.tenantId||!dateTime)return;
+    setMessage(null);
+    try{await local.api(`/tenants/${local.tenantId}/variants/${variantId}/schedule`,{method:'PATCH',body:JSON.stringify({scheduledAt:new Date(dateTime).toISOString()})});await local.refresh();setEditing(null);setMessage('Data e ora aggiornate. L’approvazione resta invariata.');}
+    catch(error){setMessage(error instanceof Error?error.message:String(error));}
+  };
 
-  const generateCalendar=async()=>{setMessage(null);try{await local.api(`/tenants/${local.tenantId}/calendar`,{method:'POST',body:JSON.stringify({weeks:4})});await local.refresh();setMessage('Calendario di 4 settimane generato nel database locale.');}catch(error){setMessage(error instanceof Error?error.message:String(error));}};
-  const generateContent=async()=>{setMessage(null);try{await local.api(`/tenants/${local.tenantId}/posts/generate-all`,{method:'POST',body:JSON.stringify({limit:50})});await local.refresh();setMessage('Contenuti generati e passati nel quality gate.');}catch(error){setMessage(error instanceof Error?error.message:String(error));}};
-
-  return <><PageHeader eyebrow="Piano editoriale · database locale" title="Calendario" description="Date, piattaforme, pillar, topic, formato e stato provengono dal database locale." action={<div className="card-actions"><button data-testid="generate-calendar" className="button secondary" onClick={()=>void generateCalendar()}>Genera 4 settimane</button><button data-testid="generate-content" className="button" onClick={()=>void generateContent()}>Genera contenuti</button></div>} />{message&&<Card><p role="status">{message}</p></Card>}<Card><div className="filter-row">{(['week','month','list'] as const).map((item)=><button key={item} data-testid={`calendar-view-${item}`} className={`filter ${view===item?'active':''}`} onClick={()=>setView(item)}>{item==='week'?'Settimana':item==='month'?'Mese':'Lista'}</button>)}<span className="grow"/><Badge>{realPosts.length} contenuti reali locali</Badge></div><div className="calendar-list">{visible.map((post:any)=><article className="calendar-row" key={post.id}><div className="date-chip large">{post.planned_at?new Date(post.planned_at).toLocaleDateString('it-IT',{day:'2-digit',month:'short'}):'—'}</div><div className="grow"><div className="row-between"><strong>{post.topic}</strong><Badge tone={post.status==='published'?'good':post.status==='failed'||post.status==='rejected'?'warn':'info'}>{String(post.status).toUpperCase()}</Badge></div><div className="meta-line">{platformName(post.primary_platform)} · {post.format??'—'} · {post.objective??'—'} · {post.variants?.length??0} varianti</div></div><Link className="ghost-button" to={`/app/posts/${post.id}`}>Apri</Link></article>)}{visible.length===0&&<p className="muted">Nessun contenuto: genera il calendario dalla strategia confermata.</p>}</div></Card></>;
+  return <>
+    <PageHeader eyebrow="Piano editoriale" title="Calendario" description="Programmazione persistente per singola variante e piattaforma. Nessun contenuto viene pubblicato senza la tua approvazione." action={<button className="button" disabled title="OpenAI da configurare">Genera piano con OpenAI · Da configurare</button>} />
+    {message&&<Card><p role="status">{message}</p></Card>}
+    <Card><div className="filter-row">{(['week','month','list'] as const).map((item)=><button key={item} data-testid={`calendar-view-${item}`} className={`filter ${view===item?'active':''}`} onClick={()=>setView(item)}>{item==='week'?'Settimana':item==='month'?'Mese':'Lista'}</button>)}<span className="grow"/><Badge>{variants.length} uscite</Badge></div></Card>
+    {visible.length===0?<Card><EmptyState title="Calendario vuoto" body="Non ci sono ancora contenuti programmati. La generazione automatica verrà abilitata solo quando OpenAI sarà configurato realmente."/></Card>:<div className="stack">{visible.map(({post,variant}:any)=>{
+      const scheduled=variant.scheduled_at??post.planned_at;
+      return <Card key={variant.id}><div className="row-between"><div><strong>{post.topic}</strong><small>{platformName(variant.platform)} · {variant.format??post.format??'formato da definire'}</small></div><Badge tone={variant.status==='published'?'good':variant.status==='rejected'||variant.status==='failed'?'warn':'info'}>{String(variant.status??post.status).toUpperCase()}</Badge></div>
+        <div className="signal-row"><span>Data e ora</span><strong>{scheduled?new Date(String(scheduled)).toLocaleString('it-IT'):'Non impostata'}</strong></div>
+        <div className="signal-row"><span>Approvazione</span><Badge tone={variant.approval_status==='approved'?'good':variant.approval_status==='rejected'?'warn':'info'}>{String(variant.approval_status??'pending').toUpperCase()}</Badge></div>
+        {editing===String(variant.id)?<div className="card-actions"><input aria-label="Nuova data e ora" type="datetime-local" value={dateTime} onChange={(event)=>setDateTime(event.target.value)}/><button className="button" disabled={!dateTime} onClick={()=>void saveSchedule(String(variant.id))}>Salva</button><button className="button secondary" onClick={()=>setEditing(null)}>Annulla</button></div>:<div className="card-actions"><button className="button secondary" disabled={['publishing','published'].includes(String(variant.status))} onClick={()=>beginEdit(variant)}>Modifica data/ora</button><a className="button secondary" href={`/app/posts/${post.id}`}>Apri contenuto</a></div>}
+      </Card>;
+    })}</div>}
+  </>;
 }
 
 function platformName(value:unknown){return value==='google_business_profile'?'Google Business Profile':String(value??'').replace(/^./,(c)=>c.toUpperCase());}
+function toLocalInput(value:unknown){if(!value)return'';const date=new Date(String(value));if(Number.isNaN(date.getTime()))return'';const offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16);}
