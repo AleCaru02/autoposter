@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { AiBudgetService } from '../apps/local-api/src/ai-budget-service.js';
 import { runAiRequestContext } from '../apps/local-api/src/ai-request-context.js';
 import { LocalSupabaseClient } from '../apps/local-api/src/db.js';
 import { handleApiRequest } from '../apps/local-api/src/server.js';
@@ -7,12 +8,14 @@ import { VercelSafeProductionAIWorkflowService } from '../apps/local-api/src/ver
 
 const db=new LocalSupabaseClient();
 const productionAi=new VercelSafeProductionAIWorkflowService();
+const aiBudget=new AiBudgetService(db);
 const allowedBuckets=new Set(['brand-assets','post-assets','tenant-documents']);
 const secret=()=>process.env.ASSET_SIGNING_SECRET?.trim()??'';
 const parts=(pathname:string)=>pathname.split('/').filter(Boolean).map(decodeURIComponent);
 const safeEqual=(left:string,right:string)=>{try{const a=Buffer.from(left,'hex'),b=Buffer.from(right,'hex');return a.length===b.length&&a.length>0&&timingSafeEqual(a,b)}catch{return false}};
 const signature=(bucket:string,path:string,exp:number)=>createHmac('sha256',secret()).update(`${bucket}\n${path}\n${exp}`).digest('hex');
 const readBytes=async(req:IncomingMessage)=>{const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));return Buffer.concat(chunks)};
+const readJsonBody=async(req:IncomingMessage)=>{const bytes=await readBytes(req);if(!bytes.length)return{} as Record<string,unknown>;if(bytes.length>1_000_000)throw new Error('body_too_large');const value=JSON.parse(bytes.toString('utf8')) as unknown;if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('json_object_required');return value as Record<string,unknown>;};
 const bearer=(req:IncomingMessage)=>{const value=Array.isArray(req.headers.authorization)?req.headers.authorization[0]:req.headers.authorization;if(!value?.startsWith('Bearer '))throw new Error('auth_required');return value.slice(7)};
 const internalAuthorized=(req:IncomingMessage)=>{const key=secret();if(!key)return false;const api=Array.isArray(req.headers.apikey)?req.headers.apikey[0]:req.headers.apikey;const auth=Array.isArray(req.headers.authorization)?req.headers.authorization[0]:req.headers.authorization;return api===key&&auth===`Bearer ${key}`};
 const origin=(req:IncomingMessage)=>{const host=Array.isArray(req.headers.host)?req.headers.host[0]:req.headers.host;return `https://${host??process.env.VERCEL_URL??''}`};
@@ -42,6 +45,16 @@ async function handleStorageCompat(req:IncomingMessage,res:ServerResponse,url:UR
   json(res,405,{error:'method_not_allowed'});return true;
 }
 
+async function handleAiBudget(req:IncomingMessage,res:ServerResponse,url:URL){
+  const p=parts(url.pathname);
+  if(!(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='ai-budget'))return false;
+  try{
+    if(req.method==='GET'){json(res,200,await aiBudget.get(bearer(req),p[2]));return true;}
+    if(req.method==='PATCH'){json(res,200,await aiBudget.update(bearer(req),p[2],await readJsonBody(req)));return true;}
+    json(res,405,{error:'method_not_allowed'});return true;
+  }catch(error){const message=error instanceof Error?error.message:'ai_budget_failed';json(res,message.includes('access_denied')||message.includes('OWNER')?403:400,{error:message});return true;}
+}
+
 async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL){
   if(req.method!=='POST')return false;
   const p=parts(url.pathname);
@@ -60,6 +73,7 @@ async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL
 async function dispatch(req:IncomingMessage,res:ServerResponse,url:URL){
   if(url.pathname==='/api/assets/private'){await handlePrivateAsset(req,res,url);return;}
   if(url.pathname.startsWith('/api/storage/v1/object')){await handleStorageCompat(req,res,url);return;}
+  if(await handleAiBudget(req,res,url))return;
   if(await handleVercelSafeAi(req,res,url))return;
   await handleApiRequest(req,res);
 }
