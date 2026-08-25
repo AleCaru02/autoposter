@@ -89,17 +89,40 @@ test.describe('local API end-to-end', () => {
     expect(new Set(signatures).size).toBe(4); expect(signatures[0]).toContain('Prodotto e ingredienti'); expect(signatures[1]).toContain('Educazione proprietari'); expect(signatures[2]).toContain('Personal brand'); expect(signatures[3]).toContain('Presenza locale');
   });
 
-  test('publisher failure modes produce coherent retry/failure states including success-after-timeout reconciliation', async ({ request }) => {
+  test('publisher failure modes are unreachable before human approval and coherent after approval', async ({ request }) => {
     const user = await register(request, 'Failure Owner');
     const tenant = await createConfiguredTenant(request, user.token, { label: 'Failure Local', industry: 'Servizi locali', subIndustry: 'Assistenza', services: 'assistenza locale', differentiator: 'risposta rapida', target: ['residenti'], siteSlug: 'local-failure', platforms: ['facebook'], modes: { facebook: 'auto' }, postsPerWeek: 3 });
-    await api(request, user.token, `/tenants/${tenant.tenantId}/calendar`, { method: 'POST', data: { weeks: 1 } }); await api(request, user.token, `/tenants/${tenant.tenantId}/posts/generate-all`, { method: 'POST', data: { limit: 3 } });
-    let workspace = await api<Workspace>(request, user.token, `/tenants/${tenant.tenantId}/workspace`); const posts = workspace.posts; expect(posts.length).toBe(3);
-    const timeout = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[0].id, failureMode: 'provider_timeout' } }); expect(timeout.some((item) => item.status === 'retry_wait')).toBe(true);
-    const recovered = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[0].id } }); expect(recovered.some((item) => item.status === 'succeeded')).toBe(true);
-    const timeoutAfterSuccess = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[1].id, failureMode: 'success_after_timeout' } }); expect(timeoutAfterSuccess.some((item) => item.error === 'timeout_after_success')).toBe(true);
+    await api(request, user.token, `/tenants/${tenant.tenantId}/calendar`, { method: 'POST', data: { weeks: 1 } });
+    await api(request, user.token, `/tenants/${tenant.tenantId}/posts/generate-all`, { method: 'POST', data: { limit: 3 } });
+
+    let workspace = await api<Workspace>(request, user.token, `/tenants/${tenant.tenantId}/workspace`);
+    const posts = workspace.posts;
+    expect(posts.length).toBe(3);
+    expect(workspace.jobs.filter((job: any) => ['queued','retry_wait'].includes(job.status)).length).toBe(0);
+    const beforeApproval = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[0].id, failureMode: 'provider_timeout' } });
+    expect(beforeApproval).toEqual([]);
+
+    for (const post of posts) {
+      const variant = post.variants.find((item: any) => item.platform_decision !== 'skip');
+      expect(variant).toBeTruthy();
+      expect(variant.approval_status).toBe('pending');
+      await api(request, user.token, `/tenants/${tenant.tenantId}/variants/${variant.id}/approve`, { method: 'POST' });
+    }
+
+    const timeout = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[0].id, failureMode: 'provider_timeout' } });
+    expect(timeout.some((item) => item.status === 'retry_wait')).toBe(true);
+    const recovered = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[0].id } });
+    expect(recovered.some((item) => item.status === 'succeeded')).toBe(true);
+
+    const timeoutAfterSuccess = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[1].id, failureMode: 'success_after_timeout' } });
+    expect(timeoutAfterSuccess.some((item) => item.error === 'timeout_after_success')).toBe(true);
     const externalId = timeoutAfterSuccess.find((item) => item.externalPostId)?.externalPostId;
-    const reconcile = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[1].id } }); expect(reconcile.find((item) => item.status === 'succeeded')?.externalPostId).toBe(externalId);
-    const validation = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[2].id, failureMode: 'validation_error' } }); expect(validation.some((item) => item.status === 'failed')).toBe(true);
-    workspace = await api<Workspace>(request, user.token, `/tenants/${tenant.tenantId}/workspace`); expect(workspace.jobs.some((job: any) => job.status === 'failed' && job.last_error_code === 'validation_error')).toBe(true);
+    const reconcile = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[1].id } });
+    expect(reconcile.find((item) => item.status === 'succeeded')?.externalPostId).toBe(externalId);
+
+    const validation = await api<any[]>(request, user.token, `/tenants/${tenant.tenantId}/publish-now`, { method: 'POST', data: { postId: posts[2].id, failureMode: 'validation_error' } });
+    expect(validation.some((item) => item.status === 'failed')).toBe(true);
+    workspace = await api<Workspace>(request, user.token, `/tenants/${tenant.tenantId}/workspace`);
+    expect(workspace.jobs.some((job: any) => job.status === 'failed' && job.last_error_code === 'validation_error')).toBe(true);
   });
 });
