@@ -1,3 +1,4 @@
+import { runAiRequestContext } from './ai-request-context.js';
 import { ProductionAIWorkflowService } from './production-ai-workflow-service.js';
 
 /**
@@ -8,19 +9,21 @@ export class VercelSafeProductionAIWorkflowService extends ProductionAIWorkflowS
   private deferVisuals=false;
 
   override async generatePost(token:string,tenantId:string,postId:string){
-    this.deferVisuals=true;
-    try{return await super.generatePost(token,tenantId,postId);}
-    finally{this.deferVisuals=false;}
+    return runAiRequestContext({tenantId,postId},async()=>{
+      this.deferVisuals=true;
+      try{return await super.generatePost(token,tenantId,postId);}
+      finally{this.deferVisuals=false;}
+    });
   }
 
   override async generateAllDrafts(token:string,tenantId:string,limit=20){
-    // Server-side batching is intentionally bounded. The web client owns the long queue,
-    // so every AI call gets a fresh serverless execution window.
+    // Server-side batching is intentionally bounded. ProductionAIWorkflowService dispatches
+    // each selected post through this.generatePost(), which re-binds its exact postId above.
     return super.generateAllDrafts(token,tenantId,Math.min(Math.max(1,limit),1));
   }
 
   override async generateVisualForVariant(token:string,tenantId:string,variantId:string){
     if(this.deferVisuals)return{preview_urls:[],model:'gpt-image-2' as const,usage:[],deferred:true,variantId,status:'awaiting_visual_generation'};
-    return super.generateVisualForVariant(token,tenantId,variantId);
+    return runAiRequestContext({tenantId,postVariantId:variantId},()=>super.generateVisualForVariant(token,tenantId,variantId));
   }
 }
