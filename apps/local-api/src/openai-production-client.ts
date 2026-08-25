@@ -55,7 +55,7 @@ export class OpenAIProductionClient {
     this.assertConfigured();
     const resolved=this.resolveContext(instruction,input,context);
     const prompt=[instruction,'Return ONLY valid JSON. Do not use markdown fences. Do not add facts that are not supported by the supplied data.','INPUT:',JSON.stringify(input)].join('\n\n');
-    const reservation=await this.budget.reserveText({tenantId:resolved.tenantId,task:resolved.task,promptInput:prompt,retryCount:resolved.retryCount,forceTier:resolved.forceTier});
+    const reservation=await this.budget.reserveText({tenantId:resolved.tenantId,task:resolved.task,promptInput:prompt,...(resolved.retryCount!==undefined?{retryCount:resolved.retryCount}:{}),...(resolved.forceTier!==undefined?{forceTier:resolved.forceTier}:{})});
     try{
       const body=await this.post<ResponsesBody>('/responses',{model:reservation.model,input:prompt});
       await this.budget.settle(reservation,body.usage??{});
@@ -70,7 +70,7 @@ export class OpenAIProductionClient {
     this.assertConfigured();
     const resolved=this.resolveContext(instruction,input,context);
     const prompt=[instruction,'Use only the supplied facts. If information is missing, say so explicitly.','INPUT:',JSON.stringify(input)].join('\n\n');
-    const reservation=await this.budget.reserveText({tenantId:resolved.tenantId,task:resolved.task,promptInput:prompt,retryCount:resolved.retryCount,forceTier:resolved.forceTier});
+    const reservation=await this.budget.reserveText({tenantId:resolved.tenantId,task:resolved.task,promptInput:prompt,...(resolved.retryCount!==undefined?{retryCount:resolved.retryCount}:{}),...(resolved.forceTier!==undefined?{forceTier:resolved.forceTier}:{})});
     try{
       const body=await this.post<ResponsesBody>('/responses',{model:reservation.model,input:prompt});
       await this.budget.settle(reservation,body.usage??{});
