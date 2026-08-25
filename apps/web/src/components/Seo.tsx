@@ -50,18 +50,18 @@ export function Seo({ title, description, path, image, noIndex = false, structur
     ensureMeta('twitter:image', socialImage);
     ensureLink('canonical', canonical);
 
-    document.head.querySelectorAll('script[data-socialpilot-schema]').forEach((node) => node.remove());
+    document.head.querySelectorAll('script[data-post-automatici-schema]').forEach((node) => node.remove());
     const schemas = structuredData ? (Array.isArray(structuredData) ? structuredData : [structuredData]) : [];
     schemas.forEach((schema) => {
       const script = document.createElement('script');
       script.type = 'application/ld+json';
-      script.dataset.socialpilotSchema = 'true';
+      script.dataset.postAutomaticiSchema = 'true';
       script.textContent = JSON.stringify(schema);
       document.head.appendChild(script);
     });
 
     return () => {
-      document.head.querySelectorAll('script[data-socialpilot-schema]').forEach((node) => node.remove());
+      document.head.querySelectorAll('script[data-post-automatici-schema]').forEach((node) => node.remove());
     };
   }, [description, image, noIndex, path, structuredData, title]);
 
@@ -72,15 +72,15 @@ export const softwareSchemas = (baseUrl: string) => ([
   {
     '@context': 'https://schema.org',
     '@type': 'Organization',
-    name: 'SocialPilot AI',
+    name: 'Post Automatici',
     url: baseUrl,
   },
   {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'SocialPilot AI',
+    name: 'Post Automatici',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
-    description: 'Piattaforma per strategia, creazione, approvazione, programmazione e analisi dei contenuti social.',
+    description: 'Piattaforma AI per profili attività indipendenti, analisi sito pagina per pagina, creazione contenuti, anteprima obbligatoria, approvazione umana, pubblicazione social e apprendimento da metriche reali.',
   },
 ]);
