@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { Badge, Card, EmptyState, PageHeader } from '../components/ui';
 import { useLocalE2E } from '../services/local-e2e';
 
 const brandFields = [
-  ['brand_name','Nome brand','text'],['description','Descrizione','textarea'],['industry','Settore','text'],['target','Target','list'],['personas','Personas','list'],['services','Servizi','list'],['products','Prodotti','list'],['usp','USP','text'],['differentiators','Differenziatori','list'],['value_propositions','Value proposition','list'],['brand_colors','Colori','list'],['fonts','Font','list'],['visual_style','Stile visivo','object'],['tone_of_voice','Tone of voice','object'],['vocabulary','Parole preferite','list'],['banned_words','Parole da evitare','list'],['cta_preferences','CTA','list'],['topics','Temi','list'],['goals','Obiettivi','list'],
+  ['brand_name','Nome brand','text'],['description','Descrizione','textarea'],['industry','Settore','text'],['target','Target','list'],['personas','Personas','list'],['services','Servizi','list'],['products','Prodotti','list'],['usp','USP','text'],['differentiators','Differenziatori','list'],['value_propositions','Value proposition','list'],['brand_colors','Colori','list'],['fonts','Font','text'],['visual_style','Stile visivo','object'],['tone_of_voice','Tone of voice','object'],['vocabulary','Parole preferite','list'],['banned_words','Parole da evitare','list'],['cta_preferences','CTA','list'],['topics','Temi','list'],['goals','Obiettivi','list'],
 ] as const;
 
 export function BrandPage() {
@@ -56,7 +57,9 @@ export function CalendarPage() {
   const [message,setMessage] = useState<string|null>(null);
   const [editing,setEditing]=useState<string|null>(null);
   const [dateTime,setDateTime]=useState('');
+  const [working,setWorking]=useState<'calendar'|'content'|null>(null);
   const posts = local.workspace?.posts ?? [];
+  const aiReady=Boolean(local.health?.testFixtures||local.health?.capabilities?.openai);
   const variants=useMemo(()=>posts.flatMap((post:any)=>(post.variants??[]).filter((variant:any)=>variant.platform_decision!=='skip').map((variant:any)=>({post,variant}))).sort((a:any,b:any)=>String(a.variant.scheduled_at??a.post.planned_at??'').localeCompare(String(b.variant.scheduled_at??b.post.planned_at??''))),[posts]);
   const visible=useMemo(()=>{
     if(view==='list'||variants.length===0)return variants;
@@ -67,6 +70,20 @@ export function CalendarPage() {
     return variants.filter((item:any)=>{const value=item.variant.scheduled_at??item.post.planned_at;if(!value)return true;const time=new Date(String(value)).getTime();return time>=start&&time<start+windowMs;});
   },[variants,view]);
 
+  const generateCalendar=async()=>{
+    if(!local.tenantId||!aiReady)return;
+    setWorking('calendar');setMessage(null);
+    try{await local.api(`/tenants/${local.tenantId}/calendar`,{method:'POST',body:JSON.stringify({weeks:4})});await local.refresh();setMessage('Calendario generato e salvato per questa attività.');}
+    catch(error){setMessage(error instanceof Error?error.message:String(error));}
+    finally{setWorking(null);}
+  };
+  const generateContent=async()=>{
+    if(!local.tenantId||!aiReady)return;
+    setWorking('content');setMessage(null);
+    try{await local.api(`/tenants/${local.tenantId}/posts/generate-all`,{method:'POST',body:JSON.stringify({limit:50})});await local.refresh();setMessage('Contenuti generati. Ogni variante resta ferma finché non la approvi nelle Anteprime.');}
+    catch(error){setMessage(error instanceof Error?error.message:String(error));}
+    finally{setWorking(null);}
+  };
   const beginEdit=(variant:any)=>{setEditing(String(variant.id));setDateTime(toLocalInput(variant.scheduled_at));};
   const saveSchedule=async(variantId:string)=>{
     if(!local.tenantId||!dateTime)return;
@@ -76,15 +93,16 @@ export function CalendarPage() {
   };
 
   return <>
-    <PageHeader eyebrow="Piano editoriale" title="Calendario" description="Programmazione persistente per singola variante e piattaforma. Nessun contenuto viene pubblicato senza la tua approvazione." action={<button className="button" disabled title="OpenAI da configurare">Genera piano con OpenAI · Da configurare</button>} />
+    <PageHeader eyebrow="Piano editoriale" title="Calendario" description="Programmazione persistente per singola variante e piattaforma. Nessun contenuto viene pubblicato senza la tua approvazione." action={<div className="card-actions"><button data-testid="generate-calendar" className="button" disabled={!local.tenantId||!aiReady||working!==null} title={aiReady?'Genera 4 settimane':'OpenAI non configurato'} onClick={()=>void generateCalendar()}>{working==='calendar'?'Generazione…':'Genera piano con OpenAI'}</button><button data-testid="generate-content" className="button secondary" disabled={!local.tenantId||!aiReady||working!==null||posts.length===0} title={aiReady?'Genera i contenuti del piano':'OpenAI non configurato'} onClick={()=>void generateContent()}>{working==='content'?'Generazione…':'Genera contenuti'}</button></div>} />
     {message&&<Card><p role="status">{message}</p></Card>}
+    {!aiReady&&<Card><Badge tone="warn">OPENAI DA CONFIGURARE</Badge><p>La generazione resta non disponibile finché il backend non conferma OpenAI. Non viene usato alcun generatore sostitutivo.</p></Card>}
     <Card><div className="filter-row">{(['week','month','list'] as const).map((item)=><button key={item} data-testid={`calendar-view-${item}`} className={`filter ${view===item?'active':''}`} onClick={()=>setView(item)}>{item==='week'?'Settimana':item==='month'?'Mese':'Lista'}</button>)}<span className="grow"/><Badge>{variants.length} uscite</Badge></div></Card>
-    {visible.length===0?<Card><EmptyState title="Calendario vuoto" body="Non ci sono ancora contenuti programmati. La generazione automatica verrà abilitata solo quando OpenAI sarà configurato realmente."/></Card>:<div className="stack">{visible.map(({post,variant}:any)=>{
+    {visible.length===0?<Card><EmptyState title="Calendario vuoto" body={aiReady?'Genera il piano editoriale per creare le prime uscite.':'Configura OpenAI nel backend per poter generare il piano editoriale.'}/></Card>:<div className="stack">{visible.map(({post,variant}:any)=>{
       const scheduled=variant.scheduled_at??post.planned_at;
       return <Card key={variant.id}><div className="row-between"><div><strong>{post.topic}</strong><small>{platformName(variant.platform)} · {variant.format??post.format??'formato da definire'}</small></div><Badge tone={variant.status==='published'?'good':variant.status==='rejected'||variant.status==='failed'?'warn':'info'}>{String(variant.status??post.status).toUpperCase()}</Badge></div>
         <div className="signal-row"><span>Data e ora</span><strong>{scheduled?new Date(String(scheduled)).toLocaleString('it-IT'):'Non impostata'}</strong></div>
         <div className="signal-row"><span>Approvazione</span><Badge tone={variant.approval_status==='approved'?'good':variant.approval_status==='rejected'?'warn':'info'}>{String(variant.approval_status??'pending').toUpperCase()}</Badge></div>
-        {editing===String(variant.id)?<div className="card-actions"><input aria-label="Nuova data e ora" type="datetime-local" value={dateTime} onChange={(event)=>setDateTime(event.target.value)}/><button className="button" disabled={!dateTime} onClick={()=>void saveSchedule(String(variant.id))}>Salva</button><button className="button secondary" onClick={()=>setEditing(null)}>Annulla</button></div>:<div className="card-actions"><button className="button secondary" disabled={['publishing','published'].includes(String(variant.status))} onClick={()=>beginEdit(variant)}>Modifica data/ora</button><a className="button secondary" href={`/app/posts/${post.id}`}>Apri contenuto</a></div>}
+        {editing===String(variant.id)?<div className="card-actions"><input aria-label="Nuova data e ora" type="datetime-local" value={dateTime} onChange={(event)=>setDateTime(event.target.value)}/><button className="button" disabled={!dateTime} onClick={()=>void saveSchedule(String(variant.id))}>Salva</button><button className="button secondary" onClick={()=>setEditing(null)}>Annulla</button></div>:<div className="card-actions"><button className="button secondary" disabled={['publishing','published'].includes(String(variant.status))} onClick={()=>beginEdit(variant)}>Modifica data/ora</button><Link className="button secondary" to={`/app/posts/${post.id}`}>Apri contenuto</Link></div>}
       </Card>;
     })}</div>}
   </>;
