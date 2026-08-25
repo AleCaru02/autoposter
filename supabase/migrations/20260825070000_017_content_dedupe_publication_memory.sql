@@ -141,6 +141,21 @@ for each row execute function public.guard_publication_job_against_republish();
 
 -- One durable memory record per post. This is what future generation can consult to avoid
 -- repeating already-published topics/hooks/visual concepts while still allowing fresh angles.
+with ranked_memory as (
+  select id,
+         row_number() over (
+           partition by tenant_id, post_id
+           order by published_at desc nulls last, created_at desc, id desc
+         ) as rn
+  from public.editorial_memory
+  where post_id is not null
+)
+delete from public.editorial_memory em
+using ranked_memory r
+where em.id = r.id and r.rn > 1;
+
+alter table public.editorial_memory
+  drop constraint if exists editorial_memory_tenant_post_unique;
 alter table public.editorial_memory
   add constraint editorial_memory_tenant_post_unique unique (tenant_id, post_id);
 
