@@ -11,6 +11,7 @@ const productionAi=new VercelSafeProductionAIWorkflowService();
 const aiBudget=new AiBudgetService(db);
 const allowedBuckets=new Set(['brand-assets','post-assets','tenant-documents']);
 const secret=()=>process.env.ASSET_SIGNING_SECRET?.trim()??'';
+const configured=(value:string|undefined)=>Boolean(value?.trim());
 const parts=(pathname:string)=>pathname.split('/').filter(Boolean).map(decodeURIComponent);
 const safeEqual=(left:string,right:string)=>{try{const a=Buffer.from(left,'hex'),b=Buffer.from(right,'hex');return a.length===b.length&&a.length>0&&timingSafeEqual(a,b)}catch{return false}};
 const signature=(bucket:string,path:string,exp:number)=>createHmac('sha256',secret()).update(`${bucket}\n${path}\n${exp}`).digest('hex');
@@ -20,6 +21,13 @@ const bearer=(req:IncomingMessage)=>{const value=Array.isArray(req.headers.autho
 const internalAuthorized=(req:IncomingMessage)=>{const key=secret();if(!key)return false;const api=Array.isArray(req.headers.apikey)?req.headers.apikey[0]:req.headers.apikey;const auth=Array.isArray(req.headers.authorization)?req.headers.authorization[0]:req.headers.authorization;return api===key&&auth===`Bearer ${key}`};
 const origin=(req:IncomingMessage)=>{const host=Array.isArray(req.headers.host)?req.headers.host[0]:req.headers.host;return `https://${host??process.env.VERCEL_URL??''}`};
 const json=(res:ServerResponse,status:number,body:unknown)=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(body));};
+
+function handleProductionHealth(res:ServerResponse){
+  const ai=productionAi.readiness();
+  const database=configured(process.env.NEON_DATABASE_URL)&&configured(process.env.NEON_DATA_API_URL);
+  const auth=configured(process.env.NEON_AUTH_URL);
+  json(res,200,{ok:true,environment:'production',approval:'human-required',testFixtures:false,capabilities:{database,databaseProvider:database?'neon':undefined,auth,openai:ai.configured,openaiTextModel:ai.textModel,openaiImages2:ai.configured&&ai.imageModel===ai.imageModelRequired,openaiImageModel:ai.imageModel,telegram:process.env.TELEGRAM_LIVE==='true'&&configured(process.env.TELEGRAM_BOT_TOKEN)&&configured(process.env.TELEGRAM_WEBHOOK_SECRET),instagram:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),facebook:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),linkedin:process.env.LINKEDIN_LIVE==='true'&&configured(process.env.LINKEDIN_CLIENT_ID)&&configured(process.env.LINKEDIN_CLIENT_SECRET),googleBusinessProfile:process.env.GBP_LIVE==='true'&&configured(process.env.GOOGLE_CLIENT_ID)&&configured(process.env.GOOGLE_CLIENT_SECRET)},aiBudget:{failClosed:true,pricingConfigured:configured(process.env.OPENAI_PRICING_JSON)},hardening:{privateAssets:true,credentialEncryption:configured(process.env.ENCRYPTION_KEY_CURRENT)}});
+}
 
 async function handlePrivateAsset(req:IncomingMessage,res:ServerResponse,url:URL){
   const bucket=url.searchParams.get('bucket')??'',path=url.searchParams.get('path')??'',sig=url.searchParams.get('sig')??'',exp=Number(url.searchParams.get('exp')??0);
@@ -46,31 +54,20 @@ async function handleStorageCompat(req:IncomingMessage,res:ServerResponse,url:UR
 }
 
 async function handleAiBudget(req:IncomingMessage,res:ServerResponse,url:URL){
-  const p=parts(url.pathname);
-  if(!(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='ai-budget'))return false;
-  try{
-    if(req.method==='GET'){json(res,200,await aiBudget.get(bearer(req),p[2]));return true;}
-    if(req.method==='PATCH'){json(res,200,await aiBudget.update(bearer(req),p[2],await readJsonBody(req)));return true;}
-    json(res,405,{error:'method_not_allowed'});return true;
-  }catch(error){const message=error instanceof Error?error.message:'ai_budget_failed';json(res,message.includes('access_denied')||message.includes('OWNER')?403:400,{error:message});return true;}
+  const p=parts(url.pathname);if(!(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='ai-budget'))return false;
+  try{if(req.method==='GET'){json(res,200,await aiBudget.get(bearer(req),p[2]));return true;}if(req.method==='PATCH'){json(res,200,await aiBudget.update(bearer(req),p[2],await readJsonBody(req)));return true;}json(res,405,{error:'method_not_allowed'});return true;}catch(error){const message=error instanceof Error?error.message:'ai_budget_failed';json(res,message.includes('access_denied')||message.includes('OWNER')?403:400,{error:message});return true;}
 }
 
 async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL){
-  if(req.method!=='POST')return false;
-  const p=parts(url.pathname);
-  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]&&p[5]==='generate'){
-    try{json(res,200,await productionAi.generatePost(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;
-  }
-  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='variants'&&p[4]&&p[5]==='visual'){
-    try{json(res,200,await productionAi.generateVisualForVariant(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'visual_generation_failed'});}return true;
-  }
-  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]==='generate-all'){
-    try{json(res,200,await productionAi.generateAllDrafts(bearer(req),p[2],1));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;
-  }
+  if(req.method!=='POST')return false;const p=parts(url.pathname);
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]&&p[5]==='generate'){try{json(res,200,await productionAi.generatePost(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='variants'&&p[4]&&p[5]==='visual'){try{json(res,200,await productionAi.generateVisualForVariant(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'visual_generation_failed'});}return true;}
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]==='generate-all'){try{json(res,200,await productionAi.generateAllDrafts(bearer(req),p[2],1));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}
   return false;
 }
 
 async function dispatch(req:IncomingMessage,res:ServerResponse,url:URL){
+  if(url.pathname==='/api/health'){handleProductionHealth(res);return;}
   if(url.pathname==='/api/assets/private'){await handlePrivateAsset(req,res,url);return;}
   if(url.pathname.startsWith('/api/storage/v1/object')){await handleStorageCompat(req,res,url);return;}
   if(await handleAiBudget(req,res,url))return;
@@ -78,10 +75,4 @@ async function dispatch(req:IncomingMessage,res:ServerResponse,url:URL){
   await handleApiRequest(req,res);
 }
 
-export default async function handler(req:IncomingMessage,res:ServerResponse){
-  const url=new URL(req.url??'/',`https://${req.headers.host??'localhost'}`);
-  const p=parts(url.pathname);
-  const tenantId=p[0]==='api'&&p[1]==='tenants'&&p[2]?p[2]:null;
-  if(tenantId){await runAiRequestContext(tenantId,()=>dispatch(req,res,url));return;}
-  await dispatch(req,res,url);
-}
+export default async function handler(req:IncomingMessage,res:ServerResponse){const url=new URL(req.url??'/',`https://${req.headers.host??'localhost'}`);const p=parts(url.pathname);const tenantId=p[0]==='api'&&p[1]==='tenants'&&p[2]?p[2]:null;if(tenantId){await runAiRequestContext(tenantId,()=>dispatch(req,res,url));return;}await dispatch(req,res,url);}
