@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from '../components/AppShell';
+import { PersonalStagingBootstrap } from '../components/PersonalStagingBootstrap';
 import { LocalE2EProvider } from '../services/local-e2e';
 import { RealDataGate } from '../services/RealDataGate';
 import { OnboardingPage } from '../pages/OnboardingPage';
@@ -20,23 +21,26 @@ import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
 import { VisualPreviewPage } from '../pages/VisualPreviewPage';
 
+const personalStaging=import.meta.env.VITE_PERSONAL_STAGING_MODE==='true';
+
 export function App() {
   const protectedData=(element:ReactNode)=><RealDataGate>{element}</RealDataGate>;
-  return <LocalE2EProvider><Routes>
-    <Route path="/" element={<LandingPage />} />
-    <Route path="/come-funziona" element={<HowItWorksPage />} />
-    <Route path="/funzionalita" element={<FeaturesPage />} />
-    <Route path="/prezzi" element={<PricingPage />} />
-    <Route path="/pricing" element={<Navigate to="/prezzi" replace />} />
-    <Route path="/faq" element={<FaqPage />} />
-    <Route path="/social-media-manager-ai" element={<SocialMediaManagerAiPage />} />
-    <Route path="/gestione-social-automatica" element={<AutomaticSocialManagementPage />} />
-    <Route path="/privacy" element={<PrivacyPage />} />
-    <Route path="/termini" element={<TermsPage />} />
-    <Route path="/cookie-policy" element={<CookiePolicyPage />} />
-    <Route path="/login" element={<LoginPage />} />
-    <Route path="/register" element={<RegisterPage />} />
-    <Route path="/reset-password" element={<ResetPasswordPage />} />
+  const publicOrDashboard=(element:ReactNode)=>personalStaging?<Navigate to="/app" replace/>:element;
+  return <LocalE2EProvider><PersonalStagingBootstrap><Routes>
+    <Route path="/" element={publicOrDashboard(<LandingPage />)} />
+    <Route path="/come-funziona" element={publicOrDashboard(<HowItWorksPage />)} />
+    <Route path="/funzionalita" element={publicOrDashboard(<FeaturesPage />)} />
+    <Route path="/prezzi" element={publicOrDashboard(<PricingPage />)} />
+    <Route path="/pricing" element={<Navigate to={personalStaging?'/app':'/prezzi'} replace />} />
+    <Route path="/faq" element={publicOrDashboard(<FaqPage />)} />
+    <Route path="/social-media-manager-ai" element={publicOrDashboard(<SocialMediaManagerAiPage />)} />
+    <Route path="/gestione-social-automatica" element={publicOrDashboard(<AutomaticSocialManagementPage />)} />
+    <Route path="/privacy" element={publicOrDashboard(<PrivacyPage />)} />
+    <Route path="/termini" element={publicOrDashboard(<TermsPage />)} />
+    <Route path="/cookie-policy" element={publicOrDashboard(<CookiePolicyPage />)} />
+    <Route path="/login" element={publicOrDashboard(<LoginPage />)} />
+    <Route path="/register" element={publicOrDashboard(<RegisterPage />)} />
+    <Route path="/reset-password" element={publicOrDashboard(<ResetPasswordPage />)} />
     <Route element={<AppShell />}>
       <Route path="/preview-ui" element={<VisualPreviewPage />} />
       <Route path="/app" element={protectedData(<DashboardPage />)} />
@@ -59,6 +63,6 @@ export function App() {
       <Route path="/app/settings" element={protectedData(<PersonalSettingsPage />)} />
       <Route path="/admin" element={protectedData(<AdminCustomersPage />)} />
     </Route>
-    <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></LocalE2EProvider>;
+    <Route path="*" element={<Navigate to={personalStaging?'/app':'/'} replace />} />
+  </Routes></PersonalStagingBootstrap></LocalE2EProvider>;
 }
