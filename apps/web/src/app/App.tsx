@@ -40,10 +40,10 @@ export function App() {
     <Route path="/login" element={<LoginPage />} />
     <Route path="/register" element={<RegisterPage />} />
     <Route path="/reset-password" element={<ResetPasswordPage />} />
+    <Route path="/onboarding" element={<OnboardingPage />} />
     <Route element={<AppShell />}>
       <Route path="/preview-ui" element={<VisualPreviewPage />} />
       <Route path="/app" element={protectedData(<DashboardPage />)} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/app/site" element={protectedData(<SitePage />)} />
       <Route path="/app/contents" element={protectedData(<ContentsPage />)} />
       <Route path="/app/brand" element={protectedData(<BrandVisualPage />)} />
