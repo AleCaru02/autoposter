@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { LocalAssetVisualService } from './asset-visual-service.js';
 import { LocalSupabaseClient, jsonBody } from './db.js';
 import { generateThumbnails } from './thumbnail-pipeline.js';
@@ -71,7 +72,23 @@ export class LocalAssetVisualReadinessService {
     const rows=await this.db.serviceRest<ReadinessAssetRow[]>(`/rest/v1/brand_assets?tenant_id=eq.${q(tenantId)}&id=eq.${q(assetId)}`,{method:'PATCH',headers:{'content-type':'application/json'},body:jsonBody({...patch,updated_at:new Date().toISOString()})});
     const item=rows[0];if(!item)throw new Error('asset_not_found');return item;
   }
-  private async uploadStorage(bucket:string,path:string,bytes:Buffer,mime:string,upsert=false){const response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}/${pathEncode(path)}`,{method:'POST',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':mime,'x-upsert':String(upsert)},body:new Blob([new Uint8Array(bytes)],{type:mime})});if(!response.ok)throw new Error(`storage_upload_${response.status}:${await response.text()}`);}
-  private async deleteStorage(bucket:string,path:string){let response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}/${pathEncode(path)}`,{method:'DELETE',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`}});if(response.ok||response.status===404)return;response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}`,{method:'DELETE',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':'application/json'},body:JSON.stringify({prefixes:[path]})});if(!response.ok&&response.status!==404)throw new Error(`storage_delete_${response.status}:${await response.text()}`);}
-  private async sign(bucket:string,path:string){const response=await fetch(`${this.db.config.url}/storage/v1/object/sign/${q(bucket)}/${pathEncode(path)}`,{method:'POST',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':'application/json'},body:JSON.stringify({expiresIn:3600})});if(!response.ok)throw new Error(`storage_sign_${response.status}`);const body=await response.json() as {signedURL?:string;signedUrl?:string};const signed=body.signedURL??body.signedUrl;if(!signed)throw new Error('storage_sign_missing_url');return signed.startsWith('http')?signed:`${this.db.config.url}${signed}`;}
+  private async uploadStorage(bucket:string,path:string,bytes:Buffer,mime:string,upsert=false){
+    if(this.db.config.backend==='neon'){
+      const tenantId=path.split('/')[0];if(!tenantId)throw new Error('storage_tenant_path_required');
+      await this.db.putBinaryObject({tenantId,bucket,path,bytes,mimeType:mime,upsert});return;
+    }
+    const response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}/${pathEncode(path)}`,{method:'POST',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':mime,'x-upsert':String(upsert)},body:new Blob([new Uint8Array(bytes)],{type:mime})});if(!response.ok)throw new Error(`storage_upload_${response.status}:${await response.text()}`);
+  }
+  private async deleteStorage(bucket:string,path:string){
+    if(this.db.config.backend==='neon'){await this.db.deleteBinaryObject(bucket,path);return;}
+    let response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}/${pathEncode(path)}`,{method:'DELETE',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`}});if(response.ok||response.status===404)return;response=await fetch(`${this.db.config.url}/storage/v1/object/${q(bucket)}`,{method:'DELETE',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':'application/json'},body:JSON.stringify({prefixes:[path]})});if(!response.ok&&response.status!==404)throw new Error(`storage_delete_${response.status}:${await response.text()}`);
+  }
+  private async sign(bucket:string,path:string){
+    if(this.db.config.backend==='neon'){
+      const secret=process.env.ASSET_SIGNING_SECRET?.trim();if(!secret)throw new Error('ASSET_SIGNING_SECRET_NOT_CONFIGURED');
+      const exp=Math.floor(Date.now()/1000)+3600;const payload=`${bucket}\n${path}\n${exp}`;const sig=createHmac('sha256',secret).update(payload).digest('hex');
+      return `/api/assets/private?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(path)}&exp=${exp}&sig=${sig}`;
+    }
+    const response=await fetch(`${this.db.config.url}/storage/v1/object/sign/${q(bucket)}/${pathEncode(path)}`,{method:'POST',headers:{apikey:this.db.config.serviceRoleKey,authorization:`Bearer ${this.db.config.serviceRoleKey}`,'content-type':'application/json'},body:JSON.stringify({expiresIn:3600})});if(!response.ok)throw new Error(`storage_sign_${response.status}`);const body=await response.json() as {signedURL?:string;signedUrl?:string};const signed=body.signedURL??body.signedUrl;if(!signed)throw new Error('storage_sign_missing_url');return signed.startsWith('http')?signed:`${this.db.config.url}${signed}`;
+  }
 }
