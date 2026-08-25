@@ -50,12 +50,23 @@ interface LocalE2EContextValue {
 }
 
 const Context = createContext<LocalE2EContextValue | null>(null);
-const baseUrl = (import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-const TOKEN_KEY = 'socialpilot.local.token';
-const TENANT_KEY = 'socialpilot.local.tenant';
+const e2eFixtures = import.meta.env.VITE_E2E_FIXTURES === 'true';
+const productionApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim().replace(/\/$/, '') ?? '';
+const testApiUrl = e2eFixtures ? ((import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.trim().replace(/\/$/, '') ?? '') : '';
+const baseUrl = productionApiUrl || testApiUrl;
+const TOKEN_KEY = 'post-automatici.session.token';
+const TENANT_KEY = 'post-automatici.active-tenant';
+const LEGACY_TOKEN_KEY = 'socialpilot.local.token';
+const LEGACY_TENANT_KEY = 'socialpilot.local.tenant';
+
+const readStored = (primary: string, legacy: string): string | null => {
+  const value = localStorage.getItem(primary) ?? localStorage.getItem(legacy);
+  if (value && !localStorage.getItem(primary)) localStorage.setItem(primary, value);
+  return value;
+};
 
 const request = async <T,>(path: string, init: LocalRequestInit = {}, token?: string | null): Promise<T> => {
-  if (!baseUrl) throw new Error('Local E2E API non configurata');
+  if (!baseUrl) throw new Error('Backend API non configurato');
   const { body: requestBody, ...rest } = init;
   const headers = new Headers(init.headers);
   if (requestBody && !headers.has('content-type')) headers.set('content-type', 'application/json');
@@ -63,14 +74,14 @@ const request = async <T,>(path: string, init: LocalRequestInit = {}, token?: st
   const fetchInit: RequestInit = requestBody === undefined ? { ...rest, headers } : { ...rest, headers, body: requestBody };
   const response = await fetch(`${baseUrl}${path}`, fetchInit);
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String(body.error ?? `HTTP ${response.status}`));
+  if (!response.ok) throw new Error(String(body.error ?? body.message ?? `HTTP ${response.status}`));
   return body as T;
 };
 
 export function LocalE2EProvider({ children }: PropsWithChildren) {
   const enabled = Boolean(baseUrl);
-  const [token, setToken] = useState<string | null>(() => enabled ? localStorage.getItem(TOKEN_KEY) : null);
-  const [tenantId, setTenantId] = useState<string | null>(() => enabled ? localStorage.getItem(TENANT_KEY) : null);
+  const [token, setToken] = useState<string | null>(() => enabled ? readStored(TOKEN_KEY, LEGACY_TOKEN_KEY) : null);
+  const [tenantId, setTenantId] = useState<string | null>(() => enabled ? readStored(TENANT_KEY, LEGACY_TENANT_KEY) : null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [workspace, setWorkspace] = useState<LocalWorkspace | null>(null);
   const [loading, setLoading] = useState(false);
@@ -124,6 +135,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
 
   const storeSession = (accessToken: string) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
     setToken(accessToken);
   };
 
@@ -148,6 +160,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const logout = () => {
     refreshSequence.current += 1;
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TENANT_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY); localStorage.removeItem(LEGACY_TENANT_KEY);
     setToken(null); setTenantId(null); setTenants([]); setWorkspace(null); setError(null);
   };
 
@@ -155,6 +168,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     if (!token) throw new Error('Accedi prima di creare il workspace');
     const result = await request<{ tenantId: string }>('/tenants', { method: 'POST', body: JSON.stringify(input) }, token);
     localStorage.setItem(TENANT_KEY, result.tenantId);
+    localStorage.removeItem(LEGACY_TENANT_KEY);
     setTenantId(result.tenantId);
     const rows = await request<TenantSummary[]>('/tenants', {}, token);
     setTenants(rows);
@@ -165,6 +179,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const selectTenant = async (id: string) => {
     refreshSequence.current += 1;
     localStorage.setItem(TENANT_KEY, id);
+    localStorage.removeItem(LEGACY_TENANT_KEY);
     setTenantId(id);
     await refresh(id);
   };
@@ -175,8 +190,9 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
 
 export function useLocalE2E(): LocalE2EContextValue {
   const value = useContext(Context);
-  if (!value) throw new Error('LocalE2EProvider richiesto');
+  if (!value) throw new Error('Product API provider richiesto');
   return value;
 }
 
 export const localE2EEnabled = Boolean(baseUrl);
+export const internalE2EFixturesEnabled = e2eFixtures;
