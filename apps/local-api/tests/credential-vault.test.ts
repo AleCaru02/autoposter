@@ -24,7 +24,11 @@ describe('CredentialVault',()=>{
   it('rejects ciphertext tampering',()=>{
     const vault=new CredentialVault({key,keyVersion:1});
     const encrypted=Buffer.from(vault.encrypt('token',aad));
-    encrypted[encrypted.length-1]^=0xff;
+    const lastIndex=encrypted.length-1;
+    if(lastIndex<0)throw new Error('encrypted credential unexpectedly empty');
+    const lastByte=encrypted.at(lastIndex);
+    if(lastByte===undefined)throw new Error('encrypted credential unexpectedly empty');
+    encrypted.writeUInt8(lastByte^0xff,lastIndex);
     expect(()=>vault.decrypt(encrypted,aad)).toThrow('credential_authentication_failed');
   });
 
