@@ -20,7 +20,7 @@ export class VercelSafeProductionAIWorkflowService extends ProductionAIWorkflowS
   }
 
   override async generateVisualForVariant(token:string,tenantId:string,variantId:string){
-    if(this.deferVisuals)return{deferred:true,variantId,status:'awaiting_visual_generation'};
+    if(this.deferVisuals)return{preview_urls:[],model:'gpt-image-2' as const,usage:[],deferred:true,variantId,status:'awaiting_visual_generation'};
     return super.generateVisualForVariant(token,tenantId,variantId);
   }
 }
