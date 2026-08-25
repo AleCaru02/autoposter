@@ -1,0 +1,83 @@
+import { LocalSupabaseClient, jsonBody } from './db.js';
+
+const q=(value:string)=>encodeURIComponent(value);
+const micros=(usd:unknown):number|null=>{
+  if(usd===null||usd===undefined||usd==='')return null;
+  const value=Number(usd);
+  if(!Number.isFinite(value)||value<0)throw new Error('AI_BUDGET_VALUE_INVALID');
+  return Math.round(value*1_000_000);
+};
+const usd=(value:unknown)=>Number(value??0)/1_000_000;
+const monthStart=()=>{const date=new Date();return new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)).toISOString();};
+
+interface PolicyRow {
+  owner_user_id:string;monthly_limit_usd_micros:number|string;daily_limit_usd_micros:number|string|null;per_tenant_monthly_limit_usd_micros:number|string|null;image_monthly_limit_usd_micros:number|string|null;premium_monthly_limit_usd_micros:number|string|null;max_single_request_usd_micros:number|string|null;warning_threshold:number|string;optimization_mode:'economy'|'balanced'|'quality';allow_premium_models:boolean;pause_all_ai:boolean;
+}
+interface OverrideRow {tenant_id:string;monthly_limit_usd_micros:number|string|null;image_monthly_limit_usd_micros:number|string|null;priority_weight:number|string;pause_ai:boolean;}
+interface ReservationRow {tenant_id:string;model:string;model_tier:string;spend_kind:string;estimated_usd_micros:number|string;actual_usd_micros:number|string|null;status:string;created_at:string;}
+
+export class AiBudgetService {
+  constructor(private readonly db=new LocalSupabaseClient()){}
+
+  async get(token:string,tenantId:string){
+    const actor=await this.db.requireTenantRole(token,tenantId,['owner']);
+    const policy=await this.ensurePolicy(actor.userId);
+    const override=(await this.db.serviceRest<OverrideRow[]>(`/rest/v1/ai_tenant_budget_overrides?select=*&tenant_id=eq.${q(tenantId)}&owner_user_id=eq.${q(actor.userId)}&limit=1`))[0]??null;
+    const reservations=await this.db.serviceRest<ReservationRow[]>(`/rest/v1/ai_spend_reservations?select=tenant_id,model,model_tier,spend_kind,estimated_usd_micros,actual_usd_micros,status,created_at&owner_user_id=eq.${q(actor.userId)}&created_at=gte.${q(monthStart())}&status=in.(reserved,settled)&order=created_at.desc`,{headers:{'accept-profile':'app_private'}});
+    const tenantMemberships=await this.db.serviceRest<Array<{tenant_id:string}>>(`/rest/v1/tenant_members?select=tenant_id&user_id=eq.${q(actor.userId)}&role=eq.owner&status=eq.active`);
+    const ids=tenantMemberships.map((item)=>item.tenant_id);
+    const tenants=ids.length?await this.db.serviceRest<Array<{id:string;name:string}>>(`/rest/v1/tenants?select=id,name&id=in.(${ids.map(q).join(',')})`):[];
+    const names=new Map(tenants.map((item)=>[item.id,item.name]));
+    const byTenant=new Map<string,{tenantId:string;name:string;spentUsd:number;reservedUsd:number;imageUsd:number;premiumUsd:number}>();
+    let spentUsd=0,reservedUsd=0,imageUsd=0,premiumUsd=0;
+    for(const row of reservations){
+      const amount=usd(row.actual_usd_micros??row.estimated_usd_micros);
+      if(row.status==='settled')spentUsd+=amount;else reservedUsd+=amount;
+      if(row.spend_kind==='image')imageUsd+=amount;
+      if(row.model_tier==='premium')premiumUsd+=amount;
+      const current=byTenant.get(row.tenant_id)??{tenantId:row.tenant_id,name:names.get(row.tenant_id)??'Attività',spentUsd:0,reservedUsd:0,imageUsd:0,premiumUsd:0};
+      if(row.status==='settled')current.spentUsd+=amount;else current.reservedUsd+=amount;
+      if(row.spend_kind==='image')current.imageUsd+=amount;
+      if(row.model_tier==='premium')current.premiumUsd+=amount;
+      byTenant.set(row.tenant_id,current);
+    }
+    const monthlyLimitUsd=usd(policy.monthly_limit_usd_micros);
+    return{
+      policy:this.publicPolicy(policy),
+      tenantOverride:override?{monthlyLimitUsd:override.monthly_limit_usd_micros===null?null:usd(override.monthly_limit_usd_micros),imageMonthlyLimitUsd:override.image_monthly_limit_usd_micros===null?null:usd(override.image_monthly_limit_usd_micros),priorityWeight:Number(override.priority_weight),pauseAi:override.pause_ai}:null,
+      month:{spentUsd,reservedUsd,committedUsd:spentUsd+reservedUsd,remainingUsd:Math.max(0,monthlyLimitUsd-spentUsd-reservedUsd),imageUsd,premiumUsd,percentUsed:monthlyLimitUsd>0?Math.min(100,((spentUsd+reservedUsd)/monthlyLimitUsd)*100):0},
+      byTenant:[...byTenant.values()].sort((a,b)=>(b.spentUsd+b.reservedUsd)-(a.spentUsd+a.reservedUsd)),
+      pricingConfigured:Boolean(process.env.OPENAI_PRICING_JSON?.trim()),
+      models:{economy:process.env.AI_MODEL_TEXT_ECONOMY??null,standard:process.env.AI_MODEL_TEXT_STANDARD??null,premium:process.env.AI_MODEL_TEXT_PREMIUM??null,image:'gpt-image-2'},
+    };
+  }
+
+  async update(token:string,tenantId:string,input:Record<string,unknown>){
+    const actor=await this.db.requireTenantRole(token,tenantId,['owner']);
+    await this.ensurePolicy(actor.userId);
+    const mode=input.optimizationMode;
+    if(mode!==undefined&&!['economy','balanced','quality'].includes(String(mode)))throw new Error('AI_BUDGET_MODE_INVALID');
+    const policyPatch:Record<string,unknown>={updated_at:new Date().toISOString()};
+    const assignMoney=(source:string,target:string)=>{if(Object.prototype.hasOwnProperty.call(input,source))policyPatch[target]=micros(input[source]);};
+    assignMoney('monthlyLimitUsd','monthly_limit_usd_micros');assignMoney('dailyLimitUsd','daily_limit_usd_micros');assignMoney('perTenantMonthlyLimitUsd','per_tenant_monthly_limit_usd_micros');assignMoney('imageMonthlyLimitUsd','image_monthly_limit_usd_micros');assignMoney('premiumMonthlyLimitUsd','premium_monthly_limit_usd_micros');assignMoney('maxSingleRequestUsd','max_single_request_usd_micros');
+    if(mode!==undefined)policyPatch.optimization_mode=mode;
+    if(input.allowPremiumModels!==undefined)policyPatch.allow_premium_models=Boolean(input.allowPremiumModels);
+    if(input.pauseAllAi!==undefined)policyPatch.pause_all_ai=Boolean(input.pauseAllAi);
+    if(input.warningThreshold!==undefined){const threshold=Number(input.warningThreshold);if(!Number.isFinite(threshold)||threshold<0.1||threshold>1)throw new Error('AI_BUDGET_WARNING_THRESHOLD_INVALID');policyPatch.warning_threshold=threshold;}
+    await this.db.serviceRest(`/rest/v1/ai_budget_policies?owner_user_id=eq.${q(actor.userId)}`,{method:'PATCH',body:jsonBody(policyPatch)});
+
+    const hasTenantOverride=['tenantMonthlyLimitUsd','tenantImageMonthlyLimitUsd','tenantPriorityWeight','tenantPauseAi'].some((key)=>Object.prototype.hasOwnProperty.call(input,key));
+    if(hasTenantOverride){
+      const priority=input.tenantPriorityWeight===undefined?1:Number(input.tenantPriorityWeight);if(!Number.isFinite(priority)||priority<=0)throw new Error('AI_BUDGET_PRIORITY_INVALID');
+      await this.db.serviceRest('/rest/v1/ai_tenant_budget_overrides?on_conflict=tenant_id',{method:'POST',headers:{prefer:'resolution=merge-duplicates,return=minimal'},body:jsonBody({tenant_id:tenantId,owner_user_id:actor.userId,monthly_limit_usd_micros:micros(input.tenantMonthlyLimitUsd),image_monthly_limit_usd_micros:micros(input.tenantImageMonthlyLimitUsd),priority_weight:priority,pause_ai:Boolean(input.tenantPauseAi),updated_at:new Date().toISOString()})});
+    }
+    return this.get(token,tenantId);
+  }
+
+  private async ensurePolicy(ownerUserId:string):Promise<PolicyRow>{
+    let row=(await this.db.serviceRest<PolicyRow[]>(`/rest/v1/ai_budget_policies?select=*&owner_user_id=eq.${q(ownerUserId)}&limit=1`))[0];
+    if(!row){const rows=await this.db.serviceRest<PolicyRow[]>('/rest/v1/ai_budget_policies',{method:'POST',body:jsonBody({owner_user_id:ownerUserId})});row=rows[0];}
+    if(!row)throw new Error('AI_BUDGET_POLICY_CREATE_FAILED');return row;
+  }
+  private publicPolicy(row:PolicyRow){return{monthlyLimitUsd:usd(row.monthly_limit_usd_micros),dailyLimitUsd:row.daily_limit_usd_micros===null?null:usd(row.daily_limit_usd_micros),perTenantMonthlyLimitUsd:row.per_tenant_monthly_limit_usd_micros===null?null:usd(row.per_tenant_monthly_limit_usd_micros),imageMonthlyLimitUsd:row.image_monthly_limit_usd_micros===null?null:usd(row.image_monthly_limit_usd_micros),premiumMonthlyLimitUsd:row.premium_monthly_limit_usd_micros===null?null:usd(row.premium_monthly_limit_usd_micros),maxSingleRequestUsd:row.max_single_request_usd_micros===null?null:usd(row.max_single_request_usd_micros),warningThreshold:Number(row.warning_threshold),optimizationMode:row.optimization_mode,allowPremiumModels:row.allow_premium_models,pauseAllAi:row.pause_all_ai};}
+}
