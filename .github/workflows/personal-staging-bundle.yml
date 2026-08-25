@@ -1,0 +1,93 @@
+name: personal-staging-bundle
+
+on:
+  push:
+    branches: [feat/saas-foundation]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install workspace dependencies
+        run: npm install --legacy-peer-deps
+      - name: Build personal staging web
+        env:
+          VITE_PERSONAL_STAGING_MODE: "true"
+          VITE_API_URL: /api
+          VITE_NEON_AUTH_URL: https://ep-rough-frost-a60otwzi.neonauth.us-west-2.aws.neon.tech/neondb
+          VITE_E2E_FIXTURES: "false"
+        run: npm run build:web
+      - name: Bundle canonical Vercel API
+        run: |
+          mkdir -p staging-bundle/api
+          npx --yes esbuild 'api/[...path].ts' \
+            --bundle \
+            --platform=node \
+            --format=esm \
+            --target=node22 \
+            --outfile='staging-bundle/api/[...path].mjs' \
+            --external:pg \
+            --external:sharp
+      - name: Inline web assets
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const path=require('path');
+          const root='apps/web/dist';
+          let html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+          html=html.replace(/<script([^>]*?)src="([^"]+)"([^>]*)><\/script>/g,(all,a,src,b)=>{
+            const p=path.join(root,src.replace(/^\//,''));
+            if(!fs.existsSync(p)) return all;
+            const js=fs.readFileSync(p,'utf8').replace(/<\/script/gi,'<\\/script');
+            return `<script${a}${b}>${js}</script>`;
+          });
+          html=html.replace(/<link([^>]*?)href="([^"]+\.css)"([^>]*)>/g,(all,a,href,b)=>{
+            const p=path.join(root,href.replace(/^\//,''));
+            if(!fs.existsSync(p)) return all;
+            const css=fs.readFileSync(p,'utf8').replace(/<\/style/gi,'<\\/style');
+            return `<style>${css}</style>`;
+          });
+          fs.writeFileSync('staging-bundle/index.html',html);
+          NODE
+      - name: Add runtime manifest
+        run: |
+          cat > staging-bundle/package.json <<'JSON'
+          {
+            "name":"post-automatici-personal-staging",
+            "private":true,
+            "type":"module",
+            "engines":{"node":">=22.12"},
+            "dependencies":{"pg":"^8.16.3","sharp":"^0.35.3"}
+          }
+          JSON
+          cat > staging-bundle/vercel.json <<'JSON'
+          {
+            "$schema":"https://openapi.vercel.sh/vercel.json",
+            "functions":{"api/[...path].mjs":{"maxDuration":60}},
+            "routes":[{"handle":"filesystem"},{"src":"/.*","dest":"/index.html"}]
+          }
+          JSON
+      - name: Verify bundle
+        run: |
+          test -s staging-bundle/index.html
+          test -s 'staging-bundle/api/[...path].mjs'
+          grep -q 'Post Automatici' staging-bundle/index.html
+          ! grep -q 'src="/assets/' staging-bundle/index.html
+          ! grep -q 'href="/assets/.*\.css' staging-bundle/index.html
+          du -h staging-bundle/index.html 'staging-bundle/api/[...path].mjs'
+      - name: Upload staging bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-staging-bundle
+          path: staging-bundle
+          retention-days: 2
+          if-no-files-found: error

@@ -1,0 +1,101 @@
+name: local-supabase-validation
+
+on:
+  push:
+    branches:
+      - feat/saas-foundation
+    paths:
+      - 'supabase/**'
+      - 'tests/integration/**'
+      - '.github/workflows/tenant-isolation.yml'
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - 'tests/integration/**'
+      - '.github/workflows/tenant-isolation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: 2.110.0
+          github-token: ${{ github.token }}
+
+      - name: Verify Supabase CLI
+        run: |
+          supabase --version
+          supabase --help >/dev/null
+          supabase db --help >/dev/null
+          supabase db lint --help >/dev/null
+          supabase db advisors --help >/dev/null
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Rebuild database from migrations and seed
+        run: supabase db reset --local
+
+      - name: Verify migration history
+        run: supabase migration list --local
+
+      - name: Lint local database
+        run: supabase db lint --local --level warning --fail-on error
+
+      - name: Run local security advisors
+        run: supabase db advisors --local --type security
+
+      - name: Run local performance advisors
+        run: supabase db advisors --local --type performance
+
+      - name: Run pgTAP database tests
+        run: supabase test db --local
+
+      - name: Export local API credentials
+        shell: bash
+        run: |
+          eval "$(supabase status -o env \
+            --override-name api.url=TEST_SUPABASE_URL \
+            --override-name auth.anon_key=TEST_SUPABASE_PUBLISHABLE_KEY \
+            --override-name auth.service_role_key=TEST_SUPABASE_SERVICE_ROLE_KEY)"
+          {
+            echo "TEST_SUPABASE_URL=$TEST_SUPABASE_URL"
+            echo "TEST_SUPABASE_PUBLISHABLE_KEY=$TEST_SUPABASE_PUBLISHABLE_KEY"
+            echo "TEST_SUPABASE_SERVICE_ROLE_KEY=$TEST_SUPABASE_SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Install integration dependencies
+        working-directory: tests/integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm install --no-audit --no-fund --legacy-peer-deps; then
+              exit 0
+            fi
+            echo "npm install failed on attempt ${attempt}; cleaning transient state"
+            rm -rf node_modules
+            npm cache verify || true
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+      - name: Run Tenant A/Tenant B and quota integration tests
+        working-directory: tests/integration
+        run: npm test
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup

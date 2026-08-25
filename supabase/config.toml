@@ -1,0 +1,24 @@
+project_id = "autoposter-saas"
+
+[db]
+major_version = 17
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:5173"
+additional_redirect_urls = ["http://localhost:5173/**", "http://127.0.0.1:5173/**", "http://localhost:3000/**", "http://127.0.0.1:3000/**"]
+jwt_expiry = 3600
+enable_signup = true
+
+# The browser/API regression suite intentionally creates many isolated users from
+# the same localhost runner in a short burst. Production/provider security is not
+# affected by this local-only Supabase configuration.
+[auth.rate_limit]
+sign_in_sign_ups = 200
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+[storage]
+enabled = true

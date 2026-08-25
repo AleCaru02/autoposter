@@ -1,0 +1,29 @@
+name: core
+
+on:
+  pull_request:
+    paths:
+      - 'packages/core/**'
+      - '.github/workflows/core.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+      - run: npm install --legacy-peer-deps --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test

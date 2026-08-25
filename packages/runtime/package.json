@@ -1,0 +1,27 @@
+{
+  "name": "@socialpilot/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck:source": "node --max-old-space-size=4096 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "typecheck:tests:ai": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.ai.json --noEmit",
+    "typecheck:tests:content-a": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.content-a.json --noEmit",
+    "typecheck:tests:content-b": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.content-b.json --noEmit",
+    "typecheck:tests:provider-a": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.provider-a.json --noEmit",
+    "typecheck:tests:provider-b": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.provider-b.json --noEmit",
+    "typecheck:tests:visual": "node --max-old-space-size=3072 ../../node_modules/typescript/bin/tsc -p tsconfig.tests.visual.json --noEmit",
+    "typecheck:tests": "npm run typecheck:tests:ai && npm run typecheck:tests:content-a && npm run typecheck:tests:content-b && npm run typecheck:tests:provider-a && npm run typecheck:tests:provider-b && npm run typecheck:tests:visual",
+    "typecheck": "npm run typecheck:source && npm run typecheck:tests"
+  },
+  "dependencies": {
+    "@socialpilot/contracts": "file:../contracts",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "5.9.2",
+    "vitest": "4.1.10"
+  }
+}

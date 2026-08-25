@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vitest/globals"], "noEmit": true },
+  "include": [
+    "tests/scheduler-mock.test.ts",
+    "tests/social-provider-mock.test.ts",
+    "tests/strategy-planner-mock.test.ts",
+    "tests/stripe-lifecycle-hardening.test.ts",
+    "tests/stripe-readiness.test.ts",
+    "tests/support-telegram.test.ts"
+  ]
+}

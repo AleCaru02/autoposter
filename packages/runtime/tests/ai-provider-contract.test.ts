@@ -1,0 +1,23 @@
+import { describe,expect,it } from 'vitest';
+import { z } from 'zod';
+import { AIProviderError, MockAIProvider, executeAIWithPolicy } from '../src/ai-provider-mock.js';
+import { BrandIntelligenceOutputSchema, StructuredOutputSchemas } from '@socialpilot/contracts/provider-readiness';
+import type { AIExecutionPolicy } from '@socialpilot/contracts';
+
+const policy:AIExecutionPolicy={timeoutMs:100,maxAttempts:2,retryableErrors:['TIMEOUT','RATE_LIMIT','PROVIDER_UNAVAILABLE']};
+const brandFixture={brandName:'Forno Vesuvio',industry:'Pizzeria',description:'Pizzeria locale',services:['pizza'],products:['margherita'],audiences:['residenti'],differentiators:['impasto'],toneRules:['chiaro'],allowedClaims:['pizza napoletana'],forbiddenClaims:['migliore al mondo'],evidence:[]};
+
+describe('MockAIProvider live-contract compatibility',()=>{
+  it('supports all configured capabilities without model strings in business input',()=>{const provider=new MockAIProvider();for(const capability of ['TEXT_CHEAP','TEXT_STANDARD','TEXT_REASONING','STRUCTURED_OUTPUT','EMBEDDING','VISION','IMAGE_GENERATION','IMAGE_EDIT','WEB_RESEARCH'] as const)expect(provider.supports(capability)).toBe(true);});
+  it('returns text, embeddings, vision, image, edit and research contracts',async()=>{const provider=new MockAIProvider();expect((await provider.generateText({capability:'TEXT_STANDARD',prompt:'hello',policy})).text).toContain('TEXT_STANDARD');expect((await provider.embed({texts:['a','b'],policy}))).toHaveLength(2);expect((await provider.analyzeVision({prompt:'describe',images:[{url:'https://fixture.invalid/a.jpg'}],policy})).imageCount).toBe(1);expect((await provider.generateImage({prompt:'pizza',aspectRatio:'square',policy})).mimeType).toBe('image/png');expect((await provider.editImage({prompt:'crop',imageBase64:'abc',policy})).mimeType).toBe('image/png');expect((await provider.webResearch({query:'local trend',policy})).sources).toHaveLength(1);});
+  it('enforces Zod structured output contracts',async()=>{const provider=new MockAIProvider();provider.setStructuredFixture(brandFixture);const output=await provider.generateStructured({capability:'STRUCTURED_OUTPUT',prompt:'brand',schema:BrandIntelligenceOutputSchema,policy});expect(output.brandName).toBe('Forno Vesuvio');provider.setStructuredFixture({bad:true});await expect(provider.generateStructured({capability:'STRUCTURED_OUTPUT',prompt:'brand',schema:BrandIntelligenceOutputSchema,policy})).rejects.toMatchObject({code:'VALIDATION_FAILURE'});});
+  it('exports every required critical structured schema',()=>{expect(Object.keys(StructuredOutputSchemas).sort()).toEqual(['analytics_insight','brand_intelligence','caption','competitor_analysis','content_strategy','core_concept','document_intelligence','fact_check','image_prompt','platform_variant','qa','topic_research','visual_brief'].sort());});
+});
+
+describe('AI failure handling',()=>{
+  it('retries only retryable failures and stops at policy limit',async()=>{const provider=new MockAIProvider();provider.setScenario('rate_limit');await expect(executeAIWithPolicy(policy,()=>provider.generateText({capability:'TEXT_STANDARD',prompt:'x',policy}))).rejects.toMatchObject({code:'RATE_LIMIT'});expect(provider.attemptCount).toBe(2);});
+  it('does not loop on safety/validation errors',async()=>{const provider=new MockAIProvider();provider.setScenario('safety');await expect(executeAIWithPolicy(policy,()=>provider.generateText({capability:'TEXT_STANDARD',prompt:'x',policy}))).rejects.toMatchObject({code:'SAFETY_REJECTION'});expect(provider.attemptCount).toBe(1);provider.setScenario('validation');provider.setStructuredFixture({});await expect(executeAIWithPolicy(policy,()=>provider.generateStructured({capability:'STRUCTURED_OUTPUT',prompt:'x',schema:z.object({ok:z.literal(true)}),policy}))).rejects.toMatchObject({code:'VALIDATION_FAILURE'});expect(provider.attemptCount).toBe(1);});
+  it('blocks excessive cost before generation',async()=>{const provider=new MockAIProvider();const zero={...policy,maxCostMicrounits:0};await expect(provider.generateText({capability:'TEXT_STANDARD',prompt:'x',policy:zero})).rejects.toMatchObject({code:'COST_LIMIT'});});
+  it('classifies empty and partial responses distinctly',async()=>{const provider=new MockAIProvider();provider.setScenario('empty');expect((await provider.generateText({capability:'TEXT_STANDARD',prompt:'x',policy})).text).toBe('');provider.setScenario('partial');await expect(provider.generateText({capability:'TEXT_STANDARD',prompt:'x',policy})).rejects.toMatchObject({code:'PARTIAL_RESPONSE'});});
+  it('represents provider errors with stable codes',()=>{expect(new AIProviderError('TIMEOUT').code).toBe('TIMEOUT');});
+});

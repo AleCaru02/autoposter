@@ -1,0 +1,22 @@
+{
+  "name": "@socialpilot/local-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pg": "^8.16.3",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.6",
+    "typescript": "5.9.2",
+    "vitest": "4.1.10"
+  }
+}
