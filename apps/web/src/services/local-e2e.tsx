@@ -156,7 +156,8 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     const result = await request<{ tenantId: string }>('/tenants', { method: 'POST', body: JSON.stringify(input) }, token);
     localStorage.setItem(TENANT_KEY, result.tenantId);
     setTenantId(result.tenantId);
-    await refreshTenants();
+    const rows = await request<TenantSummary[]>('/tenants', {}, token);
+    setTenants(rows);
     await refresh(result.tenantId);
     return result.tenantId;
   };
