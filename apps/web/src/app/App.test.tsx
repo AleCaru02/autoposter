@@ -24,11 +24,13 @@ describe('SaaS web routes', () => {
     expect(renderRoute('/gestione-social-automatica')).toContain('Automazione non significa perdere il controllo');
   });
 
-  it('renders dashboard fallback safely when local API is not configured', () => {
+  it('fails closed on the personal dashboard when backend is not configured', () => {
     const html = renderRoute('/app');
-    expect(html).toContain('Demo Studio');
-    expect(html).toContain('Approvazioni');
-    expect(html).toContain('Canali sani');
+    expect(html).toContain('Post Automatici');
+    expect(html).toContain('Backend non collegato');
+    expect(html).toContain('Provider: NON COLLEGATO');
+    expect(html).not.toContain('Demo Studio');
+    expect(html).not.toContain('Canali sani');
   });
 
   it('fails closed on the post editor when no real/local backend is configured', () => {
@@ -39,10 +41,12 @@ describe('SaaS web routes', () => {
     expect(html).not.toContain('Post editor · mock');
   });
 
-  it('renders the provider-ready connection route without enabling OAuth live', () => {
+  it('fails closed on social connections without pretending OAuth is live', () => {
     const html = renderRoute('/app/connections');
-    expect(html).toContain('Social Connections');
-    expect(html).toContain('Local E2E richiesto');
+    expect(html).toContain('Post Automatici');
+    expect(html).toContain('Backend non collegato');
+    expect(html).toContain('Provider: NON COLLEGATO');
+    expect(html).not.toContain('Connetti mock');
   });
 
   it('fails closed on the provider test console without a configured backend', () => {
