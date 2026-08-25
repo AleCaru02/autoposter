@@ -109,13 +109,8 @@ export function OnboardingPage() {
 
   const complete = async () => {
     if (!local.tenantId) return;
-    if (e2eFixtures) {
-      await run(() => local.api(`/tenants/${local.tenantId}/onboarding/complete`, { method:'POST' }));
-      navigate('/app/strategy');
-      return;
-    }
-    await run(() => local.api(`/tenants/${local.tenantId}/onboarding`, { method:'PATCH', body:JSON.stringify({ current_step:'completed' }) }));
-    setStep('completed');
+    await run(() => local.api(`/tenants/${local.tenantId}/onboarding/complete`, { method:'POST' }));
+    navigate('/app/strategy');
   };
 
   return <>
