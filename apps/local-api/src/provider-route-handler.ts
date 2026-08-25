@@ -1,11 +1,15 @@
 import type { IncomingMessage } from 'node:http';
 import type { NormalizedPublishPayload, ProviderKey } from '@socialpilot/contracts';
+import { BrandProfileBootstrapService } from './brand-profile-bootstrap-service.js';
+import { ContentScheduleService } from './content-schedule-service.js';
 import { DocumentKnowledgeService } from './document-knowledge-service.js';
 import { ProviderReadinessService } from './provider-readiness-service.js';
 import { ProviderWebhookService } from './provider-webhook-service.js';
 
 const providers=new ProviderReadinessService();
 const documents=new DocumentKnowledgeService();
+const brandBootstrap=new BrandProfileBootstrapService();
+const schedule=new ContentScheduleService();
 const webhooks=new ProviderWebhookService();
 
 const readText=async(req:IncomingMessage)=>{const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));return Buffer.concat(chunks).toString('utf8');};
@@ -28,6 +32,13 @@ export async function tryProviderReadinessRoute(req:IncomingMessage,url:URL,part
 
   if(parts[0]!=='tenants'||!parts[1])return{handled:false};
   const tenantId=parts[1];const token=()=>bearer(req);
+
+  if(method==='POST'&&parts[2]==='brand'&&parts[3]==='manual-init')return{handled:true,status:200,body:await brandBootstrap.ensureManualProfile(token(),tenantId,await readJson(req))};
+  if(method==='PATCH'&&parts[2]==='variants'&&parts[3]&&parts[4]==='schedule'){
+    const body=await readJson<{scheduledAt:string}>(req);
+    return{handled:true,status:200,body:await schedule.rescheduleVariant(token(),tenantId,parts[3],String(body.scheduledAt??''))};
+  }
+
   if(method==='GET'&&parts[2]==='documents')return{handled:true,status:200,body:await documents.list(token(),tenantId)};
   if(method==='GET'&&parts[2]==='knowledge-sources')return{handled:true,status:200,body:await documents.knowledgeSources(token(),tenantId)};
   if(method==='POST'&&parts[2]==='assets'&&parts[3]&&parts[4]==='ingest')return{handled:true,status:200,body:await documents.ingest(token(),tenantId,parts[3])};
