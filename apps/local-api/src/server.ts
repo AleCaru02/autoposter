@@ -4,6 +4,7 @@ import { LocalE2EService } from './service.js';
 import { LocalAssetVisualReadinessService } from './asset-visual-readiness-service.js';
 import { TelegramApprovalService } from './telegram-approval-service.js';
 import { ApprovalDecisionService } from './approval-decision-service.js';
+import { ProductionAIWorkflowService } from './production-ai-workflow-service.js';
 import { tryProviderReadinessRoute } from './provider-route-handler.js';
 import { LocalSupabaseClient, jsonBody } from './db.js';
 import { AdminCustomerService } from './admin-customer-service.js';
@@ -16,6 +17,7 @@ const service=new LocalE2EService();
 const visual=new LocalAssetVisualReadinessService();
 const telegram=new TelegramApprovalService();
 const approval=new ApprovalDecisionService();
+const productionAi=new ProductionAIWorkflowService();
 const db=new LocalSupabaseClient();
 const admin=new AdminCustomerService(db);
 const limiter=new FixedWindowRateLimiter();
@@ -47,7 +49,8 @@ export const route=async(req:IncomingMessage,res:ServerResponse)=>{
   }
 
   if(url.pathname==='/health'){
-    send(res,200,{ok:true,environment:e2eFixtures?'test':'production',capabilities:{database:configured(process.env.SUPABASE_URL)&&configured(process.env.SUPABASE_SERVICE_ROLE_KEY),openai:configured(process.env.OPENAI_API_KEY),openaiImages2:configured(process.env.OPENAI_API_KEY),telegram:process.env.TELEGRAM_LIVE==='true'&&configured(process.env.TELEGRAM_BOT_TOKEN)&&configured(process.env.TELEGRAM_WEBHOOK_SECRET),instagram:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),facebook:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),linkedin:process.env.LINKEDIN_LIVE==='true'&&configured(process.env.LINKEDIN_CLIENT_ID)&&configured(process.env.LINKEDIN_CLIENT_SECRET),googleBusinessProfile:process.env.GBP_LIVE==='true'&&configured(process.env.GOOGLE_CLIENT_ID)&&configured(process.env.GOOGLE_CLIENT_SECRET)},approval:'human-required',testFixtures:e2eFixtures,hardening:{cors:'allowlist',securityHeaders:true,rateLimits:true}},cors);return;
+    const ai=productionAi.readiness();
+    send(res,200,{ok:true,environment:e2eFixtures?'test':'production',capabilities:{database:configured(process.env.SUPABASE_URL)&&configured(process.env.SUPABASE_SERVICE_ROLE_KEY),openai:ai.configured,openaiTextModel:ai.textModel,openaiImages2:ai.configured&&ai.imageModel===ai.imageModelRequired,openaiImageModel:ai.imageModel,telegram:process.env.TELEGRAM_LIVE==='true'&&configured(process.env.TELEGRAM_BOT_TOKEN)&&configured(process.env.TELEGRAM_WEBHOOK_SECRET),instagram:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),facebook:process.env.META_LIVE==='true'&&configured(process.env.META_APP_ID)&&configured(process.env.META_APP_SECRET),linkedin:process.env.LINKEDIN_LIVE==='true'&&configured(process.env.LINKEDIN_CLIENT_ID)&&configured(process.env.LINKEDIN_CLIENT_SECRET),googleBusinessProfile:process.env.GBP_LIVE==='true'&&configured(process.env.GOOGLE_CLIENT_ID)&&configured(process.env.GOOGLE_CLIENT_SECRET)},approval:'human-required',testFixtures:e2eFixtures,hardening:{cors:'allowlist',securityHeaders:true,rateLimits:true}},cors);return;
   }
 
   if(method==='POST'&&url.pathname==='/auth/register'){send(res,200,await service.register(await readJson(req) as any),cors);return;}
@@ -68,45 +71,42 @@ export const route=async(req:IncomingMessage,res:ServerResponse)=>{
     if(parts[2]==='variants'&&parts[3]&&parts[4]==='telegram-preview'&&method==='POST'){send(res,200,await telegram.sendVariantPreview(token(),tenantId,parts[3]),cors);return;}
     if(parts[2]==='variants'&&parts[3]&&parts[4]==='visual'){
       if(method==='GET'){send(res,200,await visual.latestVisual(token(),tenantId,parts[3]),cors);return;}
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_IMAGES_NOT_CONFIGURED','La generazione visuale di produzione verrà abilitata soltanto tramite OpenAI Immagini 2.');return;}
-      if(method==='POST'){send(res,200,await visual.renderVariant(token(),tenantId,parts[3],await readJson(req) as any),cors);return;}
+      if(method==='POST'){send(res,200,e2eFixtures?await visual.renderVariant(token(),tenantId,parts[3],await readJson(req) as any):await productionAi.generateVisualForVariant(token(),tenantId,parts[3]),cors);return;}
     }
     if(parts[2]==='variants'&&parts[3]&&parts[4]==='repair'&&method==='POST'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_IMAGES_NOT_CONFIGURED','La rigenerazione visuale di produzione richiede OpenAI Immagini 2.');return;}
-      send(res,200,await visual.repairVariant(token(),tenantId,parts[3],await readJson(req) as any),cors);return;
+      if(e2eFixtures)send(res,200,await visual.repairVariant(token(),tenantId,parts[3],await readJson(req) as any),cors);
+      else send(res,200,await productionAi.generateVisualForVariant(token(),tenantId,parts[3]),cors);
+      return;
     }
     if(method==='GET'&&parts[2]==='workspace'){send(res,200,await service.getWorkspace(token(),tenantId),cors);return;}
     if(method==='PATCH'&&parts[2]==='onboarding'){send(res,200,await service.saveOnboarding(token(),tenantId,await readJson(req)),cors);return;}
-    if(method==='POST'&&parts[2]==='scan'){send(res,200,await service.scanWebsite(token(),tenantId),cors);return;}
+    if(method==='POST'&&parts[2]==='scan'){
+      if(!e2eFixtures&&!productionAi.readiness().configured){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','La scansione pagina per pagina è pronta, ma il Brand Profile di produzione richiede OpenAI configurato lato server.');return;}
+      const scan=await service.scanWebsite(token(),tenantId);
+      if(e2eFixtures){send(res,200,scan,cors);return;}
+      const brand=await productionAi.refineBrandFromStoredEvidence(token(),tenantId);send(res,200,{...scan,profile:brand,ai:true},cors);return;
+    }
     if(method==='POST'&&parts[2]==='social'){
       if(!e2eFixtures){unavailable(res,cors,'PROVIDER_NOT_CONFIGURED','Gli account social possono risultare connessi soltanto dopo un OAuth reale del provider.');return;}
       send(res,200,await service.configureSocial(token(),tenantId,await readJson(req) as any),cors);return;
     }
-    if(method==='POST'&&parts[2]==='onboarding'&&parts[3]==='complete'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','Il completamento automatico dell’onboarding richiede la strategia OpenAI di produzione.');return;}
-      send(res,200,await service.completeOnboarding(token(),tenantId),cors);return;
-    }
+    if(method==='POST'&&parts[2]==='onboarding'&&parts[3]==='complete'){send(res,200,e2eFixtures?await service.completeOnboarding(token(),tenantId):await productionAi.completeOnboarding(token(),tenantId),cors);return;}
     if(method==='PATCH'&&parts[2]==='brand'){send(res,200,await service.updateBrand(token(),tenantId,await readJson(req)),cors);return;}
     if(method==='POST'&&parts[2]==='brand'&&parts[3]==='status'){const body=await readJson<{status:'review'|'confirmed'}>(req);send(res,200,await service.setBrandStatus(token(),tenantId,body.status),cors);return;}
     if(method==='POST'&&parts[2]==='brand'&&parts[3]==='lock'){const body=await readJson<{fieldPath:string;locked:boolean}>(req);send(res,200,await service.setBrandLock(token(),tenantId,body.fieldPath,body.locked),cors);return;}
-    if(method==='POST'&&parts[2]==='strategy'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','La strategia di produzione deve essere generata con OpenAI.');return;}
-      send(res,200,await service.generateStrategy(token(),tenantId),cors);return;
-    }
-    if(method==='POST'&&parts[2]==='calendar'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','Il calendario automatico di produzione richiede la strategia OpenAI.');return;}
-      send(res,200,await service.generateCalendar(token(),tenantId,await readJson(req)),cors);return;
-    }
+    if(method==='POST'&&parts[2]==='strategy'){send(res,200,e2eFixtures?await service.generateStrategy(token(),tenantId):await productionAi.generateStrategy(token(),tenantId),cors);return;}
+    if(method==='POST'&&parts[2]==='calendar'){const body=await readJson(req);send(res,200,e2eFixtures?await service.generateCalendar(token(),tenantId,body):await productionAi.generateCalendar(token(),tenantId,body as {weeks?:number;startDate?:string}),cors);return;}
     if(method==='POST'&&parts[2]==='posts'&&parts[3]==='generate-all'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','La generazione contenuti di produzione richiede OpenAI.');return;}
-      const body=await readJson<{limit?:number}>(req);const limit=body.limit??20;const generated=await service.generateAllDrafts(token(),tenantId,limit);await visual.renderPendingVariants(token(),tenantId,Math.max(limit*4,20));send(res,200,generated,cors);return;
+      const body=await readJson<{limit?:number}>(req);const limit=body.limit??20;
+      if(e2eFixtures){const generated=await service.generateAllDrafts(token(),tenantId,limit);await visual.renderPendingVariants(token(),tenantId,Math.max(limit*4,20));send(res,200,generated,cors);return;}
+      send(res,200,await productionAi.generateAllDrafts(token(),tenantId,limit),cors);return;
     }
     if(parts[2]==='posts'&&parts[3]){
       const postId=parts[3];
       if(method==='GET'&&parts.length===4){send(res,200,await service.getPost(token(),tenantId,postId),cors);return;}
       if(method==='POST'&&parts[4]==='generate'){
-        if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','La generazione contenuti di produzione richiede OpenAI.');return;}
-        const generated=await service.generatePost(token(),tenantId,postId);await visual.renderPendingVariants(token(),tenantId,20);send(res,200,generated,cors);return;
+        if(e2eFixtures){const generated=await service.generatePost(token(),tenantId,postId);await visual.renderPendingVariants(token(),tenantId,20);send(res,200,generated,cors);return;}
+        send(res,200,await productionAi.generatePost(token(),tenantId,postId),cors);return;
       }
       if(method==='POST'&&parts[4]==='schedule'){send(res,200,await service.scheduleApprovedPost(token(),tenantId,postId),cors);return;}
     }
@@ -126,15 +126,14 @@ export const route=async(req:IncomingMessage,res:ServerResponse)=>{
       send(res,200,await service.refreshLearning(token(),tenantId),cors);return;
     }
     if(method==='POST'&&parts[2]==='chat'){
-      if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','L’assistente di produzione richiede OpenAI configurato lato server.');return;}
-      const body=await readJson<{message:string}>(req);send(res,200,await service.chatTenant(token(),tenantId,body.message),cors);return;
+      const body=await readJson<{message:string}>(req);send(res,200,e2eFixtures?await service.chatTenant(token(),tenantId,body.message):await productionAi.tenantAssistant(token(),tenantId,body.message),cors);return;
     }
     if(method==='POST'&&parts[2]==='lifecycle'&&parts[3]==='delete-request'){const body=await readJson<{scope?:'ACCOUNT'|'TENANT';reason?:string}>(req);send(res,200,await admin.requestDeletion(token(),tenantId,body.scope??'TENANT',body.reason??''),cors);return;}
     if(method==='POST'&&parts[2]==='lifecycle'&&parts[3]==='revoke-connections'){send(res,200,await admin.revokeTenantConnections(token(),tenantId),cors);return;}
   }
 
   if(method==='POST'&&url.pathname==='/chat/public'){
-    if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','L’assistente pubblico non è disponibile finché OpenAI non è collegato realmente.');return;}
+    if(!e2eFixtures){unavailable(res,cors,'OPENAI_NOT_CONFIGURED','L’assistente pubblico resta disabilitato finché non viene progettato come funzione reale del prodotto.');return;}
     const body=await readJson<{message:string}>(req);send(res,200,await service.chatPublic(body.message),cors);return;
   }
 
@@ -152,7 +151,7 @@ export const route=async(req:IncomingMessage,res:ServerResponse)=>{
 };
 
 export const handleApiRequest=async(req:IncomingMessage,res:ServerResponse)=>{
-  try{await route(req,res);}catch(error:unknown){const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED|TELEGRAM_USER_NOT_AUTHORIZED|HUMAN_APPROVAL_REQUIRED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/_NOT_CONFIGURED|PROVIDER_NOT_CONFIGURED|ANALYTICS_NOT_CONFIGURED/.test(message)?503:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),testHarness:e2eFixtures},corsHeaders(req));}
+  try{await route(req,res);}catch(error:unknown){const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED|TELEGRAM_USER_NOT_AUTHORIZED|HUMAN_APPROVAL_REQUIRED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/OPENAI_|_NOT_CONFIGURED|PROVIDER_NOT_CONFIGURED|ANALYTICS_NOT_CONFIGURED/.test(message)?503:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),testHarness:e2eFixtures},corsHeaders(req));}
 };
 
 const invokedAsScript=process.argv[1];
