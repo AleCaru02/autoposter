@@ -11,7 +11,7 @@ const accountPlatform=(account:any)=>String(account.provider??account.platform??
 const publishPayload=(platform:string,accountId:string)=>({platform,accountId,format:platform==='google_business_profile'?'local_post':platform==='instagram'?'image':'text',text:'Provider readiness E2E',media:platform==='instagram'?[{mimeType:'image/jpeg',url:'https://fixture.invalid/a.jpg'}]:[],idempotencyKey:`provider-e2e-${accountId.slice(0,12)}`,correlationId:`corr-${Date.now()}-${Math.random().toString(16).slice(2)}`});
 
 test.describe('provider readiness E2E',()=>{
-  test('OAuth fixtures discover multiple accounts, health, validation, dry-run, publish, analytics, reconnect and revoke',async({request})=>{
+  test('internal OAuth fixtures exercise account discovery, validation, publish, analytics and lifecycle',async({request})=>{
     const user=await setup(request,'Provider Owner');
     for(const provider of ['meta','linkedin','google_business_profile'])await requestJson(request,user.token,`/tenants/${user.tenantId}/providers/${provider}/connect-mock`,'POST',{});
     const connections=await requestJson<any[]>(request,user.token,`/tenants/${user.tenantId}/provider-connections`);
@@ -26,5 +26,22 @@ test.describe('provider readiness E2E',()=>{
 
   test('provider validator blocks known unsupported formats before sending',async({request})=>{const user=await setup(request,'Validator Owner');await requestJson(request,user.token,`/tenants/${user.tenantId}/providers/linkedin/connect-mock`,'POST',{});await requestJson(request,user.token,`/tenants/${user.tenantId}/providers/google_business_profile/connect-mock`,'POST',{});const connections=await requestJson<any[]>(request,user.token,`/tenants/${user.tenantId}/provider-connections`);const li=connections.find((item)=>item.provider==='linkedin').accounts[0];const badLi={...publishPayload('linkedin',li.id),format:'carousel'};const liValidation=await requestJson<any>(request,user.token,`/tenants/${user.tenantId}/provider-accounts/${li.id}/validate`,'POST',badLi);expect(liValidation.valid).toBe(false);expect(liValidation.issues.some((item:any)=>item.code==='LINKEDIN_ORGANIC_CAROUSEL_UNSUPPORTED')).toBe(true);const gbp=connections.find((item)=>item.provider==='google_business_profile').accounts[0];const badGbp={...publishPayload('google_business_profile',gbp.id),format:'product'};const gbpValidation=await requestJson<any>(request,user.token,`/tenants/${user.tenantId}/provider-accounts/${gbp.id}/validate`,'POST',badGbp);expect(gbpValidation.valid).toBe(false);expect(gbpValidation.issues.some((item:any)=>item.code==='GBP_PRODUCT_POST_UNSUPPORTED')).toBe(true);});
 
-  test('browser connects fixtures, shows health, uses admin dry-run and remains usable on mobile',async({page,request})=>{const user=await setup(request,'Provider Browser Owner');await page.addInitScript(({token,tenantId})=>{localStorage.setItem('socialpilot.local.token',token);localStorage.setItem('socialpilot.local.tenant',tenantId);},{token:user.token,tenantId:user.tenantId});const errors:string[]=[];page.on('console',(msg)=>{if(msg.type()==='error')errors.push(msg.text())});page.on('pageerror',(error)=>errors.push(error.message));await page.goto(`${WEB}/app/connections`);await expect(page.getByText('Social Connections & Health')).toBeVisible();await page.getByTestId('connect-meta').click();await expect(page.getByText('Forno Vesuvio Milano')).toBeVisible();await page.getByTestId('connect-linkedin').click();await expect(page.getByText('SocialPilot Demo Company')).toBeVisible();await page.getByTestId('connect-google_business_profile').click();await expect(page.getByText('Forno Vesuvio · Milano Centro')).toBeVisible();await expect(page.getByText('CONNECTED').first()).toBeVisible();await page.goto(`${WEB}/admin/providers`);if(await page.getByTestId('provider-console-claim-admin').isVisible().catch(()=>false))await page.getByTestId('provider-console-claim-admin').click();await expect(page.getByTestId('provider-console-account')).toBeVisible();await page.getByTestId('provider-console-dry-run').click();await expect(page.getByTestId('provider-console-output')).toContainText('DRY_RUN');await page.setViewportSize({width:390,height:844});await page.goto(`${WEB}/app/connections`);await expect(page.getByText('Social Connections & Health')).toBeVisible();expect(errors).toEqual([]);});
+  test('production-facing connections UI exposes no fixture OAuth or mock publish controls',async({page,request})=>{
+    const user=await setup(request,'Provider Browser Owner');
+    await page.addInitScript(({token,tenantId})=>{localStorage.setItem('post-automatici.session.token',token);localStorage.setItem('post-automatici.active-tenant',tenantId);},{token:user.token,tenantId:user.tenantId});
+    const errors:string[]=[];page.on('console',(msg)=>{if(msg.type()==='error')errors.push(msg.text())});page.on('pageerror',(error)=>errors.push(error.message));
+    await page.goto(`${WEB}/app/connections`);
+    await expect(page.getByRole('heading',{name:'Connessioni'})).toBeVisible();
+    for(const label of ['Instagram','Facebook','LinkedIn','Google Business Profile'])await expect(page.getByRole('heading',{name:label})).toBeVisible();
+    await expect(page.getByText('APPROVAZIONE UMANA OBBLIGATORIA')).toBeVisible();
+    await expect(page.locator('[data-testid="connect-meta"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="connect-linkedin"]')).toHaveCount(0);
+    await expect(page.getByText(/SocialPilot Demo Company/)).toHaveCount(0);
+    await expect(page.getByText(/mock/i)).toHaveCount(0);
+    await expect(page.getByRole('button',{name:/Connetti · API da configurare/}).first()).toBeDisabled();
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(`${WEB}/app/connections`);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)).toBeLessThanOrEqual(2);
+    expect(errors).toEqual([]);
+  });
 });
