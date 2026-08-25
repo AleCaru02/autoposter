@@ -78,7 +78,19 @@ jobs:
 
       - name: Install integration dependencies
         working-directory: tests/integration
-        run: npm install --no-audit --no-fund
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm install --no-audit --no-fund --legacy-peer-deps; then
+              exit 0
+            fi
+            echo "npm install failed on attempt ${attempt}; cleaning transient state"
+            rm -rf node_modules
+            npm cache verify || true
+            sleep $((attempt * 2))
+          done
+          exit 1
 
       - name: Run Tenant A/Tenant B and quota integration tests
         working-directory: tests/integration
