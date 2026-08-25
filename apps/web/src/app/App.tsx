@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from '../components/AppShell';
-import { PersonalStagingBootstrap } from '../components/PersonalStagingBootstrap';
 import { LocalE2EProvider } from '../services/local-e2e';
 import { RealDataGate } from '../services/RealDataGate';
 import { OnboardingPage } from '../pages/OnboardingPage';
@@ -26,7 +25,7 @@ const personalStaging=import.meta.env.VITE_PERSONAL_STAGING_MODE==='true';
 export function App() {
   const protectedData=(element:ReactNode)=><RealDataGate>{element}</RealDataGate>;
   const publicOrDashboard=(element:ReactNode)=>personalStaging?<Navigate to="/app" replace/>:element;
-  return <LocalE2EProvider><PersonalStagingBootstrap><Routes>
+  return <LocalE2EProvider><Routes>
     <Route path="/" element={publicOrDashboard(<LandingPage />)} />
     <Route path="/come-funziona" element={publicOrDashboard(<HowItWorksPage />)} />
     <Route path="/funzionalita" element={publicOrDashboard(<FeaturesPage />)} />
@@ -38,9 +37,9 @@ export function App() {
     <Route path="/privacy" element={publicOrDashboard(<PrivacyPage />)} />
     <Route path="/termini" element={publicOrDashboard(<TermsPage />)} />
     <Route path="/cookie-policy" element={publicOrDashboard(<CookiePolicyPage />)} />
-    <Route path="/login" element={publicOrDashboard(<LoginPage />)} />
-    <Route path="/register" element={publicOrDashboard(<RegisterPage />)} />
-    <Route path="/reset-password" element={publicOrDashboard(<ResetPasswordPage />)} />
+    <Route path="/login" element={<LoginPage />} />
+    <Route path="/register" element={<RegisterPage />} />
+    <Route path="/reset-password" element={<ResetPasswordPage />} />
     <Route element={<AppShell />}>
       <Route path="/preview-ui" element={<VisualPreviewPage />} />
       <Route path="/app" element={protectedData(<DashboardPage />)} />
@@ -64,5 +63,5 @@ export function App() {
       <Route path="/admin" element={protectedData(<AdminCustomersPage />)} />
     </Route>
     <Route path="*" element={<Navigate to={personalStaging?'/app':'/'} replace />} />
-  </Routes></PersonalStagingBootstrap></LocalE2EProvider>;
+  </Routes></LocalE2EProvider>;
 }
