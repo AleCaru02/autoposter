@@ -3,6 +3,8 @@ name: personal-staging-bundle
 on:
   push:
     branches: [feat/saas-foundation]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
