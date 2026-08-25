@@ -1,8 +1,7 @@
 begin;
-select plan(16);
+select plan(15);
 
-select has_column('public','tenants','data_mode','tenant has explicit data mode');
-select col_default_is('public','tenants','data_mode','DEMO','data mode defaults to explicit demo');
+select hasnt_column('public','tenants','data_mode','tenant has no demo/real product mode');
 select has_table('public','website_resources','website raw knowledge persists');
 select has_table('public','tenant_ai_budgets','tenant AI budgets persist');
 select has_table('public','ai_cost_reservations','AI cost reservations persist');
