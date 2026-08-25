@@ -10,11 +10,11 @@ import { PlatformApiSettingsService } from '../apps/local-api/src/platform-api-s
 import { MasterAdminService } from '../apps/local-api/src/master-admin-service.js';
 
 const db=new LocalSupabaseClient();
-const productionAi=new VercelSafeProductionAIWorkflowService();
 const aiBudget=new AiBudgetService(db);
-const personalOnboarding=new PersonalOnboardingCompletionService(db);
 const platformSettings=new PlatformApiSettingsService(db);
 const masterAdmin=new MasterAdminService(db);
+const productionAi=()=>new VercelSafeProductionAIWorkflowService();
+const personalOnboarding=()=>new PersonalOnboardingCompletionService(db);
 const allowedBuckets=new Set(['brand-assets','post-assets','tenant-documents']);
 const allowedNeonAuthPaths=new Set(['sign-up/email','sign-in/email','get-session','token','sign-out']);
 const secret=()=>process.env.ASSET_SIGNING_SECRET?.trim()??'';
@@ -33,7 +33,7 @@ const rewriteProxyCookie=(cookie:string):string=>{let next=cookie.replace(/;\s*D
 const adminErrorStatus=(message:string)=>/platform_admin_required|auth_required/i.test(message)?403:/NOT_CONFIGURED|ENCRYPTION/i.test(message)?503:400;
 
 function handleProductionHealth(res:ServerResponse){
-  const ai=productionAi.readiness();
+  const ai=productionAi().readiness();
   const database=configured(process.env.NEON_DATABASE_URL)&&configured(process.env.NEON_DATA_API_URL);
   const auth=configured(process.env.NEON_AUTH_URL);
   const staging=(process.env.APP_ENV??'').toUpperCase()==='STAGING';
@@ -78,7 +78,7 @@ async function handleMasterAdmin(req:IncomingMessage,res:ServerResponse,url:URL)
 async function handleOnboardingCompletion(req:IncomingMessage,res:ServerResponse,url:URL){
   const p=parts(url.pathname);
   if(!(req.method==='POST'&&p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='onboarding'&&p[4]==='complete'))return false;
-  try{json(res,200,await personalOnboarding.complete(bearer(req),p[2]));}
+  try{json(res,200,await personalOnboarding().complete(bearer(req),p[2]));}
   catch(error){const message=error instanceof Error?error.message:String(error);json(res,/auth_required|access_denied/.test(message)?403:400,{error:message});}
   return true;
 }
@@ -89,7 +89,14 @@ async function handleStorageCompat(req:IncomingMessage,res:ServerResponse,url:UR
 
 async function handleAiBudget(req:IncomingMessage,res:ServerResponse,url:URL){const p=parts(url.pathname);if(!(p[0]==='api'&&p[1]==='tenants'&&p[2]))return false;try{if(p[3]==='ai-budget'){if(req.method==='GET'){json(res,200,await aiBudget.get(bearer(req),p[2]));return true;}if(req.method==='PATCH'){json(res,200,await aiBudget.update(bearer(req),p[2],await readJsonBody(req)));return true;}json(res,405,{error:'method_not_allowed'});return true;}if(p[3]==='ai-cost-report'&&req.method==='GET'){json(res,200,await aiBudget.report(bearer(req),p[2],{from:url.searchParams.get('from')??'',to:url.searchParams.get('to')??'',scope:url.searchParams.get('scope')??'tenant'}));return true;}return false;}catch(error){const message=error instanceof Error?error.message:'ai_budget_failed';json(res,message.includes('access_denied')||message.includes('OWNER')?403:400,{error:message});return true;}}
 
-async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL){if(req.method!=='POST')return false;const p=parts(url.pathname);if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]&&p[5]==='generate'){try{json(res,200,await productionAi.generatePost(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='variants'&&p[4]&&p[5]==='visual'){try{json(res,200,await productionAi.generateVisualForVariant(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'visual_generation_failed'});}return true;}if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]==='generate-all'){try{json(res,200,await productionAi.generateAllDrafts(bearer(req),p[2],1));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}return false;}
+async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL){
+  if(req.method!=='POST')return false;
+  const p=parts(url.pathname);const ai=productionAi();
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]&&p[5]==='generate'){try{json(res,200,await ai.generatePost(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='variants'&&p[4]&&p[5]==='visual'){try{json(res,200,await ai.generateVisualForVariant(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'visual_generation_failed'});}return true;}
+  if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]==='generate-all'){try{json(res,200,await ai.generateAllDrafts(bearer(req),p[2],1));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;}
+  return false;
+}
 
 async function dispatch(req:IncomingMessage,res:ServerResponse,url:URL){
   await platformSettings.hydrateRuntime().catch(()=>false);
