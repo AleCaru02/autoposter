@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { runAiRequestContext } from '../apps/local-api/src/ai-request-context.js';
 import { LocalSupabaseClient } from '../apps/local-api/src/db.js';
 import { handleApiRequest } from '../apps/local-api/src/server.js';
 import { VercelSafeProductionAIWorkflowService } from '../apps/local-api/src/vercel-safe-production-ai-workflow-service.js';
@@ -44,25 +45,29 @@ async function handleStorageCompat(req:IncomingMessage,res:ServerResponse,url:UR
 async function handleVercelSafeAi(req:IncomingMessage,res:ServerResponse,url:URL){
   if(req.method!=='POST')return false;
   const p=parts(url.pathname);
-  // /api/tenants/:tenant/posts/:post/generate
   if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]&&p[5]==='generate'){
     try{json(res,200,await productionAi.generatePost(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;
   }
-  // /api/tenants/:tenant/variants/:variant/visual
   if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='variants'&&p[4]&&p[5]==='visual'){
     try{json(res,200,await productionAi.generateVisualForVariant(bearer(req),p[2],p[4]));}catch(error){json(res,500,{error:error instanceof Error?error.message:'visual_generation_failed'});}return true;
   }
-  // Keep legacy endpoint bounded to a single text generation. The web UI performs the long queue.
   if(p[0]==='api'&&p[1]==='tenants'&&p[2]&&p[3]==='posts'&&p[4]==='generate-all'){
     try{json(res,200,await productionAi.generateAllDrafts(bearer(req),p[2],1));}catch(error){json(res,500,{error:error instanceof Error?error.message:'generation_failed'});}return true;
   }
   return false;
 }
 
-export default async function handler(req:IncomingMessage,res:ServerResponse){
-  const url=new URL(req.url??'/',`https://${req.headers.host??'localhost'}`);
+async function dispatch(req:IncomingMessage,res:ServerResponse,url:URL){
   if(url.pathname==='/api/assets/private'){await handlePrivateAsset(req,res,url);return;}
   if(url.pathname.startsWith('/api/storage/v1/object')){await handleStorageCompat(req,res,url);return;}
   if(await handleVercelSafeAi(req,res,url))return;
   await handleApiRequest(req,res);
+}
+
+export default async function handler(req:IncomingMessage,res:ServerResponse){
+  const url=new URL(req.url??'/',`https://${req.headers.host??'localhost'}`);
+  const p=parts(url.pathname);
+  const tenantId=p[0]==='api'&&p[1]==='tenants'&&p[2]?p[2]:null;
+  if(tenantId){await runAiRequestContext(tenantId,()=>dispatch(req,res,url));return;}
+  await dispatch(req,res,url);
 }
