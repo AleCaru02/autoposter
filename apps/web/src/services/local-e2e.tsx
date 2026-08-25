@@ -4,6 +4,25 @@ export type ApiPlatform = 'facebook' | 'instagram' | 'linkedin' | 'google_busine
 export type ApprovalMode = 'auto' | 'manual';
 export type LocalRequestInit = Omit<RequestInit, 'body'> & { body?: BodyInit | null | undefined };
 
+export interface ProductHealth {
+  ok: boolean;
+  environment?: string;
+  approval?: string;
+  testFixtures?: boolean;
+  capabilities?: {
+    database?: boolean;
+    openai?: boolean;
+    openaiTextModel?: string;
+    openaiImages2?: boolean;
+    openaiImageModel?: string;
+    telegram?: boolean;
+    instagram?: boolean;
+    facebook?: boolean;
+    linkedin?: boolean;
+    googleBusinessProfile?: boolean;
+  };
+}
+
 export interface TenantSummary {
   id: string;
   name: string;
@@ -33,6 +52,7 @@ export interface LocalWorkspace {
 
 interface LocalE2EContextValue {
   enabled: boolean;
+  health: ProductHealth | null;
   token: string | null;
   tenantId: string | null;
   tenants: TenantSummary[];
@@ -46,6 +66,7 @@ interface LocalE2EContextValue {
   selectTenant(tenantId: string): Promise<void>;
   refresh(tenantOverride?: string): Promise<void>;
   refreshTenants(): Promise<void>;
+  refreshHealth(): Promise<void>;
   api<T>(path: string, init?: LocalRequestInit): Promise<T>;
 }
 
@@ -80,6 +101,7 @@ const request = async <T,>(path: string, init: LocalRequestInit = {}, token?: st
 
 export function LocalE2EProvider({ children }: PropsWithChildren) {
   const enabled = Boolean(baseUrl);
+  const [health, setHealth] = useState<ProductHealth | null>(null);
   const [token, setToken] = useState<string | null>(() => enabled ? readStored(TOKEN_KEY, LEGACY_TOKEN_KEY) : null);
   const [tenantId, setTenantId] = useState<string | null>(() => enabled ? readStored(TENANT_KEY, LEGACY_TENANT_KEY) : null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
@@ -89,6 +111,12 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const refreshSequence = useRef(0);
 
   const authedApi = useCallback(async <T,>(path: string, init: LocalRequestInit = {}): Promise<T> => request<T>(path, init, token), [token]);
+
+  const refreshHealth = useCallback(async () => {
+    if (!enabled) { setHealth(null); return; }
+    try { setHealth(await request<ProductHealth>('/health')); }
+    catch { setHealth({ ok: false }); }
+  }, [enabled]);
 
   const refreshTenants = useCallback(async () => {
     if (!enabled || !token) {
@@ -130,6 +158,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     }
   }, [enabled, token, tenantId]);
 
+  useEffect(() => { void refreshHealth(); }, [refreshHealth]);
   useEffect(() => { void refreshTenants().catch(() => undefined); }, [refreshTenants]);
   useEffect(() => { void refresh().catch(() => undefined); }, [refresh]);
 
@@ -184,7 +213,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     await refresh(id);
   };
 
-  const value = useMemo<LocalE2EContextValue>(() => ({ enabled, token, tenantId, tenants, workspace, loading, error, register, login, logout, createTenant, selectTenant, refresh, refreshTenants, api: authedApi }), [enabled, token, tenantId, tenants, workspace, loading, error, refresh, refreshTenants, authedApi]);
+  const value = useMemo<LocalE2EContextValue>(() => ({ enabled, health, token, tenantId, tenants, workspace, loading, error, register, login, logout, createTenant, selectTenant, refresh, refreshTenants, refreshHealth, api: authedApi }), [enabled, health, token, tenantId, tenants, workspace, loading, error, refresh, refreshTenants, refreshHealth, authedApi]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
