@@ -9,9 +9,10 @@ import { PostEditorPage } from '../pages/PostEditorPage';
 import { AutomaticSocialManagementPage, FaqPage, FeaturesPage, HowItWorksPage, LandingPage, PricingPage, SocialMediaManagerAiPage } from '../pages/PublicPages';
 import { LoginPage, RegisterPage, ResetPasswordPage } from '../pages/AuthPages';
 import { NotificationsPage } from '../pages/NotificationsPage';
-import { BillingPage, SettingsPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
+import { BillingPage, StrategyPage, SupportPage } from '../pages/WorkspacePages';
 import { ProviderTestConsolePage } from '../pages/ProviderReadinessPages';
-import { PremiumAnalyticsPage, PremiumApprovalsPage, PremiumAssetsPage, PremiumBrandPage, PremiumCalendarPage, PremiumConnectionsPage, PremiumDashboardPage } from '../pages/PremiumPreviewPages';
+import { PremiumAnalyticsPage, PremiumApprovalsPage, PremiumAssetsPage, PremiumBrandPage, PremiumCalendarPage, PremiumDashboardPage } from '../pages/PremiumPreviewPages';
+import { ContentsPage, PersonalSettingsPage, SitePage, SocialConnectionsPage } from '../pages/PersonalWorkspacePages';
 import { AdminCustomersPage } from '../pages/AdminCustomersPage';
 import { CookiePolicyPage, PrivacyPage, TermsPage } from '../pages/LegalPages';
 
@@ -35,6 +36,8 @@ export function App() {
     <Route element={<AppShell />}>
       <Route path="/app" element={protectedData(<PremiumDashboardPage />)} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/app/site" element={protectedData(<SitePage />)} />
+      <Route path="/app/contents" element={protectedData(<ContentsPage />)} />
       <Route path="/app/brand" element={protectedData(<PremiumBrandPage />)} />
       <Route path="/app/assets" element={protectedData(<PremiumAssetsPage />)} />
       <Route path="/app/strategy" element={protectedData(<StrategyPage />)} />
@@ -42,12 +45,12 @@ export function App() {
       <Route path="/app/posts/:id" element={protectedData(<PostEditorPage />)} />
       <Route path="/app/approvals" element={protectedData(<PremiumApprovalsPage />)} />
       <Route path="/approvals" element={protectedData(<PremiumApprovalsPage />)} />
-      <Route path="/app/connections" element={protectedData(<PremiumConnectionsPage />)} />
+      <Route path="/app/connections" element={protectedData(<SocialConnectionsPage />)} />
       <Route path="/app/analytics" element={protectedData(<PremiumAnalyticsPage />)} />
       <Route path="/app/notifications" element={protectedData(<NotificationsPage />)} />
       <Route path="/app/support" element={protectedData(<SupportPage />)} />
       <Route path="/app/billing" element={protectedData(<BillingPage />)} />
-      <Route path="/app/settings" element={protectedData(<SettingsPage />)} />
+      <Route path="/app/settings" element={protectedData(<PersonalSettingsPage />)} />
       <Route path="/admin" element={protectedData(<AdminCustomersPage />)} />
       <Route path="/admin/providers" element={protectedData(<ProviderTestConsolePage />)} />
     </Route>
