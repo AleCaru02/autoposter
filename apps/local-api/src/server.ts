@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { LocalE2EService } from './service.js';
 import { LocalAssetVisualReadinessService } from './asset-visual-readiness-service.js';
+import { TelegramApprovalService } from './telegram-approval-service.js';
 import { tryProviderReadinessRoute } from './provider-route-handler.js';
 import { LocalSupabaseClient, jsonBody } from './db.js';
 import { AdminCustomerService } from './admin-customer-service.js';
@@ -8,17 +9,19 @@ import { FixedWindowRateLimiter, clientSubject, corsHeaders, ratePolicy, readJso
 
 const port=Number(process.env.LOCAL_API_PORT??8787);const host=process.env.LOCAL_API_HOST??'127.0.0.1';
 if(process.env.LOCAL_E2E_ENABLED!=='true')throw new Error('LOCAL_E2E_ENABLED=true is required for the local API');
-const service=new LocalE2EService();const visual=new LocalAssetVisualReadinessService();const localDb=new LocalSupabaseClient();const admin=new AdminCustomerService(localDb);const limiter=new FixedWindowRateLimiter();
+const service=new LocalE2EService();const visual=new LocalAssetVisualReadinessService();const telegram=new TelegramApprovalService();const localDb=new LocalSupabaseClient();const admin=new AdminCustomerService(localDb);const limiter=new FixedWindowRateLimiter();
 const send=(res:ServerResponse,status:number,body:unknown,headers:Record<string,string>={})=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...securityHeaders(),...headers});res.end(JSON.stringify(body));};
 const sendHtml=(res:ServerResponse,status:number,body:string,headers:Record<string,string>={})=>{res.writeHead(status,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders(),...headers});res.end(body);};
 const readJson=readJsonLimited;
 const bearer=(req:IncomingMessage):string=>{const value=req.headers.authorization??'';if(!value.startsWith('Bearer '))throw new Error('auth_required');return value.slice(7);};
+const header=(req:IncomingMessage,name:string):string|undefined=>{const value=req.headers[name.toLowerCase()];return Array.isArray(value)?value[0]:value;};
 const pathParts=(pathname:string)=>pathname.split('/').filter(Boolean).map(decodeURIComponent);const q=(value:string)=>encodeURIComponent(value);
 const fixtureSite=(slug:string,page:string):string=>{const normalized=slug.toLowerCase();const profile=normalized.includes('pizza')?{name:'Forno Vesuvio',industry:'Pizzeria napoletana',city:'Milano',services:'pizza napoletana, impasto a lunga lievitazione, prenotazioni',differentiator:'forno ad alta temperatura e ingredienti selezionati',target:'residenti, famiglie e gruppi locali'}:normalized.includes('property')?{name:'CasaChiara PM',industry:'Property management',city:'Milano',services:'gestione affitti brevi, pricing dinamico, check-in, guest care',differentiator:'controllo operativo e report trasparenti',target:'proprietari di appartamenti'}:normalized.includes('network')?{name:'Marco Network Lab',industry:'Networker',city:'Monza',services:'formazione, community, personal brand',differentiator:'metodo educativo senza promesse facili',target:'professionisti che vogliono sviluppare relazioni e competenze'}:{name:'Bottega Locale',industry:'Servizi locali',city:'Milano',services:'consulenza e assistenza locale',differentiator:'servizio vicino al cliente e risposta rapida',target:'clienti dell’area locale'};const nav=`<nav><a href="/fixture-site/${slug}/">Home</a> <a href="/fixture-site/${slug}/services">Servizi</a> <a href="/fixture-site/${slug}/about">Chi siamo</a> <a href="/fixture-site/${slug}/contact">Contatti</a></nav>`;if(page==='services')return`<html><head><title>Servizi | ${profile.name}</title></head><body>${nav}<h1>${profile.services}</h1><p>${profile.differentiator}.</p><p>Area servita: ${profile.city}.</p></body></html>`;if(page==='about')return`<html><head><title>Chi siamo | ${profile.name}</title></head><body>${nav}<h1>${profile.name}</h1><p>Siamo una realtà nel settore ${profile.industry}. Il nostro target principale: ${profile.target}.</p></body></html>`;if(page==='contact')return`<html><head><title>Contatti | ${profile.name}</title></head><body>${nav}<h1>Contatti</h1><p>Siamo disponibili a ${profile.city}. Contattaci per informazioni e disponibilità.</p></body></html>`;return`<html><head><title>${profile.name}</title><meta name="description" content="${profile.industry} a ${profile.city}"></head><body>${nav}<h1>${profile.name}</h1><p>${profile.industry} a ${profile.city}: ${profile.differentiator}.</p><p>Servizi: ${profile.services}.</p></body></html>`;};
 
 const route=async(req:IncomingMessage,res:ServerResponse)=>{
   const url=new URL(req.url??'/',`http://${req.headers.host??`${host}:${port}`}`);const parts=pathParts(url.pathname);const method=req.method??'GET';const cors=corsHeaders(req);if(method==='OPTIONS'){res.writeHead(204,{...securityHeaders(),...cors});res.end();return;}
   const policy=ratePolicy(url.pathname);if(policy){const result=limiter.consume({...policy,subject:clientSubject(req)});if(!result.allowed){send(res,429,{error:'rate_limit_exceeded',retryAfterSeconds:result.retryAfterSeconds},{...cors,'retry-after':String(result.retryAfterSeconds)});return;}}
+  if(method==='POST'&&url.pathname==='/webhooks/telegram'){send(res,200,await telegram.handleWebhook(header(req,'x-telegram-bot-api-secret-token'),await readJson(req) as any),cors);return;}
   const providerRoute=await tryProviderReadinessRoute(req,url,parts,method);if(providerRoute.handled){send(res,providerRoute.status??200,providerRoute.body??{},cors);return;}
   if(parts[0]==='fixture-site'){sendHtml(res,200,fixtureSite(parts[1]??'local-business',parts[2]??'home'),cors);return;}
   if(url.pathname==='/health'){send(res,200,{ok:true,testHarness:'local-e2e',publishing:'fixture-only',visual:'deterministic-test',providers:'fixture-only',hardening:{cors:'allowlist',securityHeaders:true,rateLimits:true}},cors);return;}
@@ -33,6 +36,10 @@ const route=async(req:IncomingMessage,res:ServerResponse)=>{
     if(parts[2]==='assets'&&parts[3]){if(method==='PATCH'){send(res,200,await visual.updateAsset(token(),tenantId,parts[3],await readJson(req)),cors);return;}if(method==='DELETE'){send(res,200,await visual.deleteAsset(token(),tenantId,parts[3]),cors);return;}}
     if(method==='GET'&&parts[2]==='visual-template-profile'){send(res,200,await visual.getTemplateProfile(token(),tenantId),cors);return;}
     if(method==='PATCH'&&parts[2]==='brand'&&parts[3]==='visual-settings'){send(res,200,await visual.updateBrandVisualSettings(token(),tenantId,await readJson(req) as any),cors);return;}
+    if(method==='GET'&&parts[2]==='telegram'&&parts.length===3){send(res,200,await telegram.status(token(),tenantId),cors);return;}
+    if(method==='POST'&&parts[2]==='telegram'&&parts[3]==='pair'){send(res,200,await telegram.createPairing(token(),tenantId),cors);return;}
+    if(method==='POST'&&parts[2]==='telegram'&&parts[3]==='disconnect'){send(res,200,await telegram.disconnect(token(),tenantId),cors);return;}
+    if(parts[2]==='variants'&&parts[3]&&parts[4]==='telegram-preview'&&method==='POST'){send(res,200,await telegram.sendVariantPreview(token(),tenantId,parts[3]),cors);return;}
     if(parts[2]==='variants'&&parts[3]&&parts[4]==='visual'){if(method==='GET'){send(res,200,await visual.latestVisual(token(),tenantId,parts[3]),cors);return;}if(method==='POST'){send(res,200,await visual.renderVariant(token(),tenantId,parts[3],await readJson(req) as any),cors);return;}}
     if(parts[2]==='variants'&&parts[3]&&parts[4]==='repair'&&method==='POST'){send(res,200,await visual.repairVariant(token(),tenantId,parts[3],await readJson(req) as any),cors);return;}
     if(method==='GET'&&parts[2]==='workspace'){send(res,200,await service.getWorkspace(token(),tenantId),cors);return;}
@@ -66,5 +73,5 @@ const route=async(req:IncomingMessage,res:ServerResponse)=>{
   send(res,404,{error:'not_found',path:url.pathname},cors);
 };
 
-const server=createServer((req,res)=>{route(req,res).catch((error:unknown)=>{const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),local:true},corsHeaders(req));});});
+const server=createServer((req,res)=>{route(req,res).catch((error:unknown)=>{const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED|TELEGRAM_USER_NOT_AUTHORIZED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),local:true},corsHeaders(req));});});
 server.listen(port,host,()=>{console.log(`local-e2e-api listening on http://${host}:${port}`);});
