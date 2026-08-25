@@ -13,11 +13,13 @@ const brandBootstrap=new BrandProfileBootstrapService();
 const schedule=new ContentScheduleService();
 const strategyPreferences=new StrategyPreferencesService();
 const webhooks=new ProviderWebhookService();
+const e2eFixtures=process.env.LOCAL_E2E_ENABLED==='true';
 
 const readText=async(req:IncomingMessage)=>{const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));return Buffer.concat(chunks).toString('utf8');};
 const readJson=async<T extends Record<string,unknown>>(req:IncomingMessage):Promise<T>=>{const text=await readText(req);return(text?JSON.parse(text):{}) as T;};
 const bearer=(req:IncomingMessage)=>{const value=req.headers.authorization??'';if(!value.startsWith('Bearer '))throw new Error('auth_required');return value.slice(7);};
 const header=(req:IncomingMessage,name:string)=>{const value=req.headers[name.toLowerCase()];return Array.isArray(value)?value[0]:value;};
+const fixtureOnly=():ProviderRouteResult=>({handled:true,status:503,body:{error:'PROVIDER_NOT_CONFIGURED',message:'Questa integrazione non è disponibile finché il provider reale non è configurato.'}});
 
 export interface ProviderRouteResult {handled:boolean;status?:number;body?:unknown;}
 
@@ -26,6 +28,7 @@ export async function tryProviderReadinessRoute(req:IncomingMessage,url:URL,part
   if(method==='GET'&&url.pathname==='/provider-readiness/score')return{handled:true,status:200,body:providers.readiness()};
 
   if(method==='POST'&&parts[0]==='webhooks'&&parts[1]==='mock'&&parts[2]){
+    if(!e2eFixtures)return fixtureOnly();
     const rawBody=await readText(req);const provider=parts[2] as ProviderKey;
     const signature=header(req,'x-provider-signature');const timestamp=header(req,'x-provider-timestamp');const externalId=header(req,'x-event-id');const tenantId=header(req,'x-tenant-id');const accountId=header(req,'x-account-id');
     const webhookInput={rawBody,headers:{'x-provider-signature':signature,'x-provider-timestamp':timestamp},eventType:header(req,'x-event-type')??'fixture.event',...(externalId?{externalId}:{}),...(tenantId?{tenantId}:{}),...(accountId?{accountId}:{})};
@@ -49,6 +52,7 @@ export async function tryProviderReadinessRoute(req:IncomingMessage,url:URL,part
   if(method==='GET'&&parts[2]==='provider-audit')return{handled:true,status:200,body:await providers.auditLog(token(),tenantId)};
 
   if(parts[2]==='providers'&&parts[3]){
+    if(!e2eFixtures)return fixtureOnly();
     const provider=parts[3];
     if(method==='POST'&&parts[4]==='connect-mock')return{handled:true,status:200,body:await providers.connectMock(token(),tenantId,provider)};
     if(method==='POST'&&parts[4]==='oauth-start')return{handled:true,status:200,body:await providers.startOAuth(token(),tenantId,provider,await readJson(req))};
@@ -58,13 +62,15 @@ export async function tryProviderReadinessRoute(req:IncomingMessage,url:URL,part
   if(parts[2]==='provider-connections'&&parts[3]){
     const connectionId=parts[3];
     if(method==='GET'&&parts[4]==='health')return{handled:true,status:200,body:await providers.connectionHealth(token(),tenantId,connectionId)};
-    if(method==='POST'&&parts[4]==='reconnect')return{handled:true,status:200,body:await providers.reconnect(token(),tenantId,connectionId)};
     if(method==='POST'&&parts[4]==='revoke')return{handled:true,status:200,body:await providers.revoke(token(),tenantId,connectionId)};
+    if(!e2eFixtures&&method==='POST')return fixtureOnly();
+    if(method==='POST'&&parts[4]==='reconnect')return{handled:true,status:200,body:await providers.reconnect(token(),tenantId,connectionId)};
     if(method==='POST'&&parts[4]==='simulate'){const body=await readJson<{scenario:string}>(req);return{handled:true,status:200,body:await providers.simulate(token(),tenantId,connectionId,body.scenario as Parameters<typeof providers.simulate>[3])};}
   }
 
   if(parts[2]==='provider-accounts'&&parts[3]){
     const accountId=parts[3];
+    if(!e2eFixtures)return fixtureOnly();
     if(method==='POST'&&parts[4]==='select'){const body=await readJson<{connectionId:string}>(req);return{handled:true,status:200,body:await providers.selectAccount(token(),tenantId,body.connectionId,accountId)};}
     if(method==='POST'&&parts[4]==='validate')return{handled:true,status:200,body:await providers.validate(token(),tenantId,accountId,await readJson(req) as unknown as NormalizedPublishPayload)};
     if(method==='POST'&&parts[4]==='dry-run')return{handled:true,status:200,body:await providers.dryRun(token(),tenantId,accountId,await readJson(req) as unknown as NormalizedPublishPayload)};
