@@ -59,8 +59,8 @@ select is(
 
 select is(
   (select count(*)::bigint from supabase_migrations.schema_migrations where version like '202608%'),
-  12::bigint,
-  'all twelve application migrations are present in local migration history'
+  16::bigint,
+  'all sixteen application migrations are present in local migration history'
 );
 
 select is(
@@ -90,8 +90,10 @@ select ok(
   'learning insights are tenant-readable through RLS'
 );
 select ok(
-  exists(select 1 from pg_trigger where tgname='post_variants_enqueue_auto_publication' and not tgisinternal),
-  'AUTO variants are independently enqueued after QA via trigger'
+  not exists(select 1 from pg_trigger where tgname='post_variants_enqueue_auto_publication' and not tgisinternal)
+  and exists(select 1 from pg_trigger where tgname='post_variants_require_human_approval' and not tgisinternal)
+  and exists(select 1 from pg_trigger where tgname='publication_jobs_require_human_approval' and not tgisinternal),
+  'publication is gated by explicit human approval and the legacy AUTO enqueue trigger is absent'
 );
 
 select * from finish();
