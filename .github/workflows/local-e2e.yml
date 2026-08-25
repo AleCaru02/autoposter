@@ -92,7 +92,7 @@ jobs:
       - name: Start Vite web app
         shell: bash
         run: |
-          VITE_APP_DATA_MODE=DEMO \
+          VITE_E2E_FIXTURES=true \
           VITE_LOCAL_API_URL=http://127.0.0.1:8787 \
           VITE_PUBLIC_SITE_URL=http://127.0.0.1:5173 \
           npm run dev --workspace=@socialpilot/web -- --host 127.0.0.1 --port 5173 > /tmp/web.log 2>&1 &
