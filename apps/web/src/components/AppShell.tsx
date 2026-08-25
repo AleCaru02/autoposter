@@ -9,6 +9,7 @@ const groups = [
   { label: 'Strategia', items: [['Strategia', '/app/strategy', '◇']] },
   { label: 'Risultati', items: [['Analytics', '/app/analytics', '↗']] },
   { label: 'Connessioni', items: [['Social', '/app/connections', '◎'], ['Notifiche', '/app/notifications', '•']] },
+  { label: 'Controllo', items: [['Budget AI', '/app/budget-ai', '$']] },
   { label: 'Account', items: [['Impostazioni', '/app/settings', '⚙'], ['Supporto', '/app/support', '?']] },
 ] as const;
 
@@ -39,10 +40,10 @@ export function AppShell() {
       <nav className="side-nav" aria-label="Navigazione principale">
         {groups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map(([label, href, icon]) => <NavLink key={href} to={href} end={href === '/app'} className={({ isActive }) => isActive ? 'active' : ''}><span className="nav-icon">{icon}</span><span>{label}</span></NavLink>)}</div>)}
       </nav>
-      <div className="sidebar-footer" aria-label="Stato integrazioni"><div><span className="status-dot" /><strong>{local.enabled ? 'Persistenza locale attiva' : 'Backend non collegato'}</strong></div><small>OpenAI e provider social: da configurare</small></div>
+      <div className="sidebar-footer" aria-label="Stato integrazioni"><div><span className="status-dot" /><strong>{local.enabled ? 'Persistenza attiva' : 'Backend non collegato'}</strong></div><small>Le integrazioni restano disabilitate finché non sono realmente configurate.</small></div>
     </aside>
     <main className="main-column">
-      <div className="topbar"><div className="topbar-title"><span className="crumb">{activeName}</span><strong>{pageName(location.pathname)}</strong></div><div className="top-actions"><span className="pill"><span className="status-dot"/>{local.enabled ? 'Locale' : 'Da configurare'}</span><NavLink className="icon-button" to="/app/notifications" aria-label="Notifiche">•</NavLink><span className="user-chip">AC</span></div></div>
+      <div className="topbar"><div className="topbar-title"><span className="crumb">{activeName}</span><strong>{pageName(location.pathname)}</strong></div><div className="top-actions"><span className="pill"><span className="status-dot"/>{local.enabled ? 'Connesso' : 'Da configurare'}</span><NavLink className="icon-button" to="/app/notifications" aria-label="Notifiche">•</NavLink><span className="user-chip">AC</span></div></div>
       <div className="content"><Outlet /></div>
     </main>
     <nav className="mobile-bottom-nav" aria-label="Navigazione mobile">{mobileItems.map(([label,href,icon])=><NavLink key={href} to={href} end={href==='/app'} className={({isActive})=>isActive?'active':''}><span>{icon}</span><small>{label}</small></NavLink>)}</nav>
@@ -51,7 +52,7 @@ export function AppShell() {
 
 function pageName(path: string) {
   const entries: Array<[RegExp,string]> = [
-    [/^\/app$/, 'Panoramica'], [/site/, 'Sito'], [/contents/, 'Contenuti'], [/calendar/, 'Calendario'], [/approvals|^\/approvals/, 'Approvazioni'], [/assets/, 'Asset Library'], [/strategy/, 'Strategia'], [/brand/, 'Brand'], [/analytics/, 'Analytics'], [/connections/, 'Social'], [/notifications/, 'Notifiche'], [/settings/, 'Impostazioni'], [/support/, 'Supporto'], [/admin\/providers/, 'Provider Console'], [/admin/, 'Admin'], [/onboarding/, 'Onboarding'], [/posts/, 'Contenuto'],
+    [/^\/app$/, 'Panoramica'], [/site/, 'Sito'], [/contents/, 'Contenuti'], [/calendar/, 'Calendario'], [/approvals|^\/approvals/, 'Approvazioni'], [/assets/, 'Asset Library'], [/strategy/, 'Strategia'], [/brand/, 'Brand'], [/analytics/, 'Analytics'], [/connections/, 'Social'], [/notifications/, 'Notifiche'], [/budget-ai/, 'Budget AI'], [/settings/, 'Impostazioni'], [/support/, 'Supporto'], [/admin\/providers/, 'Provider Console'], [/admin/, 'Admin'], [/onboarding/, 'Onboarding'], [/posts/, 'Contenuto'],
   ];
   return entries.find(([pattern]) => pattern.test(path))?.[1] ?? 'Workspace';
 }
