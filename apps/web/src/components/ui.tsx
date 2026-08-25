@@ -23,6 +23,6 @@ export function Progress({ value, max, label }: { value: number; max: number; la
   return <div className="progress-wrap"><div className="row-between"><span>{label}</span><strong>{value}/{max}</strong></div><div className="progress-track"><div className="progress-fill" style={{ width: `${percentage}%` }} /></div></div>;
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
-  return <div className="empty-state"><strong>{title}</strong><span>{body}</span></div>;
+export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) {
+  return <div className="empty-state"><strong>{title}</strong><span>{body}</span>{action && <div>{action}</div>}</div>;
 }
