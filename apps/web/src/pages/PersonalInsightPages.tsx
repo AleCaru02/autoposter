@@ -4,11 +4,19 @@ import { useLocalE2E } from '../services/local-e2e';
 
 const listText=(value:unknown)=>Array.isArray(value)?value.join(', '):String(value??'');
 const splitList=(value:string)=>value.split(',').map((item)=>item.trim()).filter(Boolean);
+const pillarText=(strategy:any)=>{
+  const manual=strategy?.content_mix?.manualPillars;
+  if(Array.isArray(manual))return manual.join(', ');
+  const generated=strategy?.content_mix?.pillars;
+  if(Array.isArray(generated))return generated.map((item:any)=>String(item?.name??item)).filter(Boolean).join(', ');
+  return '';
+};
 
 export function PersonalStrategyPage(){
   const local=useLocalE2E();
   const strategy=local.workspace?.strategy as any;
   const onboarding=local.workspace?.onboarding as any;
+  const aiReady=Boolean(local.health?.testFixtures||local.health?.capabilities?.openai);
   const [objectives,setObjectives]=useState('');
   const [audience,setAudience]=useState('');
   const [pillars,setPillars]=useState('');
@@ -18,15 +26,16 @@ export function PersonalStrategyPage(){
   const [times,setTimes]=useState('');
   const [postsPerWeek,setPostsPerWeek]=useState(3);
   const [message,setMessage]=useState<string|null>(null);
+  const [working,setWorking]=useState(false);
 
   useEffect(()=>{
     setObjectives(listText(strategy?.objectives??onboarding?.goals??[]));
     setAudience(listText(strategy?.audience?.segments??onboarding?.target?.manual??[]));
-    setPillars(listText(strategy?.content_mix?.manualPillars??[]));
+    setPillars(pillarText(strategy));
     setPreferredThemes(listText(strategy?.platform_strategy?.preferredThemes??[]));
     setAvoidThemes(listText(strategy?.platform_strategy?.avoidThemes??[]));
-    setDays(listText(strategy?.scheduling_preferences?.days??onboarding?.frequency?.days??[]));
-    setTimes(listText(strategy?.scheduling_preferences?.times??onboarding?.frequency?.times??[]));
+    setDays(listText(strategy?.scheduling_preferences?.days??strategy?.scheduling_preferences?.preferredDays??onboarding?.frequency?.days??[]));
+    setTimes(listText(strategy?.scheduling_preferences?.times??strategy?.scheduling_preferences?.preferredTimes??onboarding?.frequency?.times??[]));
     setPostsPerWeek(Number(strategy?.scheduling_preferences?.postsPerWeek??onboarding?.frequency?.postsPerWeek??3));
   },[strategy,onboarding]);
 
@@ -45,10 +54,18 @@ export function PersonalStrategyPage(){
       await local.refresh();setMessage('Strategia e frequenza salvate per questa attività.');
     }catch(error){setMessage(error instanceof Error?error.message:String(error));}
   };
+  const regenerate=async()=>{
+    if(!local.tenantId||!aiReady)return;
+    setWorking(true);setMessage(null);
+    try{await local.api(`/tenants/${local.tenantId}/strategy`,{method:'POST'});await local.refresh();setMessage('Strategia rigenerata con OpenAI usando il Brand Profile e le preferenze di questa attività.');}
+    catch(error){setMessage(error instanceof Error?error.message:String(error));}
+    finally{setWorking(false);}
+  };
 
   return <>
-    <PageHeader eyebrow="Strategia" title="Regole editoriali dell’attività" description="Queste impostazioni sono manuali finché non esistono metriche reali sufficienti. Il sistema non le presenta come insight AI." action={<button className="button" onClick={()=>void save()}>Salva strategia</button>}/>
+    <PageHeader eyebrow="Strategia" title="Regole editoriali dell’attività" description="Puoi impostare le regole manualmente oppure rigenerare la strategia con OpenAI quando il backend lo conferma disponibile. Le metriche reali restano distinte dagli insight AI." action={<div className="card-actions"><button className="button secondary" data-testid="regenerate-strategy" disabled={!aiReady||!local.tenantId||working} title={aiReady?'Rigenera con OpenAI':'OpenAI non configurato'} onClick={()=>void regenerate()}>{working?'Generazione…':'Rigenera con OpenAI'}</button><button className="button" onClick={()=>void save()}>Salva strategia</button></div>}/>
     {message&&<Card><p role="status">{message}</p></Card>}
+    {!aiReady&&<Card><Badge tone="warn">OPENAI DA CONFIGURARE</Badge><p>La modifica manuale resta disponibile; la rigenerazione AI non viene simulata.</p></Card>}
     <div className="two-col">
       <Card><label className="field"><span>Obiettivi</span><input value={objectives} onChange={(e)=>setObjectives(e.target.value)} placeholder="lead, vendite, notorietà"/></label><label className="field"><span>Audience / segmenti</span><textarea value={audience} onChange={(e)=>setAudience(e.target.value)} placeholder="proprietari, clienti locali..."/></label><label className="field"><span>Pillar editoriali</span><textarea value={pillars} onChange={(e)=>setPillars(e.target.value)} placeholder="educazione, servizio, dietro le quinte"/></label></Card>
       <Card><label className="field"><span>Temi da spingere</span><textarea value={preferredThemes} onChange={(e)=>setPreferredThemes(e.target.value)}/></label><label className="field"><span>Temi da evitare</span><textarea value={avoidThemes} onChange={(e)=>setAvoidThemes(e.target.value)}/></label></Card>
