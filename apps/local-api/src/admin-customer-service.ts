@@ -23,7 +23,7 @@ export class AdminCustomerService {
     await this.requireAdmin(token);
     const [auth,tenants,members,plans,subscriptions,overrides,usage,aiUsage,aiBudgets,jobs,connections,audit,deletions]=await Promise.all([
       this.db.serviceAuth<{users:Array<Record<string,unknown>>}>('/admin/users?page=1&per_page=100').catch(()=>({users:[]})),
-      this.db.serviceRest<Array<Record<string,unknown>>>('/rest/v1/tenants?select=id,name,slug,status,data_mode,onboarding_status,created_by,created_at&order=created_at.desc'),
+      this.db.serviceRest<Array<Record<string,unknown>>>('/rest/v1/tenants?select=id,name,slug,status,onboarding_status,created_by,created_at&order=created_at.desc'),
       this.db.serviceRest<Array<Record<string,unknown>>>('/rest/v1/tenant_members?select=tenant_id,user_id,role,status,created_at'),
       this.db.serviceRest<Array<Record<string,unknown>>>('/rest/v1/plans?select=id,code,name,status,posts_per_week,monthly_post_limit,platforms,ai_budget_cents,storage_mb,team_members&order=created_at.asc'),
       this.db.serviceRest<Array<Record<string,unknown>>>('/rest/v1/subscriptions?select=*&order=created_at.desc'),
@@ -58,20 +58,6 @@ export class AdminCustomerService {
   async setStatus(token:string,tenantId:string,status:'active'|'suspended'|'closed'){
     const admin=await this.requireAdmin(token);const rows=await this.db.serviceRest<Array<Record<string,unknown>>>(`/rest/v1/tenants?id=eq.${q(tenantId)}`,{method:'PATCH',body:jsonBody({status})});
     await this.audit(admin.id,tenantId,`admin.tenant.${status}`,'tenant',tenantId);return one(rows);
-  }
-
-  async setDataMode(token:string,tenantId:string,dataMode:'DEMO'|'REAL'){
-    const admin=await this.requireAdmin(token);const current=one(await this.db.serviceRest<Array<{data_mode:string}>>(`/rest/v1/tenants?select=data_mode&id=eq.${q(tenantId)}&limit=1`),'tenant_not_found');
-    if(current.data_mode!=='REAL'&&dataMode==='REAL'){
-      await Promise.all([
-        this.db.serviceRest(`/rest/v1/analytics_snapshots?tenant_id=eq.${q(tenantId)}`,{method:'DELETE',headers:{prefer:'return=minimal'}}),
-        this.db.serviceRest(`/rest/v1/published_posts?tenant_id=eq.${q(tenantId)}`,{method:'DELETE',headers:{prefer:'return=minimal'}}),
-        this.db.serviceRest(`/rest/v1/social_accounts?tenant_id=eq.${q(tenantId)}`,{method:'DELETE',headers:{prefer:'return=minimal'}}),
-        this.db.serviceRest(`/rest/v1/social_connections?tenant_id=eq.${q(tenantId)}`,{method:'DELETE',headers:{prefer:'return=minimal'}}),
-      ]);
-    }
-    const rows=await this.db.serviceRest<Array<Record<string,unknown>>>(`/rest/v1/tenants?id=eq.${q(tenantId)}`,{method:'PATCH',body:jsonBody({data_mode:dataMode})});
-    await this.audit(admin.id,tenantId,'admin.tenant.data_mode','tenant',tenantId,{from:current.data_mode,to:dataMode,fixtureCleanup:current.data_mode!=='REAL'&&dataMode==='REAL'});return one(rows);
   }
 
   async setTenantAiBudget(token:string,tenantId:string,input:{currency?:'USD'|'EUR';softLimitMicrounits:number;hardLimitMicrounits:number;enabled:boolean}){
