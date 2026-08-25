@@ -94,10 +94,11 @@ const unique = <T>(values: T[]): T[] => [...new Set(values)];
 
 export class DeterministicStrategyPlannerMock {
   plan(input: StrategyPlannerInput): PlannedContentStrategy {
-    if (!input.tenantId.trim() || !input.brandName.trim() || !input.industry.trim()) throw new Error('strategy_context_required');
+    if (!input.tenantId.trim() || !input.brandName.trim()) throw new Error('strategy_context_required');
+    const industry = input.industry.trim() || 'Attività locale';
     if (!Number.isInteger(input.postsPerWeek) || input.postsPerWeek < 1 || input.postsPerWeek > 14) throw new Error('strategy_invalid_frequency');
     if (input.selectedPlatforms.length === 0) throw new Error('strategy_platform_required');
-    const profile = sectorProfile(input.industry, input.subIndustry);
+    const profile = sectorProfile(industry, input.subIndustry);
     const serviceSeeds = input.services.map((service) => service.trim()).filter(Boolean);
     const goalSeeds = input.goals.map((goal) => goal.trim()).filter(Boolean);
     const excluded = new Set((input.editorialMemoryTopics ?? []).map(normalize));
