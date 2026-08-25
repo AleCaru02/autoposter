@@ -3,29 +3,23 @@ import { LocalSupabaseClient, jsonBody } from './db.js';
 
 export type AiModelTier='economy'|'standard'|'premium'|'image';
 export type AiSpendKind='text'|'image'|'web_search'|'other';
+export type AiImageQuality='low'|'medium'|'high';
 
 interface TextPrice { inputUsdPer1M:number; cachedInputUsdPer1M?:number; outputUsdPer1M:number; }
-interface ImagePrice { imageUsdBySize:Record<string,number>; }
-interface PricingCatalog {
-  version:string;
-  models:Record<string,TextPrice|ImagePrice>;
+interface ImagePrice {
+  imageInputUsdPer1M:number;
+  imageCachedInputUsdPer1M?:number;
+  imageOutputUsdPer1M:number;
+  textInputUsdPer1M:number;
+  textCachedInputUsdPer1M?:number;
+  estimatedUsdBySizeQuality:Record<string,Partial<Record<AiImageQuality,number>>>;
 }
+interface PricingCatalog { version:string;models:Record<string,TextPrice|ImagePrice>; }
 interface BudgetPolicy {
-  owner_user_id:string;
-  monthly_limit_usd_micros:number|string;
-  optimization_mode:'economy'|'balanced'|'quality';
-  allow_premium_models:boolean;
-  pause_all_ai:boolean;
+  owner_user_id:string;monthly_limit_usd_micros:number|string;optimization_mode:'economy'|'balanced'|'quality';allow_premium_models:boolean;pause_all_ai:boolean;
 }
 export interface AiReservation {
-  id:string;
-  tenantId:string;
-  task:string;
-  model:string;
-  tier:AiModelTier;
-  kind:AiSpendKind;
-  estimatedUsdMicros:number;
-  pricingVersion:string;
+  id:string;tenantId:string;task:string;model:string;tier:AiModelTier;kind:AiSpendKind;estimatedUsdMicros:number;pricingVersion:string;imageQuality?:AiImageQuality;
 }
 
 const q=(value:string)=>encodeURIComponent(value);
@@ -39,16 +33,22 @@ const asTextPrice=(value:unknown):TextPrice|null=>{
 };
 const asImagePrice=(value:unknown):ImagePrice|null=>{
   if(!value||typeof value!=='object'||Array.isArray(value))return null;
-  const prices=(value as Record<string,unknown>).imageUsdBySize;
-  if(!prices||typeof prices!=='object'||Array.isArray(prices))return null;
-  const normalized=Object.fromEntries(Object.entries(prices as Record<string,unknown>).filter(([,price])=>positive(price)).map(([size,price])=>[size,Number(price)]));
-  return Object.keys(normalized).length?{imageUsdBySize:normalized}:null;
+  const row=value as Record<string,unknown>;
+  const estimates=row.estimatedUsdBySizeQuality;
+  if(!positive(row.imageInputUsdPer1M)||!positive(row.imageOutputUsdPer1M)||!positive(row.textInputUsdPer1M)||!estimates||typeof estimates!=='object'||Array.isArray(estimates))return null;
+  const normalized:Record<string,Partial<Record<AiImageQuality,number>>>={};
+  for(const [size,qualities] of Object.entries(estimates as Record<string,unknown>)){
+    if(!qualities||typeof qualities!=='object'||Array.isArray(qualities))continue;
+    const output:Partial<Record<AiImageQuality,number>>={};
+    for(const quality of ['low','medium','high'] as const){const amount=(qualities as Record<string,unknown>)[quality];if(positive(amount))output[quality]=Number(amount);}
+    if(Object.keys(output).length)normalized[size]=output;
+  }
+  if(!Object.keys(normalized).length)return null;
+  return{imageInputUsdPer1M:Number(row.imageInputUsdPer1M),imageOutputUsdPer1M:Number(row.imageOutputUsdPer1M),textInputUsdPer1M:Number(row.textInputUsdPer1M),estimatedUsdBySizeQuality:normalized,...(positive(row.imageCachedInputUsdPer1M)?{imageCachedInputUsdPer1M:Number(row.imageCachedInputUsdPer1M)}:{}),...(positive(row.textCachedInputUsdPer1M)?{textCachedInputUsdPer1M:Number(row.textCachedInputUsdPer1M)}:{})};
 };
 const parseCatalog=():PricingCatalog=>{
-  const raw=process.env.OPENAI_PRICING_JSON?.trim();
-  if(!raw)throw new Error('AI_PRICING_NOT_CONFIGURED');
-  let parsed:unknown;
-  try{parsed=JSON.parse(raw);}catch{throw new Error('AI_PRICING_JSON_INVALID');}
+  const raw=process.env.OPENAI_PRICING_JSON?.trim();if(!raw)throw new Error('AI_PRICING_NOT_CONFIGURED');
+  let parsed:unknown;try{parsed=JSON.parse(raw);}catch{throw new Error('AI_PRICING_JSON_INVALID');}
   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('AI_PRICING_JSON_INVALID');
   const obj=parsed as Record<string,unknown>;
   if(typeof obj.version!=='string'||!obj.version.trim()||!obj.models||typeof obj.models!=='object'||Array.isArray(obj.models))throw new Error('AI_PRICING_JSON_INVALID');
@@ -58,7 +58,7 @@ const estimateTokens=(value:unknown)=>Math.max(1,Math.ceil(JSON.stringify(value?
 const outputBudgetForTask=(task:string)=>{
   if(['brand_refinement','strategy'].includes(task))return 5000;
   if(['calendar','post_generation'].includes(task))return 4000;
-  if(['assistant'].includes(task))return 1800;
+  if(task==='assistant')return 1800;
   if(['classification','qa','dedupe','hashtags','rewrite','summary'].includes(task))return 900;
   return 2200;
 };
@@ -67,99 +67,34 @@ const premiumEligibleTasks=new Set(['brand_refinement','strategy','post_generati
 
 export class AiBudgetManager {
   constructor(private readonly db=new LocalSupabaseClient()){}
-
   isPricingConfigured(){try{parseCatalog();return true;}catch{return false;}}
 
   async reserveText(input:{tenantId:string;task:string;promptInput:unknown;requestedModel?:string;retryCount?:number;forceTier?:Exclude<AiModelTier,'image'>}):Promise<AiReservation>{
-    const catalog=parseCatalog();
-    const policy=await this.policyForTenant(input.tenantId);
-    const tier=this.chooseTextTier(policy,input.task,input.retryCount??0,input.forceTier);
-    const model=this.modelForTier(tier,input.requestedModel);
-    const price=asTextPrice(catalog.models[model]);
-    if(!price)throw new Error(`AI_PRICING_MODEL_UNKNOWN:${model}`);
-    const inputTokens=estimateTokens(input.promptInput);
-    const outputTokens=outputBudgetForTask(input.task);
-    const estimatedUsd=(inputTokens/1_000_000)*price.inputUsdPer1M+(outputTokens/1_000_000)*price.outputUsdPer1M;
+    const catalog=parseCatalog();const policy=await this.policyForTenant(input.tenantId);const tier=this.chooseTextTier(policy,input.task,input.retryCount??0,input.forceTier);const model=this.modelForTier(tier,input.requestedModel);const price=asTextPrice(catalog.models[model]);if(!price)throw new Error(`AI_PRICING_MODEL_UNKNOWN:${model}`);
+    const inputTokens=estimateTokens(input.promptInput);const outputTokens=outputBudgetForTask(input.task);const estimatedUsd=(inputTokens/1_000_000)*price.inputUsdPer1M+(outputTokens/1_000_000)*price.outputUsdPer1M;
     return this.reserve({tenantId:input.tenantId,task:input.task,model,tier,kind:'text',estimatedUsdMicros:usdMicros(estimatedUsd),pricingVersion:catalog.version,metadata:{inputTokensEstimate:inputTokens,outputTokensBudget:outputTokens}});
   }
 
-  async reserveImage(input:{tenantId:string;task:string;size:string;count?:number}):Promise<AiReservation>{
-    const catalog=parseCatalog();
-    const model='gpt-image-2';
-    const price=asImagePrice(catalog.models[model]);
-    if(!price)throw new Error(`AI_PRICING_MODEL_UNKNOWN:${model}`);
-    const unit=price.imageUsdBySize[input.size];
-    if(!positive(unit))throw new Error(`AI_IMAGE_PRICE_UNKNOWN:${input.size}`);
+  async reserveImage(input:{tenantId:string;task:string;size:string;count?:number;quality?:AiImageQuality}):Promise<AiReservation>{
+    const catalog=parseCatalog();const policy=await this.policyForTenant(input.tenantId);const model='gpt-image-2';const price=asImagePrice(catalog.models[model]);if(!price)throw new Error(`AI_PRICING_MODEL_UNKNOWN:${model}`);
+    const quality=input.quality??this.chooseImageQuality(policy);const unit=price.estimatedUsdBySizeQuality[input.size]?.[quality];if(!positive(unit))throw new Error(`AI_IMAGE_ESTIMATE_UNKNOWN:${input.size}:${quality}`);
     const count=Math.max(1,Math.min(10,Math.floor(input.count??1)));
-    return this.reserve({tenantId:input.tenantId,task:input.task,model,tier:'image',kind:'image',estimatedUsdMicros:usdMicros(Number(unit)*count),pricingVersion:catalog.version,metadata:{size:input.size,count}});
+    return this.reserve({tenantId:input.tenantId,task:input.task,model,tier:'image',kind:'image',estimatedUsdMicros:usdMicros(Number(unit)*count),pricingVersion:catalog.version,imageQuality:quality,metadata:{size:input.size,count,quality,estimateType:'verified_ceiling',tokenRates:{imageInputUsdPer1M:price.imageInputUsdPer1M,imageCachedInputUsdPer1M:price.imageCachedInputUsdPer1M??null,imageOutputUsdPer1M:price.imageOutputUsdPer1M,textInputUsdPer1M:price.textInputUsdPer1M,textCachedInputUsdPer1M:price.textCachedInputUsdPer1M??null}}});
   }
 
   async settle(reservation:AiReservation,usage:Record<string,unknown>):Promise<number>{
-    const catalog=parseCatalog();
-    let actual=reservation.estimatedUsdMicros;
+    const catalog=parseCatalog();let actual=reservation.estimatedUsdMicros;
     if(reservation.kind==='text'){
-      const price=asTextPrice(catalog.models[reservation.model]);
-      if(price){
-        const inputTokens=Number(usage.input_tokens??usage.prompt_tokens??0);
-        const outputTokens=Number(usage.output_tokens??usage.completion_tokens??0);
-        const details=usage.input_tokens_details;
-        const cachedTokens=details&&typeof details==='object'?Number((details as Record<string,unknown>).cached_tokens??0):0;
-        if(inputTokens>0||outputTokens>0){
-          const uncached=Math.max(0,inputTokens-Math.max(0,cachedTokens));
-          const inputUsd=(uncached/1_000_000)*price.inputUsdPer1M+(Math.max(0,cachedTokens)/1_000_000)*(price.cachedInputUsdPer1M??price.inputUsdPer1M);
-          actual=usdMicros(inputUsd+(Math.max(0,outputTokens)/1_000_000)*price.outputUsdPer1M);
-        }
-      }
+      const price=asTextPrice(catalog.models[reservation.model]);if(price){const inputTokens=Number(usage.input_tokens??usage.prompt_tokens??0);const outputTokens=Number(usage.output_tokens??usage.completion_tokens??0);const details=usage.input_tokens_details;const cachedTokens=details&&typeof details==='object'?Number((details as Record<string,unknown>).cached_tokens??0):0;if(inputTokens>0||outputTokens>0){const uncached=Math.max(0,inputTokens-Math.max(0,cachedTokens));const inputUsd=(uncached/1_000_000)*price.inputUsdPer1M+(Math.max(0,cachedTokens)/1_000_000)*(price.cachedInputUsdPer1M??price.inputUsdPer1M);actual=usdMicros(inputUsd+(Math.max(0,outputTokens)/1_000_000)*price.outputUsdPer1M);}}
     }
-    await this.db.serviceRest(`/rest/v1/ai_spend_reservations?id=eq.${q(reservation.id)}`,{method:'PATCH',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=minimal'},body:jsonBody({actual_usd_micros:actual,status:'settled',settled_at:new Date().toISOString(),updated_at:new Date().toISOString()})});
-    await this.recordUsage(reservation,usage,actual);
-    return actual;
+    await this.db.serviceRest(`/rest/v1/ai_spend_reservations?id=eq.${q(reservation.id)}`,{method:'PATCH',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=minimal'},body:jsonBody({actual_usd_micros:actual,status:'settled',settled_at:new Date().toISOString(),updated_at:new Date().toISOString()})});await this.recordUsage(reservation,usage,actual);return actual;
   }
+  async release(reservation:AiReservation,error?:unknown):Promise<void>{await this.db.serviceRest(`/rest/v1/ai_spend_reservations?id=eq.${q(reservation.id)}&status=eq.reserved`,{method:'PATCH',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=minimal'},body:jsonBody({status:'released',metadata:{releasedBecause:error instanceof Error?error.message:String(error??'request_not_sent')},updated_at:new Date().toISOString()})});}
 
-  async release(reservation:AiReservation,error?:unknown):Promise<void>{
-    await this.db.serviceRest(`/rest/v1/ai_spend_reservations?id=eq.${q(reservation.id)}&status=eq.reserved`,{method:'PATCH',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=minimal'},body:jsonBody({status:'released',metadata:{releasedBecause:error instanceof Error?error.message:String(error??'request_not_sent')},updated_at:new Date().toISOString()})});
-  }
-
-  private chooseTextTier(policy:BudgetPolicy,task:string,retryCount:number,forced?:Exclude<AiModelTier,'image'>):Exclude<AiModelTier,'image'>{
-    if(forced){if(forced==='premium'&&!policy.allow_premium_models)return'standard';return forced;}
-    if(economyTasks.has(task))return'economy';
-    if(policy.optimization_mode==='economy')return'economy';
-    if(policy.optimization_mode==='quality'&&policy.allow_premium_models&&premiumEligibleTasks.has(task)&&retryCount>0)return'premium';
-    return'standard';
-  }
-
-  private modelForTier(tier:Exclude<AiModelTier,'image'>,requested?:string){
-    const standard=(process.env.AI_MODEL_TEXT_STANDARD??process.env.AI_MODEL_STRUCTURED_OUTPUT??requested??'').trim();
-    const economy=(process.env.AI_MODEL_TEXT_ECONOMY??standard).trim();
-    const premium=(process.env.AI_MODEL_TEXT_PREMIUM??standard).trim();
-    const model=tier==='economy'?economy:tier==='premium'?premium:standard;
-    if(!model)throw new Error(`AI_MODEL_${tier.toUpperCase()}_NOT_CONFIGURED`);
-    return model;
-  }
-
-  private async policyForTenant(tenantId:string):Promise<BudgetPolicy>{
-    const owners=await this.db.serviceRest<Array<{user_id:string}>>(`/rest/v1/tenant_members?select=user_id&tenant_id=eq.${q(tenantId)}&role=eq.owner&status=eq.active&order=created_at.asc&limit=1`);
-    const owner=owners[0]?.user_id;if(!owner)throw new Error('AI_BUDGET_OWNER_NOT_FOUND');
-    const rows=await this.db.serviceRest<BudgetPolicy[]>(`/rest/v1/ai_budget_policies?select=owner_user_id,monthly_limit_usd_micros,optimization_mode,allow_premium_models,pause_all_ai&owner_user_id=eq.${q(owner)}&limit=1`);
-    const policy=rows[0];if(!policy)throw new Error('AI_BUDGET_NOT_CONFIGURED');
-    if(policy.pause_all_ai)throw new Error('AI_BUDGET_PAUSED');
-    if(Number(policy.monthly_limit_usd_micros)<=0)throw new Error('AI_BUDGET_ZERO');
-    return policy;
-  }
-
-  private async reserve(input:{tenantId:string;task:string;model:string;tier:AiModelTier;kind:AiSpendKind;estimatedUsdMicros:number;pricingVersion:string;metadata:Record<string,unknown>}):Promise<AiReservation>{
-    const id=randomUUID();
-    const idempotencyKey=`${input.tenantId}:${input.task}:${id}`;
-    const rows=await this.db.serviceRest<Array<{id:string}>>('/rest/v1/ai_spend_reservations',{method:'POST',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=representation'},body:jsonBody({id,tenant_id:input.tenantId,task:input.task,model:input.model,model_tier:input.tier,spend_kind:input.kind,estimated_usd_micros:input.estimatedUsdMicros,idempotency_key:idempotencyKey,pricing_version:input.pricingVersion,metadata:input.metadata})});
-    if(!rows[0])throw new Error('AI_BUDGET_RESERVATION_FAILED');
-    return{id,tenantId:input.tenantId,task:input.task,model:input.model,tier:input.tier,kind:input.kind,estimatedUsdMicros:input.estimatedUsdMicros,pricingVersion:input.pricingVersion};
-  }
-
-  private async recordUsage(reservation:AiReservation,usage:Record<string,unknown>,actual:number){
-    const inputTokens=Number(usage.input_tokens??usage.prompt_tokens??0)||null;
-    const outputTokens=Number(usage.output_tokens??usage.completion_tokens??0)||null;
-    const details=usage.input_tokens_details;
-    const cached=details&&typeof details==='object'?(Number((details as Record<string,unknown>).cached_tokens??0)||null):null;
-    await this.db.serviceRest('/rest/v1/ai_usage_events',{method:'POST',headers:{prefer:'return=minimal'},body:jsonBody({tenant_id:reservation.tenantId,task:reservation.task,provider:'openai',model:reservation.model,prompt_version:'budgeted-v1',input_tokens:inputTokens,cached_input_tokens:cached,output_tokens:outputTokens,image_count:reservation.kind==='image'?1:0,web_search_calls:0,estimated_cost_microunits:reservation.estimatedUsdMicros,actual_cost_microunits:actual,model_tier:reservation.tier,spend_kind:reservation.kind,budget_reservation_id:reservation.id,pricing_version:reservation.pricingVersion,metadata:{usage}})});
-  }
+  private chooseTextTier(policy:BudgetPolicy,task:string,retryCount:number,forced?:Exclude<AiModelTier,'image'>):Exclude<AiModelTier,'image'>{if(forced){if(forced==='premium'&&!policy.allow_premium_models)return'standard';return forced;}if(economyTasks.has(task))return'economy';if(policy.optimization_mode==='economy')return'economy';if(policy.optimization_mode==='quality'&&policy.allow_premium_models&&premiumEligibleTasks.has(task)&&retryCount>0)return'premium';return'standard';}
+  private chooseImageQuality(policy:BudgetPolicy):AiImageQuality{return policy.optimization_mode==='economy'?'low':policy.optimization_mode==='quality'?'high':'medium';}
+  private modelForTier(tier:Exclude<AiModelTier,'image'>,requested?:string){const standard=(process.env.AI_MODEL_TEXT_STANDARD??process.env.AI_MODEL_STRUCTURED_OUTPUT??requested??'').trim();const economy=(process.env.AI_MODEL_TEXT_ECONOMY??standard).trim();const premium=(process.env.AI_MODEL_TEXT_PREMIUM??standard).trim();const model=tier==='economy'?economy:tier==='premium'?premium:standard;if(!model)throw new Error(`AI_MODEL_${tier.toUpperCase()}_NOT_CONFIGURED`);return model;}
+  private async policyForTenant(tenantId:string):Promise<BudgetPolicy>{const owners=await this.db.serviceRest<Array<{user_id:string}>>(`/rest/v1/tenant_members?select=user_id&tenant_id=eq.${q(tenantId)}&role=eq.owner&status=eq.active&order=created_at.asc&limit=1`);const owner=owners[0]?.user_id;if(!owner)throw new Error('AI_BUDGET_OWNER_NOT_FOUND');const rows=await this.db.serviceRest<BudgetPolicy[]>(`/rest/v1/ai_budget_policies?select=owner_user_id,monthly_limit_usd_micros,optimization_mode,allow_premium_models,pause_all_ai&owner_user_id=eq.${q(owner)}&limit=1`);const policy=rows[0];if(!policy)throw new Error('AI_BUDGET_NOT_CONFIGURED');if(policy.pause_all_ai)throw new Error('AI_BUDGET_PAUSED');if(Number(policy.monthly_limit_usd_micros)<=0)throw new Error('AI_BUDGET_ZERO');return policy;}
+  private async reserve(input:{tenantId:string;task:string;model:string;tier:AiModelTier;kind:AiSpendKind;estimatedUsdMicros:number;pricingVersion:string;imageQuality?:AiImageQuality;metadata:Record<string,unknown>}):Promise<AiReservation>{const id=randomUUID();const idempotencyKey=`${input.tenantId}:${input.task}:${id}`;const rows=await this.db.serviceRest<Array<{id:string}>>('/rest/v1/ai_spend_reservations',{method:'POST',headers:{'content-profile':'app_private','accept-profile':'app_private',prefer:'return=representation'},body:jsonBody({id,tenant_id:input.tenantId,task:input.task,model:input.model,model_tier:input.tier,spend_kind:input.kind,estimated_usd_micros:input.estimatedUsdMicros,idempotency_key:idempotencyKey,pricing_version:input.pricingVersion,metadata:input.metadata})});if(!rows[0])throw new Error('AI_BUDGET_RESERVATION_FAILED');return{id,tenantId:input.tenantId,task:input.task,model:input.model,tier:input.tier,kind:input.kind,estimatedUsdMicros:input.estimatedUsdMicros,pricingVersion:input.pricingVersion,...(input.imageQuality?{imageQuality:input.imageQuality}:{})};}
+  private async recordUsage(reservation:AiReservation,usage:Record<string,unknown>,actual:number){const inputTokens=Number(usage.input_tokens??usage.prompt_tokens??0)||null;const outputTokens=Number(usage.output_tokens??usage.completion_tokens??0)||null;const details=usage.input_tokens_details;const cached=details&&typeof details==='object'?(Number((details as Record<string,unknown>).cached_tokens??0)||null):null;await this.db.serviceRest('/rest/v1/ai_usage_events',{method:'POST',headers:{prefer:'return=minimal'},body:jsonBody({tenant_id:reservation.tenantId,task:reservation.task,provider:'openai',model:reservation.model,prompt_version:'budgeted-v2',input_tokens:inputTokens,cached_input_tokens:cached,output_tokens:outputTokens,image_count:reservation.kind==='image'?1:0,web_search_calls:0,estimated_cost_microunits:reservation.estimatedUsdMicros,actual_cost_microunits:actual,model_tier:reservation.tier,spend_kind:reservation.kind,budget_reservation_id:reservation.id,pricing_version:reservation.pricingVersion,metadata:{usage,imageQuality:reservation.imageQuality??null}})});}
 }
