@@ -19,7 +19,11 @@ export const loadLocalSupabaseConfig=():LocalSupabaseConfig=>{
   const neonDatabaseUrl=process.env.NEON_DATABASE_URL?.trim();
   const neonAuthUrl=process.env.NEON_AUTH_URL?.trim();
   if(neonDataApiUrl&&neonDatabaseUrl){
-    return{backend:'neon',url:trimSlash(neonDataApiUrl),anonKey:'',serviceRoleKey:'',neonDataApiUrl:trimSlash(neonDataApiUrl),neonDatabaseUrl,neonAuthUrl:neonAuthUrl?trimSlash(neonAuthUrl):undefined};
+    const vercelBase=process.env.VERCEL_URL?.trim()?`https://${process.env.VERCEL_URL.trim()}`:'';
+    const appBase=process.env.APP_BASE_URL?.trim()||vercelBase;
+    const storageCompatUrl=appBase?`${trimSlash(appBase)}/api`:trimSlash(neonDataApiUrl);
+    const assetSigningSecret=process.env.ASSET_SIGNING_SECRET?.trim()??'';
+    return{backend:'neon',url:storageCompatUrl,anonKey:'',serviceRoleKey:assetSigningSecret,neonDataApiUrl:trimSlash(neonDataApiUrl),neonDatabaseUrl,...(neonAuthUrl?{neonAuthUrl:trimSlash(neonAuthUrl)}:{})};
   }
   const url=process.env.SUPABASE_URL??process.env.LOCAL_SUPABASE_URL??process.env.TEST_SUPABASE_URL;
   const anonKey=process.env.SUPABASE_PUBLISHABLE_KEY??process.env.LOCAL_SUPABASE_ANON_KEY??process.env.TEST_SUPABASE_PUBLISHABLE_KEY;
