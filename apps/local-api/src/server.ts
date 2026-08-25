@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { LocalE2EService } from './service.js';
 import { LocalAssetVisualReadinessService } from './asset-visual-readiness-service.js';
 import { TelegramApprovalService } from './telegram-approval-service.js';
+import { ApprovalDecisionService } from './approval-decision-service.js';
 import { tryProviderReadinessRoute } from './provider-route-handler.js';
 import { LocalSupabaseClient, jsonBody } from './db.js';
 import { AdminCustomerService } from './admin-customer-service.js';
@@ -9,7 +10,7 @@ import { FixedWindowRateLimiter, clientSubject, corsHeaders, ratePolicy, readJso
 
 const port=Number(process.env.LOCAL_API_PORT??8787);const host=process.env.LOCAL_API_HOST??'127.0.0.1';
 if(process.env.LOCAL_E2E_ENABLED!=='true')throw new Error('LOCAL_E2E_ENABLED=true is required for the local API');
-const service=new LocalE2EService();const visual=new LocalAssetVisualReadinessService();const telegram=new TelegramApprovalService();const localDb=new LocalSupabaseClient();const admin=new AdminCustomerService(localDb);const limiter=new FixedWindowRateLimiter();
+const service=new LocalE2EService();const visual=new LocalAssetVisualReadinessService();const telegram=new TelegramApprovalService();const approval=new ApprovalDecisionService();const localDb=new LocalSupabaseClient();const admin=new AdminCustomerService(localDb);const limiter=new FixedWindowRateLimiter();
 const send=(res:ServerResponse,status:number,body:unknown,headers:Record<string,string>={})=>{res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...securityHeaders(),...headers});res.end(JSON.stringify(body));};
 const sendHtml=(res:ServerResponse,status:number,body:string,headers:Record<string,string>={})=>{res.writeHead(status,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders(),...headers});res.end(body);};
 const readJson=readJsonLimited;
@@ -54,7 +55,7 @@ const route=async(req:IncomingMessage,res:ServerResponse)=>{
     if(method==='POST'&&parts[2]==='calendar'){send(res,200,await service.generateCalendar(token(),tenantId,await readJson(req)),cors);return;}
     if(method==='POST'&&parts[2]==='posts'&&parts[3]==='generate-all'){const body=await readJson<{limit?:number}>(req);const limit=body.limit??20;const generated=await service.generateAllDrafts(token(),tenantId,limit);await visual.renderPendingVariants(token(),tenantId,Math.max(limit*4,20));send(res,200,generated,cors);return;}
     if(parts[2]==='posts'&&parts[3]){const postId=parts[3];if(method==='GET'&&parts.length===4){send(res,200,await service.getPost(token(),tenantId,postId),cors);return;}if(method==='POST'&&parts[4]==='generate'){const generated=await service.generatePost(token(),tenantId,postId);await visual.renderPendingVariants(token(),tenantId,20);send(res,200,generated,cors);return;}if(method==='POST'&&parts[4]==='schedule'){send(res,200,await service.scheduleApprovedPost(token(),tenantId,postId),cors);return;}}
-    if(parts[2]==='variants'&&parts[3]){const variantId=parts[3];if(method==='PATCH'&&parts.length===4){send(res,200,await service.editVariant(token(),tenantId,variantId,await readJson(req)),cors);return;}if(method==='POST'&&parts[4]==='approve'){send(res,200,await service.approveVariant(token(),tenantId,variantId),cors);return;}if(method==='POST'&&parts[4]==='reject'){const body=await readJson<{reason?:string}>(req);send(res,200,await service.rejectVariant(token(),tenantId,variantId,body.reason??''),cors);return;}}
+    if(parts[2]==='variants'&&parts[3]){const variantId=parts[3];if(method==='PATCH'&&parts.length===4){send(res,200,await service.editVariant(token(),tenantId,variantId,await readJson(req)),cors);return;}if(method==='POST'&&parts[4]==='approve'){send(res,200,await approval.approveWeb(token(),tenantId,variantId),cors);return;}if(method==='POST'&&parts[4]==='reject'){const body=await readJson<{reason?:string}>(req);send(res,200,await approval.rejectWeb(token(),tenantId,variantId,body.reason??'Non pubblicare'),cors);return;}if(method==='POST'&&parts[4]==='publish'){send(res,200,await approval.publishApprovedWeb(token(),tenantId,variantId),cors);return;}}
     if(method==='POST'&&parts[2]==='publish-now'){send(res,200,await service.publishNow(token(),tenantId,await readJson(req)),cors);return;}
     if(method==='POST'&&parts[2]==='learning'&&parts[3]==='refresh'){send(res,200,await service.refreshLearning(token(),tenantId),cors);return;}
     if(method==='POST'&&parts[2]==='chat'){const body=await readJson<{message:string}>(req);send(res,200,await service.chatTenant(token(),tenantId,body.message),cors);return;}
@@ -73,5 +74,5 @@ const route=async(req:IncomingMessage,res:ServerResponse)=>{
   send(res,404,{error:'not_found',path:url.pathname},cors);
 };
 
-const server=createServer((req,res)=>{route(req,res).catch((error:unknown)=>{const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED|TELEGRAM_USER_NOT_AUTHORIZED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),local:true},corsHeaders(req));});});
+const server=createServer((req,res)=>{route(req,res).catch((error:unknown)=>{const message=error instanceof Error?error.message:String(error);const status=/auth_required|tenant_access_denied|platform_admin_required|FEATURE_NOT_ENTITLED|TELEGRAM_USER_NOT_AUTHORIZED|HUMAN_APPROVAL_REQUIRED/.test(message)?403:/WEBHOOK_SIGNATURE_INVALID/.test(message)?401:/not_found|row_not_found|asset_not_found|provider_account_not_found|provider_connection_not_found/.test(message)?404:/file_too_large|mime_not_supported|request_body_too_large/.test(message)?413:400;send(res,status,{error:sanitizedError(error),local:true},corsHeaders(req));});});
 server.listen(port,host,()=>{console.log(`local-e2e-api listening on http://${host}:${port}`);});
