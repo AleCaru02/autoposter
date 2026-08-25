@@ -4,6 +4,14 @@ export type ApiPlatform = 'facebook' | 'instagram' | 'linkedin' | 'google_busine
 export type ApprovalMode = 'auto' | 'manual';
 export type LocalRequestInit = Omit<RequestInit, 'body'> & { body?: BodyInit | null | undefined };
 
+export interface TenantSummary {
+  id: string;
+  name: string;
+  slug?: string;
+  onboarding_status?: string;
+  created_at?: string;
+}
+
 export interface LocalWorkspace {
   tenant: Record<string, unknown> | null;
   onboarding: Record<string, any> | null;
@@ -27,6 +35,7 @@ interface LocalE2EContextValue {
   enabled: boolean;
   token: string | null;
   tenantId: string | null;
+  tenants: TenantSummary[];
   workspace: LocalWorkspace | null;
   loading: boolean;
   error: string | null;
@@ -36,6 +45,7 @@ interface LocalE2EContextValue {
   createTenant(input: { name: string; slug: string }): Promise<string>;
   selectTenant(tenantId: string): Promise<void>;
   refresh(tenantOverride?: string): Promise<void>;
+  refreshTenants(): Promise<void>;
   api<T>(path: string, init?: LocalRequestInit): Promise<T>;
 }
 
@@ -61,12 +71,33 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const enabled = Boolean(baseUrl);
   const [token, setToken] = useState<string | null>(() => enabled ? localStorage.getItem(TOKEN_KEY) : null);
   const [tenantId, setTenantId] = useState<string | null>(() => enabled ? localStorage.getItem(TENANT_KEY) : null);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [workspace, setWorkspace] = useState<LocalWorkspace | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshSequence = useRef(0);
 
   const authedApi = useCallback(async <T,>(path: string, init: LocalRequestInit = {}): Promise<T> => request<T>(path, init, token), [token]);
+
+  const refreshTenants = useCallback(async () => {
+    if (!enabled || !token) {
+      setTenants([]);
+      return;
+    }
+    try {
+      const rows = await request<TenantSummary[]>('/tenants', {}, token);
+      setTenants(rows);
+      setError(null);
+      const selectedExists = tenantId ? rows.some((tenant) => tenant.id === tenantId) : false;
+      if (!selectedExists && rows[0]) {
+        localStorage.setItem(TENANT_KEY, rows[0].id);
+        setTenantId(rows[0].id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  }, [enabled, token, tenantId]);
 
   const refresh = useCallback(async (tenantOverride?: string) => {
     const sequence = ++refreshSequence.current;
@@ -88,6 +119,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     }
   }, [enabled, token, tenantId]);
 
+  useEffect(() => { void refreshTenants().catch(() => undefined); }, [refreshTenants]);
   useEffect(() => { void refresh().catch(() => undefined); }, [refresh]);
 
   const storeSession = (accessToken: string) => {
@@ -116,7 +148,7 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
   const logout = () => {
     refreshSequence.current += 1;
     localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TENANT_KEY);
-    setToken(null); setTenantId(null); setWorkspace(null); setError(null);
+    setToken(null); setTenantId(null); setTenants([]); setWorkspace(null); setError(null);
   };
 
   const createTenant = async (input: { name: string; slug: string }) => {
@@ -124,6 +156,8 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     const result = await request<{ tenantId: string }>('/tenants', { method: 'POST', body: JSON.stringify(input) }, token);
     localStorage.setItem(TENANT_KEY, result.tenantId);
     setTenantId(result.tenantId);
+    await refreshTenants();
+    await refresh(result.tenantId);
     return result.tenantId;
   };
 
@@ -131,9 +165,10 @@ export function LocalE2EProvider({ children }: PropsWithChildren) {
     refreshSequence.current += 1;
     localStorage.setItem(TENANT_KEY, id);
     setTenantId(id);
+    await refresh(id);
   };
 
-  const value = useMemo<LocalE2EContextValue>(() => ({ enabled, token, tenantId, workspace, loading, error, register, login, logout, createTenant, selectTenant, refresh, api: authedApi }), [enabled, token, tenantId, workspace, loading, error, refresh, authedApi]);
+  const value = useMemo<LocalE2EContextValue>(() => ({ enabled, token, tenantId, tenants, workspace, loading, error, register, login, logout, createTenant, selectTenant, refresh, refreshTenants, api: authedApi }), [enabled, token, tenantId, tenants, workspace, loading, error, refresh, refreshTenants, authedApi]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
