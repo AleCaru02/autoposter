@@ -1,8 +1,8 @@
 import { neonClient } from "../../lib/neon-client";
 import type { GeneratedSocialContent } from "../../../api/_lib/openai-text";
+import { deriveContentStatus, normalizeHashtags, variantKey, type ApprovalStatus } from "./content-workflow";
 
-export type ApprovalStatus = "PENDING" | "APPROVED" | "CHANGES_REQUESTED";
-export type ContentStatus = "IN_REVIEW" | "APPROVED" | "CHANGES_REQUESTED";
+export type { ApprovalStatus, ContentStatus } from "./content-workflow";
 
 export type ContentItemRow = {
   id: string;
@@ -50,21 +50,6 @@ export type SavedGeneration = {
   contentId: string;
   variantIds: Record<string, string>;
 };
-
-export function variantKey(provider: string, format: string, index: number) {
-  return `${provider}-${format}-${index}`;
-}
-
-export function deriveContentStatus(statuses: ApprovalStatus[]): ContentStatus {
-  if (statuses.length > 0 && statuses.every((status) => status === "APPROVED")) return "APPROVED";
-  if (statuses.some((status) => status === "CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
-  return "IN_REVIEW";
-}
-
-export function normalizeHashtags(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean).slice(0, 30);
-}
 
 export async function saveGeneratedContent(input: {
   profileId: string;
@@ -125,9 +110,11 @@ export async function loadContentWorkflow(profileId: string) {
   if (itemsResult.error) throw new Error(itemsResult.error.message);
   if (variantsResult.error) throw new Error(variantsResult.error.message);
   if (assetsResult.error) throw new Error(assetsResult.error.message);
+
+  const rawVariants = (variantsResult.data ?? []) as Array<Omit<ContentVariantRow, "hashtags"> & { hashtags: unknown }>;
   return {
     items: (itemsResult.data ?? []) as ContentItemRow[],
-    variants: ((variantsResult.data ?? []) as Omit<ContentVariantRow, "hashtags">[] & { hashtags?: unknown }).map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[],
+    variants: rawVariants.map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[],
     assets: (assetsResult.data ?? []) as AssetRow[],
   };
 }
@@ -178,6 +165,14 @@ export async function setVariantApproval(input: {
 }
 
 export async function deleteContent(profileId: string, contentId: string) {
+  const variantAssets = await neonClient.from("content_variants").select("image_asset_id").eq("content_id", contentId).eq("profile_id", profileId);
+  if (variantAssets.error) throw new Error(variantAssets.error.message);
+  const assetIds = (variantAssets.data ?? []).map((row) => row.image_asset_id).filter((id): id is string => typeof id === "string" && Boolean(id));
+
   const result = await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", profileId).select("id");
   if (result.error) throw new Error(result.error.message);
+  if (assetIds.length) {
+    const assetDelete = await neonClient.from("assets").delete().eq("profile_id", profileId).in("id", assetIds);
+    if (assetDelete.error) throw new Error(assetDelete.error.message);
+  }
 }
