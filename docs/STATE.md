@@ -38,9 +38,15 @@ Data audit: 2026-08-26
    - protezioni SSRF incluse
 10. OpenAI testi — BLOCKED: SECRET MANCANTE
    - Responses API + Structured Outputs implementati
-   - modello `gpt-5.6-terra`
+   - modello finale bloccato su `gpt-5.6-terra`; nessun downgrade a Luna per risparmiare
+   - reasoning medio e verifica completezza varianti per mantenere qualità editoriale
+   - una singola chiamata genera tutte le piattaforme/formati richiesti
+   - selezione locale delle pagine sito più pertinenti prima di inviare contesto al modello
    - grounding su brand + pagine sito analizzate
-   - contratto API, typecheck e build PASS
+   - tracking token, cached token, cache-write e costo USD in `ai_usage_events`
+   - budget hard applicativo testi default 5 USD/mese complessivi; blocco prima della chiamata se la richiesta può superarlo
+   - nessuna generazione automatica in background
+   - GitHub Gate del cost guard: typecheck + crawler + OpenAI contract + build PASS
    - prova live SKIP perché `OPENAI_API_KEY` non è configurata nei GitHub Actions secrets
    - nessun fallback/mock se la chiave manca: endpoint restituisce 503 `OPENAI_NOT_CONFIGURED`
 11. OpenAI immagini — BLOCCATO DA 10
