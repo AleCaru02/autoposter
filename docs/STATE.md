@@ -7,7 +7,16 @@ Exact GitHub main verificato: `6f9cea143751834a9e8da0ced01648363e6fda22`
 
 Problema → correzione → verifica → PASS → problema successivo.
 
-Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la CI passa. Quando il gate dipende dal runtime Vercel, il PASS finale richiede anche il deployment consolidato e un test reale del flusso.
+GitHub è l'unica source-of-truth del codice.
+
+Strategia deployment:
+- provider primario: Vercel;
+- fallback operativo: Cloudflare;
+- quando Vercel blocca deployment, quota o runtime, il fallback deve usare lo stesso commit GitHub verificato;
+- Lovable non è più un gate operativo e non deve bloccare sviluppo, QA o release;
+- nessun provider secondario deve diventare una seconda source-of-truth.
+
+Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la CI passa. Quando il gate dipende dal runtime, il PASS finale richiede anche un deployment verificato e un test reale del flusso sul provider utilizzato.
 
 ## Audit gate 1 → 21
 
@@ -16,15 +25,16 @@ Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la
    - branch canonico: `main`
    - exact main: `6f9cea143751834a9e8da0ced01648363e6fda22`
    - GitHub Actions run `32925891967`: typecheck, crawler, workflow contenuti, calendario, contratti OpenAI e build PASS
-   - repository attualmente `public` e branch `main` non protetto: non cambia la source-of-truth, ma va corretto prima della fase commerciale
+   - repository attualmente `public` e branch `main` non protetto: da correggere prima della fase commerciale
 
-2. Lovable / GitHub / Vercel stesso codice — BLOCKED
-   - GitHub è la source-of-truth corrente
-   - Lovable project `760d39d1-7dc2-45ce-a074-cd08593c4f2a` è ancora sul commit interno `ff86e0862ac41cd398827fa564f6494ac30f3395`, con nomi legacy `Brand Spark AI` / `SocialPilot AI`
-   - GitHub main è `6f9cea143751834a9e8da0ced01648363e6fda22`: Lovable non è allineato
-   - Vercel production è READY ma è un deployment precedente alle modifiche correnti; quindi non è l'exact main
-   - documentazione Lovable Git Sync verificata il 26/08/2026: collegare un progetto Lovable crea un nuovo repository GitHub; non offre il collegamento diretto del progetto esistente al repository canonico `autoposter`
-   - decisione architetturale richiesta prima di modificare la source-of-truth o creare un secondo repository
+2. Strategia deployment GitHub → provider — PASS ARCHITETTURA / RUNTIME PENDING
+   - GitHub resta l'unica source-of-truth
+   - Vercel resta provider primario
+   - Cloudflare è il fallback quando Vercel blocca quota, deployment o runtime
+   - Lovable viene escluso dai gate operativi e non deve più essere sincronizzato con GitHub
+   - il provider usato deve sempre pubblicare lo stesso commit GitHub verificato
+   - il deployment Vercel attuale non è ancora l'exact main
+   - integrazione Cloudflare richiesta/collegata lato ChatGPT, ma le azioni Cloudflare non sono ancora esposte in questa sessione; nessun deploy Cloudflare viene quindi dichiarato eseguito
 
 3. PostgreSQL reale — PASS
    - Neon project dedicato `post-automatici`
@@ -32,16 +42,15 @@ Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la
    - tutte le 18 tabelle operative risultano con RLS attiva
    - nessun uso di SQLite nel runtime canonico
 
-4. Health check reale — FAIL RUNTIME
+4. Health check reale — FAIL RUNTIME VERCEL
    - source `api/health.ts` è corretta: usa `DATABASE_URL` e `SELECT 1`
    - test production del 26/08/2026: HTTP 503, `ready:false`, `database:"not_configured"`
    - il deployment Vercel attuale non ha `DATABASE_URL` disponibile al runtime
-   - questo gate non può essere PASS finché Vercel non viene configurato e ridistribuito
+   - prossimo problema operativo: configurare il runtime del provider usato e verificare `/api/health` = 200
 
 5. Autenticazione reale — PASS BACKEND / RUNTIME CONSOLIDATO PENDING
    - frontend usa Neon Auth reale tramite `@neondatabase/neon-js`
    - smoke reale precedente: signup 200 + signin 200 + persistenza verificata e dati QA rimossi
-   - nessuna modifica successiva ha sostituito l'auth con mock
    - nuovo test browser sul deployment consolidato ancora richiesto
 
 6. Profili illimitati e isolati — PASS BACKEND / RUNTIME CONSOLIDATO PENDING
@@ -54,7 +63,7 @@ Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la
 7. Dashboard / onboarding / route — PASS SOURCE+CI / RUNTIME CONSOLIDATO PENDING
    - route reali per dashboard, profili, brand, sito, contenuti, approvazioni e calendario
    - guard auth e redirect onboarding presenti
-   - social, analytics e apprendimento sono ancora placeholder espliciti, coerenti con i gate successivi
+   - social, analytics e apprendimento sono placeholder espliciti coerenti con i gate successivi
    - exact main build PASS
 
 8. Brand e dati attività persistenti — PASS DB / RUNTIME CONSOLIDATO PENDING
@@ -73,7 +82,7 @@ Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la
    - grounding e selezione locale delle pagine rilevanti
    - live probe reale già PASS il 26/08/2026
    - test live successivi sono on-demand per evitare costi inutili
-   - nota di cleanup: il guard economico interno è ancora espresso in USD nel codice/config; la UI finale deve essere tutta in euro
+   - cleanup pendente: guard economico interno ancora espresso in USD; UI finale tutta in euro
 
 11. OpenAI Immagini 2 — PASS API+LIVE+CI / RUNTIME CONSOLIDATO PENDING
    - esclusivamente `gpt-image-2`
@@ -124,21 +133,17 @@ Nessun gate viene considerato PASS end-to-end solo perché il codice esiste o la
    - manca ancora una politica completa per retry/backoff, publication attempts, error classification e recovery end-to-end
 
 19. Bonifica nomi / config — FAIL
-   - Lovable mantiene `Brand Spark AI` / `SocialPilot AI`
    - `.env.example` contiene ancora variabili Supabase legacy non coerenti con il backend Neon corrente
    - budget testo interno usa ancora `OPENAI_TEXT_MONTHLY_BUDGET_USD`; l'esperienza finale richiesta è in euro
-   - bonifica da eseguire solo dopo aver risolto i gate precedenti, senza introdurre regressioni
+   - nomi legacy Lovable non sono più un blocker operativo perché Lovable è escluso dal percorso runtime
 
 20. QA completo iPhone + desktop — NOT STARTED SULL'EXACT MAIN
    - componenti 12/13 hanno CSS mobile-first e CI build PASS
    - manca il test browser reale dell'exact main consolidato su iPhone/mobile e desktop
-   - il deployment Vercel attuale è troppo vecchio per certificare il prodotto corrente
 
 21. Link candidato principale — BLOCKED
-   - dominio Vercel esiste ma non è un candidato finale
-   - health production attuale è 503
-   - non fornire il link come prodotto testabile finché tutti i gate richiesti non passano
+   - non fornire un link come prodotto testabile finché health e flusso end-to-end non passano sul provider usato
 
 ## Primo problema da risolvere
 
-Il primo gate non PASS è il n. 2. Non aprire OAuth o nuove feature finché non viene deciso il rapporto corretto tra Lovable e il repository GitHub canonico e finché Vercel non può essere riallineato con un deployment consolidato.
+Il gate 2 non blocca più lo sviluppo: la strategia provider è definita. Il primo problema reale è ora il gate 4: portare un provider runtime (Vercel oppure Cloudflare fallback) a `/api/health` = 200 con il database Neon configurato, usando l'exact commit GitHub verificato.
