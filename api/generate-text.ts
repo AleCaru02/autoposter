@@ -1,16 +1,18 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
+import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 
 export const config = { maxDuration: 60 };
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
+const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
+type CostRow = { cost_usd: number | string | null };
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -31,6 +33,22 @@ function summaryField(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const summary = (value as Record<string, unknown>).summary;
   return typeof summary === "string" && summary.trim() ? summary.trim() : null;
+}
+
+function monthlyBudgetUsd() {
+  const configured = Number(process.env.OPENAI_TEXT_MONTHLY_BUDGET_USD ?? DEFAULT_MONTHLY_TEXT_BUDGET_USD);
+  if (!Number.isFinite(configured)) return DEFAULT_MONTHLY_TEXT_BUDGET_USD;
+  return Math.min(Math.max(configured, 0.1), 100);
+}
+
+function currentMonthStartIso() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
+async function currentOwnerTextSpendUsd(token: string) {
+  const rows = await readJsonRows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
+  return rows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -54,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals&limit=1`, token);
     const brand = brands[0] ?? null;
     const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
-    const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=30`, token) : [];
+    const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
 
     const context: BrandContext = {
       profileName: profile.name,
@@ -70,11 +88,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
 
-    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic, objective, providers, formats, brand: context });
-    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_TEXT", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, topic } }) });
+    const budgetUsd = monthlyBudgetUsd();
+    const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic, objective, providers, formats, brand: context });
+    if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
+      return res.status(429).json({
+        error: "OPENAI_TEXT_BUDGET_REACHED",
+        message: "Budget mensile testi raggiunto. Nessuna chiamata OpenAI è stata eseguita.",
+        budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentBeforeUsd.toFixed(6)), estimatedNextMaxUsd: Number(requestUpperBoundUsd.toFixed(6)) },
+      });
+    }
+
+    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
+    const actualCostUsd = result.usage.estimatedCostUsd;
+    const usageWrite = await dataApi("ai_usage_events", token, {
+      method: "POST",
+      headers: { prefer: "return=minimal" },
+      body: JSON.stringify({
+        profile_id: profileId,
+        operation: "GENERATE_SOCIAL_TEXT",
+        model: result.model,
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        cost_usd: actualCostUsd,
+        metadata: {
+          openai_response_id: result.responseId,
+          openai_request_id: result.requestId,
+          cached_input_tokens: result.usage.cachedInputTokens,
+          cache_write_tokens: result.usage.cacheWriteTokens,
+          topic,
+        },
+      }),
+    });
     if (!usageWrite.ok) console.error("ai-usage-write", { profileId, status: usageWrite.status });
 
-    return res.status(200).json({ content: result.content, model: result.model, responseId: result.responseId, usage: result.usage });
+    const spentAfterUsd = spentBeforeUsd + (actualCostUsd ?? 0);
+    return res.status(200).json({
+      content: result.content,
+      model: result.model,
+      responseId: result.responseId,
+      usage: result.usage,
+      budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
+    });
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("generate-text", { profileId, detail });
