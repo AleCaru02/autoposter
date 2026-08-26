@@ -34,18 +34,18 @@ type OAuthState = {
 
 type TokenBundle = {
   accessToken: string;
-  refreshToken?: string | null;
-  expiresAt?: string | null;
-  kind?: string;
+  refreshToken?: string | null | undefined;
+  expiresAt?: string | null | undefined;
+  kind?: string | undefined;
 };
 
 type Candidate = {
   id: string;
   name: string;
-  accountId?: string;
-  pageId?: string;
-  username?: string;
-  kind?: string;
+  accountId?: string | undefined;
+  pageId?: string | undefined;
+  username?: string | undefined;
+  kind?: string | undefined;
 };
 
 type ConnectionRow = {
@@ -87,7 +87,7 @@ type JobRecord = {
   attempt_count: number;
 };
 
-type PublishResult = { externalId: string; metadata?: Record<string, unknown> };
+type PublishResult = { externalId: string; metadata?: Record<string, unknown> | undefined };
 
 type Sql = ReturnType<typeof neon>;
 
@@ -250,12 +250,12 @@ async function upsertConnection(sql: Sql, input: {
   profileId: string;
   provider: SocialProvider;
   status: string;
-  providerAccountId?: string | null;
-  accountName?: string | null;
-  tokenReference?: string | null;
-  permissions?: string[];
-  expiresAt?: string | null;
-  metadata?: Record<string, unknown>;
+  providerAccountId?: string | null | undefined;
+  accountName?: string | null | undefined;
+  tokenReference?: string | null | undefined;
+  permissions?: string[] | undefined;
+  expiresAt?: string | null | undefined;
+  metadata?: Record<string, unknown> | undefined;
 }) {
   const metadata = JSON.stringify(input.metadata ?? {});
   const permissions = JSON.stringify(input.permissions ?? []);
@@ -639,7 +639,7 @@ async function handleDisconnect(request: Request, env: SocialEnv) {
   return socialJson({ disconnected: true, provider });
 }
 
-async function refreshGoogleToken(bundle: TokenBundle, env: SocialEnv) {
+async function refreshGoogleToken(bundle: TokenBundle, env: SocialEnv): Promise<TokenBundle> {
   if (!bundle.expiresAt || new Date(bundle.expiresAt).getTime() > Date.now() + 5 * 60_000) return bundle;
   if (!bundle.refreshToken) throw new Error("GOOGLE_RECONNECT_REQUIRED");
   const form = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID!, client_secret: env.GOOGLE_CLIENT_SECRET!, refresh_token: bundle.refreshToken, grant_type: "refresh_token" });
@@ -670,6 +670,10 @@ async function assetBytes(storageUrl: string, fallbackMime = "image/png") {
   return { mimeType: response.headers.get("content-type") || fallbackMime, bytes: new Uint8Array(await response.arrayBuffer()) };
 }
 
+function bytesBody(bytes: Uint8Array) {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 async function mediaSignature(assetId: string, exp: number, secret: string) {
   return hmac(`media:${assetId}:${exp}`, secret);
 }
@@ -694,7 +698,7 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   if (!asset?.storage_url) return socialJson({ error: "ASSET_NOT_FOUND" }, 404);
   try {
     const data = await assetBytes(asset.storage_url, asset.mime_type || "image/png");
-    return new Response(data.bytes, { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
+    return new Response(bytesBody(data.bytes), { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
   } catch (reason) {
     return socialJson({ error: "ASSET_READ_FAILED", detail: reason instanceof Error ? reason.message : "unknown" }, 502);
   }
@@ -747,7 +751,7 @@ async function publishLinkedIn(variant: VariantRecord, connection: StoredConnect
     const initBody = await initialize.json() as { value?: { uploadUrl?: string; image?: string }; message?: string };
     if (!initialize.ok || !initBody.value?.uploadUrl || !initBody.value.image) throw new Error(initBody.message || `LINKEDIN_IMAGE_INIT_${initialize.status}`);
     const media = await assetBytes(variant.storage_url, variant.mime_type || "image/png");
-    const upload = await fetch(initBody.value.uploadUrl, { method: "PUT", headers: { "content-type": media.mimeType }, body: media.bytes });
+    const upload = await fetch(initBody.value.uploadUrl, { method: "PUT", headers: { "content-type": media.mimeType }, body: bytesBody(media.bytes) });
     if (!upload.ok) throw new Error(`LINKEDIN_IMAGE_UPLOAD_${upload.status}`);
     content = { media: { id: initBody.value.image, altText: variant.alt_text || "" } };
   }
@@ -849,7 +853,7 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   return null;
 }
 
-async function recordAttempt(sql: Sql, job: JobRecord, attemptNo: number, state: string, input: { externalId?: string; error?: string; metadata?: Record<string, unknown> }) {
+async function recordAttempt(sql: Sql, job: JobRecord, attemptNo: number, state: string, input: { externalId?: string | undefined; error?: string | undefined; metadata?: Record<string, unknown> | undefined }) {
   const metadata = JSON.stringify(input.metadata ?? {});
   await sql`
     insert into public.publication_attempts
