@@ -4,7 +4,6 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient, neonClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
 type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; discoveredPages?: number; error?: string; detail?: string };
 type AnalysisResponse = {
@@ -48,7 +47,7 @@ export function OnboardingPage() {
   if (profiles.length > 0 && !creatingAnother && stage === "FORM") return <Navigate to="/app/dashboard" replace />;
 
   async function jwt() {
-    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+    const token = await authClient.getJwtToken();
     if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
     return token;
   }
