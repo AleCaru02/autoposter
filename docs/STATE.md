@@ -8,31 +8,52 @@ Data audit: 2026-08-26
    - repository canonico: `AleCaru02/autoposter`
    - branch canonico: `main`
 2. GitHub/Lovable/Vercel stesso codice — PARTIAL
-   - GitHub -> Vercel: build canonica READY e HTTP 200
-   - Lovable source-control nativo: richiede autorizzazione GitHub nella UI Lovable; API non disponibile
+   - GitHub è la fonte unica
+   - Lovable source-control nativo richiede autorizzazione GitHub nella UI Lovable; l'API disponibile non espone il collegamento
+   - Vercel non può essere riallineato finché non si resetta il limite giornaliero `api-deployments-free-per-day`
 3. PostgreSQL reale — PASS
    - Neon project dedicato `post-automatici`
-   - schema applicativo creato
    - test insert -> nuova query -> read riuscito
    - nessun uso di SQLite
-4. Health check reale — IN CORSO
-5. Autenticazione reale — DA FARE
-6. Profili isolati — DA FARE
-7. Dashboard/onboarding/routes — DA FARE
-8. Brand persistente — DA FARE
-9. Crawler pagina-per-pagina — DA FARE
-10. OpenAI testi — DA FARE
-11. OpenAI immagini — DA FARE
-12. Workflow contenuti — DA FARE
-13. Calendario/frequenze — DA FARE
-14. OAuth social — DA FARE
-15. Pubblicazione reale — DA FARE
-16. Metriche reali — DA FARE
-17. Apprendimento — DA FARE
-18. Retry/errori — DA FARE
-19. Bonifica nomi/config — DA FARE
-20. QA iPhone/desktop — DA FARE
-21. Link candidato — DA FARE
+4. Health check reale — PARTIAL
+   - il nuovo health check non può dichiarare ready se il database non è configurato/raggiungibile
+   - verifica finale su deployment canonico ancora pendente
+5. Autenticazione reale — PASS
+   - Neon Auth provisionato
+   - smoke test reale signup 200 + signin 200 + persistenza utente verificata
+6. Profili isolati — PASS BACKEND / RUNTIME VERCEL PENDING
+   - profili senza limite applicativo
+   - Neon Data API + PostgreSQL RLS
+   - test A/B: B vede 0 righe di A e modifica 0 righe di A
+7. Dashboard/onboarding/routes — PASS CI / RUNTIME VERCEL PENDING
+   - route reali presenti
+   - redirect onboarding funzionante a livello codice
+   - GitHub Gate: typecheck + build PASS
+8. Brand persistente — PASS PERSISTENCE / RUNTIME VERCEL PENDING
+   - create -> read -> update -> read verificato su PostgreSQL
+   - dati isolati per profile_id
+9. Crawler pagina-per-pagina — PASS ENGINE+STORAGE / RUNTIME VERCEL PENDING
+   - regressione: 5 pagine analizzate, robots rispettato, sitemap inclusa, dominio isolato
+   - persistenza scansione/pagine verificata in nuova query
+   - protezioni SSRF incluse
+10. OpenAI testi — BLOCKED: SECRET MANCANTE
+   - Responses API + Structured Outputs implementati
+   - modello `gpt-5.6-terra`
+   - grounding su brand + pagine sito analizzate
+   - contratto API, typecheck e build PASS
+   - prova live SKIP perché `OPENAI_API_KEY` non è configurata nei GitHub Actions secrets
+   - nessun fallback/mock se la chiave manca: endpoint restituisce 503 `OPENAI_NOT_CONFIGURED`
+11. OpenAI immagini — BLOCCATO DA 10
+12. Workflow contenuti — BLOCCATO DA 10
+13. Calendario/frequenze — BLOCCATO DA 10
+14. OAuth social — BLOCCATO DALLA SEQUENZA
+15. Pubblicazione reale — BLOCCATO DALLA SEQUENZA
+16. Metriche reali — BLOCCATO DALLA SEQUENZA
+17. Apprendimento — BLOCCATO DALLA SEQUENZA
+18. Retry/errori — BLOCCATO DALLA SEQUENZA
+19. Bonifica nomi/config — BLOCCATO DALLA SEQUENZA
+20. QA iPhone/desktop — BLOCCATO DALLA SEQUENZA
+21. Link candidato — BLOCCATO FINO A TUTTI I PASS
 
 ## Regola
-Un gate passa a PASS solo con evidenza verificabile.
+Un gate passa a PASS solo con evidenza verificabile. Nessuna integrazione viene mostrata come live se manca il collegamento reale.
