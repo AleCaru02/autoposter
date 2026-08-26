@@ -8,6 +8,7 @@ import { OnboardingPage } from "./pages/onboarding-page";
 import { DashboardPage } from "./pages/dashboard-page";
 import { ProfilesPage } from "./pages/profiles-page";
 import { BrandPage } from "./pages/brand-page";
+import { WebsiteScanPage } from "./pages/website-scan-page";
 import { PlaceholderPage } from "./pages/placeholder-page";
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -41,7 +42,7 @@ export default function App() {
       <Route path="dashboard" element={<DashboardPage />} />
       <Route path="profili" element={<ProfilesPage />} />
       <Route path="brand" element={<BrandPage />} />
-      <Route path="sito" element={<PlaceholderPage title="Analisi sito" description="Scansione pagina per pagina del sito dell’attività." dependency="crawler reale" />} />
+      <Route path="sito" element={<WebsiteScanPage />} />
       <Route path="contenuti" element={<PlaceholderPage title="Contenuti" description="Creazione, modifica e varianti per piattaforma." dependency="OpenAI" />} />
       <Route path="approvazioni" element={<PlaceholderPage title="Approvazioni" description="Revisione mobile-first dei contenuti prima della pubblicazione." dependency="workflow contenuti" />} />
       <Route path="calendario" element={<PlaceholderPage title="Calendario" description="Frequenza e programmazione separate per attività." dependency="scheduler reale" />} />
