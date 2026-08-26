@@ -45,18 +45,22 @@ Data audit: 2026-08-26
    - tracking utilizzo in `ai_usage_events`
    - nessuna generazione automatica in background
    - prova live reale del 26/08/2026: `PASS OpenAI live: gpt-5.6-terra, response ricevuta, structured output valido.`
+   - live probe CI reso esplicito/on-demand per evitare costi ricorrenti
    - nessun fallback/mock se la chiave manca
-11. OpenAI immagini — IN IMPLEMENTAZIONE / QA
+11. OpenAI immagini — PASS API+CI / RUNTIME VERCEL PENDING
    - modello consentito esclusivamente `gpt-image-2`
    - Images API server-side, chiave mai esposta al client
-   - qualità finale `high`; il controllo costi avviene riducendo chiamate inutili, non degradando il modello
+   - qualità finale `high`; il controllo costi riduce chiamate inutili e non degrada il modello
    - una immagine per azione esplicita; nessuna generazione automatica
    - dimensione 1024x1024 per post/carosello e 1024x1536 per storie
-   - limite applicativo predefinito 20 generazioni immagini/mese, configurabile senza necessità di variabile aggiuntiva
+   - limite applicativo predefinito 20 generazioni immagini/mese, configurabile
+   - utilizzo e costo tecnico stimato da token registrabili in `ai_usage_events`; la UI utente resta in euro
    - UI collegata alle bozze testo; anteprima immagine non finge persistenza (salvataggio/approvazione è gate 12)
-   - contract test e prova live GPT-Image-2 ancora da completare prima del PASS
-12. Workflow contenuti — BLOCCATO DA 11
-13. Calendario/frequenze — BLOCCATO DA 11
+   - contract test PASS: solo `gpt-image-2`, qualità high, n=1, PNG, protezione chiave e anti-invenzione
+   - prova live reale del 26/08/2026: `PASS OpenAI image live: gpt-image-2, quality=high, size=1024x1024, immagine reale ricevuta.`
+   - prova live resa on-demand dopo il PASS per evitare ulteriori spese CI
+12. Workflow contenuti — PROSSIMO GATE
+13. Calendario/frequenze — BLOCCATO DA 12
 14. OAuth social — BLOCCATO DALLA SEQUENZA
 15. Pubblicazione reale — BLOCCATO DALLA SEQUENZA
 16. Metriche reali — BLOCCATO DALLA SEQUENZA
