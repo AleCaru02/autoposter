@@ -10,7 +10,7 @@ Data audit: 2026-08-26
 2. GitHub/Lovable/Vercel stesso codice — PARTIAL
    - GitHub è la fonte unica
    - Lovable source-control nativo richiede autorizzazione GitHub nella UI Lovable; l'API disponibile non espone il collegamento
-   - deployment Vercel canonico ancora da riallineare al main corrente
+   - per scelta operativa i gate vengono accumulati/testati su GitHub e verranno pubblicati con un deployment Vercel consolidato, non con un deployment per ogni modifica
 3. PostgreSQL reale — PASS
    - Neon project dedicato `post-automatici`
    - test insert -> nuova query -> read riuscito
@@ -72,9 +72,24 @@ Data audit: 2026-08-26
    - test PostgreSQL reale: create -> edit -> asset link -> approve -> read -> cleanup PASS; leftovers 0
    - test capacità storage: data URL da 3.000.022 caratteri persistita e rimossa correttamente
    - GitHub Actions: typecheck, crawler, content workflow regression, contratti OpenAI e build PASS
-13. Calendario/frequenze — PROSSIMO GATE
-14. OAuth social — BLOCCATO DALLA SEQUENZA
-15. Pubblicazione reale — BLOCCATO DALLA SEQUENZA
+13. Calendario/frequenze — PASS SOURCE+DB+CI / RUNTIME VERCEL PENDING
+   - `/app/calendario` sostituisce il placeholder con una funzione reale e mobile-first
+   - configurazione separata per Instagram, Facebook, LinkedIn e Google Business Profile
+   - per singolo profilo/social: abilitazione, post/settimana, fuso orario, auto-choice e slot preferiti giorno/ora
+   - `schedules` protetta da RLS `owns_profile(profile_id)` e indice univoco `(profile_id, provider)`
+   - solo varianti `eligible=true` e `APPROVED` possono entrare nel calendario
+   - i job usano stato `SCHEDULED`, mai `QUEUED`, finché OAuth/pubblicazione non sono realmente disponibili
+   - trigger DB verifica variante, profile/provider e approvazione anche contro chiamate client incoerenti
+   - modifica contenuto/rigenerazione immagine sospende automaticamente il job in `BLOCKED_APPROVAL`; la riapprovazione futura lo riporta a `SCHEDULED`
+   - creazione, spostamento e rimozione programmazione persistono in `publication_jobs`
+   - conversione `datetime-local` nel fuso del profilo verificata anche su ora legale Europe/Rome; orari inesistenti al cambio DST vengono rifiutati
+   - migrazione DB registrata in `db/migrations/20260826_gate13_calendar.sql`
+   - test PostgreSQL reale: frequenza -> variante approvata -> schedule -> reschedule -> read -> cleanup PASS; leftovers 0
+   - test negativo DB: variante `PENDING` rifiutata con `publication variant must be eligible and approved`
+   - test coerenza DB: `SCHEDULED -> BLOCKED_APPROVAL -> SCHEDULED` al cambio approvazione PASS
+   - GitHub Actions: typecheck, crawler, content workflow, calendar workflow, contratti OpenAI e build PASS; live probe OpenAI correttamente SKIP
+14. OAuth social — PROSSIMO GATE
+15. Pubblicazione reale — BLOCCATO DA 14
 16. Metriche reali — BLOCCATO DALLA SEQUENZA
 17. Apprendimento — BLOCCATO DALLA SEQUENZA
 18. Retry/errori — BLOCCATO DALLA SEQUENZA
