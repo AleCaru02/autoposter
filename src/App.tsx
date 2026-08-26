@@ -11,6 +11,7 @@ import { BrandPage } from "./pages/brand-page";
 import { WebsiteScanPage } from "./pages/website-scan-page";
 import { ContentGeneratorPage } from "./pages/content-generator-page";
 import { ApprovalsPage } from "./pages/approvals-page";
+import { CalendarPage } from "./pages/calendar-page";
 import { PlaceholderPage } from "./pages/placeholder-page";
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -47,7 +48,7 @@ export default function App() {
       <Route path="sito" element={<WebsiteScanPage />} />
       <Route path="contenuti" element={<ContentGeneratorPage />} />
       <Route path="approvazioni" element={<ApprovalsPage />} />
-      <Route path="calendario" element={<PlaceholderPage title="Calendario" description="Frequenza e programmazione separate per attività." dependency="scheduler reale" />} />
+      <Route path="calendario" element={<CalendarPage />} />
       <Route path="social" element={<PlaceholderPage title="Social" description="Instagram, Facebook, LinkedIn e Google Business Profile." dependency="OAuth provider" />} />
       <Route path="analytics" element={<PlaceholderPage title="Analytics" description="Metriche provenienti esclusivamente dalle API dei provider." dependency="social collegati" />} />
       <Route path="apprendimento" element={<PlaceholderPage title="Apprendimento" description="Ottimizzazione progressiva di temi, giorni, orari e formati." dependency="metriche reali" />} />
