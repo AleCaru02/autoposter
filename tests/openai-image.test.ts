@@ -16,7 +16,7 @@ assert.equal(imageSizeForFormat("STORY"), "1024x1536");
 const prompt = buildImagePrompt({ profileName: "QA Property", industry: "Property management", tone: "Professionale", provider: "INSTAGRAM", format: "POST", visualBrief: "Appartamento luminoso e ordinato", caption: "Gestione professionale degli affitti brevi.", additionalDirection: null });
 assert.ok(prompt.includes("Appartamento luminoso"));
 assert.ok(prompt.includes("Non aggiungere testo, loghi"));
-assert.ok(prompt.toLowerCase().includes("non affermare fatti nuovi"));
+assert.ok(prompt.toLowerCase().includes("senza affermare fatti nuovi"));
 
 const result = await generateOpenAIImage({ apiKey: "sk-image-test-only", profileName: "QA Property", industry: "Property management", tone: "Professionale", provider: "INSTAGRAM", format: "POST", visualBrief: "Appartamento luminoso e ordinato", caption: "Gestione professionale degli affitti brevi.", fetcher });
 
