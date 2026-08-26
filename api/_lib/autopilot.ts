@@ -11,7 +11,11 @@ export type AutopilotEnv = {
   OPENAI_IMAGE_MONTHLY_LIMIT?: string;
 };
 
-type Sql = ReturnType<typeof neon>;
+function createSql(connectionString: string) {
+  return neon(connectionString);
+}
+
+type Sql = ReturnType<typeof createSql>;
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; timezone: string };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
 type StrategyRow = { objectives: unknown; platform_strategy: unknown };
@@ -380,7 +384,7 @@ async function createPlannedContent(input: {
 export async function runContentAutopilot(env: AutopilotEnv, options: RunOptions = {}): Promise<RunResult> {
   if (!env.DATABASE_URL) throw new Error("DATABASE_NOT_CONFIGURED");
   if (!env.OPENAI_API_KEY) throw new Error("OPENAI_NOT_CONFIGURED");
-  const sql = neon(env.DATABASE_URL);
+  const sql = createSql(env.DATABASE_URL);
   const maxGenerations = Math.min(Math.max(options.maxGenerations ?? DEFAULT_GENERATIONS_PER_RUN, 1), 50);
   const profiles = options.profileId
     ? await sql`select id,name,website_url,industry,timezone from public.profiles where id=${options.profileId}::uuid and archived_at is null and onboarding_completed=true limit 1` as unknown as ProfileRow[]
