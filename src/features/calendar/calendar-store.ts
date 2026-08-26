@@ -148,6 +148,15 @@ export async function createCalendarJob(input: {
   const variant = variantResult.data?.[0];
   if (!variant?.provider) throw new Error("La variante deve essere idonea e approvata prima della programmazione.");
 
+  const connection = await neonClient.from("social_connections")
+    .select("id,status")
+    .eq("profile_id", input.profileId)
+    .eq("provider", variant.provider)
+    .eq("status", "ACTIVE")
+    .limit(1);
+  if (connection.error) throw new Error(connection.error.message);
+  if (!connection.data?.length) throw new Error("Collega prima questo social nella sezione Social.");
+
   const duplicate = await neonClient.from("publication_jobs")
     .select("id")
     .eq("profile_id", input.profileId)
