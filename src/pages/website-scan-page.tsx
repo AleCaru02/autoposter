@@ -28,10 +28,24 @@ type ScanPage = {
   error: string | null;
 };
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
+type ScanResponse = {
+  error?: string;
+  detail?: string;
+  visualHints?: { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
+};
+
+type AnalysisResponse = { error?: string; detail?: string };
+
+function apiError(body: { error?: string; detail?: string }, fallback: string) {
+  const code = body.detail || body.error;
+  if (code === "OPENAI_NOT_CONFIGURED") return "OpenAI non è ancora configurato sul server.";
+  if (code === "PROFILE_NOT_FOUND") return "Attività non trovata per questo account.";
+  if (code === "AUTH_REQUIRED") return "Sessione scaduta. Accedi di nuovo.";
+  return code || fallback;
+}
 
 export function WebsiteScanPage() {
-  const { selectedProfile } = useProfiles();
+  const { selectedProfile, reload } = useProfiles();
   const [scan, setScan] = useState<Scan | null>(null);
   const [pages, setPages] = useState<ScanPage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,12 +77,22 @@ export function WebsiteScanPage() {
     if (automatic) sessionStorage.setItem(automaticKey, "running");
     setRunning(true); setError(null);
     try {
-      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-      if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
+      const token = await authClient.getJwtToken();
+      if (!token) throw new Error("Sessione scaduta. Accedi di nuovo.");
       const response = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id, pageLimit: 500 }) });
-      const body = await response.json() as { error?: string; detail?: string };
-      if (!response.ok) throw new Error(body.detail || body.error || "Scansione non riuscita.");
+      const body = await response.json() as ScanResponse;
+      if (!response.ok) throw new Error(apiError(body, "Scansione non riuscita."));
+
+      const analysisResponse = await fetch("/api/onboarding-analyze", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: body.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null } }),
+      });
+      const analysisBody = await analysisResponse.json() as AnalysisResponse;
+      if (!analysisResponse.ok) throw new Error(apiError(analysisBody, "Analisi brand non riuscita."));
+
       sessionStorage.setItem(automaticKey, "done");
+      await reload();
       await load();
     } catch (reason) {
       if (automatic) sessionStorage.removeItem(automaticKey);
@@ -87,5 +111,5 @@ export function WebsiteScanPage() {
 
   if (!selectedProfile) return null;
   const coverage = scan?.discovered_pages ? Math.round((scan.analyzed_pages / scan.discovered_pages) * 100) : 0;
-  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>La prima scansione parte automaticamente quando configuri il sito. Qui puoi controllare le pagine trovate e, se serve, ripetere l’analisi.</p></div>{scan && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : "Ripeti scansione"}</button>}</header>{error && <p className="form-error">{error}</p>}{!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: la prima scansione partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section> : loading || running && !scan ? <section className="panel"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>La scansione è partita automaticamente. Controllo sitemap e collegamenti interni senza fermarmi alla homepage.</p></section> : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi automatica non completata</h2><p>Riprovo automaticamente entrando in questa sezione. Se il problema continua, verrà mostrato l’errore reale.</p></section> : <><section className="scan-summary"><article><span>Stato</span><strong className={scan.state === "COMPLETE" ? "status-ok" : "status-wait"}>{scan.state}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura</span><strong>{coverage}%</strong></article></section>{scan.state !== "COMPLETE" && <p className="coverage-warning">Copertura non completa. Motivo: {scan.error || "alcune pagine non sono state analizzate"}. Il sistema non considera il sito interamente analizzato.</p>}<section className="panel"><div className="panel-heading"><div><h2>Pagine della scansione</h2><p>{scan.root_url}</p></div><span>{pages.length} record salvati</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status}</span><small>profondità {page.depth}</small></div></article>)}</div></section></>}</div>;
+  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>Post Automatici legge automaticamente il sito e usa le pagine trovate per costruire il profilo del brand.</p></div>{scan && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : "Ripeti analisi"}</button>}</header>{error && <p className="form-error">{error}</p>}{!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section> : loading || running && !scan ? <section className="panel"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo sitemap e collegamenti interni senza fermarmi alla homepage.</p></section> : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non completata</h2><p>La scansione riparte automaticamente. Se fallisce viene mostrato qui il motivo reale.</p></section> : <><section className="scan-summary"><article><span>Stato</span><strong className={scan.state === "COMPLETE" ? "status-ok" : "status-wait"}>{scan.state}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura</span><strong>{coverage}%</strong></article></section>{scan.state !== "COMPLETE" && <p className="coverage-warning">Copertura non completa. Motivo: {scan.error || "alcune pagine non sono state analizzate"}.</p>}<section className="panel"><div className="panel-heading"><div><h2>Pagine della scansione</h2><p>{scan.root_url}</p></div><span>{pages.length} pagine</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status}</span><small>profondità {page.depth}</small></div></article>)}</div></section></>}</div>;
 }
