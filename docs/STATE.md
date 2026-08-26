@@ -4,8 +4,12 @@ Data audit: 2026-08-26
 
 ## Gate
 
-1. GitHub fonte unica — IN CORSO
-2. GitHub/Lovable/Vercel stesso codice — BLOCCATO DA 1
+1. GitHub fonte unica — PASS
+   - repository canonico: `AleCaru02/autoposter`
+   - branch canonico: `main`
+   - sorgenti, configurazione Vercel, env template e regole operative presenti
+   - nessun secret nel repository
+2. GitHub/Lovable/Vercel stesso codice — IN CORSO
 3. PostgreSQL reale — DA FARE
 4. Health check reale — DA FARE
 5. Autenticazione reale — DA FARE
