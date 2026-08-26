@@ -36,12 +36,13 @@ export function BrandPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    if (!selectedProfile) return;
+    const profile = selectedProfile;
+    if (!profile) return;
     let active = true;
     async function load() {
       setLoading(true); setError(null); setSaved(false);
-      setWebsite(selectedProfile.website_url ?? ""); setIndustry(selectedProfile.industry ?? "");
-      const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,social_links,goals").eq("profile_id", selectedProfile.id).maybeSingle();
+      setWebsite(profile.website_url ?? ""); setIndustry(profile.industry ?? "");
+      const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,social_links,goals").eq("profile_id", profile.id).maybeSingle();
       if (!active) return;
       setLoading(false);
       if (result.error) { setError(result.error.message); return; }
@@ -57,14 +58,16 @@ export function BrandPage() {
   }, [selectedProfile?.id]);
 
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (!selectedProfile) return;
+    event.preventDefault();
+    const profile = selectedProfile;
+    if (!profile) return;
     setBusy(true); setError(null); setSaved(false);
-    const profileUpdate = await neonClient.from("profiles").update({ website_url: website.trim() || null, industry: industry.trim() || null, updated_at: new Date().toISOString() }).eq("id", selectedProfile.id).select("id");
+    const profileUpdate = await neonClient.from("profiles").update({ website_url: website.trim() || null, industry: industry.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id).select("id");
     if (profileUpdate.error) { setBusy(false); setError(profileUpdate.error.message); return; }
-    const payload = { profile_id: selectedProfile.id, description: description.trim() || null, business_model: businessModel.trim() || null, location: location.trim() || null, service_area: serviceArea.trim() || null, target_audience: { summary: target.trim() }, tone_of_voice: { summary: tone.trim() }, social_links: { instagram: instagram.trim(), facebook: facebook.trim(), linkedin: linkedin.trim(), googleBusinessProfile: gbp.trim() }, goals: goals.split(",").map((item) => item.trim()).filter(Boolean), updated_at: new Date().toISOString() };
-    const existing = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", selectedProfile.id).maybeSingle();
+    const payload = { profile_id: profile.id, description: description.trim() || null, business_model: businessModel.trim() || null, location: location.trim() || null, service_area: serviceArea.trim() || null, target_audience: { summary: target.trim() }, tone_of_voice: { summary: tone.trim() }, social_links: { instagram: instagram.trim(), facebook: facebook.trim(), linkedin: linkedin.trim(), googleBusinessProfile: gbp.trim() }, goals: goals.split(",").map((item) => item.trim()).filter(Boolean), updated_at: new Date().toISOString() };
+    const existing = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", profile.id).maybeSingle();
     if (existing.error) { setBusy(false); setError(existing.error.message); return; }
-    const write = existing.data ? await neonClient.from("brand_profiles").update(payload).eq("profile_id", selectedProfile.id).select("profile_id") : await neonClient.from("brand_profiles").insert(payload).select("profile_id");
+    const write = existing.data ? await neonClient.from("brand_profiles").update(payload).eq("profile_id", profile.id).select("profile_id") : await neonClient.from("brand_profiles").insert(payload).select("profile_id");
     setBusy(false);
     if (write.error) { setError(write.error.message); return; }
     await reload(); setSaved(true);
