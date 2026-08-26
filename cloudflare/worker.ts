@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
+import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "../api/_lib/brand-analysis.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 
@@ -21,6 +22,7 @@ interface Env {
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
+type ExistingBrandRow = { profile_id: string; social_links: unknown };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
@@ -69,6 +71,15 @@ function summaryField(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const summary = (value as Record<string, unknown>).summary;
   return typeof summary === "string" && summary.trim() ? summary.trim() : null;
+}
+
+function sanitizeVisualHints(value: unknown): WebsiteVisualHints {
+  if (!value || typeof value !== "object") return { colors: [], socialLinks: {}, logoUrl: null };
+  const input = value as Record<string, unknown>;
+  const colors = Array.isArray(input.colors) ? input.colors.filter((item): item is string => typeof item === "string").slice(0, 10) : [];
+  const socialLinks = input.socialLinks && typeof input.socialLinks === "object" ? Object.fromEntries(Object.entries(input.socialLinks as Record<string, unknown>).filter(([, item]) => typeof item === "string").map(([key, item]) => [key, String(item)])) : {};
+  const logoUrl = typeof input.logoUrl === "string" ? input.logoUrl : null;
+  return { colors, socialLinks, logoUrl };
 }
 
 function currentMonthStartIso() {
@@ -153,6 +164,68 @@ async function handleAuthAccountExists(request: Request, env: Env) {
   } catch (reason) {
     console.error("auth-account-exists", reason instanceof Error ? reason.message : "unknown");
     return json({ error: "ACCOUNT_CHECK_FAILED" }, 503);
+  }
+}
+
+async function handleOnboardingAnalyze(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const token = bearer(request);
+  if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
+  if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
+  const body = await readBody(request);
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+  const visualHints = sanitizeVisualHints(body.visualHints);
+
+  try {
+    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
+    const profile = profiles[0];
+    if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+    const scans = await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
+    if (!scans[0]) return json({ error: "WEBSITE_SCAN_REQUIRED" }, 409);
+    const pageRows = await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=100`, token);
+    const pages = pageRows.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" }));
+    if (!pages.length) return json({ error: "NO_ANALYZED_WEBSITE_PAGES" }, 409);
+
+    const result = await analyzeBrandFromWebsite({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, websiteUrl: profile.website_url, industry: profile.industry, pages, visualHints });
+    const existingRows = await rows<ExistingBrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links&limit=1`, token);
+    const existingSocials = existingRows[0]?.social_links && typeof existingRows[0].social_links === "object" ? existingRows[0].social_links as Record<string, unknown> : {};
+    const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, value]) => typeof value === "string" && value)) };
+    const now = new Date().toISOString();
+    const payload = {
+      profile_id: profileId,
+      description: result.analysis.description,
+      business_model: result.analysis.businessModel,
+      location: result.analysis.location,
+      service_area: result.analysis.serviceArea,
+      target_audience: result.analysis.targetAudience,
+      services: result.analysis.services,
+      differentiators: result.analysis.differentiators,
+      value_propositions: result.analysis.valuePropositions,
+      visual_identity: { observedColors: visualHints.colors, logoUrl: visualHints.logoUrl, summary: result.analysis.visualStyleSummary, source: "website_scan" },
+      tone_of_voice: result.analysis.toneOfVoice,
+      social_links: socialLinks,
+      goals: result.analysis.goals,
+      updated_at: now,
+    };
+
+    const write = existingRows[0]
+      ? await dataApi(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) })
+      : await dataApi("brand_profiles", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) });
+    if (!write.ok) throw new Error(`BRAND_PROFILE_WRITE_${write.status}`);
+
+    const profilePatch: Record<string, unknown> = { onboarding_completed: true, updated_at: now };
+    if (!profile.industry && result.analysis.industry) profilePatch.industry = result.analysis.industry;
+    const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
+    if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
+
+    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "ANALYZE_BRAND_ONBOARDING", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, pages_analyzed: pages.length } }) });
+    if (!usageWrite.ok) console.error("onboarding-usage-write", { profileId, status: usageWrite.status });
+    return json({ analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model });
+  } catch (reason) {
+    const detail = reason instanceof Error ? reason.message : "UNKNOWN_ONBOARDING_ANALYSIS_ERROR";
+    console.error("cloudflare-onboarding-analyze", { profileId, detail });
+    return json({ error: "ONBOARDING_ANALYSIS_FAILED", detail }, detail.startsWith("OPENAI_") ? 502 : 500);
   }
 }
 
@@ -293,7 +366,7 @@ async function handleWebsiteScan(request: Request) {
     const state = result.completeCoverage && result.failedPages === 0 ? "COMPLETE" : "PARTIAL";
     const finish = await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state, discovered_pages: result.discoveredPages, analyzed_pages: result.analyzedPages, skipped_pages: result.skippedPages, failed_pages: result.failedPages, finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: result.stopReason === "COMPLETE" ? null : result.stopReason }) });
     if (!finish.ok) throw new Error(`DATA_API_FINISH_SCAN_${finish.status}`);
-    return json({ scanId, state, discoveredPages: result.discoveredPages, analyzedPages: result.analyzedPages, skippedPages: result.skippedPages, failedPages: result.failedPages, completeCoverage: result.completeCoverage, stopReason: result.stopReason });
+    return json({ scanId, state, discoveredPages: result.discoveredPages, analyzedPages: result.analyzedPages, skippedPages: result.skippedPages, failedPages: result.failedPages, completeCoverage: result.completeCoverage, stopReason: result.stopReason, visualHints: result.visualHints });
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_SCAN_ERROR";
     if (scanId) await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), error: detail.slice(0, 500) }) }).catch(() => undefined);
@@ -306,6 +379,7 @@ async function routeApi(request: Request, env: Env) {
   const path = new URL(request.url).pathname;
   if (path === "/api/health") return handleHealth(env);
   if (path === "/api/auth/account-exists") return handleAuthAccountExists(request, env);
+  if (path === "/api/onboarding-analyze") return handleOnboardingAnalyze(request, env);
   if (path === "/api/generate-text") return handleGenerateText(request, env);
   if (path === "/api/generate-image") return handleGenerateImage(request, env);
   if (path === "/api/website-scan") return handleWebsiteScan(request);

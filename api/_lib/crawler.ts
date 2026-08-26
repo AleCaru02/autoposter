@@ -17,6 +17,12 @@ export type CrawlPage = {
   error: string | null;
 };
 
+export type WebsiteVisualHints = {
+  colors: string[];
+  socialLinks: Record<string, string>;
+  logoUrl: string | null;
+};
+
 export type CrawlResult = {
   rootUrl: string;
   discoveredPages: number;
@@ -26,6 +32,7 @@ export type CrawlResult = {
   completeCoverage: boolean;
   stopReason: "COMPLETE" | "PAGE_LIMIT" | "TIME_LIMIT";
   pages: CrawlPage[];
+  visualHints: WebsiteVisualHints;
 };
 
 type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
@@ -71,6 +78,45 @@ function pageMetadata(html: string) {
   const description = $('meta[name="description"]').attr("content")?.replace(/\s+/g, " ").trim() || null;
   const hrefs = $("a[href]").map((_, element) => $(element).attr("href") ?? "").get().filter(Boolean);
   return { title, description, hrefs };
+}
+
+function normalizeObservedColor(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function rootVisualHints(html: string, root: URL): WebsiteVisualHints {
+  const $ = cheerio.load(html);
+  const counts = new Map<string, number>();
+  const colorSources = [
+    $('meta[name="theme-color"]').attr("content") ?? "",
+    $("style").map((_, element) => $(element).html() ?? "").get().join("\n"),
+    $("[style]").map((_, element) => $(element).attr("style") ?? "").get().join("\n"),
+  ].join("\n");
+  const matches = colorSources.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^\)]{3,80}\)|hsla?\([^\)]{3,80}\)/g) ?? [];
+  for (const raw of matches) {
+    const color = normalizeObservedColor(raw);
+    counts.set(color, (counts.get(color) ?? 0) + 1);
+  }
+  const colors = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([color]) => color);
+
+  const socialLinks: Record<string, string> = {};
+  for (const href of $("a[href]").map((_, element) => $(element).attr("href") ?? "").get()) {
+    if (!href) continue;
+    let absolute: URL;
+    try { absolute = new URL(href, root); } catch { continue; }
+    const host = absolute.hostname.toLowerCase().replace(/^www\./, "");
+    if (!socialLinks.instagram && host === "instagram.com") socialLinks.instagram = absolute.toString();
+    if (!socialLinks.facebook && (host === "facebook.com" || host === "fb.com")) socialLinks.facebook = absolute.toString();
+    if (!socialLinks.linkedin && host === "linkedin.com") socialLinks.linkedin = absolute.toString();
+    if (!socialLinks.googleBusinessProfile && (host === "g.page" || host === "business.google.com" || host === "maps.google.com" || host === "google.com" && absolute.pathname.startsWith("/maps"))) socialLinks.googleBusinessProfile = absolute.toString();
+  }
+
+  const logoCandidate = $('img[alt*="logo" i]').first().attr("src") || $('link[rel="apple-touch-icon"]').first().attr("href") || $('link[rel="icon"]').first().attr("href") || null;
+  let logoUrl: string | null = null;
+  if (logoCandidate) {
+    try { logoUrl = new URL(logoCandidate, root).toString(); } catch { logoUrl = null; }
+  }
+  return { colors, socialLinks, logoUrl };
 }
 
 function parseRobots(text: string) {
@@ -162,6 +208,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const pages: CrawlPage[] = [];
   const startedAt = Date.now();
   let stopReason: CrawlResult["stopReason"] = "COMPLETE";
+  let visualHints: WebsiteVisualHints = { colors: [], socialLinks: {}, logoUrl: null };
 
   while (queue.length) {
     if (visited.size >= maxPages) { stopReason = "PAGE_LIMIT"; break; }
@@ -194,6 +241,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
       }
       const html = await safeText(response, maxContentChars);
       const { title, description, hrefs } = pageMetadata(html);
+      if (item.depth === 0) visualHints = rootVisualHints(html, finalUrl);
       const contentText = plainText(html).slice(0, maxContentChars);
       pages.push({ url: finalUrl.toString(), normalizedUrl: item.url, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null });
       if (item.depth < maxDepth) {
@@ -212,5 +260,5 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const analyzedPages = pages.filter((page) => page.status === "ANALYZED").length;
   const skippedPages = pages.filter((page) => page.status === "SKIPPED").length;
   const failedPages = pages.filter((page) => page.status === "FAILED").length;
-  return { rootUrl: normalizedRoot, discoveredPages: known.size, analyzedPages, skippedPages, failedPages, completeCoverage: stopReason === "COMPLETE" && queue.length === 0, stopReason, pages };
+  return { rootUrl: normalizedRoot, discoveredPages: known.size, analyzedPages, skippedPages, failedPages, completeCoverage: stopReason === "COMPLETE" && queue.length === 0, stopReason, pages, visualHints };
 }
