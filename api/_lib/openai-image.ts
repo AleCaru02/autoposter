@@ -2,10 +2,14 @@ export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type ImageSize = "1024x1024" | "1024x1536";
 
+const GPT_IMAGE_2_TEXT_INPUT_PER_MILLION_USD = 5;
+const GPT_IMAGE_2_IMAGE_OUTPUT_PER_MILLION_USD = 30;
+
 export type OpenAIImageUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  estimatedCostUsd: number | null;
 };
 
 export type OpenAIImageResult = {
@@ -64,6 +68,10 @@ function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+export function estimateImageCostUsd(inputTokens: number, outputTokens: number) {
+  return (Math.max(inputTokens, 0) * GPT_IMAGE_2_TEXT_INPUT_PER_MILLION_USD + Math.max(outputTokens, 0) * GPT_IMAGE_2_IMAGE_OUTPUT_PER_MILLION_USD) / 1_000_000;
+}
+
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
   const fetcher = options.fetcher ?? fetch;
   const size = imageSizeForFormat(options.format);
@@ -99,6 +107,8 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   const base64 = first && typeof first.b64_json === "string" ? first.b64_json : "";
   if (!base64) throw new Error("OPENAI_IMAGE_EMPTY_OUTPUT");
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
+  const inputTokens = numberOrNull(usage.input_tokens);
+  const outputTokens = numberOrNull(usage.output_tokens);
   return {
     model: "gpt-image-2",
     mimeType: "image/png",
@@ -108,9 +118,10 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     size,
     quality: "high",
     usage: {
-      inputTokens: numberOrNull(usage.input_tokens),
-      outputTokens: numberOrNull(usage.output_tokens),
+      inputTokens,
+      outputTokens,
       totalTokens: numberOrNull(usage.total_tokens),
+      estimatedCostUsd: inputTokens !== null && outputTokens !== null ? estimateImageCostUsd(inputTokens, outputTokens) : null,
     },
   };
 }
