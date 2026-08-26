@@ -7,11 +7,15 @@ Data audit: 2026-08-26
 1. GitHub fonte unica — PASS
    - repository canonico: `AleCaru02/autoposter`
    - branch canonico: `main`
-   - sorgenti, configurazione Vercel, env template e regole operative presenti
-   - nessun secret nel repository
-2. GitHub/Lovable/Vercel stesso codice — IN CORSO
-3. PostgreSQL reale — DA FARE
-4. Health check reale — DA FARE
+2. GitHub/Lovable/Vercel stesso codice — PARTIAL
+   - GitHub -> Vercel: build canonica READY e HTTP 200
+   - Lovable source-control nativo: richiede autorizzazione GitHub nella UI Lovable; API non disponibile
+3. PostgreSQL reale — PASS
+   - Neon project dedicato `post-automatici`
+   - schema applicativo creato
+   - test insert -> nuova query -> read riuscito
+   - nessun uso di SQLite
+4. Health check reale — IN CORSO
 5. Autenticazione reale — DA FARE
 6. Profili isolati — DA FARE
 7. Dashboard/onboarding/routes — DA FARE
