@@ -4,7 +4,6 @@ import { authClient, neonClient } from "../lib/neon-client";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type BrandRow = {
   profile_id: string;
   description: string | null;
@@ -124,7 +123,7 @@ export function BrandPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function jwt() {
-    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+    const token = await authClient.getJwtToken();
     if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
     return token;
   }
