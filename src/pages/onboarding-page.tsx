@@ -86,8 +86,10 @@ export function OnboardingPage() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    let profileId: string | null = null;
     try {
       const created = await createProfile({ name, websiteUrl: website, industry });
+      profileId = created.id;
       setCreatedProfileId(created.id);
       if (!website.trim()) {
         const done = await neonClient.from("profiles").update({ onboarding_completed: true, updated_at: new Date().toISOString() }).eq("id", created.id).select("id");
@@ -99,7 +101,7 @@ export function OnboardingPage() {
       await analyzeProfile(created.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Configurazione non riuscita.");
-      setStage(createdProfileId ? "ERROR" : "FORM");
+      setStage(profileId ? "ERROR" : "FORM");
     }
   }
 
