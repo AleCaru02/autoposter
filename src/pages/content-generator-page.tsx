@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarDays, Eye, Pause, Play, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
+import { CalendarDays, Eye, Globe2, LoaderCircle, Pause, Play, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
+type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
+type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; detail?: string };
+type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
 
 const PROVIDER_LABELS: Record<string, string> = {
   INSTAGRAM: "Instagram",
@@ -15,11 +18,20 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function ContentGeneratorPage() {
-  const { selectedProfile } = useProfiles();
+  const { selectedProfile, reload: reloadProfiles } = useProfiles();
   const [overview, setOverview] = useState<AutopilotOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(false);
+  const [bootstrapPages, setBootstrapPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const triggeredProfile = useRef<string | null>(null);
+  const bootstrappedProfile = useRef<string | null>(null);
+
+  const jwt = useCallback(async () => {
+    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+    if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
+    return token;
+  }, []);
 
   const load = useCallback(async () => {
     const profileId = selectedProfile?.id;
@@ -35,29 +47,87 @@ export function ContentGeneratorPage() {
     }
   }, [selectedProfile?.id]);
 
-  useEffect(() => { void load(); }, [load]);
+  const bootstrapLegacyProfile = useCallback(async () => {
+    const profile = selectedProfile;
+    if (!profile || profile.onboarding_completed) return;
+    if (bootstrappedProfile.current === profile.id) return;
+    if (!profile.website_url?.trim()) {
+      setLoading(false);
+      setError("Per avviare i contenuti automatici serve prima il sito dell'attività. Aggiungilo nella sezione Brand.");
+      return;
+    }
+
+    bootstrappedProfile.current = profile.id;
+    setBootstrapping(true);
+    setLoading(true);
+    setBootstrapPages(0);
+    setError(null);
+    try {
+      const token = await jwt();
+      const scanResponse = await fetch("/api/website-scan", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ profileId: profile.id, pageLimit: 500 }),
+      });
+      const scanBody = await scanResponse.json() as ScanResponse;
+      if (!scanResponse.ok) throw new Error(scanBody.detail || scanBody.error || "Analisi iniziale del sito non riuscita.");
+      const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
+      setBootstrapPages(scanBody.analyzedPages ?? 0);
+
+      const analysisResponse = await fetch("/api/onboarding-analyze", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ profileId: profile.id, visualHints: hints }),
+      });
+      const analysisBody = await analysisResponse.json() as AnalysisResponse;
+      if (!analysisResponse.ok) throw new Error(analysisBody.detail || analysisBody.error || "Analisi iniziale del brand non riuscita.");
+      setBootstrapPages(analysisBody.pagesAnalyzed ?? scanBody.analyzedPages ?? 0);
+      await reloadProfiles();
+    } catch (reason) {
+      bootstrappedProfile.current = null;
+      setError(reason instanceof Error ? reason.message : "Preparazione automatica dell'attività non riuscita.");
+      setLoading(false);
+    } finally {
+      setBootstrapping(false);
+    }
+  }, [selectedProfile, jwt, reloadProfiles]);
+
+  useEffect(() => {
+    triggeredProfile.current = null;
+    if (!selectedProfile) return;
+    if (!selectedProfile.onboarding_completed) {
+      setOverview(null);
+      void bootstrapLegacyProfile();
+      return;
+    }
+    void load();
+  }, [selectedProfile?.id, selectedProfile?.onboarding_completed, bootstrapLegacyProfile, load]);
 
   const triggerAutopilot = useCallback(async () => {
     const profileId = selectedProfile?.id;
-    if (!profileId || triggeredProfile.current === profileId) return;
+    if (!profileId || !selectedProfile.onboarding_completed || triggeredProfile.current === profileId) return;
     triggeredProfile.current = profileId;
     try {
-      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-      if (!token) return;
-      await fetch("/api/autopilot/run", {
+      const token = await jwt();
+      const response = await fetch("/api/autopilot/run", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ profileId }),
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { detail?: string; error?: string };
+        throw new Error(body.detail || body.error || "AUTOPILOT_RUN_FAILED");
+      }
       window.setTimeout(() => { void load(); }, 2500);
-    } catch {
-      // Il cron server continua comunque a gestire l'autopilot: nessun errore UI per il trigger anticipato.
+    } catch (reason) {
+      triggeredProfile.current = null;
+      setError(reason instanceof Error ? reason.message : "Autopilot non avviato.");
     }
-  }, [selectedProfile?.id, load]);
+  }, [selectedProfile?.id, selectedProfile?.onboarding_completed, jwt, load]);
 
   useEffect(() => {
-    if (overview?.settings.enabled) void triggerAutopilot();
-  }, [overview?.settings.enabled, triggerAutopilot]);
+    if (overview?.settings.enabled && selectedProfile?.onboarding_completed) void triggerAutopilot();
+  }, [overview?.settings.enabled, selectedProfile?.onboarding_completed, triggerAutopilot]);
 
   async function changeSettings(patch: Partial<AutopilotSettings>) {
     if (!selectedProfile?.id || !overview) return;
@@ -78,7 +148,9 @@ export function ContentGeneratorPage() {
   }
 
   if (!selectedProfile) return null;
-  if (loading || !overview) return <div className="page-content"><section className="panel">Caricamento automazione…</section></div>;
+  if (bootstrapping) return <div className="page-content"><section className="panel onboarding-loading"><Globe2 size={24} /><LoaderCircle className="spin" size={28} /><h2>Sto preparando l'attività</h2><p>{bootstrapPages > 0 ? `${bootstrapPages} pagine del sito analizzate. ` : ""}Scansione del sito e analisi del brand stanno avvenendo automaticamente. Non devi fare nulla.</p></section></div>;
+  if ((loading || !overview) && !error) return <div className="page-content"><section className="panel">Caricamento automazione…</section></div>;
+  if (!overview) return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1></div></header>{error && <p className="form-error" role="alert">{error}</p>}</div>;
 
   const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
