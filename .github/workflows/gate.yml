@@ -25,6 +25,8 @@ jobs:
         run: npm run test:crawler
       - name: Content workflow regression
         run: npm run test:content-workflow
+      - name: Calendar workflow regression
+        run: npm run test:calendar-workflow
       - name: OpenAI text contract
         run: npm run test:openai
       - name: OpenAI text live probe
