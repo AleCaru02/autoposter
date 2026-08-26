@@ -7,9 +7,9 @@ import {
   removeCalendarJob,
   rescheduleCalendarJob,
   saveProviderSchedule,
-  type ApprovedVariantRow,
   type CalendarJobRow,
   type CalendarState,
+  type CalendarVariantRow,
 } from "../features/calendar/calendar-store";
 import {
   SOCIAL_PROVIDERS,
@@ -49,8 +49,8 @@ function makeScheduleDraft(provider: SocialProvider, timezone: string, state: Ca
   };
 }
 
-function variantTitle(variant: ApprovedVariantRow, state: CalendarState) {
-  const title = state.contentTitles[variant.content_id] || variant.hook || "Contenuto approvato";
+function variantTitle(variant: CalendarVariantRow, state: CalendarState) {
+  const title = state.contentTitles[variant.content_id] || variant.hook || "Contenuto";
   return `${providerLabel(variant.provider)} · ${variant.format} · ${title}`;
 }
 
@@ -72,10 +72,11 @@ export function CalendarPage() {
     setError(null);
     try {
       const next = await loadCalendarState(selectedProfile.id);
+      const approved = next.variants.filter((variant) => variant.eligible && variant.approval_status === "APPROVED");
       setState(next);
       setDrafts(Object.fromEntries(SOCIAL_PROVIDERS.map(({ value }) => [value, makeScheduleDraft(value, selectedProfile.timezone, next)])) as Record<SocialProvider, ScheduleDraft>);
       setJobTimes(Object.fromEntries(next.jobs.map((job) => [job.id, isoToZonedInput(job.scheduled_at, selectedProfile.timezone)])));
-      setVariantId((current) => current && next.variants.some((variant) => variant.id === current) ? current : next.variants[0]?.id ?? "");
+      setVariantId((current) => current && approved.some((variant) => variant.id === current) ? current : approved[0]?.id ?? "");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Impossibile caricare il calendario.");
     } finally {
@@ -86,6 +87,7 @@ export function CalendarPage() {
   useEffect(() => { void reload(); }, [reload]);
 
   const variantMap = useMemo(() => new Map(state.variants.map((variant) => [variant.id, variant])), [state.variants]);
+  const approvedVariants = useMemo(() => state.variants.filter((variant) => variant.eligible && variant.approval_status === "APPROVED"), [state.variants]);
 
   async function run(key: string, task: () => Promise<void>, success?: string) {
     if (busy[key]) return;
@@ -212,8 +214,8 @@ export function CalendarPage() {
 
     <section className="calendar-section panel">
       <div className="section-heading"><div><h2>Programma un contenuto approvato</h2><p>Solo le varianti idonee e già approvate possono entrare nel calendario.</p></div><CalendarClock size={22} /></div>
-      {state.variants.length === 0 ? <div className="empty-calendar"><Check size={20} /><div><strong>Nessuna variante approvata disponibile</strong><p>Approva prima un contenuto nella sezione Approvazioni.</p></div></div> : <div className="calendar-compose">
-        <label>Contenuto<select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{state.variants.map((variant) => <option value={variant.id} key={variant.id}>{variantTitle(variant, state)}</option>)}</select></label>
+      {approvedVariants.length === 0 ? <div className="empty-calendar"><Check size={20} /><div><strong>Nessuna variante approvata disponibile</strong><p>Approva prima un contenuto nella sezione Approvazioni.</p></div></div> : <div className="calendar-compose">
+        <label>Contenuto<select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{approvedVariants.map((variant) => <option value={variant.id} key={variant.id}>{variantTitle(variant, state)}</option>)}</select></label>
         <label>Data e ora ({selectedProfile.timezone})<input type="datetime-local" value={scheduleLocal} onChange={(event) => setScheduleLocal(event.target.value)} /></label>
         <button className="primary-button" type="button" disabled={!variantId || !scheduleLocal || busy["new-job"]} onClick={() => void scheduleVariant()}><CalendarClock size={16} /> {busy["new-job"] ? "Programmazione…" : "Aggiungi al calendario"}</button>
       </div>}
@@ -225,9 +227,10 @@ export function CalendarPage() {
         {state.jobs.map((job) => {
           const variant = variantMap.get(job.variant_id);
           const title = variant ? variantTitle(variant, state) : `${providerLabel(job.provider)} · contenuto`;
-          return <article className="calendar-job" key={job.id}>
-            <div className="calendar-job-main"><span className="scheduled-badge">Programmato internamente</span><h3>{title}</h3><p>{formatZonedDateTime(job.scheduled_at, selectedProfile.timezone)} · {selectedProfile.timezone}</p><small>Nessun tentativo di pubblicazione verrà eseguito prima del collegamento reale del social.</small></div>
-            <div className="calendar-job-actions"><input aria-label={`Nuova data per ${title}`} type="datetime-local" value={jobTimes[job.id] ?? ""} onChange={(event) => setJobTimes((current) => ({ ...current, [job.id]: event.target.value }))} /><button className="secondary-button" type="button" disabled={busy[`job-${job.id}`]} onClick={() => void reschedule(job)}><Save size={15} /> Sposta</button><button className="danger-outline-button" type="button" disabled={busy[`remove-${job.id}`]} onClick={() => void removeJob(job)}><Trash2 size={15} /> Rimuovi</button></div>
+          const blocked = job.state === "BLOCKED_APPROVAL";
+          return <article className={`calendar-job ${blocked ? "calendar-job-blocked" : ""}`} key={job.id}>
+            <div className="calendar-job-main"><span className={blocked ? "blocked-badge" : "scheduled-badge"}>{blocked ? "Sospeso: approvazione richiesta" : "Programmato internamente"}</span><h3>{title}</h3><p>{formatZonedDateTime(job.scheduled_at, selectedProfile.timezone)} · {selectedProfile.timezone}</p><small>{blocked ? "Il contenuto è stato modificato o riaperto. Riapprovalo prima di poter confermare nuovamente la data." : "Nessun tentativo di pubblicazione verrà eseguito prima del collegamento reale del social."}</small></div>
+            <div className="calendar-job-actions"><input aria-label={`Nuova data per ${title}`} type="datetime-local" value={jobTimes[job.id] ?? ""} onChange={(event) => setJobTimes((current) => ({ ...current, [job.id]: event.target.value }))} /><button className="secondary-button" type="button" disabled={blocked || busy[`job-${job.id}`]} onClick={() => void reschedule(job)}><Save size={15} /> {blocked ? "Riapprova prima" : "Sposta"}</button><button className="danger-outline-button" type="button" disabled={busy[`remove-${job.id}`]} onClick={() => void removeJob(job)}><Trash2 size={15} /> Rimuovi</button></div>
           </article>;
         })}
       </div>}
