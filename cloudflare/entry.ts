@@ -6,6 +6,7 @@ const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.
 type Env = AutopilotEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
 };
+type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -27,7 +28,7 @@ async function canAccessProfile(request: Request, profileId: string) {
   return rows.some((row) => row.id === profileId);
 }
 
-async function handleAutopilotRun(request: Request, env: Env) {
+async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   let profileId = "";
   try {
@@ -36,22 +37,20 @@ async function handleAutopilotRun(request: Request, env: Env) {
   } catch { /* handled below */ }
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-  try {
-    const result = await runContentAutopilot(env, { profileId, maxGenerations: 6 });
-    return json({ ok: true, result });
-  } catch (reason) {
-    const detail = reason instanceof Error ? reason.message : "AUTOPILOT_RUN_FAILED";
-    console.error("autopilot-manual-trigger", { profileId, detail });
-    return json({ error: "AUTOPILOT_RUN_FAILED", detail }, detail.includes("NOT_CONFIGURED") ? 503 : 500);
-  }
+  ctx.waitUntil(runContentAutopilot(env, { profileId, maxGenerations: 6 }).then((result) => {
+    console.log("content-autopilot-profile", { profileId, ...result });
+  }).catch((reason) => {
+    console.error("autopilot-profile-failed", { profileId, detail: reason instanceof Error ? reason.message : "unknown" });
+  }));
+  return json({ accepted: true }, 202);
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    if (new URL(request.url).pathname === "/api/autopilot/run") return handleAutopilotRun(request, env);
+  async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
+    if (new URL(request.url).pathname === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     return worker.fetch(request, env);
   },
-  async scheduled(_controller: unknown, env: Env, ctx: { waitUntil(promise: Promise<unknown>): void }) {
+  async scheduled(_controller: unknown, env: Env, ctx: WorkerContext) {
     ctx.waitUntil(runContentAutopilot(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
