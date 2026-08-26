@@ -5,7 +5,7 @@
   "compatibility_date": "2026-08-26",
   "compatibility_flags": ["nodejs_compat"],
   "triggers": {
-    "crons": ["0 * * * *"]
+    "crons": ["0 * * * *", "*/5 * * * *"]
   },
   "assets": {
     "directory": "./dist",
