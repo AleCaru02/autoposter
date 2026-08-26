@@ -8,6 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
+    "build:cloudflare": "npm run build && wrangler deploy --dry-run",
+    "deploy:cloudflare": "npm run build && wrangler deploy",
+    "dev:cloudflare": "npm run build && wrangler dev",
     "test:crawler": "tsx tests/crawler.test.ts",
     "test:openai": "tsx tests/openai-text.test.ts",
     "test:openai-live": "tsx tests/openai-live.test.ts",
@@ -34,6 +37,7 @@
     "@vitejs/plugin-react": "^5.0.3",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
-    "vite": "^7.1.7"
+    "vite": "^7.1.7",
+    "wrangler": "^4.125.0"
   }
 }

@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,5 +41,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:openai-image-live
-      - name: Build
+      - name: Vercel build
         run: npm run build
+      - name: Cloudflare bundle dry run
+        run: npx wrangler deploy --dry-run
