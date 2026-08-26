@@ -102,21 +102,37 @@ export async function saveGeneratedContent(input: {
 }
 
 export async function loadContentWorkflow(profileId: string) {
-  const [itemsResult, variantsResult, assetsResult] = await Promise.all([
-    neonClient.from("content_items").select("id,profile_id,topic,objective,title,status,created_at,updated_at").eq("profile_id", profileId).order("updated_at", { ascending: false }),
-    neonClient.from("content_variants").select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,created_at,updated_at").eq("profile_id", profileId).order("created_at", { ascending: true }),
-    neonClient.from("assets").select("id,profile_id,source,kind,name,storage_url,mime_type,metadata,created_at").eq("profile_id", profileId).eq("kind", "IMAGE").order("created_at", { ascending: false }),
-  ]);
+  const itemsResult = await neonClient.from("content_items")
+    .select("id,profile_id,topic,objective,title,status,created_at,updated_at")
+    .eq("profile_id", profileId)
+    .order("updated_at", { ascending: false })
+    .limit(50);
   if (itemsResult.error) throw new Error(itemsResult.error.message);
-  if (variantsResult.error) throw new Error(variantsResult.error.message);
-  if (assetsResult.error) throw new Error(assetsResult.error.message);
+  const items = (itemsResult.data ?? []) as ContentItemRow[];
+  if (!items.length) return { items: [], variants: [] as ContentVariantRow[], assets: [] as AssetRow[] };
 
+  const contentIds = items.map((item) => item.id);
+  const variantsResult = await neonClient.from("content_variants")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,created_at,updated_at")
+    .eq("profile_id", profileId)
+    .in("content_id", contentIds)
+    .order("created_at", { ascending: true });
+  if (variantsResult.error) throw new Error(variantsResult.error.message);
   const rawVariants = (variantsResult.data ?? []) as Array<Omit<ContentVariantRow, "hashtags"> & { hashtags: unknown }>;
-  return {
-    items: (itemsResult.data ?? []) as ContentItemRow[],
-    variants: rawVariants.map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[],
-    assets: (assetsResult.data ?? []) as AssetRow[],
-  };
+  const variants = rawVariants.map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[];
+
+  const assetIds = Array.from(new Set(variants.map((variant) => variant.image_asset_id).filter((id): id is string => typeof id === "string" && Boolean(id))));
+  let assets: AssetRow[] = [];
+  if (assetIds.length) {
+    const assetsResult = await neonClient.from("assets")
+      .select("id,profile_id,source,kind,name,storage_url,mime_type,metadata,created_at")
+      .eq("profile_id", profileId)
+      .in("id", assetIds);
+    if (assetsResult.error) throw new Error(assetsResult.error.message);
+    assets = (assetsResult.data ?? []) as AssetRow[];
+  }
+
+  return { items, variants, assets };
 }
 
 export async function updateVariant(input: {
