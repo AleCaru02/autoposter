@@ -5,7 +5,6 @@ import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
 type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; detail?: string };
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
@@ -28,7 +27,7 @@ export function ContentGeneratorPage() {
   const bootstrappedProfile = useRef<string | null>(null);
 
   const jwt = useCallback(async () => {
-    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+    const token = await authClient.getJwtToken();
     if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
     return token;
   }, []);
