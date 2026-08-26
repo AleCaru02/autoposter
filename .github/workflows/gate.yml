@@ -23,5 +23,7 @@ jobs:
         run: npm run typecheck
       - name: Crawler regression
         run: npm run test:crawler
+      - name: OpenAI text contract
+        run: npm run test:openai
       - name: Build
         run: npm run build
