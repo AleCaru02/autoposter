@@ -23,6 +23,8 @@ jobs:
         run: npm run typecheck
       - name: Crawler regression
         run: npm run test:crawler
+      - name: Content workflow regression
+        run: npm run test:content-workflow
       - name: OpenAI text contract
         run: npm run test:openai
       - name: OpenAI text live probe
