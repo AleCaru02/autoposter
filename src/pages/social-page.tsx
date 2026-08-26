@@ -53,7 +53,7 @@ function readableError(value: string) {
     NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA: "Non trovo sedi Google Business Profile accessibili oppure l’API GBP non è ancora abilitata per il progetto Google.",
     access_denied: "Autorizzazione annullata dal provider.",
   };
-  return map[value] ?? normalized || "Collegamento non riuscito.";
+  return map[value] ?? (normalized || "Collegamento non riuscito.");
 }
 
 async function jwt() {
