@@ -9,6 +9,7 @@ import type { GeneratedSocialContent, SocialFormat, SocialProvider } from "../..
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type ImageResult = { dataUrl: string; mimeType: string; model: string; size: string; quality: string; revisedPrompt?: string | null };
 type FlowStep = "IDLE" | "TEXT" | "SAVE" | "IMAGES" | "DONE";
+type GeneratedVariant = GeneratedSocialContent["variants"][number];
 
 const PROVIDERS: Array<{ value: SocialProvider; label: string }> = [
   { value: "INSTAGRAM", label: "Instagram" },
@@ -51,7 +52,7 @@ export function ContentGeneratorPage() {
     return token;
   }
 
-  async function createImage(token: string, profileId: string, contentVariantId: string, variant: GeneratedSocialContent["variants"][number]) {
+  async function createImage(token: string, profileId: string, contentVariantId: string, variant: GeneratedVariant) {
     const response = await fetch("/api/generate-image", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -91,21 +92,22 @@ export function ContentGeneratorPage() {
         throw new Error(body.detail || body.message || body.error || "Generazione non riuscita.");
       }
       if (!body.content) throw new Error("Il motore non ha restituito un contenuto utilizzabile.");
-      setResult(body.content);
+      const generated: GeneratedSocialContent = body.content;
+      setResult(generated);
 
       setFlowStep("SAVE");
       const saved = await saveGeneratedContent({
         profileId,
         topic: direction.trim() || "Tema scelto automaticamente dal brand e dal sito",
         objective: null,
-        content: body.content,
+        content: generated,
       });
 
       setFlowStep("IMAGES");
       const nextImages: Record<string, ImageResult> = {};
       const failures: string[] = [];
-      for (let index = 0; index < body.content.variants.length; index += 1) {
-        const variant = body.content.variants[index];
+      for (let index = 0; index < generated.variants.length; index += 1) {
+        const variant: GeneratedVariant | undefined = generated.variants[index];
         if (!variant?.eligible) continue;
         const key = `${variant.provider}-${variant.format}-${index}`;
         const contentVariantId = saved.variantIds[key];
