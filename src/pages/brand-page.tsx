@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
+import { Check, RefreshCw, Sparkles } from "lucide-react";
 import { authClient, neonClient } from "../lib/neon-client";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -50,12 +50,6 @@ function stringList(value: unknown) {
 }
 function nestedList(value: unknown, key: string) {
   return value && typeof value === "object" && Array.isArray((value as Record<string, unknown>)[key]) ? ((value as Record<string, unknown>)[key] as unknown[]).filter((item): item is string => typeof item === "string") : [];
-}
-
-function AutoSaveState({ status }: { status: "IDLE" | "WAITING" | "SAVING" | "SAVED" | "ERROR" }) {
-  if (status === "WAITING" || status === "SAVING") return <span className="autosave-state saving"><LoaderCircle className="spin" size={14} /> Salvataggio…</span>;
-  if (status === "ERROR") return <span className="autosave-state error">Salvataggio non riuscito</span>;
-  return <span className="autosave-state saved"><Check size={14} /> Salvato automaticamente</span>;
 }
 
 export function BrandPage() {
@@ -163,9 +157,9 @@ export function BrandPage() {
   const patch = <K extends keyof BrandDraft>(field: K, value: BrandDraft[K]) => autosave.setDraft((current) => ({ ...current, [field]: value }));
   const toggleGoal = (goal: string) => patch("goals", draft.goals.includes(goal) ? draft.goals.filter((item) => item !== goal) : [...draft.goals, goal]);
 
-  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base. Qualsiasi modifica viene salvata automaticamente.</p></div><div className="header-actions"><AutoSaveState status={autosave.status} />{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Analisi in corso…" : "Analizza di nuovo il sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
+  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base e mantiene i dati associati a questa attività.</p></div><div className="header-actions">{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Analisi in corso…" : "Analizza di nuovo il sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
     <section className="panel brand-intelligence"><div className="panel-heading"><div><h2>Brand rilevato</h2><p>Informazioni ricavate dalle pagine del sito e già associate a questa attività.</p></div><Sparkles size={19} /></div>{draft.colors.length > 0 && <div className="brand-colors">{draft.colors.slice(0, 8).map((color) => <span key={color} title={color} style={{ background: color }} />)}</div>}{draft.visualSummary && <p className="brand-summary">{draft.visualSummary}</p>}<div className="insight-groups">{draft.toneTraits.length > 0 && <div><small>Tono</small><div className="insight-chips">{draft.toneTraits.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.targetSegments.length > 0 && <div><small>Pubblico</small><div className="insight-chips">{draft.targetSegments.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.services.length > 0 && <div><small>Servizi</small><div className="insight-chips">{draft.services.map((item) => <span key={item}>{item}</span>)}</div></div>}</div></section>
-    <section className="panel"><h2>Obiettivi</h2><p className="section-hint">Tocca un obiettivo per attivarlo o disattivarlo. Il cambiamento viene salvato da solo.</p><div className="goal-options">{goalOptions.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} onClick={() => toggleGoal(goal)}>{draft.goals.includes(goal) && <Check size={13} />}{goal}</button>)}</div></section>
+    <section className="panel"><h2>Obiettivi</h2><p className="section-hint">Tocca un obiettivo per attivarlo o disattivarlo.</p><div className="goal-options">{goalOptions.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} onClick={() => toggleGoal(goal)}>{draft.goals.includes(goal) && <Check size={13} />}{goal}</button>)}</div></section>
     <details className="panel editable-details"><summary>Modifica dati attività e brand</summary><div className="form-grid details-grid" onBlurCapture={() => void autosave.flush().catch(() => undefined)}><label>Nome attività<input value={draft.name} onChange={(event) => patch("name", event.target.value)} /></label><label>Settore<input value={draft.industry} onChange={(event) => patch("industry", event.target.value)} /></label><label className="full">Sito web<input type="url" value={draft.website} onChange={(event) => patch("website", event.target.value)} /></label><label>Località<input value={draft.location} onChange={(event) => patch("location", event.target.value)} /></label><label>Area servita<input value={draft.serviceArea} onChange={(event) => patch("serviceArea", event.target.value)} /></label><label className="full">Descrizione<textarea rows={4} value={draft.description} onChange={(event) => patch("description", event.target.value)} /></label><label className="full">Modello di business<textarea rows={3} value={draft.businessModel} onChange={(event) => patch("businessModel", event.target.value)} /></label><label className="full">Target<textarea rows={3} value={draft.target} onChange={(event) => patch("target", event.target.value)} /></label><label className="full">Tono di voce<textarea rows={3} value={draft.tone} onChange={(event) => patch("tone", event.target.value)} /></label></div></details>
   </div>;
 }
