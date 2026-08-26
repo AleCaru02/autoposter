@@ -55,12 +55,24 @@ Data audit: 2026-08-26
    - dimensione 1024x1024 per post/carosello e 1024x1536 per storie
    - limite applicativo predefinito 20 generazioni immagini/mese, configurabile
    - utilizzo e costo tecnico stimato da token registrabili in `ai_usage_events`; la UI utente resta in euro
-   - UI collegata alle bozze testo; anteprima immagine non finge persistenza (salvataggio/approvazione è gate 12)
    - contract test PASS: solo `gpt-image-2`, qualità high, n=1, PNG, protezione chiave e anti-invenzione
    - prova live reale del 26/08/2026: `PASS OpenAI image live: gpt-image-2, quality=high, size=1024x1024, immagine reale ricevuta.`
    - prova live resa on-demand dopo il PASS per evitare ulteriori spese CI
-12. Workflow contenuti — PROSSIMO GATE
-13. Calendario/frequenze — BLOCCATO DA 12
+12. Workflow contenuti — PASS SOURCE+DB+CI / RUNTIME VERCEL PENDING
+   - generazione testo non crea record fantasma: salvataggio esplicito in `content_items` + `content_variants`
+   - ogni variante mantiene provider/formato separati e stato `PENDING`, `APPROVED` o `CHANGES_REQUESTED`
+   - modifica persistente di hook, caption, CTA, hashtag, brief visuale e alt text
+   - una modifica o rigenerazione immagine riapre automaticamente la revisione
+   - stato contenuto coerente: `IN_REVIEW`, `APPROVED`, `CHANGES_REQUESTED`
+   - `/app/approvazioni` è una route reale con modifica, salva, approva, da correggere, riapri ed elimina
+   - immagini GPT-Image-2 salvabili nel profilo e collegate alla variante tramite `assets` + `image_asset_id`
+   - storage fase personale dichiarato `DATABASE_DATA_URL_V1`; non viene presentato come object storage definitivo SaaS
+   - caricamento approvazioni limitato ai 50 contenuti più recenti e ai soli asset referenziati
+   - RLS verificata sulle tre tabelle: `owns_profile(profile_id)` in lettura/scrittura
+   - test PostgreSQL reale: create -> edit -> asset link -> approve -> read -> cleanup PASS; leftovers 0
+   - test capacità storage: data URL da 3.000.022 caratteri persistita e rimossa correttamente
+   - GitHub Actions: typecheck, crawler, content workflow regression, contratti OpenAI e build PASS
+13. Calendario/frequenze — PROSSIMO GATE
 14. OAuth social — BLOCCATO DALLA SEQUENZA
 15. Pubblicazione reale — BLOCCATO DALLA SEQUENZA
 16. Metriche reali — BLOCCATO DALLA SEQUENZA
