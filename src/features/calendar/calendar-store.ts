@@ -19,7 +19,7 @@ export type ScheduleRow = {
   updated_at: string;
 };
 
-export type ApprovedVariantRow = {
+export type CalendarVariantRow = {
   id: string;
   content_id: string;
   profile_id: string;
@@ -27,8 +27,8 @@ export type ApprovedVariantRow = {
   format: string;
   hook: string | null;
   caption: string;
-  approval_status: "APPROVED";
-  eligible: true;
+  approval_status: string;
+  eligible: boolean;
 };
 
 export type CalendarJobRow = {
@@ -36,7 +36,7 @@ export type CalendarJobRow = {
   profile_id: string;
   variant_id: string;
   provider: SocialProvider;
-  state: string;
+  state: "SCHEDULED" | "BLOCKED_APPROVAL" | string;
   scheduled_at: string;
   idempotency_key: string;
   attempt_count: number;
@@ -53,7 +53,7 @@ export type ContentTitleRow = {
 
 export type CalendarState = {
   schedules: ScheduleRow[];
-  variants: ApprovedVariantRow[];
+  variants: CalendarVariantRow[];
   jobs: CalendarJobRow[];
   contentTitles: Record<string, string>;
 };
@@ -68,14 +68,13 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
     neonClient.from("content_variants")
       .select("id,content_id,profile_id,provider,format,hook,caption,approval_status,eligible")
       .eq("profile_id", profileId)
-      .eq("approval_status", "APPROVED")
       .eq("eligible", true)
       .order("updated_at", { ascending: false })
-      .limit(100),
+      .limit(200),
     neonClient.from("publication_jobs")
       .select("id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,last_error,created_at,updated_at")
       .eq("profile_id", profileId)
-      .eq("state", "SCHEDULED")
+      .in("state", ["SCHEDULED", "BLOCKED_APPROVAL"])
       .order("scheduled_at", { ascending: true })
       .limit(200),
   ]);
@@ -84,7 +83,7 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
   if (jobsResult.error) throw new Error(jobsResult.error.message);
 
   const schedules = (scheduleResult.data ?? []).map((row) => ({ ...row, preferred_slots: normalizePreferredSlots(row.preferred_slots) })) as ScheduleRow[];
-  const variants = (variantsResult.data ?? []) as ApprovedVariantRow[];
+  const variants = (variantsResult.data ?? []) as CalendarVariantRow[];
   const jobs = (jobsResult.data ?? []) as CalendarJobRow[];
   const contentIds = Array.from(new Set(variants.map((variant) => variant.content_id)));
   let contentTitles: Record<string, string> = {};
@@ -153,10 +152,10 @@ export async function createCalendarJob(input: {
     .select("id")
     .eq("profile_id", input.profileId)
     .eq("variant_id", input.variantId)
-    .eq("state", "SCHEDULED")
+    .in("state", ["SCHEDULED", "BLOCKED_APPROVAL"])
     .limit(1);
   if (duplicate.error) throw new Error(duplicate.error.message);
-  if (duplicate.data?.length) throw new Error("Questa variante è già presente nel calendario. Modifica la programmazione esistente.");
+  if (duplicate.data?.length) throw new Error("Questa variante è già presente nel calendario. Modifica o rimuovi la programmazione esistente.");
 
   const id = crypto.randomUUID();
   const result = await neonClient.from("publication_jobs").insert({
