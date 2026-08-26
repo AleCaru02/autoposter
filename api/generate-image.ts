@@ -75,24 +75,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const limit = monthlyImageLimit();
     const used = await readRows<UsageRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(monthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
     if (used.length >= limit) {
-      return res.status(429).json({
-        error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED",
-        message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.",
-        quota: { used: used.length, limit, remaining: 0 },
-      });
+      return res.status(429).json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } });
     }
 
-    const result = await generateOpenAIImage({
-      apiKey: process.env.OPENAI_API_KEY,
-      profileName: profile.name,
-      industry: profile.industry,
-      tone: summary(brands[0]?.tone_of_voice),
-      provider,
-      format,
-      visualBrief,
-      caption,
-      additionalDirection,
-    });
+    const result = await generateOpenAIImage({ apiKey: process.env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summary(brands[0]?.tone_of_voice), provider, format, visualBrief, caption, additionalDirection });
 
     const usageWrite = await dataApi("ai_usage_events", token, {
       method: "POST",
@@ -103,31 +89,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         model: result.model,
         input_tokens: result.usage.inputTokens,
         output_tokens: result.usage.outputTokens,
-        cost_usd: null,
-        metadata: {
-          openai_request_id: result.requestId,
-          quality: result.quality,
-          size: result.size,
-          provider,
-          format,
-          cost_status: "not_returned_by_generation_endpoint",
-        },
+        cost_usd: result.usage.estimatedCostUsd,
+        metadata: { openai_request_id: result.requestId, quality: result.quality, size: result.size, provider, format, cost_status: result.usage.estimatedCostUsd == null ? "usage_not_returned" : "estimated_from_openai_usage" },
       }),
     });
     if (!usageWrite.ok) console.error("ai-image-usage-write", { profileId, status: usageWrite.status });
 
-    return res.status(200).json({
-      image: {
-        dataUrl: `data:${result.mimeType};base64,${result.base64}`,
-        mimeType: result.mimeType,
-        model: result.model,
-        size: result.size,
-        quality: result.quality,
-        revisedPrompt: result.revisedPrompt,
-      },
-      usage: result.usage,
-      quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) },
-    });
+    return res.status(200).json({ image: { dataUrl: `data:${result.mimeType};base64,${result.base64}`, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } });
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("generate-image", { profileId, detail });
