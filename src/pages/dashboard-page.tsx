@@ -12,15 +12,16 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedProfile) return;
+    const profile = selectedProfile;
+    if (!profile) return;
     let active = true;
     async function load() {
       setLoading(true); setError(null);
       const [content, approvals, scheduled, connections] = await Promise.all([
-        neonClient.from("content_items").select("id").eq("profile_id", selectedProfile.id),
-        neonClient.from("content_variants").select("id").eq("profile_id", selectedProfile.id).eq("approval_status", "PENDING"),
-        neonClient.from("publication_jobs").select("id").eq("profile_id", selectedProfile.id).in("state", ["QUEUED", "SCHEDULED"]),
-        neonClient.from("social_connections").select("id").eq("profile_id", selectedProfile.id).eq("status", "CONNECTED"),
+        neonClient.from("content_items").select("id").eq("profile_id", profile.id),
+        neonClient.from("content_variants").select("id").eq("profile_id", profile.id).eq("approval_status", "PENDING"),
+        neonClient.from("publication_jobs").select("id").eq("profile_id", profile.id).in("state", ["QUEUED", "SCHEDULED"]),
+        neonClient.from("social_connections").select("id").eq("profile_id", profile.id).eq("status", "CONNECTED"),
       ]);
       const firstError = [content.error, approvals.error, scheduled.error, connections.error].find(Boolean);
       if (!active) return;
