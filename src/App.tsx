@@ -11,6 +11,7 @@ import { BrandPage } from "./pages/brand-page";
 import { WebsiteScanPage } from "./pages/website-scan-page";
 import { ApprovalsPage } from "./pages/approvals-page";
 import { CalendarPage } from "./pages/calendar-page";
+import { SocialPage } from "./pages/social-page";
 import { SettingsPage } from "./pages/settings-page";
 import { PlaceholderPage } from "./pages/placeholder-page";
 
@@ -51,7 +52,7 @@ export default function App() {
       <Route path="contenuti" element={<Navigate to="/app/calendario" replace />} />
       <Route path="approvazioni" element={<ApprovalsPage />} />
       <Route path="calendario" element={<CalendarPage />} />
-      <Route path="social" element={<PlaceholderPage title="Social" description="Instagram, Facebook, LinkedIn e Google Business Profile." dependency="OAuth provider" />} />
+      <Route path="social" element={<SocialPage />} />
       <Route path="analytics" element={<PlaceholderPage title="Analytics" description="Metriche provenienti esclusivamente dalle API dei provider." dependency="social collegati" />} />
       <Route path="apprendimento" element={<PlaceholderPage title="Apprendimento" description="Ottimizzazione progressiva di temi, giorni, orari e formati." dependency="metriche reali" />} />
       <Route path="impostazioni" element={<SettingsPage />} />
