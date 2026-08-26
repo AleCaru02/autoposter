@@ -23,5 +23,11 @@ jobs:
         run: npm run typecheck
       - name: Crawler regression
         run: npm run test:crawler
+      - name: OpenAI text contract
+        run: npm run test:openai
+      - name: OpenAI live probe
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npm run test:openai-live
       - name: Build
         run: npm run build
