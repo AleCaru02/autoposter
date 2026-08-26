@@ -139,6 +139,23 @@ async function handleHealth(env: Env) {
   }
 }
 
+async function handleAuthAccountExists(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
+  const body = await readBody(request);
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "VALID_EMAIL_REQUIRED" }, 400);
+
+  try {
+    const sql = neon(env.DATABASE_URL);
+    const result = await sql`select id from neon_auth."user" where lower(email) = ${email} limit 1`;
+    return json({ exists: result.length > 0 });
+  } catch (reason) {
+    console.error("auth-account-exists", reason instanceof Error ? reason.message : "unknown");
+    return json({ error: "ACCOUNT_CHECK_FAILED" }, 503);
+  }
+}
+
 async function handleGenerateText(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   const token = bearer(request);
@@ -288,6 +305,7 @@ async function handleWebsiteScan(request: Request) {
 async function routeApi(request: Request, env: Env) {
   const path = new URL(request.url).pathname;
   if (path === "/api/health") return handleHealth(env);
+  if (path === "/api/auth/account-exists") return handleAuthAccountExists(request, env);
   if (path === "/api/generate-text") return handleGenerateText(request, env);
   if (path === "/api/generate-image") return handleGenerateImage(request, env);
   if (path === "/api/website-scan") return handleWebsiteScan(request);
