@@ -9,7 +9,6 @@ import { DashboardPage } from "./pages/dashboard-page";
 import { ProfilesPage } from "./pages/profiles-page";
 import { BrandPage } from "./pages/brand-page";
 import { WebsiteScanPage } from "./pages/website-scan-page";
-import { ContentGeneratorPage } from "./pages/content-generator-page";
 import { ApprovalsPage } from "./pages/approvals-page";
 import { CalendarPage } from "./pages/calendar-page";
 import { SettingsPage } from "./pages/settings-page";
@@ -49,7 +48,7 @@ export default function App() {
       <Route path="profili" element={<ProfilesPage />} />
       <Route path="brand" element={<BrandPage />} />
       <Route path="sito" element={<WebsiteScanPage />} />
-      <Route path="contenuti" element={<ContentGeneratorPage />} />
+      <Route path="contenuti" element={<Navigate to="/app/calendario" replace />} />
       <Route path="approvazioni" element={<ApprovalsPage />} />
       <Route path="calendario" element={<CalendarPage />} />
       <Route path="social" element={<PlaceholderPage title="Social" description="Instagram, Facebook, LinkedIn e Google Business Profile." dependency="OAuth provider" />} />
