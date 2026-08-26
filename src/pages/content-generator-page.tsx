@@ -1,148 +1,121 @@
-import { useState, type FormEvent } from "react";
-import { Check, Image as ImageIcon, LoaderCircle, Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CalendarDays, Eye, Pause, Play, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
+import { NavLink } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
-import { saveGeneratedContent } from "../features/content/content-store";
-import type { GeneratedSocialContent, SocialFormat, SocialProvider } from "../../api/_lib/openai-text";
+import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
-type ImageResult = { dataUrl: string; mimeType: string; model: string; size: string; quality: string; revisedPrompt?: string | null };
-type FlowStep = "IDLE" | "TEXT" | "SAVE" | "IMAGES" | "DONE";
-type GeneratedVariant = GeneratedSocialContent["variants"][number];
 
-const PROVIDERS: Array<{ value: SocialProvider; label: string }> = [
-  { value: "INSTAGRAM", label: "Instagram" },
-  { value: "FACEBOOK", label: "Facebook" },
-  { value: "LINKEDIN", label: "LinkedIn" },
-  { value: "GBP", label: "Google Business Profile" },
-];
-const FORMATS: Array<{ value: SocialFormat; label: string }> = [
-  { value: "POST", label: "Post" },
-  { value: "CAROUSEL", label: "Carosello" },
-  { value: "STORY", label: "Storia" },
-];
-
-function platformLabel(provider: SocialProvider) {
-  return PROVIDERS.find((item) => item.value === provider)?.label ?? provider;
-}
+const PROVIDER_LABELS: Record<string, string> = {
+  INSTAGRAM: "Instagram",
+  FACEBOOK: "Facebook",
+  LINKEDIN: "LinkedIn",
+  GBP: "Google Business Profile",
+};
 
 export function ContentGeneratorPage() {
-  const navigate = useNavigate();
   const { selectedProfile } = useProfiles();
-  const [direction, setDirection] = useState("");
-  const [providers, setProviders] = useState<SocialProvider[]>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
-  const [format, setFormat] = useState<SocialFormat>("POST");
-  const [flowStep, setFlowStep] = useState<FlowStep>("IDLE");
-  const [result, setResult] = useState<GeneratedSocialContent | null>(null);
-  const [images, setImages] = useState<Record<string, ImageResult>>({});
-  const [imageFailures, setImageFailures] = useState<string[]>([]);
+  const [overview, setOverview] = useState<AutopilotOverview | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const triggeredProfile = useRef<string | null>(null);
 
-  const busy = flowStep !== "IDLE" && flowStep !== "DONE";
-
-  function toggleProvider(provider: SocialProvider) {
-    if (busy) return;
-    setProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider]);
-  }
-
-  async function jwt() {
-    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-    if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
-    return token;
-  }
-
-  async function createImage(token: string, profileId: string, contentVariantId: string, variant: GeneratedVariant) {
-    const response = await fetch("/api/generate-image", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        profileId,
-        contentVariantId,
-        provider: variant.provider,
-        format: variant.format,
-        visualBrief: variant.visualBrief,
-        caption: variant.caption,
-      }),
-    });
-    const body = await response.json() as { image?: ImageResult; asset?: { id: string }; error?: string; message?: string; detail?: string };
-    if (!response.ok) throw new Error(body.detail || body.message || body.error || "Immagine non generata.");
-    if (!body.image?.dataUrl || !body.asset?.id) throw new Error("Immagine non salvata correttamente.");
-    return body.image;
-  }
-
-  async function generate(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedProfile?.id || !providers.length || busy) return;
-    const profileId = selectedProfile.id;
-    const topic = direction.trim() || "Scegli autonomamente un tema editoriale utile e specifico, basandoti esclusivamente sul sito e sui dati del brand confermati. Evita di ripetere concetti generici.";
-    setError(null); setResult(null); setImages({}); setImageFailures([]); setFlowStep("TEXT");
-
+  const load = useCallback(async () => {
+    const profileId = selectedProfile?.id;
+    if (!profileId) return;
+    setLoading(true);
     try {
-      const token = await jwt();
-      const response = await fetch("/api/generate-text", {
+      setOverview(await loadAutopilotOverview(profileId));
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Impossibile caricare l'automazione contenuti.");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProfile?.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const triggerAutopilot = useCallback(async () => {
+    const profileId = selectedProfile?.id;
+    if (!profileId || triggeredProfile.current === profileId) return;
+    triggeredProfile.current = profileId;
+    try {
+      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+      if (!token) return;
+      await fetch("/api/autopilot/run", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId, topic, objective: null, providers, formats: [format] }),
+        body: JSON.stringify({ profileId }),
       });
-      const body = await response.json() as { content?: GeneratedSocialContent; error?: string; message?: string; detail?: string };
-      if (!response.ok) {
-        if (body.error === "OPENAI_TEXT_BUDGET_REACHED") throw new Error("Limite di utilizzo raggiunto. Nessuna nuova generazione è partita.");
-        if (body.error === "OPENAI_NOT_CONFIGURED") throw new Error("Il motore contenuti non è disponibile in questo momento.");
-        throw new Error(body.detail || body.message || body.error || "Generazione non riuscita.");
-      }
-      if (!body.content) throw new Error("Il motore non ha restituito un contenuto utilizzabile.");
-      const generated: GeneratedSocialContent = body.content;
-      setResult(generated);
+      window.setTimeout(() => { void load(); }, 2500);
+    } catch {
+      // Il cron server continua comunque a gestire l'autopilot: nessun errore UI per il trigger anticipato.
+    }
+  }, [selectedProfile?.id, load]);
 
-      setFlowStep("SAVE");
-      const saved = await saveGeneratedContent({
-        profileId,
-        topic: direction.trim() || "Tema scelto automaticamente dal brand e dal sito",
-        objective: null,
-        content: generated,
-      });
+  useEffect(() => {
+    if (overview?.settings.enabled) void triggerAutopilot();
+  }, [overview?.settings.enabled, triggerAutopilot]);
 
-      setFlowStep("IMAGES");
-      const nextImages: Record<string, ImageResult> = {};
-      const failures: string[] = [];
-      for (let index = 0; index < generated.variants.length; index += 1) {
-        const variant: GeneratedVariant | undefined = generated.variants[index];
-        if (!variant?.eligible) continue;
-        const key = `${variant.provider}-${variant.format}-${index}`;
-        const contentVariantId = saved.variantIds[key];
-        if (!contentVariantId) {
-          failures.push(`${platformLabel(variant.provider)}: variante non collegata.`);
-          continue;
-        }
-        try {
-          nextImages[key] = await createImage(token, profileId, contentVariantId, variant);
-          setImages({ ...nextImages });
-        } catch (reason) {
-          failures.push(`${platformLabel(variant.provider)}: ${reason instanceof Error ? reason.message : "immagine non generata"}`);
-        }
+  async function changeSettings(patch: Partial<AutopilotSettings>) {
+    if (!selectedProfile?.id || !overview) return;
+    const previous = overview.settings;
+    const next = { ...previous, ...patch };
+    setOverview({ ...overview, settings: next });
+    setError(null);
+    try {
+      await saveAutopilotSettings(selectedProfile.id, next);
+      if (next.enabled) {
+        triggeredProfile.current = null;
+        void triggerAutopilot();
       }
-      setImageFailures(failures);
-      setFlowStep("DONE");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Produzione non riuscita.");
-      setFlowStep("IDLE");
+      setOverview({ ...overview, settings: previous });
+      setError(reason instanceof Error ? reason.message : "Impostazione non salvata.");
     }
   }
 
   if (!selectedProfile) return null;
-  const progress = flowStep === "TEXT" ? "Sto preparando i testi" : flowStep === "SAVE" ? "Sto salvando le bozze" : flowStep === "IMAGES" ? "Sto creando e salvando le immagini" : null;
+  if (loading || !overview) return <div className="page-content"><section className="panel">Caricamento automazione…</section></div>;
 
-  return <div className="page-content content-studio">
-    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Produzione contenuti</h1><p>Il sistema usa brand e sito come base. Tutto ciò che genera viene salvato automaticamente nelle Revisioni.</p></div></header>
+  const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
-    <section className="panel autopilot-panel"><div className="autopilot-copy"><span className="autopilot-icon"><Sparkles size={20} /></span><div><h2>Genera adesso</h2><p>È il comando manuale per forzare una nuova produzione. La produzione programmata userà le frequenze del calendario.</p></div></div><form className="autopilot-form" onSubmit={generate}>
-      <label className="direction-field">Indicazione facoltativa<textarea rows={2} placeholder="Lascia vuoto e scelgo io il tema migliore dal sito, oppure scrivi una direzione specifica." value={direction} disabled={busy} onChange={(event) => setDirection(event.target.value)} /></label>
-      <div className="studio-row"><div><span className="field-label">Social</span><div className="choice-grid studio-chips">{PROVIDERS.map((provider) => <label className={`choice-chip ${providers.includes(provider.value) ? "selected" : ""}`} key={provider.value}><input type="checkbox" checked={providers.includes(provider.value)} disabled={busy} onChange={() => toggleProvider(provider.value)} />{provider.label}</label>)}</div></div><div><span className="field-label">Formato</span><div className="choice-grid compact studio-chips">{FORMATS.map((item) => <label className={`choice-chip ${format === item.value ? "selected" : ""}`} key={item.value}><input type="radio" name="format" checked={format === item.value} disabled={busy} onChange={() => setFormat(item.value)} />{item.label}</label>)}</div></div></div>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="compact-action studio-generate" disabled={busy || !providers.length} type="submit">{busy ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}{busy ? progress : "Genera e salva"}</button>
-    </form></section>
+  return <div className="page-content content-autopilot-page">
+    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa sito, brand e frequenze per preparare i contenuti senza chiederti ogni volta tema, social o formato.</p></div></header>
+    {error && <p className="form-error" role="alert">{error}</p>}
 
-    {flowStep === "DONE" && result && <section className="generation-results studio-results"><div className="generation-complete"><span><Check size={17} /></span><div><strong>Contenuto creato e salvato</strong><p>Testi e immagini disponibili sono già nelle Revisioni. Nessun social viene pubblicato finché il collegamento reale non sarà attivo.</p></div><button className="compact-action" type="button" onClick={() => navigate("/app/approvazioni")}>Apri Revisioni</button></div>{imageFailures.length > 0 && <div className="partial-warning"><ImageIcon size={17} /><div><strong>Alcune immagini non sono state create</strong><p>{imageFailures.join(" · ")}</p></div></div>}<div className="studio-result-grid">{result.variants.map((variant, index) => { const key = `${variant.provider}-${variant.format}-${index}`; const image = images[key]; return <article className="studio-result-card" key={key}>{image ? <img src={image.dataUrl} alt={variant.altText} /> : <div className="image-placeholder"><ImageIcon size={20} /></div>}<div><small>{platformLabel(variant.provider)} · {variant.format === "CAROUSEL" ? "Carosello" : variant.format === "STORY" ? "Storia" : "Post"}</small><h2>{variant.hook}</h2><p>{variant.caption}</p></div></article>; })}</div></section>}
+    <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
+      <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
+      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{overview.settings.enabled ? "Il sistema mantiene il piano editoriale, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
+      <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
+    </section>
+
+    <section className="panel approval-mode-panel">
+      <div className="panel-heading"><div><h2>Prima della pubblicazione</h2><p>Scegli una volta come deve comportarsi il sistema. Puoi cambiarlo quando vuoi.</p></div><ShieldCheck size={20} /></div>
+      <div className="approval-mode-grid">
+        <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
+          <span className="approval-mode-icon"><Eye size={19} /></span><strong>Voglio approvare io</strong><p>Il sistema crea tutto e lo mette nel calendario, ma il post resta in attesa finché non lo approvi nelle Revisioni.</p><span className="mode-check">{!automaticApproval ? "Attivo" : "Seleziona"}</span>
+        </button>
+        <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
+          <span className="approval-mode-icon"><Sparkles size={19} /></span><strong>Gestisci tutto automaticamente</strong><p>Il sistema crea, approva e programma da solo. La pubblicazione esterna partirà solo quando il relativo social sarà realmente collegato.</p><span className="mode-check">{automaticApproval ? "Attivo" : "Seleziona"}</span>
+        </button>
+      </div>
+    </section>
+
+    <section className="autopilot-flow">
+      <article><span>1</span><div><strong>Capisce l'attività</strong><p>Usa tutte le pagine analizzate del sito e i dati del brand.</p></div></article>
+      <article><span>2</span><div><strong>Sceglie cosa creare</strong><p>Decide autonomamente tema e formato adatto al singolo social, evitando ripetizioni recenti.</p></div></article>
+      <article><span>3</span><div><strong>Crea testo e immagine</strong><p>Usa OpenAI per il copy e GPT-Image-2 per le immagini.</p></div></article>
+      <article><span>4</span><div><strong>Organizza il calendario</strong><p>Rispetta le frequenze dell'attività e prepara i contenuti nei giorni previsti.</p></div></article>
+    </section>
+
+    <section className="panel autopilot-plan-panel">
+      <div className="panel-heading"><div><h2>Piano attuale</h2><p>Le frequenze si modificano dal calendario; qui vedi cosa sta usando l'autopilot.</p></div><CalendarDays size={20} /></div>
+      {overview.schedules.length ? <div className="autopilot-schedule-list">{overview.schedules.filter((schedule) => schedule.enabled).map((schedule) => <div key={schedule.provider}><span>{PROVIDER_LABELS[schedule.provider] ?? schedule.provider}</span><strong>{schedule.posts_per_week} {schedule.posts_per_week === 1 ? "contenuto" : "contenuti"} / settimana</strong></div>)}</div> : <p className="autopilot-preparing">Il piano iniziale viene preparato automaticamente.</p>}
+      <div className="autopilot-counters"><div><span>In revisione</span><strong>{overview.inReview}</strong></div><div><span>Nel calendario</span><strong>{overview.upcoming}</strong></div></div>
+      <div className="autopilot-links"><NavLink to="/app/calendario">Apri calendario</NavLink>{!automaticApproval && <NavLink to="/app/approvazioni">Apri Revisioni</NavLink>}</div>
+    </section>
   </div>;
 }
