@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
 import { ProfileProvider, useProfiles } from "./features/profiles/profile-context";
-import { LoginPage, RegisterPage } from "./pages/auth-pages";
+import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "./pages/auth-pages";
 import { OnboardingPage } from "./pages/onboarding-page";
 import { DashboardPage } from "./pages/dashboard-page";
 import { ProfilesPage } from "./pages/profiles-page";
@@ -39,6 +39,8 @@ export default function App() {
     <Route path="/" element={<RootRedirect />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/registrazione" element={<RegisterPage />} />
+    <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
+    <Route path="/reimposta-password" element={<ResetPasswordPage />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
     <Route path="/app" element={<RequireAuth><ProfileProvider><RequireProfile /></ProfileProvider></RequireAuth>}>
       <Route index element={<Navigate to="dashboard" replace />} />
