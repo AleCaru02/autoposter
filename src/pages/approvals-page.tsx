@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Image as ImageIcon, RefreshCcw, Save, Trash2, Undo2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Image as ImageIcon, LoaderCircle, RefreshCcw, Trash2, Undo2, X } from "lucide-react";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import {
@@ -22,6 +22,7 @@ type DraftFields = {
   visualBrief: string;
   altText: string;
 };
+type DraftSaveStatus = "SAVED" | "WAITING" | "SAVING" | "ERROR";
 
 type ImageResponse = {
   image?: { dataUrl: string; model: string; size: string; quality: string };
@@ -58,9 +59,13 @@ export function ApprovalsPage() {
   const [variants, setVariants] = useState<ContentVariantRow[]>([]);
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftFields>>({});
+  const [saveStatus, setSaveStatus] = useState<Record<string, DraftSaveStatus>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const draftsRef = useRef<Record<string, DraftFields>>({});
+  const variantsRef = useRef<ContentVariantRow[]>([]);
+  const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const reload = useCallback(async () => {
     if (!selectedProfile?.id) return;
@@ -68,10 +73,14 @@ export function ApprovalsPage() {
     setError(null);
     try {
       const workflow = await loadContentWorkflow(selectedProfile.id);
+      const nextDrafts = Object.fromEntries(workflow.variants.map((variant) => [variant.id, draftFromVariant(variant)]));
       setItems(workflow.items);
       setVariants(workflow.variants);
+      variantsRef.current = workflow.variants;
       setAssets(workflow.assets);
-      setDrafts(Object.fromEntries(workflow.variants.map((variant) => [variant.id, draftFromVariant(variant)])));
+      setDrafts(nextDrafts);
+      draftsRef.current = nextDrafts;
+      setSaveStatus(Object.fromEntries(workflow.variants.map((variant) => [variant.id, "SAVED"])));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Impossibile caricare i contenuti.");
     } finally {
@@ -88,9 +97,52 @@ export function ApprovalsPage() {
     return map;
   }, [variants]);
 
-  function setDraftField(variantId: string, field: keyof DraftFields, value: string) {
-    setDrafts((current) => ({ ...current, [variantId]: { ...(current[variantId] ?? { hook: "", caption: "", cta: "", hashtags: "", visualBrief: "", altText: "" }), [field]: value } }));
+  async function persistVariant(variant: ContentVariantRow, draft = draftsRef.current[variant.id] ?? draftFromVariant(variant)) {
+    if (!selectedProfile) return;
+    const existingTimer = saveTimersRef.current[variant.id];
+    if (existingTimer) clearTimeout(existingTimer);
+    delete saveTimersRef.current[variant.id];
+    setSaveStatus((current) => ({ ...current, [variant.id]: "SAVING" }));
+    try {
+      await updateVariant({
+        profileId: selectedProfile.id,
+        variantId: variant.id,
+        contentId: variant.content_id,
+        hook: draft.hook,
+        caption: draft.caption,
+        cta: draft.cta,
+        hashtags: parseHashtags(draft.hashtags),
+        visualBrief: draft.visualBrief,
+        altText: draft.altText,
+      });
+      setSaveStatus((current) => ({ ...current, [variant.id]: "SAVED" }));
+      setVariants((current) => current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" } : row));
+      setItems((current) => current.map((item) => item.id === variant.content_id ? { ...item, status: "IN_REVIEW" } : item));
+    } catch (reason) {
+      setSaveStatus((current) => ({ ...current, [variant.id]: "ERROR" }));
+      throw reason;
+    }
   }
+
+  function setDraftField(variant: ContentVariantRow, field: keyof DraftFields, value: string) {
+    const currentDraft = draftsRef.current[variant.id] ?? draftFromVariant(variant);
+    const next = { ...currentDraft, [field]: value };
+    draftsRef.current = { ...draftsRef.current, [variant.id]: next };
+    setDrafts((current) => ({ ...current, [variant.id]: next }));
+    setSaveStatus((current) => ({ ...current, [variant.id]: "WAITING" }));
+    const existingTimer = saveTimersRef.current[variant.id];
+    if (existingTimer) clearTimeout(existingTimer);
+    saveTimersRef.current[variant.id] = setTimeout(() => {
+      void persistVariant(variant, draftsRef.current[variant.id]).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."));
+    }, 500);
+  }
+
+  useEffect(() => () => {
+    for (const timer of Object.values(saveTimersRef.current)) clearTimeout(timer);
+    for (const variant of variantsRef.current) {
+      if (saveStatus[variant.id] === "WAITING") void persistVariant(variant).catch(() => undefined);
+    }
+  }, []);
 
   async function run(key: string, task: () => Promise<void>) {
     if (busy[key]) return;
@@ -101,28 +153,10 @@ export function ApprovalsPage() {
     finally { setBusy((current) => ({ ...current, [key]: false })); }
   }
 
-  async function saveVariant(variant: ContentVariantRow) {
-    if (!selectedProfile) return;
-    const draft = drafts[variant.id] ?? draftFromVariant(variant);
-    await run(`save-${variant.id}`, async () => {
-      await updateVariant({
-        profileId: selectedProfile.id,
-        variantId: variant.id,
-        contentId: variant.content_id,
-        hook: draft.hook,
-        caption: draft.caption,
-        cta: draft.cta,
-        hashtags: parseHashtags(draft.hashtags),
-        visualBrief: draft.visualBrief,
-        altText: draft.altText,
-      });
-      await reload();
-    });
-  }
-
   async function approve(variant: ContentVariantRow, approvalStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED") {
     if (!selectedProfile) return;
     await run(`approval-${variant.id}`, async () => {
+      await persistVariant(variant);
       await setVariantApproval({ profileId: selectedProfile.id, variantId: variant.id, contentId: variant.content_id, approvalStatus });
       await reload();
     });
@@ -130,23 +164,13 @@ export function ApprovalsPage() {
 
   async function generateImage(variant: ContentVariantRow) {
     if (!selectedProfile) return;
-    const draft = drafts[variant.id] ?? draftFromVariant(variant);
+    const draft = draftsRef.current[variant.id] ?? draftFromVariant(variant);
     if (!draft.visualBrief.trim()) {
-      setError("Inserisci prima un brief visivo e salvalo.");
+      setError("Inserisci prima un brief visivo.");
       return;
     }
     await run(`image-${variant.id}`, async () => {
-      await updateVariant({
-        profileId: selectedProfile.id,
-        variantId: variant.id,
-        contentId: variant.content_id,
-        hook: draft.hook,
-        caption: draft.caption,
-        cta: draft.cta,
-        hashtags: parseHashtags(draft.hashtags),
-        visualBrief: draft.visualBrief,
-        altText: draft.altText,
-      });
+      await persistVariant(variant, draft);
       const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
       if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
       const response = await fetch("/api/generate-image", {
@@ -176,15 +200,15 @@ export function ApprovalsPage() {
   }
 
   if (!selectedProfile) return null;
-  if (loading) return <div className="page-content"><p>Caricamento approvazioni…</p></div>;
+  if (loading) return <div className="page-content"><p>Caricamento revisioni…</p></div>;
 
   return <div className="page-content">
     <header className="page-header">
-      <div><p className="eyebrow">Approvazioni · {selectedProfile.name}</p><h1>Revisione contenuti</h1><p>Modifica, salva e approva ogni variante separatamente. Le modifiche riaprono automaticamente l’approvazione.</p></div>
-      <button className="secondary-button" type="button" onClick={() => void reload()}><RefreshCcw size={16} /> Aggiorna</button>
+      <div><p className="eyebrow">Revisioni · {selectedProfile.name}</p><h1>Revisione contenuti</h1><p>Ogni modifica al testo viene salvata automaticamente. Approva solo quando il contenuto è pronto.</p></div>
+      <button className="compact-action" type="button" onClick={() => void reload()}><RefreshCcw size={15} /> Aggiorna</button>
     </header>
     {error && <p className="form-error" role="alert">{error}</p>}
-    {items.length === 0 ? <section className="panel empty-approval"><h2>Nessun contenuto in revisione</h2><p>Genera una bozza dalla sezione Contenuti e salvala nelle approvazioni.</p></section> : null}
+    {items.length === 0 ? <section className="panel empty-approval"><h2>Nessun contenuto in revisione</h2><p>Genera un contenuto dalla sezione Contenuti.</p></section> : null}
     <div className="approval-list">
       {items.map((item) => {
         const itemVariants = variantsByContent.get(item.id) ?? [];
@@ -197,20 +221,20 @@ export function ApprovalsPage() {
             {itemVariants.map((variant) => {
               const draft = drafts[variant.id] ?? draftFromVariant(variant);
               const asset = variant.image_asset_id ? assetMap.get(variant.image_asset_id) : undefined;
+              const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
-                <header><div><strong>{variant.provider}</strong><span>{variant.format}</span></div><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span></header>
-                <div className="approval-grid">
-                  <label>Hook<input value={draft.hook} onChange={(event) => setDraftField(variant.id, "hook", event.target.value)} /></label>
-                  <label>CTA<input value={draft.cta} onChange={(event) => setDraftField(variant.id, "cta", event.target.value)} /></label>
-                  <label className="full">Testo<textarea rows={5} value={draft.caption} onChange={(event) => setDraftField(variant.id, "caption", event.target.value)} /></label>
-                  <label className="full">Hashtag<input value={draft.hashtags} onChange={(event) => setDraftField(variant.id, "hashtags", event.target.value)} /></label>
-                  <label className="full">Brief immagine<textarea rows={3} value={draft.visualBrief} onChange={(event) => setDraftField(variant.id, "visualBrief", event.target.value)} /></label>
-                  <label className="full">Alt text<input value={draft.altText} onChange={(event) => setDraftField(variant.id, "altText", event.target.value)} /></label>
+                <header><div><strong>{variant.provider}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
+                <div className="approval-grid" onBlurCapture={() => void persistVariant(variant).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."))}>
+                  <label>Hook<input value={draft.hook} onChange={(event) => setDraftField(variant, "hook", event.target.value)} /></label>
+                  <label>CTA<input value={draft.cta} onChange={(event) => setDraftField(variant, "cta", event.target.value)} /></label>
+                  <label className="full">Testo<textarea rows={5} value={draft.caption} onChange={(event) => setDraftField(variant, "caption", event.target.value)} /></label>
+                  <label className="full">Hashtag<input value={draft.hashtags} onChange={(event) => setDraftField(variant, "hashtags", event.target.value)} /></label>
+                  <label className="full">Brief immagine<textarea rows={3} value={draft.visualBrief} onChange={(event) => setDraftField(variant, "visualBrief", event.target.value)} /></label>
+                  <label className="full">Alt text<input value={draft.altText} onChange={(event) => setDraftField(variant, "altText", event.target.value)} /></label>
                 </div>
                 {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
                 <div className="approval-actions">
-                  <button className="secondary-button" type="button" disabled={busy[`save-${variant.id}`]} onClick={() => void saveVariant(variant)}><Save size={16} /> Salva modifiche</button>
-                  <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera e salva immagine"}</button>
+                  <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
                   {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
