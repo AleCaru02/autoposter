@@ -36,13 +36,15 @@ export function BrandPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const profile = selectedProfile;
-    if (!profile) return;
+    const profileId = selectedProfile?.id;
+    if (!profileId) return;
+    const initialWebsite = selectedProfile.website_url ?? "";
+    const initialIndustry = selectedProfile.industry ?? "";
     let active = true;
     async function load() {
       setLoading(true); setError(null); setSaved(false);
-      setWebsite(profile.website_url ?? ""); setIndustry(profile.industry ?? "");
-      const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,social_links,goals").eq("profile_id", profile.id).maybeSingle();
+      setWebsite(initialWebsite); setIndustry(initialIndustry);
+      const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,social_links,goals").eq("profile_id", profileId).maybeSingle();
       if (!active) return;
       setLoading(false);
       if (result.error) { setError(result.error.message); return; }
@@ -50,7 +52,7 @@ export function BrandPage() {
       setDescription(row?.description ?? ""); setBusinessModel(row?.business_model ?? ""); setLocation(row?.location ?? ""); setServiceArea(row?.service_area ?? "");
       const targetValue = row?.target_audience && typeof row.target_audience === "object" && "summary" in (row.target_audience as Record<string, unknown>) ? String((row.target_audience as Record<string, unknown>).summary ?? "") : "";
       const toneValue = row?.tone_of_voice && typeof row.tone_of_voice === "object" && "summary" in (row.tone_of_voice as Record<string, unknown>) ? String((row.tone_of_voice as Record<string, unknown>).summary ?? "") : "";
-      setTarget(targetValue); setTone(toneValue); setGoals(Array.isArray(row?.goals) ? row!.goals.join(", ") : "");
+      setTarget(targetValue); setTone(toneValue); setGoals(Array.isArray(row?.goals) ? row.goals.join(", ") : "");
       const socials = row?.social_links && typeof row.social_links === "object" ? row.social_links as Record<string, unknown> : {};
       setInstagram(String(socials.instagram ?? "")); setFacebook(String(socials.facebook ?? "")); setLinkedin(String(socials.linkedin ?? "")); setGbp(String(socials.googleBusinessProfile ?? ""));
     }
@@ -59,15 +61,15 @@ export function BrandPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const profile = selectedProfile;
-    if (!profile) return;
+    const profileId = selectedProfile?.id;
+    if (!profileId) return;
     setBusy(true); setError(null); setSaved(false);
-    const profileUpdate = await neonClient.from("profiles").update({ website_url: website.trim() || null, industry: industry.trim() || null, updated_at: new Date().toISOString() }).eq("id", profile.id).select("id");
+    const profileUpdate = await neonClient.from("profiles").update({ website_url: website.trim() || null, industry: industry.trim() || null, updated_at: new Date().toISOString() }).eq("id", profileId).select("id");
     if (profileUpdate.error) { setBusy(false); setError(profileUpdate.error.message); return; }
-    const payload = { profile_id: profile.id, description: description.trim() || null, business_model: businessModel.trim() || null, location: location.trim() || null, service_area: serviceArea.trim() || null, target_audience: { summary: target.trim() }, tone_of_voice: { summary: tone.trim() }, social_links: { instagram: instagram.trim(), facebook: facebook.trim(), linkedin: linkedin.trim(), googleBusinessProfile: gbp.trim() }, goals: goals.split(",").map((item) => item.trim()).filter(Boolean), updated_at: new Date().toISOString() };
-    const existing = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", profile.id).maybeSingle();
+    const payload = { profile_id: profileId, description: description.trim() || null, business_model: businessModel.trim() || null, location: location.trim() || null, service_area: serviceArea.trim() || null, target_audience: { summary: target.trim() }, tone_of_voice: { summary: tone.trim() }, social_links: { instagram: instagram.trim(), facebook: facebook.trim(), linkedin: linkedin.trim(), googleBusinessProfile: gbp.trim() }, goals: goals.split(",").map((item) => item.trim()).filter(Boolean), updated_at: new Date().toISOString() };
+    const existing = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", profileId).maybeSingle();
     if (existing.error) { setBusy(false); setError(existing.error.message); return; }
-    const write = existing.data ? await neonClient.from("brand_profiles").update(payload).eq("profile_id", profile.id).select("profile_id") : await neonClient.from("brand_profiles").insert(payload).select("profile_id");
+    const write = existing.data ? await neonClient.from("brand_profiles").update(payload).eq("profile_id", profileId).select("profile_id") : await neonClient.from("brand_profiles").insert(payload).select("profile_id");
     setBusy(false);
     if (write.error) { setError(write.error.message); return; }
     await reload(); setSaved(true);
