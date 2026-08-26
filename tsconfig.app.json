@@ -17,6 +17,6 @@
     "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["src", "api"],
+  "include": ["src", "api", "cloudflare"],
   "references": []
 }
