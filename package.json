@@ -13,7 +13,8 @@
     "test:openai-live": "tsx tests/openai-live.test.ts",
     "test:openai-image": "tsx tests/openai-image.test.ts",
     "test:openai-image-live": "tsx tests/openai-image-live.test.ts",
-    "test:content-workflow": "tsx tests/content-workflow.test.ts"
+    "test:content-workflow": "tsx tests/content-workflow.test.ts",
+    "test:calendar-workflow": "tsx tests/calendar-workflow.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
