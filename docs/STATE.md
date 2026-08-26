@@ -10,7 +10,7 @@ Data audit: 2026-08-26
 2. GitHub/Lovable/Vercel stesso codice — PARTIAL
    - GitHub è la fonte unica
    - Lovable source-control nativo richiede autorizzazione GitHub nella UI Lovable; l'API disponibile non espone il collegamento
-   - Vercel non può essere riallineato finché non si resetta il limite giornaliero `api-deployments-free-per-day`
+   - deployment Vercel canonico ancora da riallineare al main corrente
 3. PostgreSQL reale — PASS
    - Neon project dedicato `post-automatici`
    - test insert -> nuova query -> read riuscito
@@ -36,22 +36,31 @@ Data audit: 2026-08-26
    - regressione: 5 pagine analizzate, robots rispettato, sitemap inclusa, dominio isolato
    - persistenza scansione/pagine verificata in nuova query
    - protezioni SSRF incluse
-10. OpenAI testi — BLOCKED: SECRET MANCANTE
+10. OpenAI testi — PASS
    - Responses API + Structured Outputs implementati
    - modello finale bloccato su `gpt-5.6-terra`; nessun downgrade a Luna per risparmiare
-   - reasoning medio e verifica completezza varianti per mantenere qualità editoriale
+   - reasoning medio e verifica completezza varianti
    - una singola chiamata genera tutte le piattaforme/formati richiesti
-   - selezione locale delle pagine sito più pertinenti prima di inviare contesto al modello
-   - grounding su brand + pagine sito analizzate
-   - tracking token, cached token, cache-write e costo USD in `ai_usage_events`
-   - budget hard applicativo testi default 5 USD/mese complessivi; blocco prima della chiamata se la richiesta può superarlo
+   - selezione locale delle pagine sito pertinenti + grounding su dati confermati
+   - tracking utilizzo in `ai_usage_events`
    - nessuna generazione automatica in background
-   - GitHub Gate del cost guard: typecheck + crawler + OpenAI contract + build PASS
-   - prova live SKIP perché `OPENAI_API_KEY` non è configurata nei GitHub Actions secrets
-   - nessun fallback/mock se la chiave manca: endpoint restituisce 503 `OPENAI_NOT_CONFIGURED`
-11. OpenAI immagini — BLOCCATO DA 10
-12. Workflow contenuti — BLOCCATO DA 10
-13. Calendario/frequenze — BLOCCATO DA 10
+   - prova live reale del 26/08/2026: `PASS OpenAI live: gpt-5.6-terra, response ricevuta, structured output valido.`
+   - live probe CI reso esplicito/on-demand per evitare costi ricorrenti
+   - nessun fallback/mock se la chiave manca
+11. OpenAI immagini — PASS API+CI / RUNTIME VERCEL PENDING
+   - modello consentito esclusivamente `gpt-image-2`
+   - Images API server-side, chiave mai esposta al client
+   - qualità finale `high`; il controllo costi riduce chiamate inutili e non degrada il modello
+   - una immagine per azione esplicita; nessuna generazione automatica
+   - dimensione 1024x1024 per post/carosello e 1024x1536 per storie
+   - limite applicativo predefinito 20 generazioni immagini/mese, configurabile
+   - utilizzo e costo tecnico stimato da token registrabili in `ai_usage_events`; la UI utente resta in euro
+   - UI collegata alle bozze testo; anteprima immagine non finge persistenza (salvataggio/approvazione è gate 12)
+   - contract test PASS: solo `gpt-image-2`, qualità high, n=1, PNG, protezione chiave e anti-invenzione
+   - prova live reale del 26/08/2026: `PASS OpenAI image live: gpt-image-2, quality=high, size=1024x1024, immagine reale ricevuta.`
+   - prova live resa on-demand dopo il PASS per evitare ulteriori spese CI
+12. Workflow contenuti — PROSSIMO GATE
+13. Calendario/frequenze — BLOCCATO DA 12
 14. OAuth social — BLOCCATO DALLA SEQUENZA
 15. Pubblicazione reale — BLOCCATO DALLA SEQUENZA
 16. Metriche reali — BLOCCATO DALLA SEQUENZA

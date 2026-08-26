@@ -25,9 +25,17 @@ jobs:
         run: npm run test:crawler
       - name: OpenAI text contract
         run: npm run test:openai
-      - name: OpenAI live probe
+      - name: OpenAI text live probe
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[text-live]')
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: npm run test:openai-live
+      - name: OpenAI image contract
+        run: npm run test:openai-image
+      - name: OpenAI image live probe
+        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[image-live]')
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npm run test:openai-image-live
       - name: Build
         run: npm run build
