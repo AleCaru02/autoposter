@@ -42,10 +42,33 @@ const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
   GBP: "Sede Google Business Profile che gestisci con il tuo account Google.",
 };
 
+const PROVIDER_CAPABILITIES: Record<Provider, ProviderStatus["capabilities"]> = {
+  INSTAGRAM: { publish: ["POST", "STORY"], note: "Carosello disponibile quando il contenuto contiene più media reali." },
+  FACEBOOK: { publish: ["POST"], note: "Storie e caroselli non vengono dichiarati disponibili finché non esistono gli asset richiesti dalle API." },
+  LINKEDIN: { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." },
+  GBP: { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." },
+};
+
+const UNAVAILABLE_PROVIDERS: ProviderStatus[] = (Object.keys(PROVIDER_LABELS) as Provider[]).map((provider) => ({
+  provider,
+  configured: false,
+  status: "STATUS_UNAVAILABLE",
+  accountId: null,
+  accountName: null,
+  permissions: [],
+  expiresAt: null,
+  lastValidatedAt: null,
+  candidates: [],
+  accountType: null,
+  capabilities: PROVIDER_CAPABILITIES[provider],
+}));
+
 function readableError(value: string) {
   const normalized = value.replace(/_/g, " ").trim();
   const map: Record<string, string> = {
     PROVIDER_NOT_CONFIGURED: "Questo provider non è ancora configurato lato server.",
+    PROFILE_NOT_FOUND: "Il server non riesce a verificare l’attività selezionata. Ricarica la sessione e riprova.",
+    PROFILE_ACCESS_CHECK_FAILED: "Il server non riesce a verificare la sessione con il database. Riprova tra poco.",
     SOCIAL_SECURITY_NOT_CONFIGURED: "Manca la configurazione sicura delle credenziali social sul server.",
     NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA: "Non trovo un account Instagram professionale collegato a una Pagina Facebook gestibile.",
     NESSUNA_PAGINA_FACEBOOK_GESTIBILE: "Non trovo Pagine Facebook gestibili con questo account.",
@@ -175,6 +198,7 @@ export function SocialPage() {
   }
 
   const connectedCount = useMemo(() => status?.providers.filter((provider) => provider.status === "ACTIVE").length ?? 0, [status]);
+  const providers = status?.providers?.length ? status.providers : UNAVAILABLE_PROVIDERS;
 
   if (!selectedProfile) return null;
   return <div className="page-content social-page">
@@ -186,12 +210,13 @@ export function SocialPage() {
     <section className="social-summary"><div><Share2 size={20} /><span>Account collegati</span><strong>{connectedCount}/4</strong></div><p>La pubblicazione automatica parte soltanto per provider realmente collegati e contenuti approvati.</p></section>
 
     {loading && !status ? <section className="panel social-loading"><LoaderCircle className="spin" size={22} /> Caricamento collegamenti…</section> : <div className="social-grid">
-      {(status?.providers ?? []).map((provider) => {
+      {providers.map((provider) => {
         const busy = busyProvider === provider.provider;
         const active = provider.status === "ACTIVE";
         const pending = provider.status === "PENDING_SELECTION";
+        const unavailable = provider.status === "STATUS_UNAVAILABLE";
         return <article className={`panel social-card ${active ? "connected" : ""}`} key={provider.provider}>
-          <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${active ? "active" : pending ? "pending" : "idle"}`}>{active ? "Collegato" : pending ? "Scegli account" : provider.configured ? "Non collegato" : "Da configurare"}</span></div>
+          <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${active ? "active" : pending ? "pending" : "idle"}`}>{active ? "Collegato" : pending ? "Scegli account" : unavailable ? "Stato non disponibile" : provider.configured ? "Non collegato" : "Da configurare"}</span></div>
 
           {active && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
 
@@ -199,9 +224,9 @@ export function SocialPage() {
 
           <div className="social-capabilities"><small>Pubblicazione disponibile</small><div>{provider.capabilities.publish.map((format) => <span key={format}>{format === "POST" ? "Post" : format === "STORY" ? "Storie" : format}</span>)}</div><p>{provider.capabilities.note}</p></div>
 
-          {!provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
+          {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Il server non ha restituito lo stato di questo collegamento. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
 
-          <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && <button type="button" className="primary-button" disabled={!provider.configured || busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} {provider.configured ? "Collega" : "Configurazione necessaria"}</button>}</div>
+          <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={!provider.configured || busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} {provider.configured ? "Collega" : "Configurazione necessaria"}</button>}</div>
         </article>;
       })}
     </div>}
