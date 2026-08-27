@@ -236,11 +236,10 @@ export function SocialPage() {
 
           {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Il server non ha restituito lo stato di questo collegamento. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
 
-          <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={!provider.configured || busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} {provider.configured ? "Collega" : "Configurazione necessaria"}</button>}</div>
+          <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
         </article>;
       })}
     </div>}
 
-    {status && !status.publishingBaseUrlConfigured && <section className="unavailable-panel"><AlertTriangle size={22} /><div><h2>URL pubblico del server da configurare</h2><p>Il collegamento account può essere preparato, ma la pubblicazione di immagini richiede APP_BASE_URL sul server. Finché manca, il sistema non dichiarerà i post pubblicabili.</p></div></section>}
   </div>;
 }
