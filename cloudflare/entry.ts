@@ -1,12 +1,14 @@
 import worker from "./worker.js";
 import { runContentAutopilot, type AutopilotEnv } from "../api/_lib/autopilot.js";
+import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & {
+type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
 };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
+type ScheduledController = { cron?: string };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -47,10 +49,24 @@ async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext
 
 export default {
   async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
-    if (new URL(request.url).pathname === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
+    const path = new URL(request.url).pathname;
+    if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
+    if (path.startsWith("/api/social/")) {
+      const response = await handleSocialApi(request, env);
+      if (response) return response;
+    }
     return worker.fetch(request, env);
   },
-  async scheduled(_controller: unknown, env: Env, ctx: WorkerContext) {
+  async scheduled(controller: ScheduledController, env: Env, ctx: WorkerContext) {
+    if (controller.cron === "*/5 * * * *") {
+      ctx.waitUntil(processDuePublications(env).then((result) => {
+        console.log("social-publication-run", result);
+      }).catch((reason) => {
+        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
+      }));
+      return;
+    }
+
     ctx.waitUntil(runContentAutopilot(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {

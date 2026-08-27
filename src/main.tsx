@@ -8,6 +8,7 @@ import "./content-generator.css";
 import "./brand.css";
 import "./onboarding.css";
 import "./autosave.css";
+import "./social.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
