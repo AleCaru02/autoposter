@@ -4,6 +4,9 @@
   "main": "./cloudflare/entry.ts",
   "compatibility_date": "2026-08-26",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_BASE_URL": "https://autoposter.02alessandrocaruso.workers.dev"
+  },
   "triggers": {
     "crons": ["0 * * * *", "*/5 * * * *"]
   },
