@@ -218,11 +218,17 @@ async function dataApi(path: string, token: string, init: RequestInit = {}) {
   });
 }
 
-async function canAccessProfile(profileId: string, token: string) {
+type ProfileAccess = { allowed: boolean; upstreamStatus: number | null };
+
+async function profileAccess(profileId: string, token: string): Promise<ProfileAccess> {
   const response = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, token);
-  if (!response.ok) return false;
+  if (!response.ok) return { allowed: false, upstreamStatus: response.status };
   const rows = await response.json() as Array<{ id?: string }>;
-  return rows.some((row) => row.id === profileId);
+  return { allowed: rows.some((row) => row.id === profileId), upstreamStatus: null };
+}
+
+async function canAccessProfile(profileId: string, token: string) {
+  return (await profileAccess(profileId, token)).allowed;
 }
 
 function connectionMetadata(value: unknown) {
@@ -560,7 +566,13 @@ async function handleStatus(request: Request, env: SocialEnv) {
   const token = bearer(request);
   if (!token) return socialJson({ error: "AUTH_REQUIRED" }, 401);
   const profileId = new URL(request.url).searchParams.get("profileId") || "";
-  if (!profileId || !await canAccessProfile(profileId, token)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  if (!profileId) return socialJson({ error: "PROFILE_REQUIRED" }, 400);
+  const access = await profileAccess(profileId, token);
+  if (access.upstreamStatus !== null) {
+    console.error("social-profile-access-failed", { profileId, upstreamStatus: access.upstreamStatus });
+    return socialJson({ error: "PROFILE_ACCESS_CHECK_FAILED", upstreamStatus: access.upstreamStatus }, 502);
+  }
+  if (!access.allowed) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
   const response = await dataApi(`social_connections?profile_id=eq.${encodeURIComponent(profileId)}&select=provider,status,provider_account_id,account_name,permissions,expires_at,metadata,last_validated_at,updated_at`, token);
   if (!response.ok) return socialJson({ error: `SOCIAL_CONNECTIONS_${response.status}` }, 502);
   const rows = await response.json() as ConnectionRow[];
