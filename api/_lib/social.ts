@@ -132,12 +132,26 @@ function linkedinOrganizationMode(env: SocialEnv) {
   return env.LINKEDIN_ORGANIZATION_ACCESS?.trim().toLowerCase() === "true";
 }
 
+export function missingProviderConfiguration(provider: SocialProvider, env: SocialEnv) {
+  const missing: string[] = [];
+  if (!env.DATABASE_URL) missing.push("DATABASE_URL");
+  if (!env.SOCIAL_TOKEN_KEY) missing.push("SOCIAL_TOKEN_KEY");
+  else if (env.SOCIAL_TOKEN_KEY.length < 24) missing.push("SOCIAL_TOKEN_KEY (minimo 24 caratteri)");
+  if (provider === "FACEBOOK" || provider === "INSTAGRAM") {
+    if (!env.META_APP_ID) missing.push("META_APP_ID");
+    if (!env.META_APP_SECRET) missing.push("META_APP_SECRET");
+  } else if (provider === "LINKEDIN") {
+    if (!env.LINKEDIN_CLIENT_ID) missing.push("LINKEDIN_CLIENT_ID");
+    if (!env.LINKEDIN_CLIENT_SECRET) missing.push("LINKEDIN_CLIENT_SECRET");
+  } else {
+    if (!env.GOOGLE_CLIENT_ID) missing.push("GOOGLE_CLIENT_ID");
+    if (!env.GOOGLE_CLIENT_SECRET) missing.push("GOOGLE_CLIENT_SECRET");
+  }
+  return missing;
+}
+
 export function providerConfigured(provider: SocialProvider, env: SocialEnv) {
-  const securityReady = Boolean(env.DATABASE_URL && env.SOCIAL_TOKEN_KEY && env.SOCIAL_TOKEN_KEY.length >= 24);
-  if (!securityReady) return false;
-  if (provider === "FACEBOOK" || provider === "INSTAGRAM") return Boolean(env.META_APP_ID && env.META_APP_SECRET);
-  if (provider === "LINKEDIN") return Boolean(env.LINKEDIN_CLIENT_ID && env.LINKEDIN_CLIENT_SECRET);
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+  return missingProviderConfiguration(provider, env).length === 0;
 }
 
 export function providerCapabilities(provider: SocialProvider) {
@@ -488,7 +502,8 @@ async function handleConnect(request: Request, env: SocialEnv) {
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const provider = body.provider;
   if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
-  if (!providerConfigured(provider, env)) return socialJson({ error: "PROVIDER_NOT_CONFIGURED", provider }, 503);
+  const missingConfiguration = missingProviderConfiguration(provider, env);
+  if (missingConfiguration.length) return socialJson({ error: "PROVIDER_NOT_CONFIGURED", provider, detail: `Mancano sul server: ${missingConfiguration.join(", ")}.` }, 503);
   if (!await canAccessProfile(profileId, token)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
   const callbackUri = `${baseUrl(env, request.url)}/api/social/callback/${provider.toLowerCase()}`;
   const state = await createOAuthState({ provider, profileId, callbackUri }, env.SOCIAL_TOKEN_KEY!);
