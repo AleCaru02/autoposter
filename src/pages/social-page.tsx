@@ -27,6 +27,7 @@ type StatusResponse = {
 };
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
+type SessionData = { session?: { token?: string | null }; token?: string | null; access_token?: string | null };
 
 const PROVIDER_LABELS: Record<Provider, string> = {
   INSTAGRAM: "Instagram",
@@ -79,7 +80,14 @@ function readableError(value: string) {
   return map[value] ?? (normalized || "Collegamento non riuscito.");
 }
 
-async function jwt() {
+function tokenFromSession(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const data = value as SessionData;
+  return data.session?.token || data.token || data.access_token || null;
+}
+
+async function jwt(sessionToken?: string | null) {
+  if (sessionToken) return sessionToken;
   const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
   if (!token) throw new Error("Sessione scaduta. Accedi di nuovo.");
   return token;
@@ -101,6 +109,8 @@ async function apiJson<T>(url: string, token: string, init?: RequestInit): Promi
 
 export function SocialPage() {
   const { selectedProfile } = useProfiles();
+  const authSession = authClient.useSession();
+  const sessionToken = tokenFromSession(authSession.data);
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,7 +124,7 @@ export function SocialPage() {
     setLoading(true);
     setError(null);
     try {
-      const token = await jwt();
+      const token = await jwt(sessionToken);
       const body = await apiJson<StatusResponse>(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, token);
       setStatus(body);
     } catch (reason) {
@@ -122,7 +132,7 @@ export function SocialPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedProfile?.id]);
+  }, [selectedProfile?.id, sessionToken]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -145,7 +155,7 @@ export function SocialPage() {
     setError(null);
     setNotice(null);
     try {
-      const token = await jwt();
+      const token = await jwt(sessionToken);
       const body = await apiJson<{ url: string }>("/api/social/connect", token, {
         method: "POST",
         body: JSON.stringify({ profileId: selectedProfile.id, provider }),
@@ -163,7 +173,7 @@ export function SocialPage() {
     setBusyProvider(provider);
     setError(null);
     try {
-      const token = await jwt();
+      const token = await jwt(sessionToken);
       await apiJson("/api/social/select", token, {
         method: "POST",
         body: JSON.stringify({ profileId: selectedProfile.id, provider, candidateId }),
@@ -183,7 +193,7 @@ export function SocialPage() {
     setError(null);
     setNotice(null);
     try {
-      const token = await jwt();
+      const token = await jwt(sessionToken);
       await apiJson("/api/social/disconnect", token, {
         method: "POST",
         body: JSON.stringify({ profileId: selectedProfile.id, provider }),
