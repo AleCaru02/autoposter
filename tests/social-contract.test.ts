@@ -3,6 +3,7 @@ import {
   createOAuthState,
   decryptTokenBundle,
   encryptTokenBundle,
+  missingProviderConfiguration,
   providerCapabilities,
   providerConfigured,
   verifyOAuthState,
@@ -36,6 +37,8 @@ async function run() {
   assert.equal(providerConfigured("LINKEDIN", { ...base, LINKEDIN_CLIENT_ID: "id", LINKEDIN_CLIENT_SECRET: "secret" }), true);
   assert.equal(providerConfigured("GBP", { ...base, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" }), true);
   assert.equal(providerConfigured("GBP", { ...base, SOCIAL_TOKEN_KEY: "short", GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" }), false);
+  assert.deepEqual(missingProviderConfiguration("FACEBOOK", base), ["META_APP_ID", "META_APP_SECRET"]);
+  assert.deepEqual(missingProviderConfiguration("GBP", { ...base, SOCIAL_TOKEN_KEY: "short" }), ["SOCIAL_TOKEN_KEY (minimo 24 caratteri)", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]);
 
   assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY"]);
   assert.deepEqual(providerCapabilities("GBP").publish, ["POST"]);
