@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 
 export const config = { maxDuration: 60 };
@@ -13,6 +14,8 @@ type BrandRow = { description: string | null; business_model: string | null; loc
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
+type RecentItemRow = { id: string; topic: string; title: string | null };
+type RecentVariantRow = { content_id: string; hook: string | null; caption: string | null };
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -49,6 +52,18 @@ function currentMonthStartIso() {
 async function currentOwnerTextSpendUsd(token: string) {
   const rows = await readJsonRows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
   return rows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
+}
+
+async function recentContentForDedupe(profileId: string, token: string): Promise<ContentDedupeCandidate[]> {
+  const items = await readJsonRows<RecentItemRow>(`content_items?profile_id=eq.${encodeURIComponent(profileId)}&select=id,topic,title&order=created_at.desc&limit=40`, token);
+  if (!items.length) return [];
+  const variants = await readJsonRows<RecentVariantRow>(`content_variants?profile_id=eq.${encodeURIComponent(profileId)}&select=content_id,hook,caption&order=updated_at.desc&limit=160`, token);
+  const firstVariant = new Map<string, RecentVariantRow>();
+  for (const variant of variants) if (!firstVariant.has(variant.content_id)) firstVariant.set(variant.content_id, variant);
+  return items.map((item) => {
+    const variant = firstVariant.get(item.id);
+    return { id: item.id, topic: item.topic ?? "", angle: item.title, hook: variant?.hook ?? null, caption: variant?.caption ?? null };
+  });
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -116,13 +131,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           openai_request_id: result.requestId,
           cached_input_tokens: result.usage.cachedInputTokens,
           cache_write_tokens: result.usage.cacheWriteTokens,
-          topic,
+          requested_topic: topic,
+          editorial_topic: result.content.editorialTopic,
+          editorial_angle: result.content.editorialAngle,
         },
       }),
     });
     if (!usageWrite.ok) console.error("ai-usage-write", { profileId, status: usageWrite.status });
 
+    const recent = await recentContentForDedupe(profileId, token);
+    let bestDuplicate: ReturnType<typeof findNearDuplicate> = null;
+    for (const variant of result.content.variants) {
+      const duplicate = findNearDuplicate({ topic: result.content.editorialTopic, angle: result.content.editorialAngle, hook: variant.hook, caption: variant.caption }, recent);
+      if (duplicate && (!bestDuplicate || duplicate.score > bestDuplicate.score)) bestDuplicate = duplicate;
+    }
+
     const spentAfterUsd = spentBeforeUsd + (actualCostUsd ?? 0);
+    if (bestDuplicate) {
+      return res.status(409).json({
+        error: "DUPLICATE_CONTENT",
+        message: "Il contenuto generato è troppo simile a un contenuto recente dello stesso profilo e non viene restituito come nuovo contenuto.",
+        duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null },
+        budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
+      });
+    }
+
     return res.status(200).json({
       content: result.content,
       model: result.model,

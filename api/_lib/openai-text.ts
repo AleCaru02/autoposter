@@ -29,6 +29,8 @@ export type GeneratedVariant = {
 };
 
 export type GeneratedSocialContent = {
+  editorialTopic: string;
+  editorialAngle: string;
   strategySummary: string;
   variants: GeneratedVariant[];
 };
@@ -75,6 +77,8 @@ const OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
+    editorialTopic: { type: "string", minLength: 3, maxLength: 120 },
+    editorialAngle: { type: "string", minLength: 3, maxLength: 180 },
     strategySummary: { type: "string" },
     variants: {
       type: "array",
@@ -98,7 +102,7 @@ const OUTPUT_SCHEMA = {
       },
     },
   },
-  required: ["strategySummary", "variants"],
+  required: ["editorialTopic", "editorialAngle", "strategySummary", "variants"],
 } as const;
 
 function terms(value: string) {
@@ -159,7 +163,7 @@ function extractOutputText(body: Record<string, unknown>) {
 function validateResult(value: unknown, providers: SocialProvider[], formats: SocialFormat[]): GeneratedSocialContent {
   if (!value || typeof value !== "object") throw new Error("OPENAI_INVALID_JSON");
   const candidate = value as Partial<GeneratedSocialContent>;
-  if (typeof candidate.strategySummary !== "string" || !Array.isArray(candidate.variants) || candidate.variants.length === 0) throw new Error("OPENAI_INVALID_SCHEMA");
+  if (typeof candidate.editorialTopic !== "string" || !candidate.editorialTopic.trim() || typeof candidate.editorialAngle !== "string" || !candidate.editorialAngle.trim() || typeof candidate.strategySummary !== "string" || !Array.isArray(candidate.variants) || candidate.variants.length === 0) throw new Error("OPENAI_INVALID_SCHEMA");
   const variants = candidate.variants as GeneratedVariant[];
   const keys = new Set(variants.map((variant) => `${variant.provider}:${variant.format}`));
   for (const provider of providers) {
@@ -168,7 +172,7 @@ function validateResult(value: unknown, providers: SocialProvider[], formats: So
     }
   }
   if (keys.size !== variants.length) throw new Error("OPENAI_DUPLICATE_VARIANTS");
-  return candidate as GeneratedSocialContent;
+  return { ...candidate, editorialTopic: candidate.editorialTopic.trim(), editorialAngle: candidate.editorialAngle.trim() } as GeneratedSocialContent;
 }
 
 export function estimateTerraCostUsd(inputTokens: number, outputTokens: number, cachedInputTokens = 0, cacheWriteTokens = 0) {
@@ -197,6 +201,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Se il contesto non supporta un claim, omettilo. factualBasis deve elencare brevemente quali elementi confermati sostengono la variante.",
     "Adatta davvero il copy a Instagram, Facebook, LinkedIn e Google Business Profile: non fare semplice copia-incolla cross-platform.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
+    "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
+    "editorialAngle deve descrivere in modo conciso il punto di vista concreto usato per trattare quel tema; due copy sullo stesso tema ma con angoli realmente diversi devono avere angoli diversi.",
+    "Non usare in editorialTopic o editorialAngle frasi come 'scegli', 'crea', 'evita di ripetere', 'contenuto destinato' o riferimenti alla richiesta tecnica.",
     "Per GBP imposta eligible=false quando il concept non ha utilità locale/aziendale coerente.",
     "Per le storie scrivi copy breve; per i caroselli il caption deve indicare chiaramente una sequenza di slide; per i post usa una struttura completa ma non prolissa.",
     "La qualità viene prima della brevità: elimina solo ridondanze e testo non utile, non dettagli sostanziali.",

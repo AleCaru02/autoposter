@@ -4,6 +4,8 @@ import { estimateTerraCostUsd, estimateTextRequestUpperBoundUsd, generateSocialT
 let capturedUrl = "";
 let capturedInit: RequestInit | undefined;
 const generated = {
+  editorialTopic: "Gestione professionale degli affitti brevi",
+  editorialAngle: "Perché delegare la gestione riduce il carico operativo del proprietario",
   strategySummary: "Valorizzare il servizio con un messaggio concreto.",
   variants: [{ provider: "INSTAGRAM", format: "POST", eligible: true, hook: "Gestione più semplice", caption: "Un testo social verificato.", cta: "Scopri di più", hashtags: ["#propertymanagement"], visualBrief: "Immobile luminoso, stile reale", altText: "Interno di un appartamento luminoso", factualBasis: ["Il sito descrive il servizio di gestione immobili"] }],
 };
@@ -55,10 +57,15 @@ assert.equal(body.prompt_cache_key, "post-automatici:qa-profile");
 assert.equal(body.max_output_tokens, 5000);
 assert.equal(body.text.format.type, "json_schema");
 assert.equal(body.text.format.strict, true);
+assert.ok(body.text.format.schema.required.includes("editorialTopic"));
+assert.ok(body.text.format.schema.required.includes("editorialAngle"));
 assert.ok(String(body.instructions).includes("non inventare"));
-assert.ok(String(body.instructions).includes("esattamente una variante"));
+assert.ok(String(body.instructions).includes("editorialTopic"));
+assert.ok(String(body.instructions).includes("editorialAngle"));
 assert.ok(String(body.input).includes("https://example.test/servizi/property-management"));
 assert.equal(String(capturedInit?.body).includes("sk-test-only"), false, "la chiave non deve finire nel body/prompt");
+assert.equal(result.content.editorialTopic, "Gestione professionale degli affitti brevi");
+assert.equal(result.content.editorialAngle, "Perché delegare la gestione riduce il carico operativo del proprietario");
 assert.equal(result.content.variants[0].caption, "Un testo social verificato.");
 assert.equal(result.model, "gpt-5.6-terra");
 assert.equal(result.requestId, "req_test");
@@ -72,4 +79,4 @@ assert.equal(estimateTerraCostUsd(120, 80, 20, 10), 0.001169);
 const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand });
 assert.ok(upperBound < 0.1, `una richiesta testo normale deve restare sotto $0.10 nel worst-case interno, ricevuto ${upperBound}`);
 
-console.log("PASS OpenAI text: Terra qualità invariata, contesto rilevante, cache tracking e costo misurato.");
+console.log("PASS OpenAI text: topic canonico, Terra qualità invariata, contesto rilevante, cache tracking e costo misurato.");
