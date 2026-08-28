@@ -106,7 +106,7 @@ export function semanticContentSimilarity(a: ContentDedupeCandidate, b: ContentD
   const bodyPhrase = trigramDice(bodyText(a), bodyText(b));
   const bodyScore = Math.max(bodyLexical, bodyLexical * 0.72 + bodyPhrase * 0.28);
   const score = topicScore > 0
-    ? Math.max(topicScore * 0.84 + bodyScore * 0.16, bodyScore)
+    ? Math.max(topicScore * 0.68 + bodyScore * 0.32, bodyScore)
     : bodyScore;
   return {
     score: Math.min(Math.max(score, 0), 1),
