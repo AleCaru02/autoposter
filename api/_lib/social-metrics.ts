@@ -39,7 +39,7 @@ export function metricsCapability(input: {
 }): MetricsCapability {
   const required = [...REQUIRED_PERMISSIONS[input.provider]];
   if (input.provider === "LINKEDIN" && input.linkedinOrganizationMode) {
-    required.splice(0, required.length, "r_organization_social_feed");
+    required.splice(0, required.length, "rw_organization_admin");
   }
   if (input.connectionStatus !== "ACTIVE") {
     return { provider: input.provider, available: false, reason: "SOCIAL_NOT_CONNECTED", requiredPermissions: required, notes: [] };
@@ -83,8 +83,7 @@ export function normalizeInstagramMediaMetrics(input: {
   pushMetric(result, "INSTAGRAM", "comments", input.basic?.comments_count, input.capturedAt, input.externalPostId);
   for (const insight of input.insights ?? []) {
     if (typeof insight.name !== "string") continue;
-    const value = insight.values?.[0]?.value;
-    pushMetric(result, "INSTAGRAM", insight.name.toLowerCase(), value, input.capturedAt, input.externalPostId);
+    pushMetric(result, "INSTAGRAM", insight.name.toLowerCase(), insight.values?.[0]?.value, input.capturedAt, input.externalPostId);
   }
   return result;
 }
