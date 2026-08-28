@@ -13,6 +13,7 @@
     "dev:cloudflare": "npm run build && wrangler dev",
     "test:crawler": "tsx tests/crawler.test.ts",
     "test:site-intelligence": "tsx tests/site-intelligence.test.ts",
+    "test:site-intelligence-ui": "tsx tests/site-intelligence-ui.test.ts",
     "test:editorial-intelligence": "tsx tests/editorial-intelligence.test.ts",
     "test:learning-engine": "tsx tests/learning-engine.test.ts",
     "test:openai": "tsx tests/openai-text.test.ts",
