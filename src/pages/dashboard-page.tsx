@@ -43,7 +43,7 @@ export function DashboardPage() {
         neonClient.from("content_items").select("id").eq("profile_id", profileId),
         neonClient.from("content_variants").select("id").eq("profile_id", profileId).eq("approval_status", "PENDING"),
         neonClient.from("publication_jobs").select("id").eq("profile_id", profileId).in("state", ["QUEUED", "SCHEDULED"]),
-        neonClient.from("social_connections").select("id").eq("profile_id", profileId).eq("status", "CONNECTED"),
+        neonClient.from("social_connections").select("id").eq("profile_id", profileId).eq("status", "ACTIVE"),
       ]);
       const firstError = [content.error, approvals.error, scheduled.error, connections.error].find(Boolean);
       if (!active) return;
