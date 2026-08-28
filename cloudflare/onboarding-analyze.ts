@@ -1,0 +1,150 @@
+import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "../api/_lib/brand-analysis.js";
+
+const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+
+type Env = { OPENAI_API_KEY?: string };
+type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
+type ScanRow = { id: string };
+type PageRow = { url: string; title: string | null; content_text: string | null };
+type ExistingBrand = { profile_id: string; social_links: unknown };
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+}
+
+function bearer(request: Request) {
+  const value = request.headers.get("authorization");
+  return value?.startsWith("Bearer ") ? value.slice(7).trim() || null : null;
+}
+
+async function dataApi(path: string, token: string, init: RequestInit = {}) {
+  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
+}
+
+async function rows<T>(path: string, token: string): Promise<T[]> {
+  const response = await dataApi(path, token);
+  if (!response.ok) throw new Error(`DATA_API_${response.status}`);
+  return response.json() as Promise<T[]>;
+}
+
+function stringList(value: unknown, max: number) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, max) : [];
+}
+
+function safeUrl(value: unknown) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch { return null; }
+}
+
+function sanitizeVisualHints(value: unknown): WebsiteVisualHints {
+  if (!value || typeof value !== "object") return { colors: [], fontFamilies: [], socialLinks: {}, logoUrl: null, logoCandidates: [], imageUrls: [], stylesheetUrls: [], pageSignals: [] };
+  const input = value as Record<string, unknown>;
+  const socialLinks = input.socialLinks && typeof input.socialLinks === "object"
+    ? Object.fromEntries(Object.entries(input.socialLinks as Record<string, unknown>).map(([key, item]) => [key, safeUrl(item)]).filter((entry): entry is [string, string] => Boolean(entry[1])))
+    : {};
+  const pageSignals = Array.isArray(input.pageSignals) ? input.pageSignals.slice(0, 80).flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const url = safeUrl(item.url);
+    if (!url) return [];
+    return [{
+      url,
+      canonicalUrl: safeUrl(item.canonicalUrl),
+      headings: stringList(item.headings, 20),
+      imageUrls: stringList(item.imageUrls, 8).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+      ogImageUrl: safeUrl(item.ogImageUrl),
+      schemaTypes: stringList(item.schemaTypes, 16),
+    }];
+  }) : [];
+  return {
+    colors: stringList(input.colors, 12),
+    fontFamilies: stringList(input.fontFamilies, 10),
+    socialLinks,
+    logoUrl: safeUrl(input.logoUrl),
+    logoCandidates: stringList(input.logoCandidates, 8).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    imageUrls: stringList(input.imageUrls, 40).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    stylesheetUrls: stringList(input.stylesheetUrls, 16).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    pageSignals,
+  };
+}
+
+export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const token = bearer(request);
+  if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
+  if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
+
+  let body: Record<string, unknown> = {};
+  try { body = await request.json() as Record<string, unknown>; } catch { /* validated below */ }
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+  const visualHints = sanitizeVisualHints(body.visualHints);
+
+  try {
+    const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
+    if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
+    if (!scan) return json({ error: "WEBSITE_SCAN_REQUIRED" }, 409);
+    const pageRows = await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=100`, token);
+    const pages = pageRows.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" }));
+    if (!pages.length) return json({ error: "NO_ANALYZED_WEBSITE_PAGES" }, 409);
+
+    const result = await analyzeBrandFromWebsite({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, websiteUrl: profile.website_url, industry: profile.industry, pages, visualHints });
+    const existingRows = await rows<ExistingBrand>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links&limit=1`, token);
+    const existingSocials = existingRows[0]?.social_links && typeof existingRows[0].social_links === "object" ? existingRows[0].social_links as Record<string, unknown> : {};
+    const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, item]) => typeof item === "string" && item)) };
+    const now = new Date().toISOString();
+    const visualIdentity = {
+      source: "website_scan",
+      observedColors: visualHints.colors,
+      observedFonts: visualHints.fontFamilies,
+      logoUrl: visualHints.logoUrl,
+      logoCandidates: visualHints.logoCandidates,
+      observedImages: visualHints.imageUrls,
+      stylesheets: visualHints.stylesheetUrls,
+      pageSignals: visualHints.pageSignals,
+      pageInsights: result.analysis.pageInsights,
+      contentPillars: result.analysis.contentPillars,
+      summary: result.analysis.visualStyleSummary,
+      analyzedAt: now,
+    };
+    const payload = {
+      profile_id: profileId,
+      description: result.analysis.description,
+      business_model: result.analysis.businessModel,
+      location: result.analysis.location,
+      service_area: result.analysis.serviceArea,
+      target_audience: result.analysis.targetAudience,
+      services: result.analysis.services,
+      differentiators: result.analysis.differentiators,
+      value_propositions: result.analysis.valuePropositions,
+      visual_identity: visualIdentity,
+      tone_of_voice: result.analysis.toneOfVoice,
+      social_links: socialLinks,
+      goals: result.analysis.goals,
+      updated_at: now,
+    };
+
+    const write = existingRows[0]
+      ? await dataApi(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) })
+      : await dataApi("brand_profiles", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) });
+    if (!write.ok) throw new Error(`BRAND_PROFILE_WRITE_${write.status}`);
+
+    const profilePatch: Record<string, unknown> = { onboarding_completed: true, updated_at: now };
+    if (!profile.industry && result.analysis.industry) profilePatch.industry = result.analysis.industry;
+    const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
+    if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
+
+    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "ANALYZE_BRAND_ONBOARDING", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, pages_analyzed: pages.length, page_insights: result.analysis.pageInsights.length, content_pillars: result.analysis.contentPillars.length, observed_fonts: visualHints.fontFamilies.length, observed_images: visualHints.imageUrls.length } }) });
+    if (!usageWrite.ok) console.error("onboarding-usage-write", { profileId, status: usageWrite.status });
+
+    return json({ analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model });
+  } catch (reason) {
+    const detail = reason instanceof Error ? reason.message : "UNKNOWN_ONBOARDING_ANALYSIS_ERROR";
+    console.error("cloudflare-onboarding-analyze-v2", { profileId, detail });
+    return json({ error: "ONBOARDING_ANALYSIS_FAILED", detail }, detail.startsWith("OPENAI_") ? 502 : 500);
+  }
+}
