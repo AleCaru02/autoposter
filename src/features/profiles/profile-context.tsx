@@ -49,9 +49,18 @@ function slugify(value: string) {
   return `${base}-${crypto.randomUUID().slice(0, 7)}`;
 }
 
+function profileIdFromUrl() {
+  try {
+    const value = new URLSearchParams(window.location.search).get("profileId");
+    return value && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [selectedProfileId, setSelectedProfileIdState] = useState<string | null>(() => localStorage.getItem(ACTIVE_PROFILE_KEY));
+  const [selectedProfileId, setSelectedProfileIdState] = useState<string | null>(() => profileIdFromUrl() || localStorage.getItem(ACTIVE_PROFILE_KEY));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +76,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     const next = (result.data ?? []) as Profile[];
     setProfiles(next);
     setSelectedProfileIdState((current) => {
-      const resolved = current && next.some((profile) => profile.id === current) ? current : next[0]?.id ?? null;
+      const urlProfileId = profileIdFromUrl();
+      const preferred = urlProfileId && next.some((profile) => profile.id === urlProfileId) ? urlProfileId : current;
+      const resolved = preferred && next.some((profile) => profile.id === preferred) ? preferred : next[0]?.id ?? null;
       if (resolved) localStorage.setItem(ACTIVE_PROFILE_KEY, resolved);
       else localStorage.removeItem(ACTIVE_PROFILE_KEY);
       return resolved;
