@@ -39,12 +39,12 @@ async function withFreshMetaConsent(response: Response) {
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return response;
   try {
     const body = await response.clone().json() as Record<string, unknown>;
-    if (typeof body.authorizationUrl !== "string") return response;
-    const authorizationUrl = new URL(body.authorizationUrl);
+    if (typeof body.url !== "string") return response;
+    const authorizationUrl = new URL(body.url);
     if (authorizationUrl.hostname !== "www.facebook.com") return response;
     authorizationUrl.searchParams.set("auth_type", "rerequest");
     authorizationUrl.searchParams.set("return_scopes", "true");
-    return new Response(JSON.stringify({ ...body, authorizationUrl: authorizationUrl.toString() }), {
+    return new Response(JSON.stringify({ ...body, url: authorizationUrl.toString() }), {
       status: response.status,
       headers: response.headers,
     });
@@ -98,7 +98,7 @@ export default {
       ctx.waitUntil(processDuePublications(env).then((result) => {
         console.log("social-publication-run", result);
       }).catch((reason) => {
-        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
+        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown" });
       }));
       return;
     }
@@ -106,7 +106,7 @@ export default {
     ctx.waitUntil(runContentAutopilot(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
-      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown");
+      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown" });
     }));
   },
 };
