@@ -30,6 +30,14 @@ function overlapScore(a: string, b: string) {
   return intersection / Math.min(left.size, right.size);
 }
 
+function recentTopicMatchesPillar(pillar: EditorialPillar, topic: string) {
+  const nameScore = overlapScore(pillar.name, topic);
+  if (nameScore >= 0.5) return true;
+  if (!pillar.description) return false;
+  const combinedScore = overlapScore(`${pillar.name} ${pillar.description}`, topic);
+  return combinedScore >= 0.35;
+}
+
 export function contentPillarsFromVisualIdentity(value: unknown): EditorialPillar[] {
   if (!value || typeof value !== "object") return [];
   const raw = (value as Record<string, unknown>).contentPillars;
@@ -70,10 +78,9 @@ export function selectAutopilotPillar(visualIdentity: unknown, recentTopics: str
   const pillars = contentPillarsFromVisualIdentity(visualIdentity);
   if (!pillars.length) return { pillar: null as EditorialPillar | null, pillarCount: 0, recentUsage: 0 };
 
-  const scored = pillars.map((pillar, index) => {
-    const reference = `${pillar.name} ${pillar.description}`;
-    const recentUsage = recentTopics.reduce((count, topic) => count + (overlapScore(reference, topic) >= 0.45 ? 1 : 0), 0);
-    return { pillar, recentUsage, index };
+  const scored = pillars.map((pillar) => {
+    const recentUsage = recentTopics.reduce((count, topic) => count + (recentTopicMatchesPillar(pillar, topic) ? 1 : 0), 0);
+    return { pillar, recentUsage };
   });
   const minimumUsage = Math.min(...scored.map((item) => item.recentUsage));
   const leastUsed = scored.filter((item) => item.recentUsage === minimumUsage);
