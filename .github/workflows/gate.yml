@@ -25,6 +25,8 @@ jobs:
         run: npm run test:crawler
       - name: Content workflow regression
         run: npm run test:content-workflow
+      - name: Content semantic dedupe regression
+        run: npm run test:content-dedupe
       - name: Calendar workflow regression
         run: npm run test:calendar-workflow
       - name: Social integration contract
