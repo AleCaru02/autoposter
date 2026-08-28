@@ -1,14 +1,13 @@
 import worker from "./worker.js";
 import { handleWorkerGenerateText } from "./generate-text.js";
+import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & SocialEnv & {
-  ASSETS: { fetch(request: Request): Promise<Response> };
-};
+type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> } };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
 
@@ -26,11 +25,7 @@ function canonicalNavigation(request: Request, env: Env) {
   if (!request.headers.get("accept")?.includes("text/html")) return null;
   const current = new URL(request.url);
   let canonical: URL;
-  try {
-    canonical = new URL(env.APP_BASE_URL || "https://autoposter.02alessandrocaruso.workers.dev");
-  } catch {
-    return null;
-  }
+  try { canonical = new URL(env.APP_BASE_URL || "https://autoposter.02alessandrocaruso.workers.dev"); } catch { return null; }
   if (current.hostname === canonical.hostname || !current.hostname.endsWith(`-${canonical.hostname}`)) return null;
   canonical.pathname = current.pathname;
   canonical.search = current.search;
@@ -49,13 +44,8 @@ async function withFreshMetaConsent(response: Response) {
     authorizationUrl.searchParams.set("scope", scopes.join(","));
     authorizationUrl.searchParams.set("auth_type", "rerequest");
     authorizationUrl.searchParams.set("return_scopes", "true");
-    return new Response(JSON.stringify({ ...body, url: authorizationUrl.toString() }), {
-      status: response.status,
-      headers: response.headers,
-    });
-  } catch {
-    return response;
-  }
+    return new Response(JSON.stringify({ ...body, url: authorizationUrl.toString() }), { status: response.status, headers: response.headers });
+  } catch { return response; }
 }
 
 function oauthProfileId(request: Request) {
@@ -69,9 +59,7 @@ function oauthProfileId(request: Request) {
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     const payload = JSON.parse(new TextDecoder().decode(bytes)) as { profileId?: unknown };
     return typeof payload.profileId === "string" && /^[0-9a-f-]{36}$/i.test(payload.profileId) ? payload.profileId : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function withOAuthProfileRedirect(request: Request, response: Response) {
@@ -85,17 +73,13 @@ function withOAuthProfileRedirect(request: Request, response: Response) {
     const headers = new Headers(response.headers);
     headers.set("location", target.toString());
     return new Response(null, { status: response.status, headers });
-  } catch {
-    return response;
-  }
+  } catch { return response; }
 }
 
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-  });
+  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
   if (!response.ok) return false;
   const rows = await response.json() as Array<{ id?: string }>;
   return rows.some((row) => row.id === profileId);
@@ -104,10 +88,7 @@ async function canAccessProfile(request: Request, profileId: string) {
 async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   let profileId = "";
-  try {
-    const body = await request.json() as Record<string, unknown>;
-    profileId = typeof body.profileId === "string" ? body.profileId : "";
-  } catch { /* handled below */ }
+  try { const body = await request.json() as Record<string, unknown>; profileId = typeof body.profileId === "string" ? body.profileId : ""; } catch { /* handled below */ }
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
   ctx.waitUntil(runContentAutopilotSerialized(env, { profileId, maxGenerations: 6 }).then((result) => {
@@ -125,6 +106,7 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
+    if (path === "/api/onboarding-analyze") return handleWorkerOnboardingAnalyze(request, env);
     if (path.startsWith("/api/social/")) {
       const response = await handleSocialApi(request, env);
       if (response) {
@@ -144,7 +126,6 @@ export default {
       }));
       return;
     }
-
     ctx.waitUntil(runContentAutopilotSerialized(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
