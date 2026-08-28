@@ -1,0 +1,49 @@
+/* Mobile/iPhone interaction hardening. Keep actionable controls at least 44px. */
+@media (pointer: coarse), (max-width: 760px) {
+  button,
+  .primary-button,
+  .secondary-button,
+  .compact-action,
+  .icon-danger,
+  .nav-link,
+  .mobile-nav-link {
+    min-height: 44px;
+  }
+
+  .password-toggle {
+    width: 44px;
+    height: 44px;
+    right: 2px;
+  }
+
+  .password-input-wrap input {
+    min-height: 44px;
+    padding-right: 50px;
+  }
+
+  .mobile-nav-link {
+    align-content: center;
+    padding: 4px 2px;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .page-content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .mobile-nav {
+    gap: 0;
+  }
+
+  .mobile-nav-link {
+    font-size: 8px;
+  }
+}
