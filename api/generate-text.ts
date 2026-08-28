@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
+import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 
 export const config = { maxDuration: 60 };
@@ -10,7 +11,7 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
@@ -84,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profiles = await readJsonRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
-    const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals&limit=1`, token);
+    const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity&limit=1`, token);
     const brand = brands[0] ?? null;
     const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
     const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
@@ -102,10 +103,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
+    const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
 
     const budgetUsd = monthlyBudgetUsd();
     const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
-    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic, objective, providers, formats, brand: context });
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
     if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
       return res.status(429).json({
         error: "OPENAI_TEXT_BUDGET_REACHED",
@@ -114,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
     const usageWrite = await dataApi("ai_usage_events", token, {
       method: "POST",
@@ -132,6 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cached_input_tokens: result.usage.cachedInputTokens,
           cache_write_tokens: result.usage.cacheWriteTokens,
           requested_topic: topic,
+          editorial_pillars_used: enriched.pillarCount,
           editorial_topic: result.content.editorialTopic,
           editorial_angle: result.content.editorialAngle,
         },
