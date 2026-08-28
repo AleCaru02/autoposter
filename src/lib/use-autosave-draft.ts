@@ -11,13 +11,24 @@ export function useAutoSaveDraft<T>(save: (draft: T) => Promise<void>, delayMs =
   const draftRef = useRef<T | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRef = useRef(save);
+  const pendingSaveRef = useRef(save);
 
   useEffect(() => { saveRef.current = save; }, [save]);
 
   const replaceDraft = useCallback((next: T) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
+
+    const previous = draftRef.current;
+    const previousVersion = versionRef.current;
+    if (previous !== null && previousVersion > savedVersionRef.current) {
+      const previousSave = pendingSaveRef.current;
+      savedVersionRef.current = previousVersion;
+      void previousSave(previous).catch(() => undefined);
+    }
+
     draftRef.current = next;
+    pendingSaveRef.current = saveRef.current;
     setDraftState(next);
     versionRef.current += 1;
     savedVersionRef.current = versionRef.current;
@@ -32,6 +43,7 @@ export function useAutoSaveDraft<T>(save: (draft: T) => Promise<void>, delayMs =
       draftRef.current = next;
       return next;
     });
+    pendingSaveRef.current = saveRef.current;
     versionRef.current += 1;
     setError(null);
     setStatus("WAITING");
@@ -43,9 +55,10 @@ export function useAutoSaveDraft<T>(save: (draft: T) => Promise<void>, delayMs =
     const current = draftRef.current;
     const version = versionRef.current;
     if (current === null || version <= savedVersionRef.current) return;
+    const saveForThisDraft = pendingSaveRef.current;
     setStatus("SAVING");
     try {
-      await saveRef.current(current);
+      await saveForThisDraft(current);
       savedVersionRef.current = Math.max(savedVersionRef.current, version);
       if (versionRef.current === version) setStatus("SAVED");
       else setStatus("WAITING");
@@ -69,7 +82,9 @@ export function useAutoSaveDraft<T>(save: (draft: T) => Promise<void>, delayMs =
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     const current = draftRef.current;
-    if (current !== null && versionRef.current > savedVersionRef.current) void saveRef.current(current).catch(() => undefined);
+    if (current !== null && versionRef.current > savedVersionRef.current) {
+      void pendingSaveRef.current(current).catch(() => undefined);
+    }
   }, []);
 
   return { draft, replaceDraft, setDraft, flush, status, error };
