@@ -118,12 +118,13 @@ export function semanticContentSimilarity(a: ContentDedupeCandidate, b: ContentD
 export function findNearDuplicate(
   candidate: ContentDedupeCandidate,
   recent: ContentDedupeCandidate[],
-  threshold = 0.72,
 ): ContentDuplicateMatch | null {
   let best: ContentDuplicateMatch | null = null;
   for (const existing of recent) {
     const similarity = semanticContentSimilarity(candidate, existing);
-    if (similarity.score < threshold) continue;
+    const topicLedDuplicate = similarity.score >= 0.55 && similarity.topicScore >= 0.55;
+    const copyLedDuplicate = similarity.bodyScore >= 0.78;
+    if (!topicLedDuplicate && !copyLedDuplicate) continue;
     const match = { candidate: existing, ...similarity };
     if (!best || match.score > best.score) best = match;
   }
