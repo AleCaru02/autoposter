@@ -2,8 +2,20 @@ import { estimateTerraCostUsd, type OpenAITextUsage } from "./openai-text.js";
 
 export type WebsiteVisualHints = {
   colors: string[];
+  fontFamilies?: string[];
   socialLinks: Record<string, string>;
   logoUrl: string | null;
+  logoCandidates?: string[];
+  imageUrls?: string[];
+  stylesheetUrls?: string[];
+  pageSignals?: Array<{
+    url: string;
+    canonicalUrl: string | null;
+    headings: string[];
+    imageUrls: string[];
+    ogImageUrl: string | null;
+    schemaTypes: string[];
+  }>;
 };
 
 export type BrandAnalysisInput = {
@@ -28,8 +40,16 @@ export type BrandAnalysis = {
   differentiators: string[];
   valuePropositions: string[];
   goals: string[];
+  contentPillars: Array<{ name: string; description: string; sourceUrls: string[] }>;
   visualStyleSummary: string;
-  pageInsights: Array<{ url: string; summary: string; topics: string[] }>;
+  pageInsights: Array<{
+    url: string;
+    summary: string;
+    topics: string[];
+    pageType: string;
+    intent: string;
+    servicesMentioned: string[];
+  }>;
 };
 
 export type BrandAnalysisResult = {
@@ -44,7 +64,7 @@ const MODEL = "gpt-5.6-terra";
 const MAX_CONTEXT_CHARS = 110_000;
 const MAX_PAGE_CHARS = 2_800;
 const MAX_PAGES = 80;
-const MAX_OUTPUT_TOKENS = 7_000;
+const MAX_OUTPUT_TOKENS = 8_000;
 
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -58,25 +78,33 @@ const OUTPUT_SCHEMA = {
     targetAudience: {
       type: "object",
       additionalProperties: false,
-      properties: {
-        summary: { type: "string" },
-        segments: { type: "array", items: { type: "string" }, maxItems: 8 },
-      },
+      properties: { summary: { type: "string" }, segments: { type: "array", items: { type: "string" }, maxItems: 8 } },
       required: ["summary", "segments"],
     },
     toneOfVoice: {
       type: "object",
       additionalProperties: false,
-      properties: {
-        summary: { type: "string" },
-        traits: { type: "array", items: { type: "string" }, maxItems: 8 },
-      },
+      properties: { summary: { type: "string" }, traits: { type: "array", items: { type: "string" }, maxItems: 8 } },
       required: ["summary", "traits"],
     },
-    services: { type: "array", items: { type: "string" }, maxItems: 16 },
-    differentiators: { type: "array", items: { type: "string" }, maxItems: 12 },
-    valuePropositions: { type: "array", items: { type: "string" }, maxItems: 12 },
+    services: { type: "array", items: { type: "string" }, maxItems: 20 },
+    differentiators: { type: "array", items: { type: "string" }, maxItems: 14 },
+    valuePropositions: { type: "array", items: { type: "string" }, maxItems: 14 },
     goals: { type: "array", items: { type: "string" }, maxItems: 8 },
+    contentPillars: {
+      type: "array",
+      maxItems: 12,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          sourceUrls: { type: "array", items: { type: "string" }, maxItems: 12 },
+        },
+        required: ["name", "description", "sourceUrls"],
+      },
+    },
     visualStyleSummary: { type: "string" },
     pageInsights: {
       type: "array",
@@ -86,13 +114,16 @@ const OUTPUT_SCHEMA = {
         properties: {
           url: { type: "string" },
           summary: { type: "string" },
-          topics: { type: "array", items: { type: "string" }, maxItems: 8 },
+          topics: { type: "array", items: { type: "string" }, maxItems: 10 },
+          pageType: { type: "string" },
+          intent: { type: "string" },
+          servicesMentioned: { type: "array", items: { type: "string" }, maxItems: 10 },
         },
-        required: ["url", "summary", "topics"],
+        required: ["url", "summary", "topics", "pageType", "intent", "servicesMentioned"],
       },
     },
   },
-  required: ["industry", "description", "businessModel", "location", "serviceArea", "targetAudience", "toneOfVoice", "services", "differentiators", "valuePropositions", "goals", "visualStyleSummary", "pageInsights"],
+  required: ["industry", "description", "businessModel", "location", "serviceArea", "targetAudience", "toneOfVoice", "services", "differentiators", "valuePropositions", "goals", "contentPillars", "visualStyleSummary", "pageInsights"],
 } as const;
 
 function compactPages(pages: BrandAnalysisInput["pages"]) {
@@ -126,7 +157,7 @@ function extractOutputText(body: Record<string, unknown>) {
 function validate(value: unknown): BrandAnalysis {
   if (!value || typeof value !== "object") throw new Error("OPENAI_INVALID_BRAND_ANALYSIS");
   const candidate = value as Partial<BrandAnalysis>;
-  if (!candidate.targetAudience || !candidate.toneOfVoice || !Array.isArray(candidate.pageInsights)) throw new Error("OPENAI_INVALID_BRAND_SCHEMA");
+  if (!candidate.targetAudience || !candidate.toneOfVoice || !Array.isArray(candidate.pageInsights) || !Array.isArray(candidate.contentPillars)) throw new Error("OPENAI_INVALID_BRAND_SCHEMA");
   return candidate as BrandAnalysis;
 }
 
@@ -139,11 +170,12 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
     "Sei il motore di onboarding e brand intelligence di Post Automatici.",
     "Analizza il sito pagina per pagina: ogni pagina fornita è una fonte reale e deve essere compresa individualmente.",
     "Ricostruisci attività, modello di business, servizi, target, tono di voce, differenziatori, proposte di valore e obiettivi social plausibili.",
+    "Costruisci contentPillars come tassonomia editoriale riutilizzabile: ogni pilastro deve essere specifico, distinto e collegato agli URL reali che lo supportano.",
+    "Per pageInsights restituisci un elemento per ogni pagina inclusa nel contesto, mantenendo esattamente l'URL della fonte; classifica tipo pagina, intento, temi e servizi citati.",
     "Non inventare sedi, servizi, prezzi, risultati, certificazioni, clienti o claim non presenti nelle fonti.",
     "Se un dato non è verificabile, restituisci null o una lista vuota.",
-    "Per pageInsights restituisci un elemento per ogni pagina inclusa nel contesto, mantenendo esattamente l'URL della fonte.",
     "Gli obiettivi devono essere suggerimenti operativi per la strategia social, non fatti attribuiti all'azienda.",
-    "Per lo stile visivo usa anche gli indizi tecnici forniti: colori osservati, logo e link social; non dichiarare che un colore è ufficiale se è solo osservato.",
+    "Per lo stile visivo usa anche gli indizi tecnici forniti: colori osservati, font, logo, immagini, CSS, headings, Open Graph e schema.org. Non dichiarare ufficiale ciò che è soltanto osservato.",
     "Restituisci esclusivamente l'output strutturato richiesto.",
   ].join("\n");
 
