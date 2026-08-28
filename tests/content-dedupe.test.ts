@@ -31,19 +31,22 @@ const distinct: ContentDedupeCandidate = {
 };
 
 const duplicateScore = semanticContentSimilarity(previous, paraphrase);
-assert.ok(duplicateScore.score >= 0.72, `la parafrasi dello stesso concept deve essere rilevata, score=${duplicateScore.score}`);
-assert.equal(findNearDuplicate(paraphrase, [previous])?.candidate.id, "old-1");
+assert.ok(duplicateScore.score >= 0.55, `la parafrasi deve superare la soglia combinata minima, score=${duplicateScore.score}`);
+assert.ok(duplicateScore.topicScore >= 0.55, `la parafrasi deve avere forte sovrapposizione sul tema, topicScore=${duplicateScore.topicScore}`);
+assert.equal(findNearDuplicate(paraphrase, [previous])?.candidate.id, "old-1", "la parafrasi dello stesso concept deve essere bloccata");
 
 const differentAngleScore = semanticContentSimilarity(previous, sameTopicDifferentAngle);
-assert.ok(differentAngleScore.score < 0.72, `un angolo realmente diverso sullo stesso ambito non deve essere bloccato, score=${differentAngleScore.score}`);
-assert.equal(findNearDuplicate(sameTopicDifferentAngle, [previous]), null);
+assert.ok(differentAngleScore.topicScore < 0.55 || differentAngleScore.score < 0.55, `un angolo realmente diverso non deve soddisfare entrambe le condizioni topic-led, score=${differentAngleScore.score}, topic=${differentAngleScore.topicScore}`);
+assert.ok(differentAngleScore.bodyScore < 0.78, `un angolo realmente diverso non deve sembrare una copia del copy, body=${differentAngleScore.bodyScore}`);
+assert.equal(findNearDuplicate(sameTopicDifferentAngle, [previous]), null, "un angolo realmente diverso sullo stesso ambito deve restare consentito");
 
 const distinctScore = semanticContentSimilarity(previous, distinct);
 assert.ok(distinctScore.score < 0.35, `temi distinti devono restare nettamente separati, score=${distinctScore.score}`);
 assert.equal(findNearDuplicate(distinct, [previous]), null);
 
 const exact = semanticContentSimilarity(previous, { ...previous, id: "copy" });
-assert.ok(exact.score > 0.95, `una copia quasi esatta deve avere score molto alto, score=${exact.score}`);
+assert.ok(exact.score > 0.95, `una copia esatta deve avere score molto alto, score=${exact.score}`);
+assert.equal(findNearDuplicate({ ...previous, id: "copy" }, [previous])?.candidate.id, "old-1", "una copia esatta deve essere bloccata");
 
 const legacyInstruction: ContentDedupeCandidate = {
   id: "legacy",
