@@ -1,21 +1,38 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
 import { ProfileProvider, useProfiles } from "./features/profiles/profile-context";
-import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "./pages/auth-pages";
-import { OnboardingPage } from "./pages/onboarding-page";
-import { DashboardPage } from "./pages/dashboard-page";
-import { ProfilesPage } from "./pages/profiles-page";
-import { BrandPage } from "./pages/brand-page";
-import { WebsiteScanPage } from "./pages/website-scan-page";
-import { ContentGeneratorPage } from "./pages/content-generator-page";
-import { ApprovalsPage } from "./pages/approvals-page";
-import { CalendarPage } from "./pages/calendar-page";
-import { SocialPage } from "./pages/social-page";
-import { SettingsPage } from "./pages/settings-page";
-import { AnalyticsPage } from "./pages/analytics-page";
-import { LearningPage } from "./pages/learning-page";
+
+const AuthPages = lazy(() => import("./pages/auth-pages").then((module) => ({ default: () => <AuthRoutes module={module} /> })));
+const OnboardingPage = lazy(() => import("./pages/onboarding-page").then((module) => ({ default: module.OnboardingPage })));
+const DashboardPage = lazy(() => import("./pages/dashboard-page").then((module) => ({ default: module.DashboardPage })));
+const ProfilesPage = lazy(() => import("./pages/profiles-page").then((module) => ({ default: module.ProfilesPage })));
+const BrandPage = lazy(() => import("./pages/brand-page").then((module) => ({ default: module.BrandPage })));
+const WebsiteScanPage = lazy(() => import("./pages/website-scan-page").then((module) => ({ default: module.WebsiteScanPage })));
+const ContentGeneratorPage = lazy(() => import("./pages/content-generator-page").then((module) => ({ default: module.ContentGeneratorPage })));
+const ApprovalsPage = lazy(() => import("./pages/approvals-page").then((module) => ({ default: module.ApprovalsPage })));
+const CalendarPage = lazy(() => import("./pages/calendar-page").then((module) => ({ default: module.CalendarPage })));
+const SocialPage = lazy(() => import("./pages/social-page").then((module) => ({ default: module.SocialPage })));
+const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
+const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
+const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
+
+type AuthPagesModule = typeof import("./pages/auth-pages");
+
+function AuthRoutes({ module }: { module: AuthPagesModule }) {
+  const { LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage } = module;
+  return <Routes>
+    <Route path="/login" element={<LoginPage />} />
+    <Route path="/registrazione" element={<RegisterPage />} />
+    <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
+    <Route path="/reimposta-password" element={<ResetPasswordPage />} />
+  </Routes>;
+}
+
+function PageFallback() {
+  return <main className="center-state">Caricamento pagina…</main>;
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const session = authClient.useSession();
@@ -39,12 +56,12 @@ function RootRedirect() {
 }
 
 export default function App() {
-  return <Routes>
+  return <Suspense fallback={<PageFallback />}><Routes>
     <Route path="/" element={<RootRedirect />} />
-    <Route path="/login" element={<LoginPage />} />
-    <Route path="/registrazione" element={<RegisterPage />} />
-    <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
-    <Route path="/reimposta-password" element={<ResetPasswordPage />} />
+    <Route path="/login" element={<AuthPages />} />
+    <Route path="/registrazione" element={<AuthPages />} />
+    <Route path="/password-dimenticata" element={<AuthPages />} />
+    <Route path="/reimposta-password" element={<AuthPages />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
     <Route path="/app" element={<RequireAuth><ProfileProvider><RequireProfile /></ProfileProvider></RequireAuth>}>
       <Route index element={<Navigate to="dashboard" replace />} />
@@ -61,5 +78,5 @@ export default function App() {
       <Route path="impostazioni" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes>;
+  </Routes></Suspense>;
 }
