@@ -19,6 +19,22 @@ function bearer(request: Request) {
   return value?.startsWith("Bearer ") ? value.slice(7).trim() || null : null;
 }
 
+function canonicalNavigation(request: Request, env: Env) {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+  if (!request.headers.get("accept")?.includes("text/html")) return null;
+  const current = new URL(request.url);
+  let canonical: URL;
+  try {
+    canonical = new URL(env.APP_BASE_URL || "https://autoposter.02alessandrocaruso.workers.dev");
+  } catch {
+    return null;
+  }
+  if (current.hostname === canonical.hostname || !current.hostname.endsWith(`-${canonical.hostname}`)) return null;
+  canonical.pathname = current.pathname;
+  canonical.search = current.search;
+  return Response.redirect(canonical.toString(), 307);
+}
+
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
@@ -49,6 +65,8 @@ async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext
 
 export default {
   async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
+    const canonicalRedirect = canonicalNavigation(request, env);
+    if (canonicalRedirect) return canonicalRedirect;
     const path = new URL(request.url).pathname;
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path.startsWith("/api/social/")) {

@@ -23,8 +23,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 function RequireProfile() {
-  const { profiles, loading } = useProfiles();
+  const { profiles, loading, error, reload } = useProfiles();
   if (loading) return <main className="center-state">Caricamento attività…</main>;
+  if (error) return <main className="center-state profile-load-error"><section><h1>Non riesco a caricare le tue attività</h1><p>I dati non sono stati cancellati. Controlla la sessione e riprova.</p><button className="primary-button" type="button" onClick={() => void reload()}>Riprova</button></section></main>;
   if (profiles.length === 0) return <Navigate to="/onboarding" replace />;
   return <AppShell />;
 }

@@ -54,6 +54,28 @@ function AuthLayout({ children, title, subtitle }: { children: ReactNode; title?
   return <main className="auth-page"><section className="auth-card">{title && <h1>{title}</h1>}{subtitle && <p className="auth-subtitle">{subtitle}</p>}{children}</section></main>;
 }
 
+function GoogleMark() {
+  return <span className="google-mark" aria-hidden="true">G</span>;
+}
+
+async function startGoogleAccess(setError: (message: string | null) => void, setBusy: (busy: boolean) => void) {
+  setError(null);
+  setBusy(true);
+  try {
+    const result = await withAuthTimeout(authClient.signIn.social({
+      provider: "google",
+      callbackURL: `${window.location.origin}/app/dashboard`,
+    }));
+    if (result?.error) {
+      setError(result.error.message ?? "Accesso con Google non riuscito.");
+      setBusy(false);
+    }
+  } catch (reason) {
+    setError(readableAuthError(reason, "Accesso con Google non riuscito. Riprova."));
+    setBusy(false);
+  }
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -85,7 +107,7 @@ export function LoginPage() {
     }
   }
 
-  return <AuthLayout><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
+  return <AuthLayout><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button><div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
 }
 
 export function ForgotPasswordPage() {
@@ -193,5 +215,5 @@ export function RegisterPage() {
     }
   }
 
-  return <AuthLayout title="Crea il tuo accesso"><form onSubmit={submit} className="auth-form"><label>Nome<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" /><p className="field-help">Minimo 8 caratteri.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Creazione…" : "Crea account"}</button></form><p className="auth-switch">Hai già un account? <NavLink to="/login">Accedi</NavLink></p></AuthLayout>;
+  return <AuthLayout title="Crea il tuo accesso"><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button><div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Nome<input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="new-password" /><p className="field-help">Minimo 8 caratteri.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Creazione…" : "Crea account"}</button></form><p className="auth-switch">Hai già un account? <NavLink to="/login">Accedi</NavLink></p></AuthLayout>;
 }

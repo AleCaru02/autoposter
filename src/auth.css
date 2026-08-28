@@ -1,0 +1,70 @@
+.google-auth-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 16px;
+  border: 1px solid #cfd9e6;
+  border-radius: 10px;
+  padding: 11px 14px;
+  background: #fff;
+  color: #25334a;
+  font-weight: 800;
+}
+
+.google-auth-button:hover {
+  border-color: #aab8c9;
+  background: #f8fafc;
+}
+
+.google-auth-button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.google-mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #4285f4;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: #8995a5;
+  font-size: 12px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #e2e8f0;
+}
+
+.profile-load-error {
+  padding: 24px;
+  text-align: center;
+}
+
+.profile-load-error section {
+  max-width: 520px;
+}
+
+.profile-load-error h1 {
+  margin: 0;
+  color: #182233;
+}
+
+.profile-load-error p {
+  margin: 10px 0 18px;
+}
