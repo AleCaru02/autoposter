@@ -35,6 +35,24 @@ function canonicalNavigation(request: Request, env: Env) {
   return Response.redirect(canonical.toString(), 307);
 }
 
+async function withFreshMetaConsent(response: Response) {
+  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return response;
+  try {
+    const body = await response.clone().json() as Record<string, unknown>;
+    if (typeof body.authorizationUrl !== "string") return response;
+    const authorizationUrl = new URL(body.authorizationUrl);
+    if (authorizationUrl.hostname !== "www.facebook.com") return response;
+    authorizationUrl.searchParams.set("auth_type", "rerequest");
+    authorizationUrl.searchParams.set("return_scopes", "true");
+    return new Response(JSON.stringify({ ...body, authorizationUrl: authorizationUrl.toString() }), {
+      status: response.status,
+      headers: response.headers,
+    });
+  } catch {
+    return response;
+  }
+}
+
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
@@ -71,7 +89,7 @@ export default {
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path.startsWith("/api/social/")) {
       const response = await handleSocialApi(request, env);
-      if (response) return response;
+      if (response) return path === "/api/social/connect" ? withFreshMetaConsent(response) : response;
     }
     return worker.fetch(request, env);
   },
