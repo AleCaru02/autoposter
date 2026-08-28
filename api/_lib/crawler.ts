@@ -3,6 +3,14 @@ import * as cheerio from "cheerio";
 
 export type CrawlPageStatus = "ANALYZED" | "SKIPPED" | "FAILED";
 
+export type PageSignals = {
+  canonicalUrl: string | null;
+  headings: string[];
+  imageUrls: string[];
+  ogImageUrl: string | null;
+  schemaTypes: string[];
+};
+
 export type CrawlPage = {
   url: string;
   normalizedUrl: string;
@@ -15,12 +23,18 @@ export type CrawlPage = {
   discoveredFrom: string | null;
   skipReason: string | null;
   error: string | null;
+  signals: PageSignals | null;
 };
 
 export type WebsiteVisualHints = {
   colors: string[];
+  fontFamilies: string[];
   socialLinks: Record<string, string>;
   logoUrl: string | null;
+  logoCandidates: string[];
+  imageUrls: string[];
+  stylesheetUrls: string[];
+  pageSignals: Array<PageSignals & { url: string }>;
 };
 
 export type CrawlResult = {
@@ -36,7 +50,6 @@ export type CrawlResult = {
 };
 
 type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
-
 type CrawlOptions = {
   fetcher?: typeof fetch;
   validateTarget?: (url: URL) => Promise<void> | void;
@@ -49,6 +62,14 @@ type CrawlOptions = {
 
 const TRACKING_PARAMS = new Set(["fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"]);
 const NON_HTML_EXTENSIONS = /\.(?:avif|bmp|css|csv|docx?|eot|gif|ico|jpe?g|js|json|map|mp3|mp4|mov|ogg|otf|pdf|png|pptx?|rar|rss|svg|tar|tiff?|ttf|txt|wav|webm|webp|woff2?|xlsx?|xml|zip)$/i;
+const MAX_STYLESHEETS = 16;
+const MAX_STYLE_CHARS = 200_000;
+const MAX_PAGE_SIGNALS = 80;
+const MAX_IMAGES = 40;
+
+function emptyVisualHints(): WebsiteVisualHints {
+  return { colors: [], fontFamilies: [], socialLinks: {}, logoUrl: null, logoCandidates: [], imageUrls: [], stylesheetUrls: [], pageSignals: [] };
+}
 
 export function normalizeCrawlUrl(input: string, root: URL): string | null {
   let url: URL;
@@ -64,6 +85,16 @@ export function normalizeCrawlUrl(input: string, root: URL): string | null {
   url.searchParams.sort();
   if (url.pathname !== "/" && url.pathname.endsWith("/")) url.pathname = url.pathname.replace(/\/+$/, "");
   return url.toString();
+}
+
+function absoluteHttpUrl(value: string | undefined, base: URL) {
+  if (!value) return null;
+  try {
+    const url = new URL(value, base);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    return url.toString();
+  } catch { return null; }
 }
 
 function plainText(html: string) {
@@ -84,26 +115,79 @@ function normalizeObservedColor(value: string) {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function rootVisualHints(html: string, root: URL): WebsiteVisualHints {
-  const $ = cheerio.load(html);
-  const counts = new Map<string, number>();
-  const colorSources = [
-    $('meta[name="theme-color"]').attr("content") ?? "",
-    $("style").map((_, element) => $(element).html() ?? "").get().join("\n"),
-    $("[style]").map((_, element) => $(element).attr("style") ?? "").get().join("\n"),
-  ].join("\n");
-  const matches = colorSources.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^\)]{3,80}\)|hsla?\([^\)]{3,80}\)/g) ?? [];
+function extractColors(source: string, counts: Map<string, number>) {
+  const matches = source.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^\)]{3,80}\)|hsla?\([^\)]{3,80}\)/g) ?? [];
   for (const raw of matches) {
     const color = normalizeObservedColor(raw);
     counts.set(color, (counts.get(color) ?? 0) + 1);
   }
-  const colors = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([color]) => color);
+}
+
+function extractFontFamilies(source: string, counts: Map<string, number>) {
+  const matches = source.matchAll(/font-family\s*:\s*([^;}{]+)/gi);
+  for (const match of matches) {
+    for (const raw of match[1].split(",")) {
+      const font = raw.trim().replace(/^['"]|['"]$/g, "").replace(/\s+/g, " ");
+      if (!font || /^(serif|sans-serif|monospace|system-ui|inherit|initial)$/i.test(font)) continue;
+      counts.set(font, (counts.get(font) ?? 0) + 1);
+    }
+  }
+}
+
+function schemaTypes($: cheerio.CheerioAPI) {
+  const types = new Set<string>();
+  $('script[type="application/ld+json"]').each((_, element) => {
+    const raw = $(element).html();
+    if (!raw) return;
+    try {
+      const value = JSON.parse(raw) as unknown;
+      const walk = (node: unknown) => {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+        const record = node as Record<string, unknown>;
+        const type = record["@type"];
+        if (typeof type === "string") types.add(type);
+        else if (Array.isArray(type)) for (const item of type) if (typeof item === "string") types.add(item);
+        for (const child of Object.values(record)) if (child && typeof child === "object") walk(child);
+      };
+      walk(value);
+    } catch { /* malformed JSON-LD is ignored */ }
+  });
+  return [...types].slice(0, 16);
+}
+
+function pageSignals(html: string, pageUrl: URL): PageSignals {
+  const $ = cheerio.load(html);
+  const headings = $("h1,h2,h3").map((_, element) => $(element).text().replace(/\s+/g, " ").trim()).get().filter(Boolean).slice(0, 20);
+  const imageUrls = new Set<string>();
+  $("img[src],img[data-src],source[srcset]").each((_, element) => {
+    const raw = $(element).attr("src") || $(element).attr("data-src") || ($(element).attr("srcset") ?? "").split(",")[0]?.trim().split(/\s+/)[0];
+    const absolute = absoluteHttpUrl(raw, pageUrl);
+    if (absolute) imageUrls.add(absolute);
+  });
+  const canonicalUrl = absoluteHttpUrl($('link[rel="canonical"]').first().attr("href"), pageUrl);
+  const ogImageUrl = absoluteHttpUrl($('meta[property="og:image"]').first().attr("content") || $('meta[name="twitter:image"]').first().attr("content"), pageUrl);
+  if (ogImageUrl) imageUrls.add(ogImageUrl);
+  return { canonicalUrl, headings, imageUrls: [...imageUrls].slice(0, 8), ogImageUrl, schemaTypes: schemaTypes($) };
+}
+
+function collectRootHints(html: string, root: URL) {
+  const $ = cheerio.load(html);
+  const colorCounts = new Map<string, number>();
+  const fontCounts = new Map<string, number>();
+  const inlineStyles = [
+    $('meta[name="theme-color"]').attr("content") ?? "",
+    $("style").map((_, element) => $(element).html() ?? "").get().join("\n"),
+    $("[style]").map((_, element) => $(element).attr("style") ?? "").get().join("\n"),
+  ].join("\n");
+  extractColors(inlineStyles, colorCounts);
+  extractFontFamilies(inlineStyles, fontCounts);
 
   const socialLinks: Record<string, string> = {};
   for (const href of $("a[href]").map((_, element) => $(element).attr("href") ?? "").get()) {
-    if (!href) continue;
-    let absolute: URL;
-    try { absolute = new URL(href, root); } catch { continue; }
+    const absoluteText = absoluteHttpUrl(href, root);
+    if (!absoluteText) continue;
+    const absolute = new URL(absoluteText);
     const host = absolute.hostname.toLowerCase().replace(/^www\./, "");
     if (!socialLinks.instagram && host === "instagram.com") socialLinks.instagram = absolute.toString();
     if (!socialLinks.facebook && (host === "facebook.com" || host === "fb.com")) socialLinks.facebook = absolute.toString();
@@ -111,12 +195,44 @@ function rootVisualHints(html: string, root: URL): WebsiteVisualHints {
     if (!socialLinks.googleBusinessProfile && (host === "g.page" || host === "business.google.com" || host === "maps.google.com" || host === "google.com" && absolute.pathname.startsWith("/maps"))) socialLinks.googleBusinessProfile = absolute.toString();
   }
 
-  const logoCandidate = $('img[alt*="logo" i]').first().attr("src") || $('link[rel="apple-touch-icon"]').first().attr("href") || $('link[rel="icon"]').first().attr("href") || null;
-  let logoUrl: string | null = null;
-  if (logoCandidate) {
-    try { logoUrl = new URL(logoCandidate, root).toString(); } catch { logoUrl = null; }
+  const logoCandidates = new Set<string>();
+  const addLogo = (raw: string | undefined) => { const absolute = absoluteHttpUrl(raw, root); if (absolute) logoCandidates.add(absolute); };
+  $("img").each((_, element) => {
+    const alt = ($(element).attr("alt") ?? "").toLowerCase();
+    const classes = ($(element).attr("class") ?? "").toLowerCase();
+    const id = ($(element).attr("id") ?? "").toLowerCase();
+    if (alt.includes("logo") || classes.includes("logo") || id.includes("logo")) addLogo($(element).attr("src") || $(element).attr("data-src"));
+  });
+  addLogo($('meta[property="og:logo"]').attr("content"));
+  addLogo($('link[rel="apple-touch-icon"]').attr("href"));
+  addLogo($('link[rel~="icon"]').attr("href"));
+
+  const stylesheetUrls = new Set<string>();
+  $('link[rel="stylesheet"][href]').each((_, element) => { const absolute = absoluteHttpUrl($(element).attr("href"), root); if (absolute) stylesheetUrls.add(absolute); });
+
+  return { colorCounts, fontCounts, socialLinks, logoCandidates, stylesheetUrls };
+}
+
+async function enrichStylesheets(
+  stylesheetUrls: string[],
+  fetcher: typeof fetch,
+  validateTarget: CrawlOptions["validateTarget"],
+  colorCounts: Map<string, number>,
+  fontCounts: Map<string, number>,
+) {
+  for (const href of stylesheetUrls.slice(0, MAX_STYLESHEETS)) {
+    try {
+      const url = new URL(href);
+      await validateTarget?.(url);
+      const response = await fetcher(url.toString(), { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/css,*/*;q=0.5" }, signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) continue;
+      const type = (response.headers.get("content-type") ?? "").toLowerCase();
+      if (type && !type.includes("text/css")) continue;
+      const css = (await response.text()).slice(0, MAX_STYLE_CHARS);
+      extractColors(css, colorCounts);
+      extractFontFamilies(css, fontCounts);
+    } catch { /* visual enrichment must never break the crawl */ }
   }
-  return { colors, socialLinks, logoUrl };
 }
 
 function parseRobots(text: string) {
@@ -198,9 +314,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const disallow = robotsText ? parseRobots(robotsText) : [];
   const queue: QueueItem[] = [{ url: normalizedRoot, depth: 0, discoveredFrom: null }];
   if (options.includeSitemap !== false) {
-    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxPages)) {
-      if (url !== normalizedRoot) queue.push({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
-    }
+    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxPages)) if (url !== normalizedRoot) queue.push({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
   }
 
   const known = new Set(queue.map((item) => item.url));
@@ -208,7 +322,8 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const pages: CrawlPage[] = [];
   const startedAt = Date.now();
   let stopReason: CrawlResult["stopReason"] = "COMPLETE";
-  let visualHints: WebsiteVisualHints = { colors: [], socialLinks: {}, logoUrl: null };
+  let visualHints = emptyVisualHints();
+  let rootEnriched = false;
 
   while (queue.length) {
     if (visited.size >= maxPages) { stopReason = "PAGE_LIMIT"; break; }
@@ -218,14 +333,9 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
     visited.add(item.url);
     const url = new URL(item.url);
 
-    if (item.depth > maxDepth) {
-      pages.push({ url: item.url, normalizedUrl: item.url, status: "SKIPPED", depth: item.depth, title: null, metaDescription: null, contentText: null, contentHash: null, discoveredFrom: item.discoveredFrom, skipReason: "MAX_DEPTH", error: null });
-      continue;
-    }
-    if (!isRobotsAllowed(url, disallow)) {
-      pages.push({ url: item.url, normalizedUrl: item.url, status: "SKIPPED", depth: item.depth, title: null, metaDescription: null, contentText: null, contentHash: null, discoveredFrom: item.discoveredFrom, skipReason: "ROBOTS_DISALLOW", error: null });
-      continue;
-    }
+    const baseSkipped = { url: item.url, normalizedUrl: item.url, depth: item.depth, title: null, metaDescription: null, contentText: null, contentHash: null, discoveredFrom: item.discoveredFrom, error: null, signals: null };
+    if (item.depth > maxDepth) { pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "MAX_DEPTH" }); continue; }
+    if (!isRobotsAllowed(url, disallow)) { pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "ROBOTS_DISALLOW" }); continue; }
 
     try {
       await options.validateTarget?.(url);
@@ -236,14 +346,33 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
       if (!response.ok) throw new Error(`HTTP_${response.status}`);
       const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
       if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
-        pages.push({ url: item.url, normalizedUrl: item.url, status: "SKIPPED", depth: item.depth, title: null, metaDescription: null, contentText: null, contentHash: null, discoveredFrom: item.discoveredFrom, skipReason: "NON_HTML", error: null });
+        pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "NON_HTML" });
         continue;
       }
       const html = await safeText(response, maxContentChars);
       const { title, description, hrefs } = pageMetadata(html);
-      if (item.depth === 0) visualHints = rootVisualHints(html, finalUrl);
+      const signals = pageSignals(html, finalUrl);
       const contentText = plainText(html).slice(0, maxContentChars);
-      pages.push({ url: finalUrl.toString(), normalizedUrl: item.url, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null });
+      pages.push({ url: finalUrl.toString(), normalizedUrl: item.url, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null, signals });
+
+      if (visualHints.pageSignals.length < MAX_PAGE_SIGNALS) visualHints.pageSignals.push({ url: finalUrl.toString(), ...signals });
+      for (const imageUrl of signals.imageUrls) if (visualHints.imageUrls.length < MAX_IMAGES && !visualHints.imageUrls.includes(imageUrl)) visualHints.imageUrls.push(imageUrl);
+
+      if (item.depth === 0 && !rootEnriched) {
+        const rootHints = collectRootHints(html, finalUrl);
+        await enrichStylesheets([...rootHints.stylesheetUrls], fetcher, options.validateTarget, rootHints.colorCounts, rootHints.fontCounts);
+        visualHints = {
+          ...visualHints,
+          colors: [...rootHints.colorCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([color]) => color),
+          fontFamilies: [...rootHints.fontCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([font]) => font),
+          socialLinks: rootHints.socialLinks,
+          logoCandidates: [...rootHints.logoCandidates].slice(0, 8),
+          logoUrl: [...rootHints.logoCandidates][0] ?? null,
+          stylesheetUrls: [...rootHints.stylesheetUrls].slice(0, MAX_STYLESHEETS),
+        };
+        rootEnriched = true;
+      }
+
       if (item.depth < maxDepth) {
         for (const href of hrefs) {
           const normalized = normalizeCrawlUrl(href, root);
@@ -253,7 +382,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
         }
       }
     } catch (reason) {
-      pages.push({ url: item.url, normalizedUrl: item.url, status: "FAILED", depth: item.depth, title: null, metaDescription: null, contentText: null, contentHash: null, discoveredFrom: item.discoveredFrom, skipReason: null, error: reason instanceof Error ? reason.message : "UNKNOWN_ERROR" });
+      pages.push({ ...baseSkipped, status: "FAILED", skipReason: null, error: reason instanceof Error ? reason.message : "UNKNOWN_ERROR" });
     }
   }
 
