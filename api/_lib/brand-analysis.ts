@@ -2,13 +2,13 @@ import { estimateTerraCostUsd, type OpenAITextUsage } from "./openai-text.js";
 
 export type WebsiteVisualHints = {
   colors: string[];
-  fontFamilies: string[];
+  fontFamilies?: string[];
   socialLinks: Record<string, string>;
   logoUrl: string | null;
-  logoCandidates: string[];
-  imageUrls: string[];
-  stylesheetUrls: string[];
-  pageSignals: Array<{
+  logoCandidates?: string[];
+  imageUrls?: string[];
+  stylesheetUrls?: string[];
+  pageSignals?: Array<{
     url: string;
     canonicalUrl: string | null;
     headings: string[];
