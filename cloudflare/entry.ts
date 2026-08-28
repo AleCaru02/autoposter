@@ -42,12 +42,47 @@ async function withFreshMetaConsent(response: Response) {
     if (typeof body.url !== "string") return response;
     const authorizationUrl = new URL(body.url);
     if (authorizationUrl.hostname !== "www.facebook.com") return response;
+    const scopes = (authorizationUrl.searchParams.get("scope") || "").split(",").map((scope) => scope.trim()).filter(Boolean);
+    if (!scopes.includes("business_management")) scopes.push("business_management");
+    authorizationUrl.searchParams.set("scope", scopes.join(","));
     authorizationUrl.searchParams.set("auth_type", "rerequest");
     authorizationUrl.searchParams.set("return_scopes", "true");
     return new Response(JSON.stringify({ ...body, url: authorizationUrl.toString() }), {
       status: response.status,
       headers: response.headers,
     });
+  } catch {
+    return response;
+  }
+}
+
+function oauthProfileId(request: Request) {
+  try {
+    const state = new URL(request.url).searchParams.get("state") || "";
+    const encoded = state.split(".")[0];
+    if (!encoded) return null;
+    const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((encoded.length + 3) % 4);
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as { profileId?: unknown };
+    return typeof payload.profileId === "string" && /^[0-9a-f-]{36}$/i.test(payload.profileId) ? payload.profileId : null;
+  } catch {
+    return null;
+  }
+}
+
+function withOAuthProfileRedirect(request: Request, response: Response) {
+  if (response.status < 300 || response.status >= 400) return response;
+  const location = response.headers.get("location");
+  const profileId = oauthProfileId(request);
+  if (!location || !profileId) return response;
+  try {
+    const target = new URL(location, request.url);
+    target.searchParams.set("profileId", profileId);
+    const headers = new Headers(response.headers);
+    headers.set("location", target.toString());
+    return new Response(null, { status: response.status, headers });
   } catch {
     return response;
   }
@@ -89,7 +124,11 @@ export default {
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path.startsWith("/api/social/")) {
       const response = await handleSocialApi(request, env);
-      if (response) return path === "/api/social/connect" ? withFreshMetaConsent(response) : response;
+      if (response) {
+        if (path === "/api/social/connect") return withFreshMetaConsent(response);
+        if (path.startsWith("/api/social/callback/")) return withOAuthProfileRedirect(request, response);
+        return response;
+      }
     }
     return worker.fetch(request, env);
   },
@@ -98,7 +137,7 @@ export default {
       ctx.waitUntil(processDuePublications(env).then((result) => {
         console.log("social-publication-run", result);
       }).catch((reason) => {
-        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
+        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown" });
       }));
       return;
     }
@@ -106,7 +145,7 @@ export default {
     ctx.waitUntil(runContentAutopilot(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
-      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown");
+      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown" });
     }));
   },
 };
