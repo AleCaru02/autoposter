@@ -21,9 +21,10 @@ function requestHeaders(req: VercelRequest) {
   return headers;
 }
 
-function requestBody(req: VercelRequest) {
+function requestBody(req: VercelRequest): BodyInit | undefined {
   if (req.method === "GET" || req.method === "HEAD" || req.body === undefined || req.body === null) return undefined;
-  if (typeof req.body === "string" || req.body instanceof Uint8Array) return req.body;
+  if (typeof req.body === "string") return req.body;
+  if (req.body instanceof Uint8Array) return Buffer.from(req.body).toString("utf8");
   return JSON.stringify(req.body);
 }
 
