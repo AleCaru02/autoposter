@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 
@@ -24,6 +25,7 @@ type PreferredSlot = { day: number; time: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type JobRow = { provider: SocialProvider; scheduled_at: string };
 type RecentItemRow = { topic: string };
+type RecentContentRow = { id: string; topic: string; title: string | null; hook: string | null; caption: string | null };
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 
@@ -267,6 +269,24 @@ async function recentTopics(sql: Sql, profileId: string) {
   return rows.map((row) => row.topic).filter(Boolean);
 }
 
+async function recentContentForDedupe(sql: Sql, profileId: string): Promise<ContentDedupeCandidate[]> {
+  const rows = await sql`
+    select ci.id,ci.topic,ci.title,cv.hook,cv.caption
+    from public.content_items ci
+    left join lateral (
+      select hook,caption
+      from public.content_variants
+      where profile_id=${profileId}::uuid and content_id=ci.id
+      order by updated_at desc
+      limit 1
+    ) cv on true
+    where ci.profile_id=${profileId}::uuid
+    order by ci.created_at desc
+    limit 40
+  ` as unknown as RecentContentRow[];
+  return rows.map((row) => ({ id: row.id, topic: row.topic ?? "", angle: row.title, hook: row.hook, caption: row.caption }));
+}
+
 async function recentVariantCount(sql: Sql, profileId: string, provider: SocialProvider) {
   const rows = await sql`select count(*)::int as count from public.content_variants where profile_id=${profileId}::uuid and provider=${provider}` as unknown as CountRow[];
   return Number(rows[0]?.count ?? 0);
@@ -301,18 +321,18 @@ async function createPlannedContent(input: {
   const count = await recentVariantCount(sql, profile.id, provider);
   const format = chooseFormat(provider, count);
   const objective = strings(strategy?.objectives)[0] ?? context.goals[0] ?? null;
-  const topic = [
+  const topicRequest = [
     "Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.",
     "Usa esclusivamente i fatti confermati dal sito e dal brand.",
     `Il contenuto è destinato a ${provider} nel formato ${format}.`,
     topics.length ? `Evita di ripetere questi temi recenti: ${topics.join(" | ")}.` : "Evita temi generici e ripetitivi.",
   ].join(" ");
-  const upper = estimateTextRequestUpperBoundUsd({ topic, objective, providers: [provider], formats: [format], brand: context });
+  const upper = estimateTextRequestUpperBoundUsd({ topic: topicRequest, objective, providers: [provider], formats: [format], brand: context });
   if (budget.textSpent >= budget.textLimit || budget.textSpent + upper > budget.textLimit) throw new Error("AUTOPILOT_TEXT_BUDGET_REACHED");
 
   const generated = await generateSocialText({
     apiKey: env.OPENAI_API_KEY,
-    topic,
+    topic: topicRequest,
     objective,
     providers: [provider],
     formats: [format],
@@ -320,17 +340,29 @@ async function createPlannedContent(input: {
     cacheKey: `post-automatici:${profile.id}`,
   });
   budget.textSpent += generated.usage.estimatedCostUsd ?? 0;
-  await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
-            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format })}::jsonb)`;
-
   const variant = generated.content.variants.find((item) => item.provider === provider && item.format === format);
   if (!variant) throw new Error("AUTOPILOT_VARIANT_MISSING");
+
+  await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
+            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format, editorial_topic: generated.content.editorialTopic, editorial_angle: generated.content.editorialAngle })}::jsonb)`;
+
+  const duplicate = findNearDuplicate({
+    topic: generated.content.editorialTopic,
+    angle: generated.content.editorialAngle,
+    hook: variant.hook,
+    caption: variant.caption,
+  }, await recentContentForDedupe(sql, profile.id));
+  if (duplicate) {
+    console.info("autopilot-dedupe", { profileId: profile.id, provider, score: duplicate.score, matchedContentId: duplicate.candidate.id ?? null });
+    throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
+  }
+
   const contentId = crypto.randomUUID();
   const variantId = crypto.randomUUID();
   const now = new Date().toISOString();
 
   await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,updated_at)
-            values (${contentId}::uuid,${profile.id}::uuid,${topic},${objective},${generated.content.strategySummary.slice(0,240)},'IN_REVIEW',${now}::timestamptz)`;
+            values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${now}::timestamptz)`;
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,approval_status,updated_at)
             values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},'PENDING',${now}::timestamptz)`;
 
