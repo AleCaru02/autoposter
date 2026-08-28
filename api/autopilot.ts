@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runContentAutopilot, type AutopilotEnv } from "./_lib/autopilot.js";
+import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
+import type { AutopilotEnv } from "./_lib/autopilot.js";
 
 export const config = { maxDuration: 300 };
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neondb/rest/v1";
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -48,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!runtime.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
 
   try {
-    const result = await runContentAutopilot(runtime, { profileId, maxGenerations: 6 });
+    const result = await runContentAutopilotSerialized(runtime, { profileId, maxGenerations: 6 });
     return res.status(200).json(result);
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "AUTOPILOT_RUN_FAILED";
