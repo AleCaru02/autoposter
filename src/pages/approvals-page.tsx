@@ -120,7 +120,7 @@ export function ApprovalsPage() {
       dirtyVariantIdsRef.current.delete(variant.id);
       setSaveStatus((current) => ({ ...current, [variant.id]: "SAVED" }));
       setVariants((current) => {
-        const next = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" } : row);
+        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" as const } : row);
         variantsRef.current = next;
         return next;
       });
