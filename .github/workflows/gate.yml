@@ -35,6 +35,8 @@ jobs:
         run: npm run test:calendar-workflow
       - name: Social integration contract
         run: npm run test:social
+      - name: Social metrics contract
+        run: npm run test:social-metrics
       - name: Autopilot route contract
         run: npm run test:autopilot-route
       - name: OpenAI text contract
