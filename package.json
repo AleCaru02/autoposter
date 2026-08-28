@@ -12,6 +12,7 @@
     "deploy:cloudflare": "npm run build && wrangler deploy",
     "dev:cloudflare": "npm run build && wrangler dev",
     "test:crawler": "tsx tests/crawler.test.ts",
+    "test:site-intelligence": "tsx tests/site-intelligence.test.ts",
     "test:openai": "tsx tests/openai-text.test.ts",
     "test:openai-live": "tsx tests/openai-live.test.ts",
     "test:openai-image": "tsx tests/openai-image.test.ts",
