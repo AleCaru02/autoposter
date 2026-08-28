@@ -27,6 +27,8 @@ jobs:
         run: npm run test:site-intelligence
       - name: Editorial intelligence regression
         run: npm run test:editorial-intelligence
+      - name: Learning engine regression
+        run: npm run test:learning-engine
       - name: Content workflow regression
         run: npm run test:content-workflow
       - name: Content semantic dedupe regression
