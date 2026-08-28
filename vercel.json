@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/social/:path*", "destination": "/api/social?path=:path*" },
+    { "source": "/api/autopilot/:path*", "destination": "/api/autopilot?path=:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
