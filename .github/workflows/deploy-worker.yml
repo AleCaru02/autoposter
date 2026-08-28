@@ -20,8 +20,20 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
+      - name: Crawler regression
+        run: npm run test:crawler
+      - name: Content workflow regression
+        run: npm run test:content-workflow
+      - name: Calendar workflow regression
+        run: npm run test:calendar-workflow
       - name: Social integration contract
         run: npm run test:social
+      - name: Autopilot route contract
+        run: npm run test:autopilot-route
+      - name: OpenAI text contract
+        run: npm run test:openai
+      - name: OpenAI image contract
+        run: npm run test:openai-image
       - name: Build
         run: npm run build
       - name: Cloudflare dry run
