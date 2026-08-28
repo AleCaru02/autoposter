@@ -65,6 +65,7 @@ export function ApprovalsPage() {
   const [error, setError] = useState<string | null>(null);
   const draftsRef = useRef<Record<string, DraftFields>>({});
   const variantsRef = useRef<ContentVariantRow[]>([]);
+  const dirtyVariantIdsRef = useRef(new Set<string>());
   const saveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const reload = useCallback(async () => {
@@ -80,6 +81,7 @@ export function ApprovalsPage() {
       setAssets(workflow.assets);
       setDrafts(nextDrafts);
       draftsRef.current = nextDrafts;
+      dirtyVariantIdsRef.current.clear();
       setSaveStatus(Object.fromEntries(workflow.variants.map((variant) => [variant.id, "SAVED"])));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Impossibile caricare i contenuti.");
@@ -97,15 +99,15 @@ export function ApprovalsPage() {
     return map;
   }, [variants]);
 
-  async function persistVariant(variant: ContentVariantRow, draft = draftsRef.current[variant.id] ?? draftFromVariant(variant)) {
-    if (!selectedProfile) return;
+  async function persistVariant(variant: ContentVariantRow, draft = draftsRef.current[variant.id] ?? draftFromVariant(variant), profileId = selectedProfile?.id) {
+    if (!profileId) return;
     const existingTimer = saveTimersRef.current[variant.id];
     if (existingTimer) clearTimeout(existingTimer);
     delete saveTimersRef.current[variant.id];
     setSaveStatus((current) => ({ ...current, [variant.id]: "SAVING" }));
     try {
       await updateVariant({
-        profileId: selectedProfile.id,
+        profileId,
         variantId: variant.id,
         contentId: variant.content_id,
         hook: draft.hook,
@@ -115,8 +117,13 @@ export function ApprovalsPage() {
         visualBrief: draft.visualBrief,
         altText: draft.altText,
       });
+      dirtyVariantIdsRef.current.delete(variant.id);
       setSaveStatus((current) => ({ ...current, [variant.id]: "SAVED" }));
-      setVariants((current) => current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" } : row));
+      setVariants((current) => {
+        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" as const } : row);
+        variantsRef.current = next;
+        return next;
+      });
       setItems((current) => current.map((item) => item.id === variant.content_id ? { ...item, status: "IN_REVIEW" } : item));
     } catch (reason) {
       setSaveStatus((current) => ({ ...current, [variant.id]: "ERROR" }));
@@ -125,24 +132,34 @@ export function ApprovalsPage() {
   }
 
   function setDraftField(variant: ContentVariantRow, field: keyof DraftFields, value: string) {
+    const profileId = selectedProfile?.id;
+    if (!profileId) return;
     const currentDraft = draftsRef.current[variant.id] ?? draftFromVariant(variant);
     const next = { ...currentDraft, [field]: value };
     draftsRef.current = { ...draftsRef.current, [variant.id]: next };
+    dirtyVariantIdsRef.current.add(variant.id);
     setDrafts((current) => ({ ...current, [variant.id]: next }));
     setSaveStatus((current) => ({ ...current, [variant.id]: "WAITING" }));
     const existingTimer = saveTimersRef.current[variant.id];
     if (existingTimer) clearTimeout(existingTimer);
     saveTimersRef.current[variant.id] = setTimeout(() => {
-      void persistVariant(variant, draftsRef.current[variant.id]).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."));
+      void persistVariant(variant, draftsRef.current[variant.id], profileId).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."));
     }, 500);
   }
 
-  useEffect(() => () => {
-    for (const timer of Object.values(saveTimersRef.current)) clearTimeout(timer);
-    for (const variant of variantsRef.current) {
-      if (saveStatus[variant.id] === "WAITING") void persistVariant(variant).catch(() => undefined);
-    }
-  }, []);
+  useEffect(() => {
+    const profileId = selectedProfile?.id;
+    return () => {
+      for (const timer of Object.values(saveTimersRef.current)) clearTimeout(timer);
+      saveTimersRef.current = {};
+      if (!profileId) return;
+      const dirtyIds = new Set(dirtyVariantIdsRef.current);
+      for (const variant of variantsRef.current) {
+        if (!dirtyIds.has(variant.id)) continue;
+        void persistVariant(variant, draftsRef.current[variant.id], profileId).catch(() => undefined);
+      }
+    };
+  }, [selectedProfile?.id]);
 
   async function run(key: string, task: () => Promise<void>) {
     if (busy[key]) return;

@@ -1,0 +1,162 @@
+/* Mobile/iPhone interaction hardening. Keep actionable controls at least 44px. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+@media (pointer: coarse), (max-width: 760px) {
+  button,
+  .primary-button,
+  .secondary-button,
+  .compact-action,
+  .icon-danger,
+  .nav-link,
+  .mobile-nav-link {
+    min-height: 44px;
+  }
+
+  .password-toggle {
+    width: 44px;
+    height: 44px;
+    right: 2px;
+  }
+
+  .password-input-wrap input {
+    min-height: 44px;
+    padding-right: 50px;
+  }
+
+  .mobile-nav-link {
+    align-content: center;
+    padding: 4px 2px;
+  }
+
+  .mobile-more-trigger {
+    width:100%;
+    border:0;
+    background:transparent;
+    font-size:9px;
+    font-weight:inherit;
+  }
+
+  .mobile-more-backdrop {
+    position:fixed;
+    inset:0;
+    z-index:40;
+    display:flex;
+    align-items:flex-end;
+    background:rgba(16,28,45,.42);
+    padding:16px 12px calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-more-menu {
+    width:min(520px,100%);
+    max-height:min(72vh,640px);
+    margin:0 auto;
+    overflow:auto;
+    overscroll-behavior:contain;
+    border:1px solid #dce4ee;
+    border-radius:20px;
+    background:#fff;
+    box-shadow:0 24px 70px rgba(20,35,55,.22);
+    padding:14px;
+  }
+
+  .mobile-more-head {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    padding:2px 2px 12px;
+    border-bottom:1px solid #edf1f5;
+  }
+
+  .mobile-more-head>div {
+    min-width:0;
+    flex:1;
+  }
+
+  .mobile-more-head small {
+    display:block;
+    margin:0 0 6px;
+    color:#7b899b;
+    font-size:11px;
+    font-weight:800;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+  }
+
+  .mobile-profile-switcher {
+    padding:0;
+  }
+
+  .mobile-profile-switcher select {
+    min-height:44px;
+  }
+
+  .mobile-more-close {
+    flex:0 0 44px;
+    display:grid;
+    place-items:center;
+    width:44px;
+    height:44px;
+    border:1px solid #dce4ee;
+    border-radius:12px;
+    background:#fff;
+    color:#526178;
+  }
+
+  .mobile-more-links {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    padding:12px 0;
+  }
+
+  .mobile-more-links .nav-link {
+    border:1px solid transparent;
+    padding:11px 10px;
+  }
+
+  .mobile-more-links .nav-link.active {
+    border-color:#cfe8f0;
+  }
+
+  .mobile-signout {
+    width:100%;
+    justify-content:flex-start;
+    border:1px solid #efdada;
+    color:#9d2e2e;
+    background:#fff8f8;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .mobile-more-links {
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width: 360px) {
+  .page-content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .mobile-nav {
+    gap: 0;
+  }
+
+  .mobile-nav-link,
+  .mobile-more-trigger {
+    font-size: 8px;
+  }
+
+  .mobile-more-backdrop {
+    padding-left:8px;
+    padding-right:8px;
+  }
+}

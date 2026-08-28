@@ -9,11 +9,13 @@ import { DashboardPage } from "./pages/dashboard-page";
 import { ProfilesPage } from "./pages/profiles-page";
 import { BrandPage } from "./pages/brand-page";
 import { WebsiteScanPage } from "./pages/website-scan-page";
+import { ContentGeneratorPage } from "./pages/content-generator-page";
 import { ApprovalsPage } from "./pages/approvals-page";
 import { CalendarPage } from "./pages/calendar-page";
 import { SocialPage } from "./pages/social-page";
 import { SettingsPage } from "./pages/settings-page";
-import { PlaceholderPage } from "./pages/placeholder-page";
+import { AnalyticsPage } from "./pages/analytics-page";
+import { LearningPage } from "./pages/learning-page";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const session = authClient.useSession();
@@ -50,12 +52,12 @@ export default function App() {
       <Route path="profili" element={<ProfilesPage />} />
       <Route path="brand" element={<BrandPage />} />
       <Route path="sito" element={<WebsiteScanPage />} />
-      <Route path="contenuti" element={<Navigate to="/app/calendario" replace />} />
+      <Route path="contenuti" element={<ContentGeneratorPage />} />
       <Route path="approvazioni" element={<ApprovalsPage />} />
       <Route path="calendario" element={<CalendarPage />} />
       <Route path="social" element={<SocialPage />} />
-      <Route path="analytics" element={<PlaceholderPage title="Analytics" description="Metriche provenienti esclusivamente dalle API dei provider." dependency="social collegati" />} />
-      <Route path="apprendimento" element={<PlaceholderPage title="Apprendimento" description="Ottimizzazione progressiva di temi, giorni, orari e formati." dependency="metriche reali" />} />
+      <Route path="analytics" element={<AnalyticsPage />} />
+      <Route path="apprendimento" element={<LearningPage />} />
       <Route path="impostazioni" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />

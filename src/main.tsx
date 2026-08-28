@@ -10,6 +10,7 @@ import "./brand.css";
 import "./onboarding.css";
 import "./autosave.css";
 import "./social.css";
+import "./mobile-a11y.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
