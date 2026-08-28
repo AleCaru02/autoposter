@@ -1,4 +1,5 @@
 import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/content-dedupe.js";
+import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -11,7 +12,7 @@ type Env = {
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 };
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
@@ -89,7 +90,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   try {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-    const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals&limit=1`, token))[0] ?? null;
+    const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity&limit=1`, token))[0] ?? null;
     const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
     const pages = scan ? await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
     const context: BrandContext = {
@@ -105,18 +106,19 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
+    const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
 
     const budgetUsd = monthlyBudgetUsd(env);
     const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
-    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic, objective, providers, formats, brand: context });
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
     if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) return json({ error: "OPENAI_TEXT_BUDGET_REACHED", message: "Budget mensile testi raggiunto. Nessuna chiamata OpenAI è stata eseguita.", budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentBeforeUsd.toFixed(6)), estimatedNextMaxUsd: Number(requestUpperBoundUsd.toFixed(6)) } }, 429);
 
-    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
     await dataApi("ai_usage_events", token, {
       method: "POST",
       headers: { prefer: "return=minimal" },
-      body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_TEXT", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: actualCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, cached_input_tokens: result.usage.cachedInputTokens, cache_write_tokens: result.usage.cacheWriteTokens, requested_topic: topic, editorial_topic: result.content.editorialTopic, editorial_angle: result.content.editorialAngle } }),
+      body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_TEXT", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: actualCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, cached_input_tokens: result.usage.cachedInputTokens, cache_write_tokens: result.usage.cacheWriteTokens, requested_topic: topic, editorial_pillars_used: enriched.pillarCount, editorial_topic: result.content.editorialTopic, editorial_angle: result.content.editorialAngle } }),
     });
 
     const recent = await recentContentForDedupe(profileId, token);
