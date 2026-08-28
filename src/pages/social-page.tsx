@@ -112,7 +112,7 @@ async function apiJson<T>(url: string, token: string, init?: RequestInit): Promi
 }
 
 export function SocialPage() {
-  const { selectedProfile } = useProfiles();
+  const { selectedProfile, setSelectedProfileId } = useProfiles();
   const authSession = authClient.useSession();
   const sessionToken = tokenFromSession(authSession.data);
   const sessionPending = authSession.isPending;
@@ -152,13 +152,15 @@ export function SocialPage() {
     const connected = searchParams.get("connected") as Provider | null;
     const selection = searchParams.get("selection") as Provider | null;
     const socialError = searchParams.get("social_error");
+    const oauthProfileId = searchParams.get("profileId");
+    if (oauthProfileId && oauthProfileId !== selectedProfile?.id) setSelectedProfileId(oauthProfileId);
     if (connected && PROVIDER_LABELS[connected]) setNotice(`${PROVIDER_LABELS[connected]} collegato correttamente.`);
     else if (selection && PROVIDER_LABELS[selection]) setNotice(`Autorizzazione completata. Scegli quale account ${PROVIDER_LABELS[selection]} usare per questa attività.`);
     if (socialError) setError(readableError(socialError));
-    if (connected || selection || socialError) {
+    if (connected || selection || socialError || oauthProfileId) {
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, selectedProfile?.id, setSelectedProfileId]);
 
   async function connect(provider: Provider) {
     if (!selectedProfile?.id || busyProvider) return;
