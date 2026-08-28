@@ -24,7 +24,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, token ? { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } } : init);
+  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
 }
 
 async function readJsonRows<T>(path: string, token: string): Promise<T[]> {
