@@ -1,5 +1,6 @@
 import worker from "./worker.js";
-import { runContentAutopilot, type AutopilotEnv } from "../api/_lib/autopilot.js";
+import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
+import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -108,7 +109,7 @@ async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext
   } catch { /* handled below */ }
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-  ctx.waitUntil(runContentAutopilot(env, { profileId, maxGenerations: 6 }).then((result) => {
+  ctx.waitUntil(runContentAutopilotSerialized(env, { profileId, maxGenerations: 6 }).then((result) => {
     console.log("content-autopilot-profile", { profileId, ...result });
   }).catch((reason) => {
     console.error("autopilot-profile-failed", { profileId, detail: reason instanceof Error ? reason.message : "unknown" });
@@ -142,7 +143,7 @@ export default {
       return;
     }
 
-    ctx.waitUntil(runContentAutopilot(env).then((result) => {
+    ctx.waitUntil(runContentAutopilotSerialized(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
       console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown");
