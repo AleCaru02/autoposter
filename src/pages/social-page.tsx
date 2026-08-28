@@ -93,6 +93,10 @@ async function jwt(sessionToken?: string | null) {
   return token;
 }
 
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 async function apiJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -111,6 +115,7 @@ export function SocialPage() {
   const { selectedProfile } = useProfiles();
   const authSession = authClient.useSession();
   const sessionToken = tokenFromSession(authSession.data);
+  const sessionPending = authSession.isPending;
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -120,19 +125,26 @@ export function SocialPage() {
 
   const load = useCallback(async () => {
     const profileId = selectedProfile?.id;
-    if (!profileId) return;
+    if (!profileId || sessionPending) return;
     setLoading(true);
     setError(null);
-    try {
-      const token = await jwt(sessionToken);
-      const body = await apiJson<StatusResponse>(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, token);
-      setStatus(body);
-    } catch (reason) {
-      setError(readableError(reason instanceof Error ? reason.message : "SOCIAL_STATUS_FAILED"));
-    } finally {
-      setLoading(false);
+    let lastError: unknown = new Error("SOCIAL_STATUS_FAILED");
+    const retryDelays = [0, 300, 900];
+    for (const delay of retryDelays) {
+      if (delay) await wait(delay);
+      try {
+        const token = await jwt(sessionToken);
+        const body = await apiJson<StatusResponse>(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, token);
+        setStatus(body);
+        setLoading(false);
+        return;
+      } catch (reason) {
+        lastError = reason;
+      }
     }
-  }, [selectedProfile?.id, sessionToken]);
+    setError(readableError(lastError instanceof Error ? lastError.message : "SOCIAL_STATUS_FAILED"));
+    setLoading(false);
+  }, [selectedProfile?.id, sessionPending, sessionToken]);
 
   useEffect(() => { void load(); }, [load]);
 
