@@ -157,9 +157,8 @@ export function SocialPage() {
     if (socialError) setError(readableError(socialError));
     if (connected || selection || socialError) {
       setSearchParams({}, { replace: true });
-      void load();
     }
-  }, [searchParams, setSearchParams, load]);
+  }, [searchParams, setSearchParams]);
 
   async function connect(provider: Provider) {
     if (!selectedProfile?.id || busyProvider) return;
