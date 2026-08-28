@@ -148,7 +148,7 @@ export default {
     ctx.waitUntil(runContentAutopilotSerialized(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
-      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown" });
+      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown");
     }));
   },
 };
