@@ -23,6 +23,8 @@ jobs:
         run: npm run typecheck
       - name: Crawler regression
         run: npm run test:crawler
+      - name: Site intelligence regression
+        run: npm run test:site-intelligence
       - name: Content workflow regression
         run: npm run test:content-workflow
       - name: Content semantic dedupe regression
