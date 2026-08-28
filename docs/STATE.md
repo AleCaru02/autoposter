@@ -1,6 +1,6 @@
 # Stato operativo — Post Automatici
 
-Data audit: 2026-08-26
+Data audit: 2026-08-28
 
 ## Gate
 
@@ -8,94 +8,96 @@ Data audit: 2026-08-26
    - repository canonico: `AleCaru02/autoposter`
    - branch canonico: `main`
 2. GitHub/Lovable/Vercel stesso codice — PARTIAL
-   - GitHub è la fonte unica
-   - Lovable source-control nativo richiede autorizzazione GitHub nella UI Lovable; l'API disponibile non espone il collegamento
-   - per scelta operativa i gate vengono accumulati/testati su GitHub e verranno pubblicati con un deployment Vercel consolidato, non con un deployment per ogni modifica
+   - GitHub resta la fonte unica
+   - Lovable source-control nativo richiede autorizzazione GitHub nella UI Lovable
+   - il progetto Vercel canonico `post-automatici-canonical` risulta `link: null`: il collegamento GitHub del progetto canonico resta da configurare, senza creare copie sostitutive
 3. PostgreSQL reale — PASS
    - Neon project dedicato `post-automatici`
-   - test insert -> nuova query -> read riuscito
+   - persistenza e RLS già verificate
    - nessun uso di SQLite
-4. Health check reale — PARTIAL
-   - il nuovo health check non può dichiarare ready se il database non è configurato/raggiungibile
-   - verifica finale su deployment canonico ancora pendente
+4. Health check reale — BLOCKED RUNTIME CONFIG
+   - `/api/health` è fail-closed: non dichiara ready senza database realmente raggiungibile
+   - verifica live 28/08/2026 sul Vercel canonico: HTTP 503, `database=not_configured`
+   - la dashboard ora legge il vero health check e non mostra più PostgreSQL `Attivo` in modo hardcoded
+   - il PASS richiede `DATABASE_URL` configurato sul progetto Vercel canonico e successivo health 200 con `database=postgres_ready`
 5. Autenticazione reale — PASS
    - Neon Auth provisionato
-   - smoke test reale signup 200 + signin 200 + persistenza utente verificata
-6. Profili isolati — PASS BACKEND / RUNTIME VERCEL PENDING
+   - smoke test reale signup/signin e persistenza già verificati
+6. Profili isolati — PASS BACKEND / CANONICAL VERCEL PENDING
    - profili senza limite applicativo
    - Neon Data API + PostgreSQL RLS
-   - test A/B: B vede 0 righe di A e modifica 0 righe di A
-7. Dashboard/onboarding/routes — PASS CI / RUNTIME VERCEL PENDING
+   - test A/B di isolamento già PASS
+   - selezione profilo migliorata anche da tastiera; eliminazione protetta contro doppio invio
+   - autosave Brand/Impostazioni vincolato al profilo della bozza: un cambio attività non può dirottare una scrittura pendente sul profilo successivo
+7. Dashboard/onboarding/routes — PASS SOURCE+CI / CANONICAL VERCEL PENDING
    - route reali presenti
-   - redirect onboarding funzionante a livello codice
-   - GitHub Gate: typecheck + build PASS
-8. Brand persistente — PASS PERSISTENCE / RUNTIME VERCEL PENDING
-   - create -> read -> update -> read verificato su PostgreSQL
-   - dati isolati per profile_id
-9. Crawler pagina-per-pagina — PASS ENGINE+STORAGE / RUNTIME VERCEL PENDING
-   - regressione: 5 pagine analizzate, robots rispettato, sitemap inclusa, dominio isolato
-   - persistenza scansione/pagine verificata in nuova query
-   - protezioni SSRF incluse
+   - `/app/contenuti` è ora una route reale e non viene più reindirizzata al Calendario
+   - navigazione desktop espone tutte le sezioni del prodotto
+   - navigazione mobile espone Contenuti e un menu `Altro` con Attività, Brand, Sito, Revisioni, Analytics, Apprendimento, Impostazioni, selettore attività e logout
+8. Brand persistente — PASS PERSISTENCE+SOURCE / CANONICAL VERCEL PENDING
+   - create/read/update/read già verificato su PostgreSQL
+   - dati isolati per `profile_id`
+   - autosave hardenizzato contro perdita dati/cross-profile durante cambio attività
+9. Crawler pagina-per-pagina — PASS ENGINE+STORAGE+CI / CANONICAL VERCEL PENDING
+   - sitemap e collegamenti interni, robots, dominio isolato e protezioni SSRF
+   - regressione e persistenza già PASS
 10. OpenAI testi — PASS
-   - Responses API + Structured Outputs implementati
-   - modello finale bloccato su `gpt-5.6-terra`; nessun downgrade a Luna per risparmiare
-   - reasoning medio e verifica completezza varianti
-   - una singola chiamata genera tutte le piattaforme/formati richiesti
-   - selezione locale delle pagine sito pertinenti + grounding su dati confermati
+   - Responses API + Structured Outputs
+   - modello finale bloccato sul modello previsto dal progetto
+   - grounding su pagine sito confermate
    - tracking utilizzo in `ai_usage_events`
-   - nessuna generazione automatica in background
-   - prova live reale del 26/08/2026: `PASS OpenAI live: gpt-5.6-terra, response ricevuta, structured output valido.`
-   - live probe CI reso esplicito/on-demand per evitare costi ricorrenti
+   - live probe già PASS; probe ricorrenti disabilitati per evitare costi inutili
    - nessun fallback/mock se la chiave manca
-11. OpenAI immagini — PASS API+CI / RUNTIME VERCEL PENDING
-   - modello consentito esclusivamente `gpt-image-2`
-   - Images API server-side, chiave mai esposta al client
-   - qualità finale `high`; il controllo costi riduce chiamate inutili e non degrada il modello
-   - una immagine per azione esplicita; nessuna generazione automatica
-   - dimensione 1024x1024 per post/carosello e 1024x1536 per storie
-   - limite applicativo predefinito 20 generazioni immagini/mese, configurabile
-   - utilizzo e costo tecnico stimato da token registrabili in `ai_usage_events`; la UI utente resta in euro
-   - contract test PASS: solo `gpt-image-2`, qualità high, n=1, PNG, protezione chiave e anti-invenzione
-   - prova live reale del 26/08/2026: `PASS OpenAI image live: gpt-image-2, quality=high, size=1024x1024, immagine reale ricevuta.`
-   - prova live resa on-demand dopo il PASS per evitare ulteriori spese CI
-12. Workflow contenuti — PASS SOURCE+DB+CI / RUNTIME VERCEL PENDING
-   - generazione testo non crea record fantasma: salvataggio esplicito in `content_items` + `content_variants`
-   - ogni variante mantiene provider/formato separati e stato `PENDING`, `APPROVED` o `CHANGES_REQUESTED`
-   - modifica persistente di hook, caption, CTA, hashtag, brief visuale e alt text
-   - una modifica o rigenerazione immagine riapre automaticamente la revisione
-   - stato contenuto coerente: `IN_REVIEW`, `APPROVED`, `CHANGES_REQUESTED`
-   - `/app/approvazioni` è una route reale con modifica, salva, approva, da correggere, riapri ed elimina
-   - immagini GPT-Image-2 salvabili nel profilo e collegate alla variante tramite `assets` + `image_asset_id`
-   - storage fase personale dichiarato `DATABASE_DATA_URL_V1`; non viene presentato come object storage definitivo SaaS
-   - caricamento approvazioni limitato ai 50 contenuti più recenti e ai soli asset referenziati
-   - RLS verificata sulle tre tabelle: `owns_profile(profile_id)` in lettura/scrittura
-   - test PostgreSQL reale: create -> edit -> asset link -> approve -> read -> cleanup PASS; leftovers 0
-   - test capacità storage: data URL da 3.000.022 caratteri persistita e rimossa correttamente
-   - GitHub Actions: typecheck, crawler, content workflow regression, contratti OpenAI e build PASS
-13. Calendario/frequenze — PASS SOURCE+DB+CI / RUNTIME VERCEL PENDING
-   - `/app/calendario` sostituisce il placeholder con una funzione reale e mobile-first
+11. OpenAI immagini — PASS API+CI / CANONICAL VERCEL PENDING
+   - esclusivamente `gpt-image-2`
+   - Images API server-side, qualità high, una generazione per azione esplicita
+   - limiti e usage tracking implementati
+   - live probe già PASS e reso on-demand
+12. Workflow contenuti — PASS SOURCE+DB+CI / CANONICAL VERCEL PENDING
+   - `/app/contenuti` raggiungibile realmente
+   - generazione, persistenza, modifica, approvazione, immagini e stati coerenti
+   - autosave Revisioni tiene traccia delle varianti sporche e forza il salvataggio quando si cambia pagina/profilo
+   - autosave condiviso di Brand/Impostazioni conserva il callback/profilo associato alla bozza originale
+   - l'autopilot Vercel dispone ora di endpoint reale `/api/autopilot/run`, verifica il bearer token e l'accesso al solo profilo richiesto prima di eseguire logica server-side
+   - contract test dedicato impedisce regressioni della route/rewrite Vercel
+13. Calendario/frequenze — PASS SOURCE+DB+CI / CANONICAL VERCEL PENDING
    - configurazione separata per Instagram, Facebook, LinkedIn e Google Business Profile
-   - per singolo profilo/social: abilitazione, post/settimana, fuso orario, auto-choice e slot preferiti giorno/ora
-   - `schedules` protetta da RLS `owns_profile(profile_id)` e indice univoco `(profile_id, provider)`
-   - solo varianti `eligible=true` e `APPROVED` possono entrare nel calendario
-   - i job usano stato `SCHEDULED`, mai `QUEUED`, finché OAuth/pubblicazione non sono realmente disponibili
-   - trigger DB verifica variante, profile/provider e approvazione anche contro chiamate client incoerenti
-   - modifica contenuto/rigenerazione immagine sospende automaticamente il job in `BLOCKED_APPROVAL`; la riapprovazione futura lo riporta a `SCHEDULED`
-   - creazione, spostamento e rimozione programmazione persistono in `publication_jobs`
-   - conversione `datetime-local` nel fuso del profilo verificata anche su ora legale Europe/Rome; orari inesistenti al cambio DST vengono rifiutati
-   - migrazione DB registrata in `db/migrations/20260826_gate13_calendar.sql`
-   - test PostgreSQL reale: frequenza -> variante approvata -> schedule -> reschedule -> read -> cleanup PASS; leftovers 0
-   - test negativo DB: variante `PENDING` rifiutata con `publication variant must be eligible and approved`
-   - test coerenza DB: `SCHEDULED -> BLOCKED_APPROVAL -> SCHEDULED` al cambio approvazione PASS
-   - GitHub Actions: typecheck, crawler, content workflow, calendar workflow, contratti OpenAI e build PASS; live probe OpenAI correttamente SKIP
-14. OAuth social — PROSSIMO GATE
-15. Pubblicazione reale — BLOCCATO DA 14
-16. Metriche reali — BLOCCATO DALLA SEQUENZA
-17. Apprendimento — BLOCCATO DALLA SEQUENZA
-18. Retry/errori — BLOCCATO DALLA SEQUENZA
-19. Bonifica nomi/config — BLOCCATO DALLA SEQUENZA
-20. QA iPhone/desktop — BLOCCATO DALLA SEQUENZA
-21. Link candidato — BLOCCATO FINO A TUTTI I PASS
+   - frequenza, fuso, auto-choice e slot per profilo/provider
+   - solo varianti eleggibili e approvate possono essere programmate
+   - stati e trigger DB già verificati
+14. OAuth social — PARTIAL / MANUAL PROVIDER TEST REQUIRED
+   - backend OAuth e storage token server-side esistono
+   - Meta richiede completamento manuale della selezione Pagine Facebook/Instagram e test reale dell'account
+   - Google Business Profile resta in attesa dell'accesso/approvazione Google
+   - nessun provider viene dichiarato collegato se il collegamento reale manca
+15. Pubblicazione reale — BLOCKED BY REAL SOCIAL CONNECTIONS
+   - pipeline e processor esistono
+   - il PASS richiede una pubblicazione controllata reale per ogni provider effettivamente collegato
+16. Metriche reali — UI REAL-READ READY / INGESTION BLOCKED
+   - `/app/analytics` legge esclusivamente `metric_snapshots` del profilo selezionato
+   - zero metriche demo o inventate; empty state esplicito finché non arrivano dati API reali
+   - raccolta live non può essere dichiarata PASS prima dei collegamenti social e delle relative API metriche
+17. Apprendimento — UI REAL-READ READY / ENGINE BLOCKED BY REAL METRICS
+   - `/app/apprendimento` legge esclusivamente `learning_insights` del profilo selezionato
+   - zero suggerimenti inventati
+   - ottimizzazione reale di giorni/orari/temi/formati resta bloccata finché non esiste una base di metriche reali sufficiente
+18. Retry/errori — SOURCE IMPLEMENTED / LIVE VALIDATION PENDING
+   - `publication_attempts` e tentativi di pubblicazione reali sono presenti
+   - errori permanenti di connessione/formato non vengono mascherati come successo
+   - validazione end-to-end di rate limit, token scaduto e 5xx resta legata ai provider reali
+19. Bonifica nomi/config — PARTIAL
+   - dashboard non dichiara più stati runtime falsi
+   - conteggio connessioni social allineato allo stato backend reale `ACTIVE`
+   - contratto frontend health allineato a `postgres_ready`
+   - resta da completare la configurazione canonica Vercel/GitHub/env; non viene aggirata con nuovi progetti
+20. QA iPhone/desktop — SOURCE HARDENED / AUTHENTICATED RUNTIME QA PENDING
+   - touch target mobile portati ad almeno 44 px sui controlli principali
+   - input mobile a 16 px per evitare zoom automatico iOS
+   - navigazione mobile completa e logout disponibili
+   - layout rinforzato anche per viewport <=360 px
+   - PASS finale richiede test browser autenticato su iPhone/viewport reali dopo il deployment canonico funzionante
+21. Link candidato — BLOCKED
+   - non viene dichiarato un link finale finché Vercel canonico, OAuth/pubblicazione e QA runtime richiesti non sono PASS
 
 ## Regola
-Un gate passa a PASS solo con evidenza verificabile. Nessuna integrazione viene mostrata come live se manca il collegamento reale.
+Un gate passa a PASS solo con evidenza verificabile. Nessuna integrazione, metrica, insight o stato runtime viene mostrato come live se manca il collegamento o il dato reale.
