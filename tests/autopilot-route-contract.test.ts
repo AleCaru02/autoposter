@@ -41,7 +41,21 @@ async function run() {
     const vercelConfig = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as { rewrites?: Array<{ source?: string; destination?: string }> };
     assert.equal(vercelConfig.rewrites?.some((rewrite) => rewrite.source === "/api/autopilot/:path*" && rewrite.destination === "/api/autopilot?path=:path*"), true, "Vercel must route /api/autopilot/run to the server handler");
 
-    console.log("autopilot route contract: PASS");
+    const serializedSource = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
+    assert.ok(serializedSource.includes("pg_advisory_lock"), "autopilot runs must acquire a PostgreSQL advisory lock");
+    assert.ok(serializedSource.includes("pg_advisory_unlock"), "autopilot runs must release the PostgreSQL advisory lock");
+    assert.ok(serializedSource.includes("runContentAutopilot(env, options)"), "serialized wrapper must execute the canonical autopilot implementation");
+
+    const vercelAutopilotSource = await readFile(new URL("../api/autopilot.ts", import.meta.url), "utf8");
+    assert.ok(vercelAutopilotSource.includes("runContentAutopilotSerialized"), "Vercel manual autopilot must use the serialized runner");
+
+    const workerEntrySource = await readFile(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
+    assert.ok(workerEntrySource.includes("runContentAutopilotSerialized(env, { profileId, maxGenerations: 6 })"), "Worker manual autopilot must use the serialized runner");
+    assert.ok(workerEntrySource.includes("runContentAutopilotSerialized(env)"), "Worker scheduled autopilot must use the serialized runner");
+    assert.ok(workerEntrySource.includes('path === "/api/generate-text"'), "Worker /api/generate-text must be intercepted before the legacy worker handler");
+    assert.ok(workerEntrySource.includes("handleWorkerGenerateText(request, env)"), "Worker text generation must use the dedupe-aware handler");
+
+    console.log("autopilot route contract: PASS — Vercel/Worker serialized and Worker text dedupe route guarded.");
   } finally {
     globalThis.fetch = previousFetch;
   }
