@@ -16,15 +16,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/json",
-      ...(init.body ? { "content-type": "application/json" } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
 }
 
 async function rows<T>(path: string, token: string): Promise<T[]> {
@@ -33,13 +25,48 @@ async function rows<T>(path: string, token: string): Promise<T[]> {
   return response.json() as Promise<T[]>;
 }
 
+function stringList(value: unknown, max: number) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, max) : [];
+}
+
+function safeUrl(value: unknown) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch { return null; }
+}
+
 function sanitizeVisualHints(value: unknown): WebsiteVisualHints {
-  if (!value || typeof value !== "object") return { colors: [], socialLinks: {}, logoUrl: null };
+  if (!value || typeof value !== "object") return { colors: [], fontFamilies: [], socialLinks: {}, logoUrl: null, logoCandidates: [], imageUrls: [], stylesheetUrls: [], pageSignals: [] };
   const input = value as Record<string, unknown>;
-  const colors = Array.isArray(input.colors) ? input.colors.filter((item): item is string => typeof item === "string").slice(0, 10) : [];
-  const socialLinks = input.socialLinks && typeof input.socialLinks === "object" ? Object.fromEntries(Object.entries(input.socialLinks as Record<string, unknown>).filter(([, item]) => typeof item === "string").map(([key, item]) => [key, String(item)])) : {};
-  const logoUrl = typeof input.logoUrl === "string" ? input.logoUrl : null;
-  return { colors, socialLinks, logoUrl };
+  const socialLinks = input.socialLinks && typeof input.socialLinks === "object"
+    ? Object.fromEntries(Object.entries(input.socialLinks as Record<string, unknown>).map(([key, item]) => [key, safeUrl(item)]).filter((entry): entry is [string, string] => Boolean(entry[1])))
+    : {};
+  const pageSignals = Array.isArray(input.pageSignals) ? input.pageSignals.slice(0, 80).flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as Record<string, unknown>;
+    const url = safeUrl(item.url);
+    if (!url) return [];
+    return [{
+      url,
+      canonicalUrl: safeUrl(item.canonicalUrl),
+      headings: stringList(item.headings, 20),
+      imageUrls: stringList(item.imageUrls, 8).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+      ogImageUrl: safeUrl(item.ogImageUrl),
+      schemaTypes: stringList(item.schemaTypes, 16),
+    }];
+  }) : [];
+  return {
+    colors: stringList(input.colors, 12),
+    fontFamilies: stringList(input.fontFamilies, 10),
+    socialLinks,
+    logoUrl: safeUrl(input.logoUrl),
+    logoCandidates: stringList(input.logoCandidates, 8).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    imageUrls: stringList(input.imageUrls, 40).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    stylesheetUrls: stringList(input.stylesheetUrls, 16).map(safeUrl).filter((entry): entry is string => Boolean(entry)),
+    pageSignals,
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -52,20 +79,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const visualHints = sanitizeVisualHints(req.body?.visualHints);
 
   try {
-    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
-    const profile = profiles[0];
+    const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
-    const scans = await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
-    if (!scans[0]) return res.status(409).json({ error: "WEBSITE_SCAN_REQUIRED" });
-    const pageRows = await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=100`, token);
+    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
+    if (!scan) return res.status(409).json({ error: "WEBSITE_SCAN_REQUIRED" });
+    const pageRows = await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=100`, token);
     const pages = pageRows.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" }));
     if (!pages.length) return res.status(409).json({ error: "NO_ANALYZED_WEBSITE_PAGES" });
 
     const result = await analyzeBrandFromWebsite({ apiKey: process.env.OPENAI_API_KEY, profileName: profile.name, websiteUrl: profile.website_url, industry: profile.industry, pages, visualHints });
     const existingRows = await rows<ExistingBrand>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links&limit=1`, token);
     const existingSocials = existingRows[0]?.social_links && typeof existingRows[0].social_links === "object" ? existingRows[0].social_links as Record<string, unknown> : {};
-    const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, value]) => typeof value === "string" && value)) };
+    const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, item]) => typeof item === "string" && item)) };
     const now = new Date().toISOString();
+    const visualIdentity = {
+      source: "website_scan",
+      observedColors: visualHints.colors,
+      observedFonts: visualHints.fontFamilies,
+      logoUrl: visualHints.logoUrl,
+      logoCandidates: visualHints.logoCandidates,
+      observedImages: visualHints.imageUrls,
+      stylesheets: visualHints.stylesheetUrls,
+      pageSignals: visualHints.pageSignals,
+      pageInsights: result.analysis.pageInsights,
+      contentPillars: result.analysis.contentPillars,
+      summary: result.analysis.visualStyleSummary,
+      analyzedAt: now,
+    };
     const payload = {
       profile_id: profileId,
       description: result.analysis.description,
@@ -76,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       services: result.analysis.services,
       differentiators: result.analysis.differentiators,
       value_propositions: result.analysis.valuePropositions,
-      visual_identity: { observedColors: visualHints.colors, logoUrl: visualHints.logoUrl, summary: result.analysis.visualStyleSummary, source: "website_scan" },
+      visual_identity: visualIdentity,
       tone_of_voice: result.analysis.toneOfVoice,
       social_links: socialLinks,
       goals: result.analysis.goals,
@@ -93,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
     if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
 
-    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "ANALYZE_BRAND_ONBOARDING", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, pages_analyzed: pages.length } }) });
+    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "ANALYZE_BRAND_ONBOARDING", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, pages_analyzed: pages.length, page_insights: result.analysis.pageInsights.length, content_pillars: result.analysis.contentPillars.length, observed_fonts: visualHints.fontFamilies.length, observed_images: visualHints.imageUrls.length } }) });
     if (!usageWrite.ok) console.error("onboarding-usage-write", { profileId, status: usageWrite.status });
 
     return res.status(200).json({ analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model });
