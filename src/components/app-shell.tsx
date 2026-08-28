@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, Globe2, LayoutDashboard, LogOut, Menu, Settings2, Share2, Sparkles, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, LayoutDashboard, LogOut, Menu, Settings2, Share2, Sparkles, X } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -9,6 +9,7 @@ const links = [
   ["Attività", "/app/profili", Building2],
   ["Brand", "/app/brand", Sparkles],
   ["Sito", "/app/sito", Globe2],
+  ["Contenuti", "/app/contenuti", FileText],
   ["Revisioni", "/app/approvazioni", FileCheck2],
   ["Calendario", "/app/calendario", CalendarDays],
   ["Social", "/app/social", Share2],
@@ -17,8 +18,8 @@ const links = [
   ["Impostazioni", "/app/impostazioni", Settings2],
 ] as const;
 
-const mobilePrimaryLinks = [links[0], links[5], links[6], links[7]] as const;
-const mobileMoreLinks = [links[1], links[2], links[3], links[4], links[8], links[9]] as const;
+const mobilePrimaryLinks = [links[0], links[4], links[6], links[7]] as const;
+const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[8], links[9], links[10]] as const;
 
 export function AppShell() {
   const navigate = useNavigate();
