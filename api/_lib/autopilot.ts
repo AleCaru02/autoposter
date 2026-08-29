@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
+import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 
@@ -18,7 +19,7 @@ function createSql(connectionString: string) {
 
 type Sql = ReturnType<typeof createSql>;
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; timezone: string };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown };
 type StrategyRow = { objectives: unknown; platform_strategy: unknown };
 type ScheduleRow = { provider: SocialProvider; timezone: string; posts_per_week: number; preferred_slots: unknown; auto_choose: boolean; enabled: boolean };
 type PreferredSlot = { day: number; time: string };
@@ -231,8 +232,8 @@ async function ensureSchedules(sql: Sql, profile: ProfileRow) {
   }
 }
 
-async function loadBrandContext(sql: Sql, profile: ProfileRow): Promise<BrandContext> {
-  const brandRows = await sql`select description,business_model,location,service_area,target_audience,tone_of_voice,goals
+async function loadBrandContext(sql: Sql, profile: ProfileRow): Promise<{ context: BrandContext; visualIdentity: unknown }> {
+  const brandRows = await sql`select description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity
                               from public.brand_profiles where profile_id=${profile.id}::uuid limit 1` as unknown as BrandRow[];
   const brand = brandRows[0];
   const scans = await sql`select id from public.website_scans
@@ -245,17 +246,20 @@ async function loadBrandContext(sql: Sql, profile: ProfileRow): Promise<BrandCon
                       order by depth asc, url asc limit 100` as unknown as PageRow[];
   }
   return {
-    profileName: profile.name,
-    industry: profile.industry,
-    websiteUrl: profile.website_url,
-    description: brand?.description ?? null,
-    businessModel: brand?.business_model ?? null,
-    location: brand?.location ?? null,
-    serviceArea: brand?.service_area ?? null,
-    target: summary(brand?.target_audience),
-    tone: summary(brand?.tone_of_voice),
-    goals: strings(brand?.goals),
-    confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
+    context: {
+      profileName: profile.name,
+      industry: profile.industry,
+      websiteUrl: profile.website_url,
+      description: brand?.description ?? null,
+      businessModel: brand?.business_model ?? null,
+      location: brand?.location ?? null,
+      serviceArea: brand?.service_area ?? null,
+      target: summary(brand?.target_audience),
+      tone: summary(brand?.tone_of_voice),
+      goals: strings(brand?.goals),
+      confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
+    },
+    visualIdentity: brand?.visual_identity ?? null,
   };
 }
 
@@ -265,7 +269,7 @@ function chooseFormat(provider: SocialProvider, recentCount: number): SocialForm
 }
 
 async function recentTopics(sql: Sql, profileId: string) {
-  const rows = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 8` as unknown as RecentItemRow[];
+  const rows = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 24` as unknown as RecentItemRow[];
   return rows.map((row) => row.topic).filter(Boolean);
 }
 
@@ -315,14 +319,16 @@ async function createPlannedContent(input: {
   budget: { textSpent: number; textLimit: number; imagesUsed: number; imageLimit: number };
 }) {
   const { sql, env, profile, strategy, provider, scheduledAt, approvalMode, budget } = input;
-  const context = await loadBrandContext(sql, profile);
+  const loaded = await loadBrandContext(sql, profile);
+  const context = loaded.context;
   if (!context.confirmedWebsiteContent.length) throw new Error("AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics = await recentTopics(sql, profile.id);
   const count = await recentVariantCount(sql, profile.id, provider);
   const format = chooseFormat(provider, count);
   const objective = strings(strategy?.objectives)[0] ?? context.goals[0] ?? null;
+  const pillar = buildAutopilotPillarInstruction(loaded.visualIdentity, topics, count);
   const topicRequest = [
-    "Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.",
+    pillar.instruction || "Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.",
     "Usa esclusivamente i fatti confermati dal sito e dal brand.",
     `Il contenuto è destinato a ${provider} nel formato ${format}.`,
     topics.length ? `Evita di ripetere questi temi recenti: ${topics.join(" | ")}.` : "Evita temi generici e ripetitivi.",
@@ -344,7 +350,7 @@ async function createPlannedContent(input: {
   if (!variant) throw new Error("AUTOPILOT_VARIANT_MISSING");
 
   await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
-            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format, editorial_topic: generated.content.editorialTopic, editorial_angle: generated.content.editorialAngle })}::jsonb)`;
+            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format, editorial_pillar_selected: pillar.pillar?.name ?? null, editorial_pillar_recent_usage: pillar.recentUsage, editorial_pillars_available: pillar.pillarCount, editorial_topic: generated.content.editorialTopic, editorial_angle: generated.content.editorialAngle })}::jsonb)`;
 
   const duplicate = findNearDuplicate({
     topic: generated.content.editorialTopic,
