@@ -27,7 +27,8 @@ export function buildSectorResearchInstruction(input: { industry: string | null;
   const policy = buildEditorialResearchPolicy(input.mode);
   const sector = [input.industry, input.description, input.businessModel].filter(Boolean).join(" · ") || "settore dell'attività";
   const target = input.target ? ` Pubblico di riferimento: ${input.target}.` : "";
-  const platformPolicy = input.providers?.length && input.formats?.length ? buildPlatformManagerInstruction(input.providers, input.formats) : null;
+  const providers: SocialProvider[] = input.providers?.length ? input.providers : ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"];
+  const formats: SocialFormat[] = input.formats?.length ? input.formats : ["POST", "CAROUSEL", "STORY"];
   return {
     ...policy,
     instruction: [
@@ -36,7 +37,7 @@ export function buildSectorResearchInstruction(input: { industry: string | null;
       "Il sito serve soprattutto a capire identità del brand, servizi realmente offerti, tono, posizionamento e segnali visivi; non è l'unico universo di argomenti.",
       "Qualunque informazione esterna deve essere direttamente pertinente al perimetro editoriale. Non trasformare una notizia generica in contenuto solo perché è popolare.",
       "Distingui sempre fatti del brand da fatti esterni: non attribuire al brand dati, risultati, prezzi o dichiarazioni trovati altrove.",
-      platformPolicy,
-    ].filter(Boolean).join(" "),
+      buildPlatformManagerInstruction(providers, formats),
+    ].join(" "),
   };
 }
