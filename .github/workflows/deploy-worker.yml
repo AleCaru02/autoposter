@@ -32,6 +32,8 @@ jobs:
         run: npm run test:editorial-research
       - name: Multi-agent editorial regression
         run: npm run test:content-agents
+      - name: OpenAI strategist planner regression
+        run: npm run test:openai-strategy-planner
       - name: Learning engine regression
         run: npm run test:learning-engine
       - name: Feedback loop regression
