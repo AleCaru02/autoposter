@@ -1,3 +1,5 @@
+import { runOpenAIMediaManager } from "./openai-media-manager.js";
+
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type ImageSize = "1024x1024" | "1024x1536";
@@ -10,6 +12,9 @@ export type OpenAIImageUsage = {
   outputTokens: number | null;
   totalTokens: number | null;
   estimatedCostUsd: number | null;
+  mediaManagerInputTokens: number;
+  mediaManagerOutputTokens: number;
+  mediaManagerCostUsd: number;
 };
 
 export type OpenAIImageResult = {
@@ -20,6 +25,14 @@ export type OpenAIImageResult = {
   requestId: string | null;
   size: ImageSize;
   quality: "high";
+  mediaManager: {
+    model: "gpt-5.6-terra";
+    responseId: string;
+    requestId: string | null;
+    visualIntent: string;
+    composition: string;
+    altText: string;
+  };
   usage: OpenAIImageUsage;
 };
 
@@ -75,7 +88,20 @@ export function estimateImageCostUsd(inputTokens: number, outputTokens: number) 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
   const fetcher = options.fetcher ?? fetch;
   const size = imageSizeForFormat(options.format);
-  const prompt = buildImagePrompt(options);
+  const mediaManager = await runOpenAIMediaManager({
+    apiKey: options.apiKey,
+    profileName: options.profileName,
+    industry: options.industry,
+    tone: options.tone,
+    provider: options.provider,
+    format: options.format,
+    visualBrief: options.visualBrief,
+    caption: options.caption,
+    additionalDirection: options.additionalDirection,
+    fetcher,
+  });
+  const fallbackPrompt = buildImagePrompt(options);
+  const prompt = mediaManager.imagePrompt.trim() || fallbackPrompt;
   const response = await fetcher("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
@@ -107,8 +133,10 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   const base64 = first && typeof first.b64_json === "string" ? first.b64_json : "";
   if (!base64) throw new Error("OPENAI_IMAGE_EMPTY_OUTPUT");
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
-  const inputTokens = numberOrNull(usage.input_tokens);
-  const outputTokens = numberOrNull(usage.output_tokens);
+  const imageInputTokens = numberOrNull(usage.input_tokens);
+  const imageOutputTokens = numberOrNull(usage.output_tokens);
+  const imageCost = imageInputTokens !== null && imageOutputTokens !== null ? estimateImageCostUsd(imageInputTokens, imageOutputTokens) : null;
+  const totalCost = imageCost === null ? null : imageCost + mediaManager.usage.estimatedCostUsd;
   return {
     model: "gpt-image-2",
     mimeType: "image/png",
@@ -117,11 +145,22 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     requestId,
     size,
     quality: "high",
+    mediaManager: {
+      model: mediaManager.model,
+      responseId: mediaManager.responseId,
+      requestId: mediaManager.requestId,
+      visualIntent: mediaManager.visualIntent,
+      composition: mediaManager.composition,
+      altText: mediaManager.altText,
+    },
     usage: {
-      inputTokens,
-      outputTokens,
-      totalTokens: numberOrNull(usage.total_tokens),
-      estimatedCostUsd: inputTokens !== null && outputTokens !== null ? estimateImageCostUsd(inputTokens, outputTokens) : null,
+      inputTokens: imageInputTokens === null ? null : imageInputTokens + mediaManager.usage.inputTokens,
+      outputTokens: imageOutputTokens === null ? null : imageOutputTokens + mediaManager.usage.outputTokens,
+      totalTokens: numberOrNull(usage.total_tokens) === null ? null : Number(usage.total_tokens) + mediaManager.usage.totalTokens,
+      estimatedCostUsd: totalCost,
+      mediaManagerInputTokens: mediaManager.usage.inputTokens,
+      mediaManagerOutputTokens: mediaManager.usage.outputTokens,
+      mediaManagerCostUsd: mediaManager.usage.estimatedCostUsd,
     },
   };
 }
