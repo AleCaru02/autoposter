@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
+import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 
 export const config = { maxDuration: 60 };
@@ -76,6 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   const topic = typeof req.body?.topic === "string" ? req.body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof req.body?.objective === "string" ? req.body.objective.trim().slice(0, 500) : null;
+  const researchMode = normalizeEditorialResearchMode(req.body?.researchMode);
   const providers = Array.isArray(req.body?.providers) ? req.body.providers.filter((value: unknown): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
   const formats = Array.isArray(req.body?.formats) ? req.body.formats.filter((value: unknown): value is SocialFormat => typeof value === "string" && VALID_FORMATS.has(value as SocialFormat)) : [];
   if (!profileId || !topic) return res.status(400).json({ error: "PROFILE_AND_TOPIC_REQUIRED" });
@@ -107,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const budgetUsd = monthlyBudgetUsd();
     const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
-    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
     if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
       return res.status(429).json({
         error: "OPENAI_TEXT_BUDGET_REACHED",
@@ -116,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
     const usageWrite = await dataApi("ai_usage_events", token, {
       method: "POST",
@@ -133,6 +135,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           openai_request_id: result.requestId,
           cached_input_tokens: result.usage.cachedInputTokens,
           cache_write_tokens: result.usage.cacheWriteTokens,
+          web_search_calls: result.usage.webSearchCalls,
+          research_mode: result.researchMode,
+          external_sources: result.externalSources,
           requested_topic: topic,
           editorial_pillars_used: enriched.pillarCount,
           editorial_topic: result.content.editorialTopic,
@@ -155,6 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: "DUPLICATE_CONTENT",
         message: "Il contenuto generato è troppo simile a un contenuto recente dello stesso profilo e non viene restituito come nuovo contenuto.",
         duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null },
+        research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
         budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
       });
     }
@@ -163,6 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       content: result.content,
       model: result.model,
       responseId: result.responseId,
+      research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
       budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
     });
