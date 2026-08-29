@@ -69,6 +69,7 @@ assert.ok(worker.includes("editorial_pillars_used: enriched.pillarCount"));
 const autopilot = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
 assert.ok(autopilot.includes("select description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity"));
 assert.ok(autopilot.includes("buildAutopilotPillarInstruction(loaded.visualIdentity, topics, count)"));
+assert.ok(autopilot.includes("pillar.instruction || \"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.\""), "senza tassonomia deve restare il fallback editoriale precedente");
 assert.ok(autopilot.includes("editorial_pillar_selected: pillar.pillar?.name ?? null"));
 assert.ok(autopilot.includes("editorial_pillar_recent_usage: pillar.recentUsage"));
 assert.ok(autopilot.includes("editorial_pillars_available: pillar.pillarCount"));
