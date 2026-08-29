@@ -10,54 +10,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - { name: Checkout, uses: actions/checkout@v4 }
       - name: Setup Node
         uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install
-        run: npm install --no-audit --no-fund
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Crawler regression
-        run: npm run test:crawler
-      - name: Site intelligence regression
-        run: npm run test:site-intelligence
-      - name: Site intelligence UI regression
-        run: npm run test:site-intelligence-ui
-      - name: Editorial intelligence regression
-        run: npm run test:editorial-intelligence
-      - name: Editorial research regression
-        run: npm run test:editorial-research
-      - name: Multi-agent editorial regression
-        run: npm run test:content-agents
-      - name: OpenAI strategist planner regression
-        run: npm run test:openai-strategy-planner
-      - name: Learning engine regression
-        run: npm run test:learning-engine
-      - name: Feedback loop regression
-        run: npm run test:feedback-loop
-      - name: Content workflow regression
-        run: npm run test:content-workflow
-      - name: Content semantic dedupe regression
-        run: npm run test:content-dedupe
-      - name: Calendar workflow regression
-        run: npm run test:calendar-workflow
-      - name: Social integration contract
-        run: npm run test:social
-      - name: Social metrics contract
-        run: npm run test:social-metrics
-      - name: Autopilot route contract
-        run: npm run test:autopilot-route
-      - name: OpenAI text contract
-        run: npm run test:openai
-      - name: OpenAI image contract
-        run: npm run test:openai-image
-      - name: Build
-        run: npm run build
-      - name: Cloudflare dry run
-        run: npx wrangler deploy --dry-run
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - { name: Typecheck, run: "npm run typecheck" }
+      - { name: Crawler regression, run: "npm run test:crawler" }
+      - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
+      - { name: Site intelligence UI regression, run: "npm run test:site-intelligence-ui" }
+      - { name: Editorial intelligence regression, run: "npm run test:editorial-intelligence" }
+      - { name: Editorial research regression, run: "npm run test:editorial-research" }
+      - { name: Multi-agent editorial regression, run: "npm run test:content-agents" }
+      - { name: Platform social manager regression, run: "npm run test:platform-social-manager" }
+      - { name: Per-profile AI economics regression, run: "npm run test:ai-economics" }
+      - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
+      - { name: Learning engine regression, run: "npm run test:learning-engine" }
+      - { name: Feedback loop regression, run: "npm run test:feedback-loop" }
+      - { name: Content workflow regression, run: "npm run test:content-workflow" }
+      - { name: Content semantic dedupe regression, run: "npm run test:content-dedupe" }
+      - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
+      - { name: Social integration contract, run: "npm run test:social" }
+      - { name: Social metrics contract, run: "npm run test:social-metrics" }
+      - { name: Autopilot route contract, run: "npm run test:autopilot-route" }
+      - { name: OpenAI text contract, run: "npm run test:openai" }
+      - { name: OpenAI image contract, run: "npm run test:openai-image" }
+      - { name: Build, run: "npm run build" }
+      - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
       - name: Deploy Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
