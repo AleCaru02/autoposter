@@ -1,3 +1,5 @@
+import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
+
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type SocialFormat = "POST" | "CAROUSEL" | "STORY";
 
@@ -41,6 +43,7 @@ export type OpenAITextUsage = {
   cacheWriteTokens: number;
   outputTokens: number | null;
   totalTokens: number | null;
+  webSearchCalls: number;
   estimatedCostUsd: number | null;
 };
 
@@ -49,6 +52,8 @@ export type OpenAITextResult = {
   responseId: string;
   model: string;
   requestId: string | null;
+  researchMode: EditorialResearchMode;
+  externalSources: string[];
   usage: OpenAITextUsage;
 };
 
@@ -59,6 +64,7 @@ export type GenerateOptions = {
   providers: SocialProvider[];
   formats: SocialFormat[];
   brand: BrandContext;
+  researchMode?: EditorialResearchMode;
   fetcher?: typeof fetch;
   model?: string;
   cacheKey?: string;
@@ -68,6 +74,7 @@ const TERRA_INPUT_PER_MILLION_USD = 2;
 const TERRA_CACHED_INPUT_PER_MILLION_USD = 0.2;
 const TERRA_CACHE_WRITE_PER_MILLION_USD = 2.5;
 const TERRA_OUTPUT_PER_MILLION_USD = 12;
+const WEB_SEARCH_PER_RUN_USD = 0.01;
 export const MAX_TEXT_OUTPUT_TOKENS = 5_000;
 const MAX_WEBSITE_CONTEXT_CHARS = 40_000;
 const MAX_PAGE_CONTEXT_CHARS = 6_000;
@@ -160,6 +167,30 @@ function extractOutputText(body: Record<string, unknown>) {
   return pieces.join("\n").trim();
 }
 
+export function countWebSearchCalls(body: Record<string, unknown>) {
+  const output = Array.isArray(body.output) ? body.output : [];
+  return output.filter((item) => item && typeof item === "object" && (item as { type?: unknown }).type === "web_search_call").length;
+}
+
+export function extractWebSearchSources(body: Record<string, unknown>) {
+  const output = Array.isArray(body.output) ? body.output : [];
+  const urls = new Set<string>();
+  for (const item of output) {
+    if (!item || typeof item !== "object" || (item as { type?: unknown }).type !== "web_search_call") continue;
+    const action = (item as { action?: unknown }).action;
+    if (!action || typeof action !== "object") continue;
+    const sources = Array.isArray((action as { sources?: unknown }).sources) ? (action as { sources: unknown[] }).sources : [];
+    for (const source of sources) {
+      if (!source || typeof source !== "object" || typeof (source as { url?: unknown }).url !== "string") continue;
+      try {
+        const url = new URL((source as { url: string }).url);
+        if (url.protocol === "https:" || url.protocol === "http:") urls.add(url.toString());
+      } catch { /* ignore invalid provider source URLs */ }
+    }
+  }
+  return [...urls].slice(0, 20);
+}
+
 function validateResult(value: unknown, providers: SocialProvider[], formats: SocialFormat[]): GeneratedSocialContent {
   if (!value || typeof value !== "object") throw new Error("OPENAI_INVALID_JSON");
   const candidate = value as Partial<GeneratedSocialContent>;
@@ -182,11 +213,12 @@ export function estimateTerraCostUsd(inputTokens: number, outputTokens: number, 
   return (uncachedInput * TERRA_INPUT_PER_MILLION_USD + safeCached * TERRA_CACHED_INPUT_PER_MILLION_USD + safeWrite * TERRA_CACHE_WRITE_PER_MILLION_USD + Math.max(outputTokens, 0) * TERRA_OUTPUT_PER_MILLION_USD) / 1_000_000;
 }
 
-export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, "topic" | "objective" | "providers" | "formats" | "brand">) {
+export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, "topic" | "objective" | "providers" | "formats" | "brand" | "researchMode">) {
   const selected = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
-  const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 6_000;
+  const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 7_000;
   const approximateInputTokens = Math.ceil(approximateInputChars / 3.5);
-  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS);
+  const research = buildSectorResearchInstruction({ industry: options.brand.industry, description: options.brand.description, businessModel: options.brand.businessModel, target: options.brand.target, mode: options.researchMode ?? "BALANCED" });
+  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0);
 }
 
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
@@ -194,11 +226,20 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const model = options.model ?? "gpt-5.6-terra";
   if (model !== "gpt-5.6-terra") throw new Error("OPENAI_TEXT_MODEL_NOT_ALLOWED");
   const websiteContext = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
+  const research = buildSectorResearchInstruction({
+    industry: options.brand.industry,
+    description: options.brand.description,
+    businessModel: options.brand.businessModel,
+    target: options.brand.target,
+    mode: options.researchMode ?? "BALANCED",
+  });
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
     "Genera contenuti social distinti per piattaforma e formato, mantenendo il tono del brand e una qualità professionale pronta per revisione umana.",
-    "Regola critica: non inventare prezzi, servizi, risultati, sedi, certificazioni, numeri o fatti. Usa come fatti solo i dati brand forniti e il contenuto sito esplicitamente incluso come fonte confermata.",
-    "Se il contesto non supporta un claim, omettilo. factualBasis deve elencare brevemente quali elementi confermati sostengono la variante.",
+    research.instruction,
+    "Regola critica sui fatti del brand: non inventare prezzi, servizi, risultati, sedi, certificazioni, numeri o dichiarazioni dell'attività. Per questi claim usa solo dati brand e contenuto sito esplicitamente incluso come fonte confermata.",
+    research.useWebSearch ? "Per conoscenze di settore, consigli, dati generali, aggiornamenti e news puoi usare esclusivamente informazioni trovate tramite la ricerca web disponibile in questa richiesta. Se una fonte non è sufficientemente affidabile o pertinente, non usarla." : "Non hai ricerca web attiva in questa modalità: non introdurre fatti esterni.",
+    "Se il contesto non supporta un claim, omettilo. factualBasis deve distinguere sinteticamente BASE BRAND/SITO da BASE ESTERNA quando vengono usate informazioni web.",
     "Adatta davvero il copy a Instagram, Facebook, LinkedIn e Google Business Profile: non fare semplice copia-incolla cross-platform.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
     "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
@@ -210,7 +251,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Restituisci esclusivamente l'output strutturato richiesto.",
   ].join("\n");
   const userContext = JSON.stringify({
-    task: { topic: options.topic, objective: options.objective ?? null, providers: options.providers, formats: options.formats },
+    task: { topic: options.topic, objective: options.objective ?? null, providers: options.providers, formats: options.formats, researchMode: research.mode, freshnessGuidanceDays: research.freshnessDays },
     brand: {
       name: options.brand.profileName,
       industry: options.brand.industry,
@@ -235,6 +276,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       reasoning: { effort: "medium" },
       instructions,
       input: userContext,
+      ...(research.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
       prompt_cache_key: options.cacheKey || undefined,
       text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_social_content", strict: true, schema: OUTPUT_SCHEMA } },
       max_output_tokens: MAX_TEXT_OUTPUT_TOKENS,
@@ -260,18 +302,23 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : null;
   const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
   const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
-  const estimatedCostUsd = inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const webSearchCalls = countWebSearchCalls(body);
+  const tokenCostUsd = inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const estimatedCostUsd = tokenCostUsd === null ? null : tokenCostUsd + webSearchCalls * WEB_SEARCH_PER_RUN_USD;
   return {
     content,
     responseId: typeof body.id === "string" ? body.id : "",
     model: typeof body.model === "string" ? body.model : model,
     requestId,
+    researchMode: research.mode,
+    externalSources: research.useWebSearch ? extractWebSearchSources(body) : [],
     usage: {
       inputTokens,
       cachedInputTokens,
       cacheWriteTokens,
       outputTokens,
       totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : null,
+      webSearchCalls,
       estimatedCostUsd,
     },
   };

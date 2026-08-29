@@ -28,6 +28,8 @@ jobs:
         run: npm run test:site-intelligence-ui
       - name: Editorial intelligence regression
         run: npm run test:editorial-intelligence
+      - name: Editorial research regression
+        run: npm run test:editorial-research
       - name: Learning engine regression
         run: npm run test:learning-engine
       - name: Feedback loop regression
