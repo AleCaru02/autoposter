@@ -14,10 +14,10 @@ export type AgentDefinition = {
 };
 
 export const CONTENT_AGENTS: readonly AgentDefinition[] = [
-  { role: "STRATEGIST", responsibility: "Definisce obiettivo, pubblico, mix editoriale e vincoli del profilo.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
+  { role: "STRATEGIST", responsibility: "Definisce obiettivo, pubblico, mix editoriale e vincoli del profilo tramite API OpenAI.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "RESEARCHER", responsibility: "Raccoglie solo informazioni pertinenti al settore e fonti tracciabili quando la modalità di ricerca lo consente.", mayUseOpenAI: true, mayUseWeb: true, blocksOnFailure: false },
   { role: "FACT_CHECKER", responsibility: "Controlla date, numeri, norme e affermazioni esterne; non trasforma fatti generali in claim del brand.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
-  { role: "PLANNER", responsibility: "Costruisce il piano 2-4 settimane evitando ripetizioni e bilanciando intenti, social e formati.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
+  { role: "PLANNER", responsibility: "Costruisce tramite API OpenAI il piano 2-4 settimane evitando ripetizioni e bilanciando intenti, social e formati.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "COPYWRITER", responsibility: "Scrive hook, caption e CTA partendo dal brief approvato senza cambiare strategia o inventare fatti.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "VISUAL_DIRECTOR", responsibility: "Trasforma identità visuale e brief in istruzioni coerenti per gpt-image-2.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
   { role: "FORMAT_BUILDER", responsibility: "Adatta lo stesso concetto al formato nativo supportato dal social, incluse sequenze narrative e caroselli.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },

@@ -17,6 +17,7 @@
     "test:editorial-intelligence": "tsx tests/editorial-intelligence.test.ts",
     "test:editorial-research": "tsx tests/editorial-research.test.ts",
     "test:content-agents": "tsx tests/content-agents.test.ts",
+    "test:openai-strategy-planner": "tsx tests/openai-strategy-planner.test.ts",
     "test:learning-engine": "tsx tests/learning-engine.test.ts",
     "test:feedback-loop": "tsx tests/feedback-loop.test.ts",
     "test:openai": "tsx tests/openai-text.test.ts",
