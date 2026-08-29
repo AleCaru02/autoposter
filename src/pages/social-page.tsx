@@ -245,8 +245,6 @@ export function SocialPage() {
 
           {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Scegli l’account corretto per questa attività:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
 
-          <div className="social-capabilities"><small>Pubblicazione disponibile</small><div>{provider.capabilities.publish.map((format) => <span key={format}>{format === "POST" ? "Post" : format === "STORY" ? "Storie" : format}</span>)}</div><p>{provider.capabilities.note}</p></div>
-
           {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Il server non ha restituito lo stato di questo collegamento. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
 
           <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
