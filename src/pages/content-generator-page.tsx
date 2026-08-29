@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarDays, Eye, Globe2, LoaderCircle, Pause, Play, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
@@ -16,6 +17,14 @@ const PROVIDER_LABELS: Record<string, string> = {
   LINKEDIN: "LinkedIn",
   GBP: "Google Business Profile",
 };
+
+const RESEARCH_MODES: Array<{ value: EditorialResearchMode; title: string; description: string }> = [
+  { value: "BALANCED", title: "Bilanciato", description: "Mescola informazioni di settore, consigli, contenuti evergreen e aggiornamenti pertinenti." },
+  { value: "TIPS", title: "Consigli", description: "Privilegia guide pratiche, checklist, spiegazioni ed errori da evitare." },
+  { value: "NEWS", title: "News", description: "Privilegia notizie e aggiornamenti recenti realmente collegati al settore." },
+  { value: "EVERGREEN", title: "Evergreen", description: "Privilegia temi utili e durevoli, senza forzare news o trend." },
+  { value: "WEBSITE_ONLY", title: "Solo sito", description: "Usa esclusivamente i fatti e i temi confermati dal sito e dal brand." },
+];
 
 export function ContentGeneratorPage() {
   const { selectedProfile, reload: reloadProfiles } = useProfiles();
@@ -155,12 +164,12 @@ export function ContentGeneratorPage() {
   const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
   return <div className="page-content content-autopilot-page">
-    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa sito, brand e frequenze per preparare i contenuti senza chiederti ogni volta tema, social o formato.</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa il sito per capire brand, servizi e tono, poi può ampliare i temi con ricerca online pertinente al settore.</p></div></header>
     {error && <p className="form-error" role="alert">{error}</p>}
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
       <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
-      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{overview.settings.enabled ? "Il sistema mantiene il piano editoriale, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
+      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{overview.settings.enabled ? "Il sistema mantiene il piano editoriale, ricerca temi pertinenti, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
       <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
     </section>
 
@@ -176,9 +185,21 @@ export function ContentGeneratorPage() {
       </div>
     </section>
 
+    <section className="panel approval-mode-panel editorial-research-panel">
+      <div className="panel-heading"><div><h2>Tipo di contenuti</h2><p>Il filtro vale solo per {selectedProfile.name}. Il sito resta la fonte dei fatti specifici del brand; la ricerca online viene usata solo quando prevista dalla modalità.</p></div><Globe2 size={20} /></div>
+      <div className="approval-mode-grid editorial-research-grid">
+        {RESEARCH_MODES.map((mode) => {
+          const selected = overview.settings.researchMode === mode.value;
+          return <button type="button" key={mode.value} className={`approval-mode-card ${selected ? "selected" : ""}`} onClick={() => void changeSettings({ researchMode: mode.value })}>
+            <strong>{mode.title}</strong><p>{mode.description}</p><span className="mode-check">{selected ? "Attivo" : "Seleziona"}</span>
+          </button>;
+        })}
+      </div>
+    </section>
+
     <section className="autopilot-flow">
-      <article><span>1</span><div><strong>Capisce l'attività</strong><p>Usa tutte le pagine analizzate del sito e i dati del brand.</p></div></article>
-      <article><span>2</span><div><strong>Sceglie cosa creare</strong><p>Decide autonomamente tema e formato adatto al singolo social, evitando ripetizioni recenti.</p></div></article>
+      <article><span>1</span><div><strong>Capisce l'attività</strong><p>Analizza le pagine del sito per servizi, identità, tono e segnali visivi del brand.</p></div></article>
+      <article><span>2</span><div><strong>Sceglie cosa creare</strong><p>Usa settore, filtro editoriale e, quando attiva, ricerca online verificata per trovare temi pertinenti senza ripetizioni.</p></div></article>
       <article><span>3</span><div><strong>Crea testo e immagine</strong><p>Usa OpenAI per il copy e GPT-Image-2 per le immagini.</p></div></article>
       <article><span>4</span><div><strong>Organizza il calendario</strong><p>Rispetta le frequenze dell'attività e prepara i contenuti nei giorni previsti.</p></div></article>
     </section>
