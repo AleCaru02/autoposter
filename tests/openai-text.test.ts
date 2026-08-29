@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { estimateTerraCostUsd, estimateTextRequestUpperBoundUsd, extractWebSearchSources, generateSocialText, selectRelevantWebsiteContent } from "../api/_lib/openai-text.js";
+import { countWebSearchCalls, estimateTerraCostUsd, estimateTextRequestUpperBoundUsd, extractWebSearchSources, generateSocialText, selectRelevantWebsiteContent } from "../api/_lib/openai-text.js";
 
 let capturedUrl = "";
 let capturedInit: RequestInit | undefined;
@@ -64,6 +64,8 @@ assert.equal(body.store, false);
 assert.equal(body.reasoning.effort, "medium", "manteniamo reasoning medio per la qualità editoriale finale");
 assert.equal(body.prompt_cache_key, "post-automatici:qa-profile");
 assert.equal(body.max_output_tokens, 5000);
+assert.equal(body.max_tool_calls, 1, "una generazione può fare al massimo una ricerca web per contenere la spesa");
+assert.deepEqual(body.include, ["web_search_call.action.sources"]);
 assert.equal(body.text.format.type, "json_schema");
 assert.equal(body.text.format.strict, true);
 assert.equal(body.tools[0].type, "web_search");
@@ -87,8 +89,10 @@ assert.equal(result.usage.cachedInputTokens, 20);
 assert.equal(result.usage.cacheWriteTokens, 10);
 assert.equal(result.usage.outputTokens, 80);
 assert.equal(result.usage.totalTokens, 200);
-assert.equal(result.usage.estimatedCostUsd, 0.001169);
+assert.equal(result.usage.webSearchCalls, 1);
+assert.equal(result.usage.estimatedCostUsd, 0.011169);
 assert.equal(estimateTerraCostUsd(120, 80, 20, 10), 0.001169);
+assert.equal(countWebSearchCalls({ output: [{ type: "web_search_call" }, { type: "message" }] }), 1);
 assert.deepEqual(extractWebSearchSources({ output: [{ type: "web_search_call", action: { sources: [{ url: "https://example.org/a" }, { url: "ftp://bad.example/file" }] } }] }), ["https://example.org/a"]);
 
 let websiteOnlyBody: Record<string, any> | null = null;
@@ -96,10 +100,14 @@ const websiteOnlyFetcher = (async (_url: string | URL | Request, init?: RequestI
   websiteOnlyBody = JSON.parse(String(init?.body));
   return new Response(JSON.stringify({ id: "resp_site", model: "gpt-5.6-terra", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(generated) }] }], usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } }), { status: 200 });
 }) as typeof fetch;
-await generateSocialText({ apiKey: "sk-test-only", topic: "Servizi reali", providers: ["INSTAGRAM"], formats: ["POST"], brand, fetcher: websiteOnlyFetcher, researchMode: "WEBSITE_ONLY" });
+const websiteOnlyResult = await generateSocialText({ apiKey: "sk-test-only", topic: "Servizi reali", providers: ["INSTAGRAM"], formats: ["POST"], brand, fetcher: websiteOnlyFetcher, researchMode: "WEBSITE_ONLY" });
 assert.equal(websiteOnlyBody && "tools" in websiteOnlyBody, false, "la modalità solo sito non deve attivare web search");
+assert.equal(websiteOnlyResult.usage.webSearchCalls, 0);
+assert.equal(websiteOnlyResult.usage.estimatedCostUsd, estimateTerraCostUsd(10, 10));
 
-const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand });
+const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand, researchMode: "BALANCED" });
+const websiteOnlyUpperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM"], formats: ["POST"], brand, researchMode: "WEBSITE_ONLY" });
+assert.ok(upperBound > websiteOnlyUpperBound, "il budget preventivo deve includere il costo separato della ricerca web");
 assert.ok(upperBound < 0.1, `una richiesta testo normale deve restare sotto $0.10 nel worst-case interno, ricevuto ${upperBound}`);
 
-console.log("PASS OpenAI text: Terra + ricerca web filtrabile, fonti estratte, modalità solo sito e costo testuale verificati.");
+console.log("PASS OpenAI text: Terra + ricerca web filtrabile, una sola web run, fonti estratte e costo totale tracciato.");
