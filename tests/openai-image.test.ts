@@ -52,7 +52,7 @@ assert.equal(calls[1].body.size, "1024x1024");
 assert.equal(calls[1].body.n, 1);
 assert.equal(calls[1].body.output_format, "png");
 assert.match(calls[1].body.prompt, /PROMPT MEDIA MANAGER/);
-assert.equal(JSON.stringify(calls).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
+assert.equal(JSON.stringify(calls.map((call) => call.body)).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
 
 const mediaCost = estimateTerraCostUsd(100, 80);
 const imageCost = estimateImageCostUsd(50, 1200);
