@@ -56,6 +56,10 @@ async function run() {
     assert.match(serializedSource, /PLANNER_REFRESH_RESERVE/, "planning refresh must reserve budget before making OpenAI calls");
     assert.match(serializedSource, /usage=await usageSnapshot\(client,profileId\)/, "usage must be read again after a paid planning refresh");
 
+    const canonicalAutopilotSource = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
+    assert.match(canonicalAutopilotSource, /Math\.min\(Math\.max\(Math\.floor\(parsed\),0\),500\)/, "a scoped zero image allowance must stay zero; manual review must not silently spend one image");
+    assert.match(canonicalAutopilotSource, /budget\.imagesUsed<budget\.imageLimit/, "image generation must remain gated by the scoped image allowance");
+
     const vercelAutopilotSource = await readFile(new URL("../api/autopilot.ts", import.meta.url), "utf8");
     assert.match(vercelAutopilotSource, /runContentAutopilotSerialized/, "Vercel manual autopilot must use the serialized runner");
 
@@ -65,7 +69,7 @@ async function run() {
     assert.match(workerEntrySource, /path === "\/api\/generate-text"/, "Worker /api/generate-text must be intercepted before the legacy worker handler");
     assert.match(workerEntrySource, /handleWorkerGenerateText\(request,\s*env\)/, "Worker text generation must use the dedupe-aware handler");
 
-    console.log("autopilot route contract: PASS — serialized per-profile economics, AI-plan refresh and Worker routes guarded.");
+    console.log("autopilot route contract: PASS — per-profile economics, zero-image manual review, AI-plan refresh and Worker routes guarded.");
   } finally {
     globalThis.fetch = previousFetch;
   }
