@@ -5,6 +5,9 @@ assert.equal(CONTENT_AGENTS.length, 10);
 assert.deepEqual(CONTENT_AGENTS.map((agent) => agent.role), ["STRATEGIST","RESEARCHER","FACT_CHECKER","PLANNER","COPYWRITER","VISUAL_DIRECTOR","FORMAT_BUILDER","QA","PUBLISHER","ANALYST"]);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "RESEARCHER")?.mayUseWeb, true);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "COPYWRITER")?.mayUseWeb, false);
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "VISUAL_DIRECTOR")?.mayUseOpenAI, true, "Visual Director is now the OpenAI Media Manager stage");
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "VISUAL_DIRECTOR")?.mayUseWeb, false, "Media Manager must not spend on web research");
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FORMAT_BUILDER")?.mayUseOpenAI, false, "deterministic native-format mapping must not be falsely labelled an AI agent runtime");
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "QA")?.blocksOnFailure, true);
 
 assert.equal(chooseContentType("INSTAGRAM", 0), "SINGLE_POST");
