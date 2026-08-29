@@ -1,6 +1,7 @@
 import worker from "./worker.js";
 import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
+import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
@@ -105,6 +106,7 @@ export default {
     if (canonicalRedirect) return canonicalRedirect;
     const path = new URL(request.url).pathname;
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
+    if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
     if (path === "/api/onboarding-analyze") return handleWorkerOnboardingAnalyze(request, env);
     if (path.startsWith("/api/social/")) {
