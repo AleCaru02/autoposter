@@ -43,6 +43,7 @@ export type OpenAITextUsage = {
   cacheWriteTokens: number;
   outputTokens: number | null;
   totalTokens: number | null;
+  webSearchCalls: number;
   estimatedCostUsd: number | null;
 };
 
@@ -73,6 +74,7 @@ const TERRA_INPUT_PER_MILLION_USD = 2;
 const TERRA_CACHED_INPUT_PER_MILLION_USD = 0.2;
 const TERRA_CACHE_WRITE_PER_MILLION_USD = 2.5;
 const TERRA_OUTPUT_PER_MILLION_USD = 12;
+const WEB_SEARCH_PER_RUN_USD = 0.01;
 export const MAX_TEXT_OUTPUT_TOKENS = 5_000;
 const MAX_WEBSITE_CONTEXT_CHARS = 40_000;
 const MAX_PAGE_CONTEXT_CHARS = 6_000;
@@ -165,6 +167,11 @@ function extractOutputText(body: Record<string, unknown>) {
   return pieces.join("\n").trim();
 }
 
+export function countWebSearchCalls(body: Record<string, unknown>) {
+  const output = Array.isArray(body.output) ? body.output : [];
+  return output.filter((item) => item && typeof item === "object" && (item as { type?: unknown }).type === "web_search_call").length;
+}
+
 export function extractWebSearchSources(body: Record<string, unknown>) {
   const output = Array.isArray(body.output) ? body.output : [];
   const urls = new Set<string>();
@@ -206,11 +213,12 @@ export function estimateTerraCostUsd(inputTokens: number, outputTokens: number, 
   return (uncachedInput * TERRA_INPUT_PER_MILLION_USD + safeCached * TERRA_CACHED_INPUT_PER_MILLION_USD + safeWrite * TERRA_CACHE_WRITE_PER_MILLION_USD + Math.max(outputTokens, 0) * TERRA_OUTPUT_PER_MILLION_USD) / 1_000_000;
 }
 
-export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, "topic" | "objective" | "providers" | "formats" | "brand">) {
+export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, "topic" | "objective" | "providers" | "formats" | "brand" | "researchMode">) {
   const selected = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
   const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 7_000;
   const approximateInputTokens = Math.ceil(approximateInputChars / 3.5);
-  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS);
+  const research = buildSectorResearchInstruction({ industry: options.brand.industry, description: options.brand.description, businessModel: options.brand.businessModel, target: options.brand.target, mode: options.researchMode ?? "BALANCED" });
+  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0);
 }
 
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
@@ -268,7 +276,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       reasoning: { effort: "medium" },
       instructions,
       input: userContext,
-      ...(research.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }] } : {}),
+      ...(research.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
       prompt_cache_key: options.cacheKey || undefined,
       text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_social_content", strict: true, schema: OUTPUT_SCHEMA } },
       max_output_tokens: MAX_TEXT_OUTPUT_TOKENS,
@@ -294,7 +302,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : null;
   const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
   const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
-  const estimatedCostUsd = inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const webSearchCalls = countWebSearchCalls(body);
+  const tokenCostUsd = inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const estimatedCostUsd = tokenCostUsd === null ? null : tokenCostUsd + webSearchCalls * WEB_SEARCH_PER_RUN_USD;
   return {
     content,
     responseId: typeof body.id === "string" ? body.id : "",
@@ -308,6 +318,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       cacheWriteTokens,
       outputTokens,
       totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : null,
+      webSearchCalls,
       estimatedCostUsd,
     },
   };
