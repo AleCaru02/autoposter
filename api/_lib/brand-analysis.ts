@@ -232,6 +232,7 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
       cacheWriteTokens,
       outputTokens,
       totalTokens: typeof usageRaw.total_tokens === "number" ? usageRaw.total_tokens : null,
+      webSearchCalls: 0,
       estimatedCostUsd: inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null,
     },
   };
