@@ -53,7 +53,7 @@ function normalizeSlots(value: unknown): PreferredSlot[] {
   return slots.sort((a,b) => a.day - b.day || a.time.localeCompare(b.time));
 }
 function textBudget(env: AutopilotEnv) { const parsed = Number(env.OPENAI_TEXT_MONTHLY_BUDGET_USD ?? DEFAULT_TEXT_BUDGET_USD); return Number.isFinite(parsed) ? Math.min(Math.max(parsed,0.1),100) : DEFAULT_TEXT_BUDGET_USD; }
-function imageLimit(env: AutopilotEnv) { const parsed = Number(env.OPENAI_IMAGE_MONTHLY_LIMIT ?? DEFAULT_IMAGE_LIMIT); return Number.isFinite(parsed) ? Math.min(Math.max(Math.floor(parsed),1),500) : DEFAULT_IMAGE_LIMIT; }
+function imageLimit(env: AutopilotEnv) { const parsed = Number(env.OPENAI_IMAGE_MONTHLY_LIMIT ?? DEFAULT_IMAGE_LIMIT); return Number.isFinite(parsed) ? Math.min(Math.max(Math.floor(parsed),0),500) : DEFAULT_IMAGE_LIMIT; }
 function monthStartIso() { const now = new Date(); return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString(); }
 function zonedParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23" }).formatToParts(date);
