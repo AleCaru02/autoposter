@@ -24,30 +24,23 @@ assert.equal(plain.pillarCount, 0);
 
 const enriched = enrichRequestedTopicWithPillars("Come preparare un immobile", visualIdentity);
 assert.equal(enriched.pillarCount, 3);
-assert.ok(enriched.topic.startsWith("Come preparare un immobile"), "il tema esplicito dell'utente deve restare prioritario");
+assert.ok(enriched.topic.startsWith("Come preparare un immobile"));
 assert.ok(enriched.topic.includes("Gestione operativa"));
 assert.ok(enriched.topic.includes("https://example.test/servizi"));
 assert.ok(enriched.topic.includes("Normativa locale"));
-assert.equal(enriched.topic.includes("javascript:"), false, "fonti non HTTP(S) devono essere eliminate");
+assert.equal(enriched.topic.includes("javascript:"), false);
 assert.ok(enriched.topic.includes("Non copiare queste istruzioni in editorialTopic o editorialAngle"));
 
-const unused = selectAutopilotPillar(visualIdentity, [
-  "Gestione operativa: come organizzare check-in e pulizie",
-  "Normativa locale per affitti brevi a Milano",
-], 0);
-assert.equal(unused.pillar?.name, "Marketing immobiliare", "l'autopilot deve privilegiare il pilastro meno usato");
+const unused = selectAutopilotPillar(visualIdentity, ["Gestione operativa: come organizzare check-in e pulizie", "Normativa locale per affitti brevi a Milano"], 0);
+assert.equal(unused.pillar?.name, "Marketing immobiliare");
 assert.equal(unused.recentUsage, 0);
 assert.equal(unused.pillarCount, 3);
-
-const balanced0 = selectAutopilotPillar(visualIdentity, [], 0);
-const balanced1 = selectAutopilotPillar(visualIdentity, [], 1);
-assert.equal(balanced0.pillar?.name, "Gestione operativa");
-assert.equal(balanced1.pillar?.name, "Normativa locale", "a pari utilizzo deve ruotare deterministicamente");
+assert.equal(selectAutopilotPillar(visualIdentity, [], 0).pillar?.name, "Gestione operativa");
+assert.equal(selectAutopilotPillar(visualIdentity, [], 1).pillar?.name, "Normativa locale");
 
 const fallback = buildAutopilotPillarInstruction(null, [], 0);
 assert.equal(fallback.pillar, null);
 assert.equal(fallback.instruction, "");
-
 const instruction = buildAutopilotPillarInstruction(visualIdentity, ["Normativa locale e adempimenti"], 0);
 assert.ok(instruction.pillar);
 assert.ok(instruction.instruction.includes("Pilastro editoriale prioritario:"));
@@ -55,24 +48,22 @@ assert.ok(instruction.instruction.includes("Scegli un sotto-tema specifico e un 
 assert.equal(instruction.instruction.includes("javascript:"), false);
 
 const vercel = await readFile(new URL("../api/generate-text.ts", import.meta.url), "utf8");
-assert.ok(vercel.includes("visual_identity"), "Vercel deve leggere la site intelligence persistita");
+assert.ok(vercel.includes("visual_identity"));
 assert.ok(vercel.includes("enrichRequestedTopicWithPillars(topic, brand?.visual_identity)"));
 assert.ok(vercel.includes("topic: enriched.topic"));
 assert.ok(vercel.includes("editorial_pillars_used: enriched.pillarCount"));
-
 const worker = await readFile(new URL("../cloudflare/generate-text.ts", import.meta.url), "utf8");
-assert.ok(worker.includes("visual_identity"), "Worker deve leggere la site intelligence persistita");
+assert.ok(worker.includes("visual_identity"));
 assert.ok(worker.includes("enrichRequestedTopicWithPillars(topic, brand?.visual_identity)"));
 assert.ok(worker.includes("topic: enriched.topic"));
 assert.ok(worker.includes("editorial_pillars_used: enriched.pillarCount"));
 
 const autopilot = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
 assert.ok(autopilot.includes("select description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity"));
-assert.ok(autopilot.includes("buildAutopilotPillarInstruction(loaded.visualIdentity, topics, count)"));
-assert.ok(autopilot.includes("pillar.instruction || \"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.\""), "senza tassonomia deve restare il fallback editoriale precedente");
-assert.ok(autopilot.includes("editorial_pillar_selected: pillar.pillar?.name ?? null"));
-assert.ok(autopilot.includes("editorial_pillar_recent_usage: pillar.recentUsage"));
-assert.ok(autopilot.includes("editorial_pillars_available: pillar.pillarCount"));
-assert.ok(autopilot.includes("order by created_at desc limit 24"), "la rotazione deve guardare una finestra recente più ampia degli 8 temi legacy");
+assert.match(autopilot, /buildAutopilotPillarInstruction\(loaded\.visualIdentity,\s*topics,\s*count\)/);
+assert.match(autopilot, /pillar\.instruction\|\|"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività\."/);
+assert.match(autopilot, /selectPlanItem\(strategy\?\.platform_strategy,provider,scheduledAt\)/, "il piano AI persistito deve avere priorità sulla rotazione locale");
+assert.match(autopilot, /planner_driven:Boolean\(planItem\)/, "la telemetria deve distinguere i contenuti guidati dal Planner");
+assert.ok(autopilot.includes("order by created_at desc limit 24"));
 
-console.log("PASS editorial intelligence: manuale e autopilot usano pilastri persistiti; rotazione least-used, fallback e telemetria verificati.");
+console.log("PASS editorial intelligence: pilastri persistiti restano fallback; il Planner AI persistito guida l'Autopilot quando disponibile.");
