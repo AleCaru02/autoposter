@@ -66,6 +66,7 @@ for (const call of calls) {
 }
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "STRATEGIST")?.mayUseOpenAI, true);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "PLANNER")?.mayUseOpenAI, true);
-assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseOpenAI, false, "Fact-checker is the next separate implementation step and must not be falsely marked live");
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseOpenAI, true, "Fact-checker is now a real OpenAI-backed runtime stage");
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseWeb, true, "Fact-checker may use web only when existing evidence is insufficient");
 
 console.log("OpenAI strategist/planner regression: PASS");

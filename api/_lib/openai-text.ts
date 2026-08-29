@@ -1,4 +1,5 @@
 import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
+import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, type ResearchAgentResult } from "./openai-research-factcheck.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type SocialFormat = "POST" | "CAROUSEL" | "STORY";
@@ -54,6 +55,11 @@ export type OpenAITextResult = {
   requestId: string | null;
   researchMode: EditorialResearchMode;
   externalSources: string[];
+  verification: {
+    researchAgentRan: boolean;
+    factCheckAgentRan: boolean;
+    factCheckVerdict: "PASS" | null;
+  };
   usage: OpenAITextUsage;
 };
 
@@ -179,8 +185,8 @@ export function extractWebSearchSources(body: Record<string, unknown>) {
     if (!item || typeof item !== "object" || (item as { type?: unknown }).type !== "web_search_call") continue;
     const action = (item as { action?: unknown }).action;
     if (!action || typeof action !== "object") continue;
-    const sources = Array.isArray((action as { sources?: unknown }).sources) ? (action as { sources: unknown[] }).sources : [];
-    for (const source of sources) {
+    const sourceList = Array.isArray((action as { sources?: unknown }).sources) ? (action as { sources: unknown[] }).sources : [];
+    for (const source of sourceList) {
       if (!source || typeof source !== "object" || typeof (source as { url?: unknown }).url !== "string") continue;
       try {
         const url = new URL((source as { url: string }).url);
@@ -218,7 +224,13 @@ export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, 
   const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 7_000;
   const approximateInputTokens = Math.ceil(approximateInputChars / 3.5);
   const research = buildSectorResearchInstruction({ industry: options.brand.industry, description: options.brand.description, businessModel: options.brand.businessModel, target: options.brand.target, mode: options.researchMode ?? "BALANCED" });
-  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0);
+  const agentReserve = research.mode === "NEWS" ? estimateTerraCostUsd(6_000, 2_400) * 2 : 0;
+  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0) + agentReserve;
+}
+
+function agentCost(result: ResearchAgentResult | { usage: { inputTokens: number; outputTokens: number; webSearchCalls: number } } | null) {
+  if (!result) return 0;
+  return estimateTerraCostUsd(result.usage.inputTokens, result.usage.outputTokens) + result.usage.webSearchCalls * WEB_SEARCH_PER_RUN_USD;
 }
 
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
@@ -233,12 +245,29 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     target: options.brand.target,
     mode: options.researchMode ?? "BALANCED",
   });
+
+  let dedicatedResearch: ResearchAgentResult | null = null;
+  if (shouldRunResearchAgent(research.mode)) {
+    dedicatedResearch = await runOpenAIResearchAgent({
+      apiKey: options.apiKey,
+      topic: options.topic,
+      industry: options.brand.industry,
+      businessDescription: options.brand.description,
+      target: options.brand.target,
+      freshnessDays: research.freshnessDays,
+      fetcher,
+    });
+    if (dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) throw new Error("OPENAI_RESEARCH_BLOCKED");
+  }
+
+  const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
     "Genera contenuti social distinti per piattaforma e formato, mantenendo il tono del brand e una qualità professionale pronta per revisione umana.",
     research.instruction,
+    dedicatedResearch ? "Il Research Agent ha già raccolto le evidenze esterne. Usa soltanto quelle evidenze per i fatti esterni e non avviare una seconda ricerca web nel copy." : "",
     "Regola critica sui fatti del brand: non inventare prezzi, servizi, risultati, sedi, certificazioni, numeri o dichiarazioni dell'attività. Per questi claim usa solo dati brand e contenuto sito esplicitamente incluso come fonte confermata.",
-    research.useWebSearch ? "Per conoscenze di settore, consigli, dati generali, aggiornamenti e news puoi usare esclusivamente informazioni trovate tramite la ricerca web disponibile in questa richiesta. Se una fonte non è sufficientemente affidabile o pertinente, non usarla." : "Non hai ricerca web attiva in questa modalità: non introdurre fatti esterni.",
+    copyUsesWebSearch ? "Per conoscenze di settore, consigli, dati generali, aggiornamenti e news puoi usare esclusivamente informazioni trovate tramite la ricerca web disponibile in questa richiesta. Se una fonte non è sufficientemente affidabile o pertinente, non usarla." : "Non introdurre fatti esterni diversi dalle evidenze esplicitamente fornite.",
     "Se il contesto non supporta un claim, omettilo. factualBasis deve distinguere sinteticamente BASE BRAND/SITO da BASE ESTERNA quando vengono usate informazioni web.",
     "Adatta davvero il copy a Instagram, Facebook, LinkedIn e Google Business Profile: non fare semplice copia-incolla cross-platform.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
@@ -249,7 +278,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Per le storie scrivi copy breve; per i caroselli il caption deve indicare chiaramente una sequenza di slide; per i post usa una struttura completa ma non prolissa.",
     "La qualità viene prima della brevità: elimina solo ridondanze e testo non utile, non dettagli sostanziali.",
     "Restituisci esclusivamente l'output strutturato richiesto.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   const userContext = JSON.stringify({
     task: { topic: options.topic, objective: options.objective ?? null, providers: options.providers, formats: options.formats, researchMode: research.mode, freshnessGuidanceDays: research.freshnessDays },
     brand: {
@@ -265,6 +294,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       goals: options.brand.goals,
     },
     confirmedWebsiteSources: websiteContext || "NESSUNA PAGINA SITO CONFERMATA DISPONIBILE",
+    researchAgentEvidence: dedicatedResearch ? { summary: dedicatedResearch.summary, evidence: dedicatedResearch.evidence, sources: dedicatedResearch.sources } : null,
   });
 
   const response = await fetcher("https://api.openai.com/v1/responses", {
@@ -276,7 +306,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       reasoning: { effort: "medium" },
       instructions,
       input: userContext,
-      ...(research.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
+      ...(copyUsesWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
       prompt_cache_key: options.cacheKey || undefined,
       text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_social_content", strict: true, schema: OUTPUT_SCHEMA } },
       max_output_tokens: MAX_TEXT_OUTPUT_TOKENS,
@@ -298,26 +328,53 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const content = validateResult(JSON.parse(outputText), options.providers, options.formats);
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === "object" ? usage.input_tokens_details as Record<string, unknown> : {};
-  const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : null;
-  const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : null;
+  const mainInputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : null;
+  const mainOutputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : null;
   const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
   const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
-  const webSearchCalls = countWebSearchCalls(body);
-  const tokenCostUsd = inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null;
-  const estimatedCostUsd = tokenCostUsd === null ? null : tokenCostUsd + webSearchCalls * WEB_SEARCH_PER_RUN_USD;
+  const mainWebSearchCalls = countWebSearchCalls(body);
+  const mainSources = copyUsesWebSearch ? extractWebSearchSources(body) : [];
+  const combinedSources = [...new Set([...(dedicatedResearch?.sources ?? []), ...mainSources])].slice(0, 20);
+
+  let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
+  if (contentNeedsFactCheck(content, research.mode)) {
+    factCheck = await runOpenAIFactCheckAgent({
+      apiKey: options.apiKey,
+      topic: options.topic,
+      content: { generated: content, confirmedWebsiteSources: websiteContext },
+      research: dedicatedResearch,
+      existingSources: combinedSources,
+      allowWebSearch: research.useWebSearch && combinedSources.length === 0,
+      fetcher,
+    });
+    if (factCheck.verdict !== "PASS") throw new Error(`OPENAI_FACTCHECK_${factCheck.verdict}`);
+  }
+
+  const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
+  const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + (factCheck?.usage.outputTokens ?? 0);
+  const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + (factCheck?.usage.webSearchCalls ?? 0);
+  const mainTokenCost = mainInputTokens !== null && mainOutputTokens !== null ? estimateTerraCostUsd(mainInputTokens, mainOutputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const estimatedCostUsd = mainTokenCost === null ? null : mainTokenCost + agentCost(dedicatedResearch) + agentCost(factCheck) + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
+  const externalSources = [...new Set([...combinedSources, ...(factCheck?.sources ?? [])])].slice(0, 20);
+
   return {
     content,
     responseId: typeof body.id === "string" ? body.id : "",
     model: typeof body.model === "string" ? body.model : model,
     requestId,
     researchMode: research.mode,
-    externalSources: research.useWebSearch ? extractWebSearchSources(body) : [],
+    externalSources,
+    verification: {
+      researchAgentRan: Boolean(dedicatedResearch),
+      factCheckAgentRan: Boolean(factCheck),
+      factCheckVerdict: factCheck?.verdict === "PASS" ? "PASS" : null,
+    },
     usage: {
-      inputTokens,
+      inputTokens: totalInputTokens,
       cachedInputTokens,
       cacheWriteTokens,
-      outputTokens,
-      totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : null,
+      outputTokens: totalOutputTokens,
+      totalTokens: totalInputTokens !== null && totalOutputTokens !== null ? totalInputTokens + totalOutputTokens : (typeof usage.total_tokens === "number" ? usage.total_tokens : null),
       webSearchCalls,
       estimatedCostUsd,
     },
