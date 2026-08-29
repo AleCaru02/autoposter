@@ -16,6 +16,7 @@
     "test:site-intelligence-ui": "tsx tests/site-intelligence-ui.test.ts",
     "test:editorial-intelligence": "tsx tests/editorial-intelligence.test.ts",
     "test:learning-engine": "tsx tests/learning-engine.test.ts",
+    "test:feedback-loop": "tsx tests/feedback-loop.test.ts",
     "test:openai": "tsx tests/openai-text.test.ts",
     "test:openai-live": "tsx tests/openai-live.test.ts",
     "test:openai-image": "tsx tests/openai-image.test.ts",
