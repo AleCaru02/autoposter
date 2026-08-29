@@ -25,6 +25,7 @@ jobs:
       - { name: Multi-agent editorial regression, run: "npm run test:content-agents" }
       - { name: Platform social manager regression, run: "npm run test:platform-social-manager" }
       - { name: Per-profile AI economics regression, run: "npm run test:ai-economics" }
+      - { name: OpenAI Research and Fact-check regression, run: "npm run test:openai-research-factcheck" }
       - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
       - { name: Feedback loop regression, run: "npm run test:feedback-loop" }
