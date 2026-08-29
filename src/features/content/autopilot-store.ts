@@ -1,9 +1,11 @@
 import { neonClient } from "../../lib/neon-client";
 import type { ApprovalMode } from "../../../api/_lib/autopilot";
+import { normalizeEditorialResearchMode, type EditorialResearchMode } from "../../../api/_lib/editorial-research";
 
 export type AutopilotSettings = {
   enabled: boolean;
   approvalMode: ApprovalMode;
+  researchMode: EditorialResearchMode;
 };
 
 export type AutopilotSchedule = {
@@ -28,6 +30,7 @@ function parseSettings(value: unknown): AutopilotSettings {
   return {
     enabled: row.autopilotEnabled !== false,
     approvalMode: row.approvalMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL_REVIEW",
+    researchMode: normalizeEditorialResearchMode(row.researchMode),
   };
 }
 
@@ -59,6 +62,7 @@ export async function saveAutopilotSettings(profileId: string, settings: Autopil
     ...object(currentData?.platform_strategy),
     autopilotEnabled: settings.enabled,
     approvalMode: settings.approvalMode,
+    researchMode: normalizeEditorialResearchMode(settings.researchMode),
   };
   const payload = { platform_strategy: platformStrategy, updated_at: new Date().toISOString() };
   const write = currentData?.profile_id
