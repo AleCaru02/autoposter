@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
+import { normalizeEditorialResearchMode } from "./editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 
@@ -216,7 +217,7 @@ function settingsFromStrategy(value: unknown) {
 }
 
 async function ensureStrategy(sql: Sql, profileId: string) {
-  const defaults = JSON.stringify({ autopilotEnabled: true, approvalMode: "MANUAL_REVIEW" });
+  const defaults = JSON.stringify({ autopilotEnabled: true, approvalMode: "MANUAL_REVIEW", researchMode: "BALANCED" });
   await sql`insert into public.content_strategies (profile_id, platform_strategy, updated_at)
             values (${profileId}::uuid, ${defaults}::jsonb, now())
             on conflict (profile_id) do nothing`;
@@ -326,14 +327,15 @@ async function createPlannedContent(input: {
   const count = await recentVariantCount(sql, profile.id, provider);
   const format = chooseFormat(provider, count);
   const objective = strings(strategy?.objectives)[0] ?? context.goals[0] ?? null;
+  const researchMode = normalizeEditorialResearchMode(asObject(strategy?.platform_strategy).researchMode);
   const pillar = buildAutopilotPillarInstruction(loaded.visualIdentity, topics, count);
   const topicRequest = [
     pillar.instruction || "Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.",
-    "Usa esclusivamente i fatti confermati dal sito e dal brand.",
+    "Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",
     `Il contenuto è destinato a ${provider} nel formato ${format}.`,
     topics.length ? `Evita di ripetere questi temi recenti: ${topics.join(" | ")}.` : "Evita temi generici e ripetitivi.",
   ].join(" ");
-  const upper = estimateTextRequestUpperBoundUsd({ topic: topicRequest, objective, providers: [provider], formats: [format], brand: context });
+  const upper = estimateTextRequestUpperBoundUsd({ topic: topicRequest, objective, providers: [provider], formats: [format], brand: context, researchMode });
   if (budget.textSpent >= budget.textLimit || budget.textSpent + upper > budget.textLimit) throw new Error("AUTOPILOT_TEXT_BUDGET_REACHED");
 
   const generated = await generateSocialText({
@@ -343,6 +345,7 @@ async function createPlannedContent(input: {
     providers: [provider],
     formats: [format],
     brand: context,
+    researchMode,
     cacheKey: `post-automatici:${profile.id}`,
   });
   budget.textSpent += generated.usage.estimatedCostUsd ?? 0;
@@ -350,7 +353,7 @@ async function createPlannedContent(input: {
   if (!variant) throw new Error("AUTOPILOT_VARIANT_MISSING");
 
   await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
-            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format, editorial_pillar_selected: pillar.pillar?.name ?? null, editorial_pillar_recent_usage: pillar.recentUsage, editorial_pillars_available: pillar.pillarCount, editorial_topic: generated.content.editorialTopic, editorial_angle: generated.content.editorialAngle })}::jsonb)`;
+            values (${profile.id}::uuid,'GENERATE_SOCIAL_TEXT',${generated.model},${generated.usage.inputTokens},${generated.usage.outputTokens},${generated.usage.estimatedCostUsd},${JSON.stringify({ openai_response_id: generated.responseId, openai_request_id: generated.requestId, source: "AUTOPILOT", provider, format, research_mode: generated.researchMode, web_search_calls: generated.usage.webSearchCalls, external_sources: generated.externalSources, editorial_pillar_selected: pillar.pillar?.name ?? null, editorial_pillar_recent_usage: pillar.recentUsage, editorial_pillars_available: pillar.pillarCount, editorial_topic: generated.content.editorialTopic, editorial_angle: generated.content.editorialAngle })}::jsonb)`;
 
   const duplicate = findNearDuplicate({
     topic: generated.content.editorialTopic,
