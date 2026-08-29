@@ -21,7 +21,7 @@ export const CONTENT_AGENTS: readonly AgentDefinition[] = [
   { role: "COPYWRITER", responsibility: "Scrive hook, caption e CTA partendo dal brief approvato senza cambiare strategia o inventare fatti.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "VISUAL_DIRECTOR", responsibility: "Agisce come Media Manager tramite API OpenAI e trasforma identità visuale, copy e brief in una direzione pronta per gpt-image-2 soltanto quando l'immagine deve essere realmente generata.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "FORMAT_BUILDER", responsibility: "Adatta lo stesso concetto al formato nativo supportato dal social, incluse sequenze narrative e caroselli.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
-  { role: "QA", responsibility: "Blocca contenuti duplicati, incoerenti, non supportati o privi delle risorse obbligatorie.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
+  { role: "QA", responsibility: "Nel flusso automatico controlla tramite API OpenAI coerenza brand, piattaforma, formato, CTA, sicurezza claim e visual; può bloccare prima della spesa media e della pubblicazione.", mayUseOpenAI: true, mayUseWeb: false, blocksOnFailure: true },
   { role: "PUBLISHER", responsibility: "Pubblica solo attraverso integrazioni realmente collegate e con permessi validi.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: true },
   { role: "ANALYST", responsibility: "Legge metriche reali e produce segnali per il learning senza inventare performance.", mayUseOpenAI: false, mayUseWeb: false, blocksOnFailure: false },
 ] as const;
