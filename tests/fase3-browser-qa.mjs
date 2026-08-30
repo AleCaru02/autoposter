@@ -112,15 +112,26 @@ async function verifyCustomer(browser, email, suffix, label) {
   }
 }
 
+async function openAdminFromFreshPage(context, viewportLabel) {
+  const loginPage = await context.newPage();
+  try {
+    await login(loginPage, adminEmail, `SUPER_ADMIN ${viewportLabel}`);
+    await settleProfilelessAdminLanding(loginPage, `SUPER_ADMIN ${viewportLabel}`);
+
+    const page = await context.newPage();
+    const dump = diagnostics(page, `SUPER_ADMIN ${viewportLabel} /admin fresh-page`);
+    const adminResponses = trackAdminResponses(page);
+    await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
+    return { page, dump, adminResponses };
+  } finally {
+    await loginPage.close();
+  }
+}
+
 async function verifyAdminMobile(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const page = await context.newPage();
-  const dump = diagnostics(page, "SUPER_ADMIN mobile /admin");
-  const adminResponses = trackAdminResponses(page);
   try {
-    await login(page, adminEmail, "SUPER_ADMIN mobile");
-    await settleProfilelessAdminLanding(page, "SUPER_ADMIN mobile");
-    await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
+    const { page, dump, adminResponses } = await openAdminFromFreshPage(context, "mobile");
     try {
       await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
       await page.getByRole("link", { name: "Overview", exact: true }).waitFor({ state: "visible", timeout: 10000 });
@@ -157,13 +168,8 @@ async function verifyAdminMobile(browser) {
 
 async function verifyAdminDesktop(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
-  const dump = diagnostics(page, "SUPER_ADMIN desktop /admin");
-  const adminResponses = trackAdminResponses(page);
   try {
-    await login(page, adminEmail, "SUPER_ADMIN desktop");
-    await settleProfilelessAdminLanding(page, "SUPER_ADMIN desktop");
-    await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
+    const { page, dump, adminResponses } = await openAdminFromFreshPage(context, "desktop");
     try {
       await page.getByText("Backoffice", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
       await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
@@ -186,7 +192,7 @@ try {
   await verifyCustomer(browser, customerBEmail, "B", "CUSTOMER B / OWNER B");
   await verifyAdminMobile(browser);
   await verifyAdminDesktop(browser);
-  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied; SUPER_ADMIN Admin UI/API chain PASS at 390x844 and 1440x900");
+  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied; SUPER_ADMIN Admin UI/API chain PASS from fresh authenticated page at 390x844 and 1440x900");
 } finally {
   await browser.close();
 }
