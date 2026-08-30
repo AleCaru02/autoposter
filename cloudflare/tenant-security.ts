@@ -29,6 +29,10 @@ type TenantTableSecurityRow = {
   force_rls: boolean;
   policy_count: number | string;
   open_policy_count: number | string;
+  anonymous_can_select: boolean;
+  anonymous_can_insert: boolean;
+  anonymous_can_update: boolean;
+  anonymous_can_delete: boolean;
 };
 
 export type TenantSecuritySummary = {
@@ -38,6 +42,7 @@ export type TenantSecuritySummary = {
   rlsEnabledTables: number;
   tablesWithPolicies: number;
   openPolicies: number;
+  anonymousPrivilegedTables: number;
   anonymousProfileReadBlocked: boolean;
 };
 
@@ -46,18 +51,21 @@ export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymous
     ...row,
     policyCount: Number(row.policy_count) || 0,
     openPolicyCount: Number(row.open_policy_count) || 0,
+    anonymousPrivileged: row.anonymous_can_select || row.anonymous_can_insert || row.anonymous_can_update || row.anonymous_can_delete,
   }));
   const existingTables = normalized.filter((row) => row.table_exists).length;
   const rlsEnabledTables = normalized.filter((row) => row.table_exists && row.rls_enabled).length;
   const tablesWithPolicies = normalized.filter((row) => row.table_exists && row.policyCount > 0).length;
   const openPolicies = normalized.reduce((total, row) => total + row.openPolicyCount, 0);
+  const anonymousPrivilegedTables = normalized.filter((row) => row.table_exists && row.anonymousPrivileged).length;
   const ready = normalized.length === TENANT_TABLES.length
     && existingTables === TENANT_TABLES.length
     && rlsEnabledTables === TENANT_TABLES.length
     && tablesWithPolicies === TENANT_TABLES.length
     && openPolicies === 0
+    && anonymousPrivilegedTables === 0
     && anonymousProfileReadBlocked;
-  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, openPolicies, anonymousProfileReadBlocked };
+  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, openPolicies, anonymousPrivilegedTables, anonymousProfileReadBlocked };
 }
 
 export async function handleTenantSecurityAudit(request: Request, env: { DATABASE_URL?: string }) {
@@ -77,6 +85,8 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
           ('content_strategies'), ('assets'), ('content_items'), ('content_variants'), ('social_connections'),
           ('schedules'), ('publication_jobs'), ('publication_attempts'), ('metric_snapshots'), ('learning_insights'),
           ('ai_usage_events'), ('audit_log')
+      ), role_state as (
+        select exists(select 1 from pg_roles where rolname = 'anonymous') as has_anonymous
       )
       select
         expected.table_name,
@@ -86,12 +96,17 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
         count(policies.policyname)::int as policy_count,
         count(policies.policyname) filter (
           where lower(coalesce(policies.qual, '') || ' ' || coalesce(policies.with_check, '')) in ('true', '(true)', '((true))')
-        )::int as open_policy_count
+        )::int as open_policy_count,
+        case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'SELECT') else false end as anonymous_can_select,
+        case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'INSERT') else false end as anonymous_can_insert,
+        case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'UPDATE') else false end as anonymous_can_update,
+        case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'DELETE') else false end as anonymous_can_delete
       from expected
+      cross join role_state
       left join pg_namespace namespaces on namespaces.nspname = 'public'
       left join pg_class classes on classes.relnamespace = namespaces.oid and classes.relname = expected.table_name and classes.relkind in ('r', 'p')
       left join pg_policies policies on policies.schemaname = 'public' and policies.tablename = expected.table_name
-      group by expected.table_name, classes.oid, classes.relrowsecurity, classes.relforcerowsecurity
+      group by expected.table_name, classes.oid, classes.relrowsecurity, classes.relforcerowsecurity, role_state.has_anonymous
       order by expected.table_name
     ` as TenantTableSecurityRow[];
 
