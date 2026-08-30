@@ -19,6 +19,7 @@ jobs:
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
+      - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
       - { name: Site intelligence UI regression, run: "npm run test:site-intelligence-ui" }
