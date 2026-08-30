@@ -29,6 +29,7 @@ type TenantTableSecurityRow = {
   force_rls: boolean;
   policy_count: number | string;
   open_policy_count: number | string;
+  auth_barrier_count: number | string;
   anonymous_can_select: boolean;
   anonymous_can_insert: boolean;
   anonymous_can_update: boolean;
@@ -41,6 +42,7 @@ export type TenantSecuritySummary = {
   existingTables: number;
   rlsEnabledTables: number;
   tablesWithPolicies: number;
+  authBarrierTables: number;
   openPolicies: number;
   anonymousPrivilegedTables: number;
   anonymousProfileReadBlocked: boolean;
@@ -51,21 +53,24 @@ export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymous
     ...row,
     policyCount: Number(row.policy_count) || 0,
     openPolicyCount: Number(row.open_policy_count) || 0,
+    authBarrierCount: Number(row.auth_barrier_count) || 0,
     anonymousPrivileged: row.anonymous_can_select || row.anonymous_can_insert || row.anonymous_can_update || row.anonymous_can_delete,
   }));
   const existingTables = normalized.filter((row) => row.table_exists).length;
   const rlsEnabledTables = normalized.filter((row) => row.table_exists && row.rls_enabled).length;
   const tablesWithPolicies = normalized.filter((row) => row.table_exists && row.policyCount > 0).length;
+  const authBarrierTables = normalized.filter((row) => row.table_exists && row.authBarrierCount === 1).length;
   const openPolicies = normalized.reduce((total, row) => total + row.openPolicyCount, 0);
   const anonymousPrivilegedTables = normalized.filter((row) => row.table_exists && row.anonymousPrivileged).length;
   const ready = normalized.length === TENANT_TABLES.length
     && existingTables === TENANT_TABLES.length
     && rlsEnabledTables === TENANT_TABLES.length
     && tablesWithPolicies === TENANT_TABLES.length
+    && authBarrierTables === TENANT_TABLES.length
     && openPolicies === 0
     && anonymousPrivilegedTables === 0
     && anonymousProfileReadBlocked;
-  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, openPolicies, anonymousPrivilegedTables, anonymousProfileReadBlocked };
+  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, authBarrierTables, openPolicies, anonymousPrivilegedTables, anonymousProfileReadBlocked };
 }
 
 export async function handleTenantSecurityAudit(request: Request, env: { DATABASE_URL?: string }) {
@@ -97,6 +102,13 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
         count(policies.policyname) filter (
           where lower(coalesce(policies.qual, '') || ' ' || coalesce(policies.with_check, '')) in ('true', '(true)', '((true))')
         )::int as open_policy_count,
+        count(policies.policyname) filter (
+          where policies.policyname = 'require_authenticated_identity'
+            and upper(coalesce(policies.permissive, '')) = 'RESTRICTIVE'
+            and upper(coalesce(policies.cmd, '')) = 'ALL'
+            and position('auth.user_id' in lower(coalesce(policies.qual, ''))) > 0
+            and position('auth.user_id' in lower(coalesce(policies.with_check, ''))) > 0
+        )::int as auth_barrier_count,
         case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'SELECT') else false end as anonymous_can_select,
         case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'INSERT') else false end as anonymous_can_insert,
         case when role_state.has_anonymous and classes.oid is not null then has_table_privilege('anonymous', classes.oid, 'UPDATE') else false end as anonymous_can_update,
