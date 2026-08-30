@@ -5,7 +5,7 @@ import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleTenantCrossTest } from "./tenant-cross-test.js";
 import { handleTenantMembershipDiagnostic } from "./tenant-membership-diagnostic.js";
-import { handleTenantOwnerMembershipMigration } from "./tenant-owner-membership-migration.js";
+import { handleTenantOwnerMembershipMigration } from "./tenant-owner-profile-policy-fix.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
