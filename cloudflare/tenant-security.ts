@@ -36,6 +36,36 @@ type TenantTableSecurityRow = {
   anonymous_can_delete: boolean;
 };
 
+export type AnonymousProbeOutcome = "BLOCKED_STATUS" | "EMPTY_ROWS" | "ROWS_VISIBLE" | "ERROR_OBJECT" | "UNEXPECTED" | "NETWORK_ERROR";
+export type AnonymousProbe = {
+  blocked: boolean;
+  status: number | null;
+  outcome: AnonymousProbeOutcome;
+  rowCount: number | null;
+  errorCode: string | null;
+};
+
+export function classifyAnonymousProbe(status: number, ok: boolean, payload: unknown): AnonymousProbe {
+  if (!ok) {
+    const errorCode = payload && typeof payload === "object" && "code" in payload && typeof (payload as { code?: unknown }).code === "string"
+      ? (payload as { code: string }).code
+      : null;
+    return { blocked: true, status, outcome: "BLOCKED_STATUS", rowCount: null, errorCode };
+  }
+  if (Array.isArray(payload)) {
+    return payload.length === 0
+      ? { blocked: true, status, outcome: "EMPTY_ROWS", rowCount: 0, errorCode: null }
+      : { blocked: false, status, outcome: "ROWS_VISIBLE", rowCount: payload.length, errorCode: null };
+  }
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const errorCode = typeof record.code === "string" ? record.code : null;
+    const looksLikeError = errorCode !== null || typeof record.error === "string" || typeof record.message === "string";
+    if (looksLikeError) return { blocked: true, status, outcome: "ERROR_OBJECT", rowCount: null, errorCode };
+  }
+  return { blocked: false, status, outcome: "UNEXPECTED", rowCount: null, errorCode: null };
+}
+
 export type TenantSecuritySummary = {
   ready: boolean;
   expectedTables: number;
@@ -46,9 +76,10 @@ export type TenantSecuritySummary = {
   openPolicies: number;
   anonymousPrivilegedTables: number;
   anonymousProfileReadBlocked: boolean;
+  anonymousProbe: AnonymousProbe;
 };
 
-export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymousProfileReadBlocked: boolean): TenantSecuritySummary {
+export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymousProbe: AnonymousProbe): TenantSecuritySummary {
   const normalized = rows.map((row) => ({
     ...row,
     policyCount: Number(row.policy_count) || 0,
@@ -62,6 +93,7 @@ export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymous
   const authBarrierTables = normalized.filter((row) => row.table_exists && row.authBarrierCount === 1).length;
   const openPolicies = normalized.reduce((total, row) => total + row.openPolicyCount, 0);
   const anonymousPrivilegedTables = normalized.filter((row) => row.table_exists && row.anonymousPrivileged).length;
+  const anonymousProfileReadBlocked = anonymousProbe.blocked;
   const ready = normalized.length === TENANT_TABLES.length
     && existingTables === TENANT_TABLES.length
     && rlsEnabledTables === TENANT_TABLES.length
@@ -70,7 +102,7 @@ export function evaluateTenantSecurity(rows: TenantTableSecurityRow[], anonymous
     && openPolicies === 0
     && anonymousPrivilegedTables === 0
     && anonymousProfileReadBlocked;
-  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, authBarrierTables, openPolicies, anonymousPrivilegedTables, anonymousProfileReadBlocked };
+  return { ready, expectedTables: TENANT_TABLES.length, existingTables, rlsEnabledTables, tablesWithPolicies, authBarrierTables, openPolicies, anonymousPrivilegedTables, anonymousProfileReadBlocked, anonymousProbe };
 }
 
 export async function handleTenantSecurityAudit(request: Request, env: { DATABASE_URL?: string }) {
@@ -122,19 +154,17 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
       order by expected.table_name
     ` as TenantTableSecurityRow[];
 
-    let anonymousProfileReadBlocked = false;
+    let anonymousProbe: AnonymousProbe;
     try {
       const anonymous = await fetch(`${DATA_API}/profiles?select=id&limit=1`, { headers: { accept: "application/json" } });
-      if (!anonymous.ok) anonymousProfileReadBlocked = anonymous.status === 401 || anonymous.status === 403;
-      else {
-        const payload = await anonymous.json() as unknown;
-        anonymousProfileReadBlocked = Array.isArray(payload) && payload.length === 0;
-      }
+      let payload: unknown = null;
+      try { payload = await anonymous.json(); } catch { payload = null; }
+      anonymousProbe = classifyAnonymousProbe(anonymous.status, anonymous.ok, payload);
     } catch {
-      anonymousProfileReadBlocked = false;
+      anonymousProbe = { blocked: false, status: null, outcome: "NETWORK_ERROR", rowCount: null, errorCode: null };
     }
 
-    const summary = evaluateTenantSecurity(rows, anonymousProfileReadBlocked);
+    const summary = evaluateTenantSecurity(rows, anonymousProbe);
     return new Response(JSON.stringify({ service: "post-automatici", database: "reachable", tenantIsolation: summary }), {
       status: summary.ready ? 200 : 503,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
