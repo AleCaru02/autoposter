@@ -279,26 +279,54 @@ jobs:
           jwt_b=$(make_identity B "$email_b" "$password_b" b.cookies b)
           echo "::add-mask::$jwt_b"
 
-          EMAIL_A="$email_a" EMAIL_B="$email_b" JWT_A="$jwt_a" JWT_B="$jwt_b" node - <<'NODE' > tenant-cross-request.json
-          process.stdout.write(JSON.stringify({
+          EMAIL_A="$email_a" EMAIL_B="$email_b" JWT_A="$jwt_a" JWT_B="$jwt_b" CROSS_URL="$CROSS_URL" node - <<'NODE'
+          const headers = { authorization: `Bearer ${process.env.TENANT_CROSS_TEST_TOKEN}`, 'content-type': 'application/json' };
+          const identities = {
             a: { email: process.env.EMAIL_A, jwt: process.env.JWT_A },
             b: { email: process.env.EMAIL_B, jwt: process.env.JWT_B },
-          }));
-          NODE
-
-          status=$(curl -sS -X POST -o tenant-cross.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" -H "content-type: application/json" --data-binary @tenant-cross-request.json "$CROSS_URL" || true)
-          cat tenant-cross.json || true
-          echo
-          CROSS_STATUS="$status" node - <<'NODE'
-          const fs = require('node:fs');
-          const payload = JSON.parse(fs.readFileSync('tenant-cross.json', 'utf8'));
-          const checks = Array.isArray(payload?.checks) ? payload.checks : [];
-          const failed = checks.filter((check) => check?.pass !== true);
-          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS' || checks.length < 48 || failed.length > 0) {
-            console.error('Cross-tenant production test failed:', JSON.stringify({ status: process.env.CROSS_STATUS, ready: payload?.ready, cleanup: payload?.cleanup, checkCount: checks.length, failed, error: payload?.error }));
-            process.exit(1);
+          };
+          async function call(body, label) {
+            const response = await fetch(process.env.CROSS_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+            let payload;
+            try { payload = await response.json(); } catch { payload = { error: 'NON_JSON_RESPONSE' }; }
+            console.log(`${label}:`, response.status, JSON.stringify(payload));
+            if (!response.ok || payload?.ready === false) throw new Error(`${label}_FAILED:${payload?.error || response.status}`);
+            return payload;
           }
-          console.log(`tenant A/B production isolation: PASS (${checks.length} checks, cleanup PASS)`);
+          const prepared = await call({ mode: 'prepare', ...identities }, 'tenant prepare');
+          const fixtures = prepared?.fixtures;
+          if (!fixtures?.a?.profileId || !fixtures?.b?.profileId) throw new Error('TENANT_PREPARE_FIXTURES_MISSING');
+
+          const phaseSpecs = [
+            ['phase-1', 22],
+            ['phase-2a', 13],
+            ['phase-2b', 13],
+          ];
+          const allChecks = [];
+          for (const [mode, expectedCount] of phaseSpecs) {
+            const phase = await call({ mode, ...identities, fixtures }, mode);
+            const checks = Array.isArray(phase?.checks) ? phase.checks : [];
+            if (checks.length !== expectedCount) throw new Error(`${mode}_CHECK_COUNT_${checks.length}_EXPECTED_${expectedCount}`);
+            const failed = checks.filter((item) => item?.pass !== true);
+            if (failed.length) throw new Error(`${mode}_SECURITY_FAILURE:${JSON.stringify(failed)}`);
+            allChecks.push(...checks);
+          }
+          const names = new Set(allChecks.map((item) => item?.name));
+          if (allChecks.length !== 48 || names.size !== 48) throw new Error(`TENANT_CHECK_SET_INVALID:${allChecks.length}/${names.size}`);
+
+          async function cleanup(label) {
+            const response = await fetch(process.env.CROSS_URL, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ mode: 'cleanup', a: { email: identities.a.email }, b: { email: identities.b.email } }),
+            });
+            const payload = await response.json();
+            console.log(`${label}:`, response.status, JSON.stringify(payload));
+            if (!response.ok || payload?.cleanup !== 'PASS') throw new Error(`${label}_FAILED`);
+          }
+          await cleanup('tenant cleanup');
+          await cleanup('tenant cleanup idempotent verification');
+          console.log(`tenant A/B production isolation: PASS (${allChecks.length}/48 checks, cleanup PASS)`);
           NODE
       - name: Remove one-time cross-tenant test secret
         if: always()
