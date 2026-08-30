@@ -1,0 +1,75 @@
+name: FASE 3 Post Bootstrap Verification
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    if: contains(github.event.head_commit.message, '[post-bootstrap-verify]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify bootstrap route is closed after Cloudflare propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=""
+          for attempt in {1..24}; do
+            status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "$base/api/internal/fase3/bootstrap-super-admin" || true)
+            if [ "$status" = "404" ]; then break; fi
+            sleep 5
+          done
+          if [ "$status" != "404" ]; then
+            echo "Bootstrap route still reachable after propagation window: HTTP $status" >&2
+            exit 1
+          fi
+          echo "bootstrap route closed: PASS"
+
+      - name: Verify native SUPER_ADMIN and audit schema persisted
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=$(curl -sS -o auth-state.json -w "%{http_code}" "$base/api/security/managed-auth-capabilities" || true)
+          AUTH_STATE_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('auth-state.json', 'utf8'));
+          const auth = body?.managedAuth ?? {};
+          const valid = process.env.AUTH_STATE_STATUS === '200'
+            && auth.adminPluginActive === true
+            && Number(auth.nativeAdminUsers ?? -1) === 1
+            && auth.platformAdminAuditPresent === true;
+          if (!valid) {
+            console.error('Post-bootstrap state invalid:', JSON.stringify({ status: process.env.AUTH_STATE_STATUS, nativeAdminUsers: auth.nativeAdminUsers, platformAdminAuditPresent: auth.platformAdminAuditPresent, adminPluginActive: auth.adminPluginActive }));
+            process.exit(1);
+          }
+          console.log('post-bootstrap native admin state: PASS', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, platformAdminAuditPresent: auth.platformAdminAuditPresent }));
+          NODE
+
+      - name: Verify tenant and OWNER contract unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=$(curl -sS -o tenant-state.json -w "%{http_code}" "$base/api/security/tenant-audit" || true)
+          TENANT_STATE_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('tenant-state.json', 'utf8'));
+          const tenant = body?.tenantIsolation ?? {};
+          const owner = body?.ownerContract ?? {};
+          const valid = process.env.TENANT_STATE_STATUS === '200'
+            && body?.ready === true
+            && tenant?.ready === true
+            && owner?.ready === true
+            && Number(tenant.openPolicies ?? -1) === 0
+            && Number(tenant.anonymousPrivilegedTables ?? -1) === 0
+            && Number(owner.profilesWithoutOwner ?? -1) === 0
+            && Number(owner.profilesWithMultipleOwners ?? -1) === 0;
+          if (!valid) {
+            console.error('Tenant/OWNER regression after bootstrap:', JSON.stringify({ status: process.env.TENANT_STATE_STATUS, tenant, owner }));
+            process.exit(1);
+          }
+          console.log('tenant and OWNER post-bootstrap: PASS', JSON.stringify({ profilesTotal: owner.profilesTotal, profilesWithOwner: owner.profilesWithOwner }));
+          NODE
