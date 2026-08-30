@@ -1,0 +1,173 @@
+name: FASE 3 Runtime QA
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  runtime-qa:
+    if: contains(github.event.head_commit.message, '[fase3-runtime-qa]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - { name: Typecheck, run: "npm run typecheck" }
+      - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
+      - { name: FASE 3 QA control security, run: "npm run test:fase3-qa-control" }
+      - { name: Tenant security regression, run: "npm run test:tenant-security" }
+      - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
+      - { name: Build, run: "npm run build" }
+      - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
+
+      - name: Generate ephemeral QA identities and secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker=$(openssl rand -hex 6)
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "::add-mask::fase3-qa-$marker-customer-a@example.invalid"
+          echo "::add-mask::fase3-qa-$marker-customer-b@example.invalid"
+          echo "::add-mask::fase3-qa-$marker-admin@example.invalid"
+          echo "FASE3_QA_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "FASE3_QA_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "FASE3_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+
+      - name: Provision ephemeral QA control secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: printf '%s' "$FASE3_QA_TOKEN_VALUE" | npx wrangler secret put FASE3_QA_TOKEN
+
+      - name: Deploy QA-capable Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      - name: Verify QA control activated only with secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=""
+          for attempt in {1..12}; do
+            status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" \
+              -H 'content-type: application/json' -H 'x-fase3-qa-token: wrong' \
+              --data "{\"action\":\"state\",\"marker\":\"$FASE3_QA_MARKER\"}" \
+              "$base/api/internal/fase3/qa-control" || true)
+            if [ "$status" = "403" ]; then break; fi
+            sleep 5
+          done
+          if [ "$status" != "403" ]; then
+            echo "QA control did not enter protected state: HTTP $status" >&2
+            exit 1
+          fi
+          echo "QA control secret gate: PASS"
+
+      - name: Authenticated runtime RBAC and admin API matrix
+        run: npm run test:fase3-runtime-qa
+
+      - name: Install browser QA runtime
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install chromium
+
+      - name: Mobile browser CUSTOMER vs SUPER_ADMIN
+        run: node tests/fase3-browser-qa.mjs
+
+      - name: Cleanup QA identities and fixtures
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${FASE3_QA_TOKEN_VALUE:-}" ] || [ -z "${FASE3_QA_MARKER:-}" ]; then
+            echo "QA env was not provisioned; no cleanup call needed"
+            exit 0
+          fi
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=$(curl -sS -o qa-cleanup.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-fase3-qa-token: $FASE3_QA_TOKEN_VALUE" \
+            --data "{\"action\":\"cleanup\",\"marker\":\"$FASE3_QA_MARKER\"}" \
+            "$base/api/internal/fase3/qa-control" || true)
+          QA_CLEANUP_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('qa-cleanup.json', 'utf8'));
+          const valid = process.env.QA_CLEANUP_STATUS === '200'
+            && body?.cleaned === true
+            && Number(body.qaUsers ?? -1) === 0
+            && Number(body.qaProfiles ?? -1) === 0
+            && Number(body.qaOwners ?? -1) === 0
+            && Number(body.qaAdmins ?? -1) === 0
+            && Number(body?.metrics?.super_admins ?? -1) === 1;
+          if (!valid) {
+            console.error('FASE3 QA cleanup failed:', JSON.stringify({ status: process.env.QA_CLEANUP_STATUS, cleaned: body?.cleaned, qaUsers: body?.qaUsers, qaProfiles: body?.qaProfiles, qaOwners: body?.qaOwners, qaAdmins: body?.qaAdmins, superAdmins: body?.metrics?.super_admins }));
+            process.exit(1);
+          }
+          console.log('FASE3 QA cleanup: PASS', JSON.stringify({ residue: 0, superAdmins: body.metrics.super_admins }));
+          NODE
+
+      - name: Remove ephemeral QA control secret
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${FASE3_QA_TOKEN_VALUE:-}" ]; then printf 'y\n' | npx wrangler secret delete FASE3_QA_TOKEN; fi
+
+      - name: Verify QA control closed after secret removal
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=""
+          for attempt in {1..24}; do
+            status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "$base/api/internal/fase3/qa-control" || true)
+            if [ "$status" = "404" ]; then break; fi
+            sleep 5
+          done
+          if [ "$status" != "404" ]; then
+            echo "QA control route still reachable after secret removal: HTTP $status" >&2
+            exit 1
+          fi
+          echo "QA control route closed: PASS"
+
+      - name: Final production invariants
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          curl -sS -o auth-state.json "$base/api/security/managed-auth-capabilities"
+          curl -sS -o tenant-state.json "$base/api/security/tenant-audit"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const auth = JSON.parse(fs.readFileSync('auth-state.json', 'utf8'))?.managedAuth ?? {};
+          const tenantBody = JSON.parse(fs.readFileSync('tenant-state.json', 'utf8'));
+          const tenant = tenantBody?.tenantIsolation ?? {};
+          const owner = tenantBody?.ownerContract ?? {};
+          const valid = auth.adminPluginActive === true
+            && Number(auth.nativeAdminUsers ?? -1) === 1
+            && auth.platformAdminAuditPresent === true
+            && tenantBody?.ready === true
+            && tenant?.ready === true
+            && owner?.ready === true
+            && Number(tenant.openPolicies ?? -1) === 0
+            && Number(tenant.anonymousPrivilegedTables ?? -1) === 0
+            && Number(owner.profilesWithoutOwner ?? -1) === 0
+            && Number(owner.profilesWithMultipleOwners ?? -1) === 0;
+          if (!valid) {
+            console.error('Final FASE3 invariants failed:', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, adminPluginActive: auth.adminPluginActive, auditPresent: auth.platformAdminAuditPresent, tenant, owner }));
+            process.exit(1);
+          }
+          console.log('final FASE3 invariants: PASS', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, profilesTotal: owner.profilesTotal, profilesWithOwner: owner.profilesWithOwner }));
+          NODE

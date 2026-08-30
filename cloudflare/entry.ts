@@ -5,6 +5,7 @@ import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleManagedAuthCapabilities } from "./managed-auth-capabilities.js";
 import { handleInitialSuperAdminBootstrap } from "./platform-admin-bootstrap.js";
+import { handleFase3QaControl } from "./fase3-qa-control.js";
 import { handleAdminApi } from "./admin-api.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
@@ -15,6 +16,7 @@ const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.
 type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
+  FASE3_QA_TOKEN?: string;
 };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
@@ -116,6 +118,7 @@ export default {
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
     if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
     if (path === "/api/internal/fase3/bootstrap-super-admin") return handleInitialSuperAdminBootstrap(request, env);
+    if (path === "/api/internal/fase3/qa-control") return handleFase3QaControl(request, env);
     if (path.startsWith("/api/admin/")) {
       const response = await handleAdminApi(request, env);
       if (response) return response;
