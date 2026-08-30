@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Globe2, LoaderCircle, RefreshCw, Sparkles, WandSparkles } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient, neonClient } from "../lib/neon-client";
@@ -27,6 +27,8 @@ export function OnboardingPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const creatingAnother = searchParams.get("new") === "1";
+  const submitLock = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [industry, setIndustry] = useState("");
@@ -85,12 +87,18 @@ export function OnboardingPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
+    setSubmitting(true);
     setError(null);
     let profileId: string | null = null;
     try {
       const created = await createProfile({ name, websiteUrl: website, industry });
       profileId = created.id;
       setCreatedProfileId(created.id);
+      // `?new=1` is an explicit one-shot intent. Remove it as soon as the new
+      // workspace exists so a refresh/retry cannot reopen creation accidentally.
+      if (creatingAnother) navigate("/onboarding", { replace: true });
       if (!website.trim()) {
         const done = await neonClient.from("profiles").update({ onboarding_completed: true, updated_at: new Date().toISOString() }).eq("id", created.id).select("id");
         if (done.error) throw new Error(done.error.message);
@@ -102,6 +110,9 @@ export function OnboardingPage() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Configurazione non riuscita.");
       setStage(profileId ? "ERROR" : "FORM");
+    } finally {
+      submitLock.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -124,7 +135,7 @@ export function OnboardingPage() {
       return <div className={`onboarding-step ${done ? "done" : ""} ${active ? "active" : ""}`} key={step.key}><span>{done ? <Check size={14} /> : index + 1}</span><small>{step.label}</small></div>;
     })}</div>
 
-    {stage === "FORM" && <div className="onboarding-copy"><span className="onboarding-icon"><WandSparkles size={22} /></span><h1>Crea il profilo della tua attività</h1><p>Dimmi l’essenziale. Se inserisci il sito, Post Automatici lo legge pagina per pagina e prepara automaticamente brand, tono, target, servizi e identità visiva.</p><form className="auth-form onboarding-form" onSubmit={submit}><label>Come si chiama l’attività?<input required autoFocus placeholder="Es. Il Tuo Property Manager" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Sito web<input type="url" placeholder="https://iltuosito.it" value={website} onChange={(event) => setWebsite(event.target.value)} /></label><label>Settore <span className="optional-label">opzionale</span><input placeholder="Se lo lasci vuoto provo a capirlo dal sito" value={industry} onChange={(event) => setIndustry(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="submit">Continua <span>→</span></button></form></div>}
+    {stage === "FORM" && <div className="onboarding-copy"><span className="onboarding-icon"><WandSparkles size={22} /></span><h1>Crea il profilo della tua attività</h1><p>Dimmi l’essenziale. Se inserisci il sito, Post Automatici lo legge pagina per pagina e prepara automaticamente brand, tono, target, servizi e identità visiva.</p><form className="auth-form onboarding-form" onSubmit={submit}><label>Come si chiama l’attività?<input required autoFocus placeholder="Es. Il Tuo Property Manager" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Sito web<input type="url" placeholder="https://iltuosito.it" value={website} onChange={(event) => setWebsite(event.target.value)} /></label><label>Settore <span className="optional-label">opzionale</span><input placeholder="Se lo lasci vuoto provo a capirlo dal sito" value={industry} onChange={(event) => setIndustry(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="submit" disabled={submitting}>{submitting ? "Creazione…" : "Continua"} <span>→</span></button></form></div>}
 
     {stage === "CRAWL" && <div className="onboarding-loading"><span className="onboarding-icon"><Globe2 size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto leggendo il sito</h1><p>Controllo sitemap e collegamenti interni, poi salvo ogni pagina trovata. Non mi fermo alla homepage.</p><div className="analysis-pulse"><span /> <span /> <span /></div></div>}
 
