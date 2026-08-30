@@ -168,7 +168,8 @@ jobs:
           }
 
           make_identity() {
-            local label="$1" email="$2" password="$3" jar="$4" prefix="$5" signup_body_file="${prefix}-signup-request.json" status="" jwt=""
+            local label="$1" email="$2" password="$3" jar="$4" prefix="$5"
+            local signup_body_file="${prefix}-signup-request.json" status="" jwt=""
             json_body "$email" "$password" "$label" > "$signup_body_file"
             status=$(curl -sS -c "$jar" -D "${prefix}-signup.headers" -o "${prefix}-signup.json" -w "%{http_code}" -X POST -H "content-type: application/json" -H "accept: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" --data-binary "@$signup_body_file" "$AUTH_URL/sign-up/email" || true)
             if [[ ! "$status" =~ ^2 ]]; then
