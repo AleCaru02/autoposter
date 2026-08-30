@@ -17,6 +17,7 @@ jobs:
       - { name: Install, run: "npm install --no-audit --no-fund" }
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
+      - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Crawler regression, run: "npm run test:crawler" }
@@ -40,6 +41,18 @@ jobs:
       - { name: OpenAI image contract, run: "npm run test:openai-image" }
       - { name: Build, run: "npm run build" }
       - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
+      - name: Provision ephemeral admin bootstrap secret
+        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "ADMIN_BOOTSTRAP_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          printf '%s' "$token" | npx wrangler secret put ADMIN_BOOTSTRAP_TOKEN
       - name: Deploy Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -119,6 +132,7 @@ jobs:
           const valid = process.env.AUTH_AUDIT_STATUS === '200'
             && managedAuth.ready === true
             && managedAuth.coreAuthReachable === true
+            && managedAuth.adminPluginActive === true
             && endpoints.every((endpoint) => endpoint?.state !== 'UNSAFE');
           if (!valid) {
             console.error('Production Managed Auth capability audit failed:', JSON.stringify({ status: process.env.AUTH_AUDIT_STATUS, managedAuth }));
@@ -126,6 +140,63 @@ jobs:
           }
           console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
           NODE
+      - name: Configure initial native SUPER_ADMIN
+        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o bootstrap.json -w "%{http_code}" -X POST \
+            -H "x-bootstrap-token: $ADMIN_BOOTSTRAP_TOKEN_VALUE" \
+            "https://autoposter.02alessandrocaruso.workers.dev/api/internal/fase3/bootstrap-super-admin")
+          cat bootstrap.json
+          echo
+          BOOTSTRAP_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('bootstrap.json', 'utf8'));
+          if (process.env.BOOTSTRAP_STATUS !== '200' || body?.configured !== true || body?.ownerIdentityCount !== 1) {
+            console.error('Initial SUPER_ADMIN bootstrap failed:', JSON.stringify({ status: process.env.BOOTSTRAP_STATUS, body }));
+            process.exit(1);
+          }
+          console.log('initial SUPER_ADMIN bootstrap: PASS', JSON.stringify(body));
+          NODE
+      - name: Verify native SUPER_ADMIN persisted
+        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -o admin-state.json "https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities"
+          cat admin-state.json
+          echo
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('admin-state.json', 'utf8'));
+          const auth = body?.managedAuth ?? {};
+          if (Number(auth.nativeAdminUsers ?? 0) < 1 || auth.platformAdminAuditPresent !== true) {
+            console.error('Native SUPER_ADMIN persistence verification failed:', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, platformAdminAuditPresent: auth.platformAdminAuditPresent }));
+            process.exit(1);
+          }
+          console.log('native SUPER_ADMIN persistence: PASS', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, platformAdminAuditPresent: auth.platformAdminAuditPresent }));
+          NODE
+      - name: Remove ephemeral admin bootstrap secret
+        if: always() && contains(github.event.head_commit.message, '[bootstrap-admin]')
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          printf 'y\n' | npx wrangler secret delete ADMIN_BOOTSTRAP_TOKEN
+      - name: Verify bootstrap route closed
+        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "https://autoposter.02alessandrocaruso.workers.dev/api/internal/fase3/bootstrap-super-admin" || true)
+          if [ "$status" != "404" ]; then
+            echo "Bootstrap route did not fail closed after secret removal: HTTP $status" >&2
+            exit 1
+          fi
+          echo "bootstrap route closed: PASS"
       - name: Production temporary diagnostic routes absent
         shell: bash
         run: |

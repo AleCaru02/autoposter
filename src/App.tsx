@@ -17,6 +17,7 @@ const SocialPage = lazy(() => import("./pages/social-page").then((module) => ({ 
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
 const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
 const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
+const AdminBackoffice = lazy(() => import("./pages/admin-pages").then((module) => ({ default: module.AdminBackoffice })));
 
 type AuthPagesModule = typeof import("./pages/auth-pages");
 
@@ -63,6 +64,7 @@ export default function App() {
     <Route path="/password-dimenticata" element={<AuthPages />} />
     <Route path="/reimposta-password" element={<AuthPages />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
+    <Route path="/admin/*" element={<RequireAuth><AdminBackoffice /></RequireAuth>} />
     <Route path="/app" element={<RequireAuth><ProfileProvider><RequireProfile /></ProfileProvider></RequireAuth>}>
       <Route index element={<Navigate to="dashboard" replace />} />
       <Route path="dashboard" element={<DashboardPage />} />

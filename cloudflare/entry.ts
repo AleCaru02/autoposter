@@ -4,13 +4,18 @@ import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleManagedAuthCapabilities } from "./managed-auth-capabilities.js";
+import { handleInitialSuperAdminBootstrap } from "./platform-admin-bootstrap.js";
+import { handleAdminApi } from "./admin-api.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> } };
+type Env = AutopilotEnv & SocialEnv & {
+  ASSETS: { fetch(request: Request): Promise<Response> };
+  ADMIN_BOOTSTRAP_TOKEN?: string;
+};
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
 
@@ -110,6 +115,11 @@ export default {
     if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
     if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
+    if (path === "/api/internal/fase3/bootstrap-super-admin") return handleInitialSuperAdminBootstrap(request, env);
+    if (path.startsWith("/api/admin/")) {
+      const response = await handleAdminApi(request, env);
+      if (response) return response;
+    }
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
