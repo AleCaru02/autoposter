@@ -36,8 +36,7 @@ function secureEquals(left: string, right: string) {
 
 function authorized(request: Request, secret?: string) {
   if (!secret) return false;
-  const header = request.headers.get("authorization") ?? "";
-  return secureEquals(header, `Bearer ${secret}`);
+  return secureEquals(request.headers.get("authorization") ?? "", `Bearer ${secret}`);
 }
 
 function randomPassword() {
@@ -46,16 +45,13 @@ function randomPassword() {
 }
 
 function isJwt(value: unknown): value is string {
-  return typeof value === "string" && value.split(".").length === 3 && value.length > 80;
+  return typeof value === "string" && value.length > 80 && value.split(".").length === 3;
 }
 
 function findJwt(value: unknown, depth = 0): string | null {
-  if (depth > 5) return null;
+  if (depth > 6) return null;
   if (isJwt(value)) return value;
   if (!value || typeof value !== "object") return null;
-  for (const [key, child] of Object.entries(value as JsonRecord)) {
-    if (["access_token", "accessToken", "jwt"].includes(key) && isJwt(child)) return child;
-  }
   for (const child of Object.values(value as JsonRecord)) {
     const nested = findJwt(child, depth + 1);
     if (nested) return nested;
@@ -66,11 +62,14 @@ function findJwt(value: unknown, depth = 0): string | null {
 function authUserId(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const root = value as JsonRecord;
-  const directUser = root.user && typeof root.user === "object" ? root.user as JsonRecord : null;
-  const data = root.data && typeof root.data === "object" ? root.data as JsonRecord : null;
-  const nestedUser = data?.user && typeof data.user === "object" ? data.user as JsonRecord : null;
-  const id = directUser?.id ?? nestedUser?.id;
-  return typeof id === "string" && id.length > 0 ? id : null;
+  const candidates: unknown[] = [root.id];
+  if (root.user && typeof root.user === "object") candidates.push((root.user as JsonRecord).id);
+  if (root.data && typeof root.data === "object") {
+    const data = root.data as JsonRecord;
+    candidates.push(data.id);
+    if (data.user && typeof data.user === "object") candidates.push((data.user as JsonRecord).id);
+  }
+  return candidates.find((candidate): candidate is string => typeof candidate === "string" && candidate.length > 0) ?? null;
 }
 
 function jwtSubject(token: string) {
@@ -84,10 +83,17 @@ function jwtSubject(token: string) {
   }
 }
 
-function sessionCookie(response: Response) {
-  const raw = response.headers.get("set-cookie") ?? "";
-  const match = raw.match(/(?:^|,\s*)((?:__Secure-)?(?:neonauth|better-auth)\.session_token=[^;,]+)/i);
-  return match?.[1] ?? null;
+function cookieHeader(response: Response) {
+  const extended = response.headers as Headers & { getSetCookie?: () => string[] };
+  const values = typeof extended.getSetCookie === "function"
+    ? extended.getSetCookie()
+    : [response.headers.get("set-cookie") ?? ""];
+  const pairs = new Set<string>();
+  for (const value of values) {
+    const regex = /(?:^|,\s*)((?:__Secure-)?(?:neonauth|better-auth)\.[A-Za-z0-9_.-]+=[^;,]+)/gi;
+    for (const match of value.matchAll(regex)) pairs.add(match[1]);
+  }
+  return pairs.size > 0 ? [...pairs].join("; ") : null;
 }
 
 async function parsed(response: Response): Promise<unknown> {
@@ -98,21 +104,35 @@ async function parsed(response: Response): Promise<unknown> {
 async function authPost(path: string, body: JsonRecord, origin: string) {
   return fetch(`${AUTH_URL}/${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json", origin, referer: `${origin}/` },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      origin,
+      referer: `${origin}/`,
+    },
     body: JSON.stringify(body),
   });
 }
 
-async function jwtFromCookie(cookie: string | null, origin: string) {
+async function tokenFromSession(cookie: string | null, origin: string) {
   if (!cookie) return null;
+  const headers = { accept: "application/json", cookie, origin, referer: `${origin}/` };
+
+  const session = await fetch(`${AUTH_URL}/get-session`, { method: "GET", headers });
+  const sessionHeaderJwt = session.headers.get("set-auth-jwt");
+  if (isJwt(sessionHeaderJwt)) return sessionHeaderJwt;
+  if (session.ok) {
+    const bodyJwt = findJwt(await parsed(session));
+    if (bodyJwt) return bodyJwt;
+  }
+
   for (const method of ["GET", "POST"] as const) {
-    const response = await fetch(`${AUTH_URL}/token`, {
-      method,
-      headers: { accept: "application/json", cookie, origin, referer: `${origin}/` },
-    });
-    if (!response.ok) continue;
-    const token = findJwt(await parsed(response));
-    if (token) return token;
+    const tokenResponse = await fetch(`${AUTH_URL}/token`, { method, headers });
+    const headerJwt = tokenResponse.headers.get("set-auth-jwt");
+    if (isJwt(headerJwt)) return headerJwt;
+    if (!tokenResponse.ok) continue;
+    const bodyJwt = findJwt(await parsed(tokenResponse));
+    if (bodyJwt) return bodyJwt;
   }
   return null;
 }
@@ -121,21 +141,20 @@ async function createIdentity(label: string, origin: string, state: FixtureState
   const nonce = crypto.randomUUID().replace(/-/g, "");
   const email = `tenant-${label.toLowerCase()}-${nonce}@example.com`;
   const password = randomPassword();
-  const name = `Tenant QA ${label}`;
   state.email = email;
 
-  const signup = await authPost("sign-up/email", { name, email, password }, origin);
+  const signup = await authPost("sign-up/email", { name: `Tenant QA ${label}`, email, password }, origin);
   if (!signup.ok) throw new Error(`AUTH_SIGNUP_${label}_${signup.status}`);
   const signupBody = await parsed(signup);
   state.userId = authUserId(signupBody) ?? state.userId;
-  let jwt = findJwt(signupBody) ?? await jwtFromCookie(sessionCookie(signup), origin);
+  let jwt = findJwt(signupBody) ?? await tokenFromSession(cookieHeader(signup), origin);
 
   if (!jwt) {
     const signin = await authPost("sign-in/email", { email, password }, origin);
     if (!signin.ok) throw new Error(`AUTH_SIGNIN_${label}_${signin.status}`);
     const signinBody = await parsed(signin);
     state.userId = authUserId(signinBody) ?? state.userId;
-    jwt = findJwt(signinBody) ?? await jwtFromCookie(sessionCookie(signin), origin);
+    jwt = findJwt(signinBody) ?? await tokenFromSession(cookieHeader(signin), origin);
   }
 
   if (!jwt) throw new Error(`AUTH_JWT_${label}_MISSING`);
@@ -161,7 +180,9 @@ async function dataApi(token: string, path: string, init: RequestInit = {}) {
 async function responseRows(response: Response): Promise<JsonRecord[]> {
   if (!response.ok) return [];
   const body = await parsed(response);
-  return Array.isArray(body) ? body.filter((row): row is JsonRecord => Boolean(row) && typeof row === "object") : [];
+  return Array.isArray(body)
+    ? body.filter((row): row is JsonRecord => Boolean(row) && typeof row === "object")
+    : [];
 }
 
 async function ownRows(token: string, table: string, profileId: string, select = "profile_id") {
@@ -176,6 +197,7 @@ async function createFixture(label: string, origin: string, state: FixtureState)
   const identity = await createIdentity(label, origin, state);
   const profileName = `Tenant QA ${label} ${crypto.randomUUID().slice(0, 8)}`;
   state.profileName = profileName;
+
   const insert = await dataApi(identity.jwt, "profiles?select=id,name", {
     method: "POST",
     headers: { prefer: "return=representation" },
@@ -222,34 +244,44 @@ async function crossWriteChecks(actor: Fixture, target: Fixture, actorLabel: str
     headers: { prefer: "return=representation" },
     body: JSON.stringify({ name: changedName }),
   });
-  const patchedProfiles = await responseRows(profilePatch);
   const ownerProfile = await profileRows(target.jwt, target.profileId, "id,name");
-  check(checks, `${actorLabel}_cannot_update_${targetLabel}_profile`, patchedProfiles.length === 0 && ownerProfile.length === 1 && ownerProfile[0]?.name === target.profileName);
+  check(
+    checks,
+    `${actorLabel}_cannot_update_${targetLabel}_profile`,
+    (await responseRows(profilePatch)).length === 0 && ownerProfile.length === 1 && ownerProfile[0]?.name === target.profileName,
+  );
 
   const brandPatch = await dataApi(actor.jwt, `brand_profiles?profile_id=eq.${encodeURIComponent(target.profileId)}&select=profile_id`, {
     method: "PATCH",
     headers: { prefer: "return=representation" },
     body: JSON.stringify({ description: `forbidden-${actorLabel}` }),
   });
-  const patchedBrands = await responseRows(brandPatch);
   const ownerBrand = await ownRows(target.jwt, "brand_profiles", target.profileId, "profile_id,description");
-  check(checks, `${actorLabel}_cannot_update_${targetLabel}_brand`, patchedBrands.length === 0 && ownerBrand.length === 1 && ownerBrand[0]?.description === `private-${targetLabel}`);
+  check(
+    checks,
+    `${actorLabel}_cannot_update_${targetLabel}_brand`,
+    (await responseRows(brandPatch)).length === 0 && ownerBrand.length === 1 && ownerBrand[0]?.description === `private-${targetLabel}`,
+  );
 
   const brandDelete = await dataApi(actor.jwt, `brand_profiles?profile_id=eq.${encodeURIComponent(target.profileId)}&select=profile_id`, {
     method: "DELETE",
     headers: { prefer: "return=representation" },
   });
-  const deletedBrands = await responseRows(brandDelete);
-  const brandAfterDelete = await ownRows(target.jwt, "brand_profiles", target.profileId, "profile_id");
-  check(checks, `${actorLabel}_cannot_delete_${targetLabel}_brand`, deletedBrands.length === 0 && brandAfterDelete.length === 1);
+  check(
+    checks,
+    `${actorLabel}_cannot_delete_${targetLabel}_brand`,
+    (await responseRows(brandDelete)).length === 0 && (await ownRows(target.jwt, "brand_profiles", target.profileId, "profile_id")).length === 1,
+  );
 
   const profileDelete = await dataApi(actor.jwt, `profiles?id=eq.${encodeURIComponent(target.profileId)}&select=id`, {
     method: "DELETE",
     headers: { prefer: "return=representation" },
   });
-  const deletedProfiles = await responseRows(profileDelete);
-  const profileAfterDelete = await profileRows(target.jwt, target.profileId, "id");
-  check(checks, `${actorLabel}_cannot_delete_${targetLabel}_profile`, deletedProfiles.length === 0 && profileAfterDelete.length === 1);
+  check(
+    checks,
+    `${actorLabel}_cannot_delete_${targetLabel}_profile`,
+    (await responseRows(profileDelete)).length === 0 && (await profileRows(target.jwt, target.profileId, "id")).length === 1,
+  );
 }
 
 export function evaluateCrossTenantChecks(checks: Check[], cleanupOk: boolean) {
@@ -312,7 +344,6 @@ export async function handleTenantCrossTest(request: Request, env: CrossTenantEn
 
     check(checks, "A_can_read_own_profile", (await profileRows(a.jwt, a.profileId)).length === 1);
     check(checks, "B_can_read_own_profile", (await profileRows(b.jwt, b.profileId)).length === 1);
-
     await crossReadChecks(a, b, "A", "B", checks);
     await crossReadChecks(b, a, "B", "A", checks);
     await crossWriteChecks(a, b, "A", "B", checks);
