@@ -20,6 +20,14 @@ type CountRow = {
   profiles_without_owner: number | string;
   profiles_with_multiple_owners: number | string;
   memberships_total: number | string;
+  app_users_total: number | string;
+  profiles_auth_identity_confirmed: number | string;
+  profiles_auth_identity_unresolved: number | string;
+  profiles_app_user_mapped: number | string;
+  profiles_app_user_unmapped: number | string;
+  profiles_owner_user_id_set: number | string;
+  profiles_owner_user_id_mismatch: number | string;
+  conflicting_owner_memberships: number | string;
 };
 
 function secureEquals(left: string, right: string) {
@@ -97,7 +105,7 @@ export async function handleTenantMembershipDiagnostic(request: Request, env: En
              pg_get_functiondef(p.oid) as definition
       from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = 'public' and p.proname in ('current_auth_user_id', 'owns_profile')
+      where n.nspname = 'public' and p.proname in ('current_auth_user_id', 'current_app_user_id', 'owns_profile', 'sync_profile_owner_membership')
       order by p.proname
     ` as FunctionRow[];
 
@@ -108,14 +116,35 @@ export async function handleTenantMembershipDiagnostic(request: Request, env: En
         from public.profiles p
         left join public.profile_members pm on pm.profile_id = p.id
         group by p.id
+      ), profile_map as (
+        select p.id,
+               p.owner_auth_user_id,
+               p.owner_user_id,
+               exists(select 1 from neon_auth.user nu where nu.id::text = p.owner_auth_user_id) as auth_identity_confirmed,
+               au_by_auth.id as mapped_app_user_id,
+               au_by_owner.auth_user_id as owner_user_auth_user_id
+        from public.profiles p
+        left join public.app_users au_by_auth on au_by_auth.auth_user_id = p.owner_auth_user_id
+        left join public.app_users au_by_owner on au_by_owner.id = p.owner_user_id
       )
       select
-        count(*)::int as profiles_total,
-        count(*) filter (where owner_count >= 1)::int as profiles_with_owner,
-        count(*) filter (where owner_count = 0)::int as profiles_without_owner,
-        count(*) filter (where owner_count > 1)::int as profiles_with_multiple_owners,
-        (select count(*)::int from public.profile_members) as memberships_total
-      from owner_counts
+        (select count(*)::int from public.profiles) as profiles_total,
+        (select count(*)::int from owner_counts where owner_count >= 1) as profiles_with_owner,
+        (select count(*)::int from owner_counts where owner_count = 0) as profiles_without_owner,
+        (select count(*)::int from owner_counts where owner_count > 1) as profiles_with_multiple_owners,
+        (select count(*)::int from public.profile_members) as memberships_total,
+        (select count(*)::int from public.app_users) as app_users_total,
+        (select count(*)::int from profile_map where auth_identity_confirmed) as profiles_auth_identity_confirmed,
+        (select count(*)::int from profile_map where not auth_identity_confirmed) as profiles_auth_identity_unresolved,
+        (select count(*)::int from profile_map where mapped_app_user_id is not null) as profiles_app_user_mapped,
+        (select count(*)::int from profile_map where mapped_app_user_id is null) as profiles_app_user_unmapped,
+        (select count(*)::int from profile_map where owner_user_id is not null) as profiles_owner_user_id_set,
+        (select count(*)::int from profile_map where owner_user_id is not null and owner_user_auth_user_id is distinct from owner_auth_user_id) as profiles_owner_user_id_mismatch,
+        (select count(distinct p.id)::int
+           from public.profiles p
+           join public.profile_members pm on pm.profile_id = p.id and upper(pm.role) = 'OWNER'
+           join public.app_users au on au.id = pm.user_id
+          where au.auth_user_id is distinct from p.owner_auth_user_id) as conflicting_owner_memberships
     ` as CountRow[];
 
     return json({
