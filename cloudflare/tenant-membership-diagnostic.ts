@@ -12,7 +12,15 @@ type ColumnRow = {
 
 type TriggerRow = { table_name: string; trigger_name: string; definition: string };
 type PolicyRow = { table_name: string; policy_name: string; command: string; permissive: string; using_expression: string | null; check_expression: string | null };
-type ConstraintRow = { constraint_name: string; constraint_type: string; definition: string };
+type ConstraintRow = { table_name: string; constraint_name: string; constraint_type: string; definition: string };
+type FunctionRow = { function_name: string; definition: string };
+type CountRow = {
+  profiles_total: number | string;
+  profiles_with_owner: number | string;
+  profiles_without_owner: number | string;
+  profiles_with_multiple_owners: number | string;
+  memberships_total: number | string;
+};
 
 function secureEquals(left: string, right: string) {
   if (left.length !== right.length) return false;
@@ -43,7 +51,7 @@ export async function handleTenantMembershipDiagnostic(request: Request, env: En
     const columns = await sql`
       select table_name, column_name, data_type, is_nullable, column_default
       from information_schema.columns
-      where table_schema = 'public' and table_name in ('profiles', 'profile_members')
+      where table_schema = 'public' and table_name in ('profiles', 'profile_members', 'app_users')
       order by table_name, ordinal_position
     ` as ColumnRow[];
 
@@ -73,20 +81,54 @@ export async function handleTenantMembershipDiagnostic(request: Request, env: En
     ` as PolicyRow[];
 
     const constraints = await sql`
-      select con.conname as constraint_name,
+      select c.relname as table_name,
+             con.conname as constraint_name,
              con.contype::text as constraint_type,
              pg_get_constraintdef(con.oid, true) as definition
       from pg_constraint con
       join pg_class c on c.oid = con.conrelid
       join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and c.relname = 'profile_members'
-      order by con.conname
+      where n.nspname = 'public' and c.relname in ('profiles', 'profile_members', 'app_users')
+      order by c.relname, con.conname
     ` as ConstraintRow[];
+
+    const functions = await sql`
+      select p.proname as function_name,
+             pg_get_functiondef(p.oid) as definition
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname in ('current_auth_user_id', 'owns_profile')
+      order by p.proname
+    ` as FunctionRow[];
+
+    const counts = await sql`
+      with owner_counts as (
+        select p.id,
+               count(pm.user_id) filter (where upper(pm.role) = 'OWNER')::int as owner_count
+        from public.profiles p
+        left join public.profile_members pm on pm.profile_id = p.id
+        group by p.id
+      )
+      select
+        count(*)::int as profiles_total,
+        count(*) filter (where owner_count >= 1)::int as profiles_with_owner,
+        count(*) filter (where owner_count = 0)::int as profiles_without_owner,
+        count(*) filter (where owner_count > 1)::int as profiles_with_multiple_owners,
+        (select count(*)::int from public.profile_members) as memberships_total
+      from owner_counts
+    ` as CountRow[];
 
     return json({
       service: "post-automatici",
       ready: true,
-      membershipContract: { columns, triggers, policies, constraints },
+      membershipContract: {
+        columns,
+        triggers,
+        policies,
+        constraints,
+        functions,
+        counts: counts[0] ?? null,
+      },
     });
   } catch (reason) {
     return json({ ready: false, error: reason instanceof Error ? reason.message : "MEMBERSHIP_DIAGNOSTIC_FAILED" }, 503);
