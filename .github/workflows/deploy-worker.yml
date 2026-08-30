@@ -79,22 +79,86 @@ jobs:
           }
           console.log('tenant isolation production audit: PASS', JSON.stringify(payload.tenantIsolation));
           NODE
-      - name: Production membership contract diagnostic
+      - name: Production owner mapping preflight
         shell: bash
         run: |
           set -euo pipefail
           url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-membership-diagnostic"
-          status=$(curl -sS -X POST -o membership-contract.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$url" || true)
-          cat membership-contract.json || true
+          status=$(curl -sS -X POST -o membership-contract-before.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$url" || true)
+          cat membership-contract-before.json || true
           echo
           CONTRACT_STATUS="$status" node - <<'NODE'
           const fs = require('node:fs');
-          const payload = JSON.parse(fs.readFileSync('membership-contract.json', 'utf8'));
-          if (process.env.CONTRACT_STATUS !== '200' || payload?.ready !== true) {
-            console.error('Membership contract diagnostic failed:', JSON.stringify(payload));
+          const payload = JSON.parse(fs.readFileSync('membership-contract-before.json', 'utf8'));
+          const counts = payload?.membershipContract?.counts ?? {};
+          const unsafe = Number(counts.profiles_auth_identity_unresolved ?? 1) !== 0
+            || Number(counts.profiles_owner_user_id_mismatch ?? 1) !== 0
+            || Number(counts.conflicting_owner_memberships ?? 1) !== 0;
+          if (process.env.CONTRACT_STATUS !== '200' || payload?.ready !== true || unsafe) {
+            console.error('Owner mapping preflight failed:', JSON.stringify({ status: process.env.CONTRACT_STATUS, counts }));
             process.exit(1);
           }
-          console.log('membership contract diagnostic: PASS');
+          console.log('owner mapping preflight: PASS', JSON.stringify(counts));
+          NODE
+      - name: Apply versioned owner membership contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-owner-membership-migrate"
+          status=$(curl -sS -X POST -o owner-membership-migration.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$url" || true)
+          cat owner-membership-migration.json || true
+          echo
+          MIGRATION_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('owner-membership-migration.json', 'utf8'));
+          const counts = payload?.counts ?? {};
+          if (process.env.MIGRATION_STATUS !== '200' || payload?.ready !== true || payload?.applied !== true
+              || Number(counts.profiles_without_owner ?? 1) !== 0
+              || Number(counts.profiles_with_multiple_owners ?? 1) !== 0
+              || Number(counts.profiles_without_owner_user_id ?? 1) !== 0
+              || Number(counts.profiles_total ?? -1) !== Number(counts.profiles_with_owner ?? -2)) {
+            console.error('Owner membership migration failed:', JSON.stringify(payload));
+            process.exit(1);
+          }
+          console.log('owner membership migration: PASS', JSON.stringify(counts));
+          NODE
+      - name: Production owner contract verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-membership-diagnostic"
+          status=$(curl -sS -X POST -o membership-contract-after.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$url" || true)
+          cat membership-contract-after.json || true
+          echo
+          CONTRACT_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('membership-contract-after.json', 'utf8'));
+          const contract = payload?.membershipContract ?? {};
+          const counts = contract.counts ?? {};
+          const triggerNames = new Set((contract.triggers ?? []).map((item) => item?.trigger_name));
+          const functionNames = new Set((contract.functions ?? []).map((item) => item?.function_name));
+          const policies = contract.policies ?? [];
+          const ownerRead = policies.some((item) => item?.table_name === 'profile_members' && item?.policy_name === 'profile_members_owner_read' && item?.command === 'SELECT');
+          const legacyWritePolicy = policies.some((item) => item?.table_name === 'profile_members' && item?.policy_name === 'profile_members_isolation');
+          const valid = process.env.CONTRACT_STATUS === '200'
+            && payload?.ready === true
+            && Number(counts.profiles_without_owner ?? 1) === 0
+            && Number(counts.profiles_with_multiple_owners ?? 1) === 0
+            && Number(counts.profiles_auth_identity_unresolved ?? 1) === 0
+            && Number(counts.profiles_owner_user_id_mismatch ?? 1) === 0
+            && Number(counts.conflicting_owner_memberships ?? 1) === 0
+            && Number(counts.profiles_total ?? -1) === Number(counts.profiles_with_owner ?? -2)
+            && triggerNames.has('profiles_owner_prepare')
+            && triggerNames.has('profiles_owner_membership')
+            && functionNames.has('current_app_user_id')
+            && functionNames.has('sync_profile_owner_membership')
+            && ownerRead
+            && !legacyWritePolicy;
+          if (!valid) {
+            console.error('Owner contract verification failed:', JSON.stringify({ status: process.env.CONTRACT_STATUS, counts, triggers: [...triggerNames], functions: [...functionNames], ownerRead, legacyWritePolicy }));
+            process.exit(1);
+          }
+          console.log('owner contract production verification: PASS', JSON.stringify(counts));
           NODE
       - name: Production synthetic tenant A B isolation test
         shell: bash
@@ -230,7 +294,7 @@ jobs:
           const payload = JSON.parse(fs.readFileSync('tenant-cross.json', 'utf8'));
           const checks = Array.isArray(payload?.checks) ? payload.checks : [];
           const failed = checks.filter((check) => check?.pass !== true);
-          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS' || checks.length < 28 || failed.length > 0) {
+          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS' || checks.length < 48 || failed.length > 0) {
             console.error('Cross-tenant production test failed:', JSON.stringify({ status: process.env.CROSS_STATUS, ready: payload?.ready, cleanup: payload?.cleanup, checkCount: checks.length, failed, error: payload?.error }));
             process.exit(1);
           }
