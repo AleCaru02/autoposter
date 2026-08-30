@@ -77,6 +77,20 @@ assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_select[\s\S]*FOR SEL
 assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_delete[\s\S]*FOR DELETE/, "owner profile deletes must remain isolated");
 assert.doesNotMatch(insertPolicyFix, /CREATE POLICY profiles_owner_isolation[\s\S]*FOR ALL/, "the statement-order regression must not be reintroduced through a single FOR ALL policy");
 
+const phasedProbe = readFileSync("cloudflare/tenant-cross-test-phased.ts", "utf8");
+assert.match(phasedProbe, /payload\.mode === "prepare"/, "runtime QA fixtures must be prepared in a bounded invocation");
+assert.match(phasedProbe, /payload\.mode === "phase-1"/, "own and cross-read checks must run in their own bounded phase");
+assert.match(phasedProbe, /payload\.mode === "phase-2a"/, "A-to-B write and escalation checks must run in their own bounded phase");
+assert.match(phasedProbe, /payload\.mode === "phase-2b"/, "B-to-A write and escalation checks must run in their own bounded phase");
+assert.match(phasedProbe, /payload\.mode === "cleanup"/, "QA cleanup must remain a separate protected invocation");
+
+const deployWorkflow = readFileSync(".github/workflows/deploy-worker.yml", "utf8");
+assert.match(deployWorkflow, /\['phase-1', 22\]/, "runtime phase 1 must account for exactly 22 checks");
+assert.match(deployWorkflow, /\['phase-2a', 13\]/, "runtime phase 2A must account for exactly 13 checks");
+assert.match(deployWorkflow, /\['phase-2b', 13\]/, "runtime phase 2B must account for exactly 13 checks");
+assert.match(deployWorkflow, /allChecks\.length !== 48/, "production certification must reject anything other than the full 48-check set");
+assert.match(deployWorkflow, /tenant cleanup idempotent verification/, "cleanup must be explicitly verified after the full runtime probe");
+
 const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
 assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
 assert.match(onboarding, /const submitLock = useRef\(false\)/, "onboarding must use a synchronous submission lock against rapid duplicate submits");
