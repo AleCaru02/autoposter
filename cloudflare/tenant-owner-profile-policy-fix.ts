@@ -3,8 +3,10 @@ import { neon } from "@neondatabase/serverless";
 type Env = { DATABASE_URL?: string; TENANT_CROSS_TEST_TOKEN?: string };
 type SafetyCounts = {
   profiles_total: number | string;
+  profiles_with_owner: number | string;
   profiles_without_owner: number | string;
   profiles_with_multiple_owners: number | string;
+  profiles_without_owner_user_id: number | string;
   profiles_auth_identity_unresolved: number | string;
   profiles_owner_user_id_mismatch: number | string;
 };
@@ -46,8 +48,10 @@ export async function handleTenantOwnerMembershipMigration(request: Request, env
       )
       select
         (select count(*)::int from public.profiles) as profiles_total,
+        (select count(*)::int from owner_counts where owner_count = 1) as profiles_with_owner,
         (select count(*)::int from owner_counts where owner_count = 0) as profiles_without_owner,
         (select count(*)::int from owner_counts where owner_count > 1) as profiles_with_multiple_owners,
+        (select count(*)::int from public.profiles where owner_user_id is null) as profiles_without_owner_user_id,
         (select count(*)::int
            from public.profiles p
            left join neon_auth.user nu on nu.id::text = p.owner_auth_user_id
@@ -61,8 +65,10 @@ export async function handleTenantOwnerMembershipMigration(request: Request, env
     const before = safety[0];
     const safe = Number(before?.profiles_without_owner ?? 1) === 0
       && Number(before?.profiles_with_multiple_owners ?? 1) === 0
+      && Number(before?.profiles_without_owner_user_id ?? 1) === 0
       && Number(before?.profiles_auth_identity_unresolved ?? 1) === 0
-      && Number(before?.profiles_owner_user_id_mismatch ?? 1) === 0;
+      && Number(before?.profiles_owner_user_id_mismatch ?? 1) === 0
+      && Number(before?.profiles_total ?? -1) === Number(before?.profiles_with_owner ?? -2);
     if (!safe) {
       return json({
         service: "post-automatici",
