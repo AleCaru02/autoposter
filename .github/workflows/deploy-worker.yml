@@ -98,6 +98,34 @@ jobs:
           }
           console.log('production tenant/owner audit: PASS', JSON.stringify({ tenant, owner }));
           NODE
+      - name: Production Managed Auth capability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_url="https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities"
+          status=""
+          for attempt in {1..12}; do
+            status=$(curl -sS -o managed-auth.json -w "%{http_code}" "$audit_url" || true)
+            cat managed-auth.json || true
+            echo
+            if [ "$status" = "200" ]; then break; fi
+            sleep 5
+          done
+          AUTH_AUDIT_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('managed-auth.json', 'utf8'));
+          const managedAuth = payload?.managedAuth ?? {};
+          const endpoints = Object.values(managedAuth.endpoints ?? {});
+          const valid = process.env.AUTH_AUDIT_STATUS === '200'
+            && managedAuth.ready === true
+            && managedAuth.coreAuthReachable === true
+            && endpoints.every((endpoint) => endpoint?.state !== 'UNSAFE');
+          if (!valid) {
+            console.error('Production Managed Auth capability audit failed:', JSON.stringify({ status: process.env.AUTH_AUDIT_STATUS, managedAuth }));
+            process.exit(1);
+          }
+          console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
+          NODE
       - name: Production temporary diagnostic routes absent
         shell: bash
         run: |
