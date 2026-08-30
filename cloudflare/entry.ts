@@ -3,7 +3,7 @@ import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
-import { handleTenantCrossTest } from "./tenant-cross-test.js";
+import { handleTenantCrossTest } from "./tenant-cross-test-phased.js";
 import { handleTenantMembershipDiagnostic } from "./tenant-membership-diagnostic.js";
 import { handleTenantOwnerMembershipMigration } from "./tenant-owner-profile-policy-fix.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
