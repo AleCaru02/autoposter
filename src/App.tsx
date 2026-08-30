@@ -4,7 +4,10 @@ import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
 import { ProfileProvider, useProfiles } from "./features/profiles/profile-context";
 
-const AuthPages = lazy(() => import("./pages/auth-pages").then((module) => ({ default: () => <AuthRoutes module={module} /> })));
+const LoginPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.LoginPage })));
+const RegisterPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.RegisterPage })));
+const ForgotPasswordPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.ResetPasswordPage })));
 const OnboardingPage = lazy(() => import("./pages/onboarding-page").then((module) => ({ default: module.OnboardingPage })));
 const DashboardPage = lazy(() => import("./pages/dashboard-page").then((module) => ({ default: module.DashboardPage })));
 const ProfilesPage = lazy(() => import("./pages/profiles-page").then((module) => ({ default: module.ProfilesPage })));
@@ -18,18 +21,6 @@ const SettingsPage = lazy(() => import("./pages/settings-page").then((module) =>
 const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
 const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
 const AdminBackoffice = lazy(() => import("./pages/admin-pages").then((module) => ({ default: module.AdminBackoffice })));
-
-type AuthPagesModule = typeof import("./pages/auth-pages");
-
-function AuthRoutes({ module }: { module: AuthPagesModule }) {
-  const { LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage } = module;
-  return <Routes>
-    <Route path="/login" element={<LoginPage />} />
-    <Route path="/registrazione" element={<RegisterPage />} />
-    <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
-    <Route path="/reimposta-password" element={<ResetPasswordPage />} />
-  </Routes>;
-}
 
 function PageFallback() {
   return <main className="center-state">Caricamento pagina…</main>;
@@ -59,10 +50,10 @@ function RootRedirect() {
 export default function App() {
   return <Suspense fallback={<PageFallback />}><Routes>
     <Route path="/" element={<RootRedirect />} />
-    <Route path="/login" element={<AuthPages />} />
-    <Route path="/registrazione" element={<AuthPages />} />
-    <Route path="/password-dimenticata" element={<AuthPages />} />
-    <Route path="/reimposta-password" element={<AuthPages />} />
+    <Route path="/login" element={<LoginPage />} />
+    <Route path="/registrazione" element={<RegisterPage />} />
+    <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
+    <Route path="/reimposta-password" element={<ResetPasswordPage />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
     <Route path="/admin/*" element={<RequireAuth><AdminBackoffice /></RequireAuth>} />
     <Route path="/app" element={<RequireAuth><ProfileProvider><RequireProfile /></ProfileProvider></RequireAuth>}>
