@@ -189,7 +189,17 @@ assertCustomerDenied(revokeOtherSessions.status, "CUSTOMER revoke-user-sessions"
 const impersonate = await plugin(customerA, "/admin/impersonate-user", { method: "POST", body: JSON.stringify({ userId: customerB.id }) });
 assertCustomerDenied(impersonate.status, "CUSTOMER impersonate-user");
 const stopImpersonating = await plugin(customerA, "/admin/stop-impersonating", { method: "POST", body: "{}" });
-assertCustomerDenied(stopImpersonating.status, "CUSTOMER stop-impersonating");
+assert.ok([400, 401, 403].includes(stopImpersonating.status), `CUSTOMER stop-impersonating must fail closed, got ${stopImpersonating.status}: ${JSON.stringify(stopImpersonating.body)}`);
+const customerSessionAfterStop = await plugin(customerA, "/get-session");
+assert.equal(customerSessionAfterStop.status, 200, `CUSTOMER session unavailable after denied stop-impersonating: ${customerSessionAfterStop.status}`);
+assert.equal(customerSessionAfterStop.body?.user?.id, customerA.id, "CUSTOMER identity changed after denied stop-impersonating");
+assert.ok(!customerSessionAfterStop.body?.session?.impersonatedBy, "CUSTOMER unexpectedly gained an impersonated session");
+const customerTokenAfterStopResponse = await authFetch(customerA.jar, "/token");
+const customerTokenAfterStopBody = await readJson(customerTokenAfterStopResponse) as { token?: string; data?: { token?: string } } | null;
+const customerTokenAfterStop = customerTokenAfterStopBody?.token ?? customerTokenAfterStopBody?.data?.token ?? "";
+assert.ok(customerTokenAfterStopResponse.ok && customerTokenAfterStop.length > 40, "CUSTOMER JWT unavailable after denied stop-impersonating");
+assert.equal(decodeSub(customerTokenAfterStop), customerA.id, "CUSTOMER JWT identity changed after denied stop-impersonating");
+await adminApi("/api/admin/me", customerTokenAfterStop, 403);
 
 const membershipAttempt = await dataApi(`/profile_members?profile_id=eq.${encodeURIComponent(profileA)}`, customerA.token, {
   method: "PATCH",
@@ -274,6 +284,7 @@ console.log("FASE3_RUNTIME_QA: PASS", JSON.stringify({
   ownerAdminDenied: true,
   customerRoleEscalationDenied: true,
   customerAdminPluginDenied: true,
+  customerStopImpersonationFailClosed: true,
   superAdminApi: true,
   adminPluginListSessions: true,
   adminPluginBanUnban: true,
