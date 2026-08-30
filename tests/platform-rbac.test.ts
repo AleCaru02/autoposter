@@ -4,6 +4,7 @@ import { bearerToken, normalizePlatformRole, requireAuthenticatedUser, requireSu
 
 const entry = readFileSync(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
 const adminApi = readFileSync(new URL("../cloudflare/admin-api.ts", import.meta.url), "utf8");
+const rbacSource = readFileSync(new URL("../cloudflare/platform-rbac.ts", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const adminUi = readFileSync(new URL("../src/pages/admin-pages.tsx", import.meta.url), "utf8");
 const ownerMigration = readFileSync(new URL("../db/migrations/20260830_profile_owner_membership_contract.sql", import.meta.url), "utf8");
@@ -26,6 +27,10 @@ const unauthorizedAdmin = await requireSuperAdmin(noAuth, {});
 assert.equal(unauthorizedAdmin.ok, false);
 if (!unauthorizedAdmin.ok) assert.equal(unauthorizedAdmin.response.status, 401);
 
+assert.equal(rbacSource.includes("/rpc/current_auth_user_id"), true, "platform identity must be verified by the same Neon Data API boundary used by customer RLS");
+assert.equal(rbacSource.includes("authToken: token"), false, "platform RBAC must not assume the normal SQL endpoint validates the Data API JWT");
+assert.equal(rbacSource.includes("JSON.parse(Buffer") || rbacSource.includes("atob("), false, "Worker must not authorize by merely decoding unverified JWT claims");
+assert.equal(rbacSource.indexOf("verifiedAuthUserId(token)") < rbacSource.indexOf("from neon_auth.user"), true, "verified identity must be established before privileged role lookup");
 assert.equal(entry.includes('path.startsWith("/api/admin/")'), true, "all platform admin API routes must enter the central admin handler");
 assert.equal(adminApi.includes("requireSuperAdmin(request, env)"), true, "admin handler must authorize through central requireSuperAdmin");
 assert.equal(adminApi.indexOf("requireSuperAdmin(request, env)") < adminApi.indexOf('if (path === "/api/admin/me")'), true, "authorization must happen before every admin endpoint branch");
