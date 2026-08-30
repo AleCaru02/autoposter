@@ -83,23 +83,140 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cross_url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-cross-test"
-          status=$(curl -sS -X POST -o tenant-cross.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$cross_url" || true)
+          AUTH_URL="https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth"
+          APP_ORIGIN="https://autoposter.02alessandrocaruso.workers.dev"
+          CROSS_URL="$APP_ORIGIN/api/internal/tenant-cross-test"
+          nonce=$(openssl rand -hex 12)
+          email_a="tenant-a-${nonce}@example.com"
+          email_b="tenant-b-${nonce}@example.com"
+          password_a="Qa9!$(openssl rand -hex 24)"
+          password_b="Qa9!$(openssl rand -hex 24)"
+          echo "::add-mask::$password_a"
+          echo "::add-mask::$password_b"
+
+          cleanup() {
+            EMAIL_A="$email_a" EMAIL_B="$email_b" node - <<'NODE' > tenant-cleanup-request.json
+          const payload = { mode: 'cleanup', a: { email: process.env.EMAIL_A }, b: { email: process.env.EMAIL_B } };
+          process.stdout.write(JSON.stringify(payload));
+          NODE
+            curl -sS -X POST -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" -H "content-type: application/json" --data-binary @tenant-cleanup-request.json "$CROSS_URL" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          json_body() {
+            EMAIL="$1" PASSWORD="$2" LABEL="$3" node - <<'NODE'
+          process.stdout.write(JSON.stringify({
+            name: `Tenant QA ${process.env.LABEL}`,
+            email: process.env.EMAIL,
+            password: process.env.PASSWORD,
+          }));
+          NODE
+          }
+
+          login_body() {
+            EMAIL="$1" PASSWORD="$2" node - <<'NODE'
+          process.stdout.write(JSON.stringify({ email: process.env.EMAIL, password: process.env.PASSWORD }));
+          NODE
+          }
+
+          extract_header_jwt() {
+            awk 'BEGIN{IGNORECASE=1} /^set-auth-jwt:/ {sub(/\r$/,""); sub(/^[^:]+:[[:space:]]*/,""); print; exit}' "$1"
+          }
+
+          extract_body_jwt() {
+            FILE="$1" node - <<'NODE'
+          const fs = require('node:fs');
+          let value;
+          try { value = JSON.parse(fs.readFileSync(process.env.FILE, 'utf8')); } catch { process.exit(0); }
+          const isJwt = (x) => typeof x === 'string' && x.length > 80 && x.split('.').length === 3;
+          function find(x, depth = 0) {
+            if (depth > 7) return null;
+            if (isJwt(x)) return x;
+            if (!x || typeof x !== 'object') return null;
+            for (const child of Object.values(x)) {
+              const nested = find(child, depth + 1);
+              if (nested) return nested;
+            }
+            return null;
+          }
+          process.stdout.write(find(value) || '');
+          NODE
+          }
+
+          fetch_jwt() {
+            local jar="$1" prefix="$2" jwt="" status=""
+            status=$(curl -sS -b "$jar" -c "$jar" -D "${prefix}-session.headers" -o "${prefix}-session.json" -w "%{http_code}" -H "accept: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" "$AUTH_URL/get-session" || true)
+            if [[ "$status" =~ ^2 ]]; then
+              jwt=$(extract_header_jwt "${prefix}-session.headers")
+              if [ -z "$jwt" ]; then jwt=$(extract_body_jwt "${prefix}-session.json"); fi
+            fi
+            if [ -z "$jwt" ]; then
+              status=$(curl -sS -b "$jar" -c "$jar" -D "${prefix}-token.headers" -o "${prefix}-token.json" -w "%{http_code}" -H "accept: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" "$AUTH_URL/token" || true)
+              if [[ "$status" =~ ^2 ]]; then
+                jwt=$(extract_header_jwt "${prefix}-token.headers")
+                if [ -z "$jwt" ]; then jwt=$(extract_body_jwt "${prefix}-token.json"); fi
+              fi
+            fi
+            if [ -z "$jwt" ]; then
+              status=$(curl -sS -X POST -b "$jar" -c "$jar" -D "${prefix}-token-post.headers" -o "${prefix}-token-post.json" -w "%{http_code}" -H "accept: application/json" -H "content-type: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" --data '{}' "$AUTH_URL/token" || true)
+              if [[ "$status" =~ ^2 ]]; then
+                jwt=$(extract_header_jwt "${prefix}-token-post.headers")
+                if [ -z "$jwt" ]; then jwt=$(extract_body_jwt "${prefix}-token-post.json"); fi
+              fi
+            fi
+            printf '%s' "$jwt"
+          }
+
+          make_identity() {
+            local label="$1" email="$2" password="$3" jar="$4" prefix="$5" signup_body_file="${prefix}-signup-request.json" status="" jwt=""
+            json_body "$email" "$password" "$label" > "$signup_body_file"
+            status=$(curl -sS -c "$jar" -D "${prefix}-signup.headers" -o "${prefix}-signup.json" -w "%{http_code}" -X POST -H "content-type: application/json" -H "accept: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" --data-binary "@$signup_body_file" "$AUTH_URL/sign-up/email" || true)
+            if [[ ! "$status" =~ ^2 ]]; then
+              echo "synthetic tenant $label signup failed with HTTP $status" >&2
+              return 1
+            fi
+            jwt=$(fetch_jwt "$jar" "$prefix")
+            if [ -z "$jwt" ]; then
+              login_body "$email" "$password" > "${prefix}-signin-request.json"
+              status=$(curl -sS -b "$jar" -c "$jar" -D "${prefix}-signin.headers" -o "${prefix}-signin.json" -w "%{http_code}" -X POST -H "content-type: application/json" -H "accept: application/json" -H "Origin: $APP_ORIGIN" -H "Referer: $APP_ORIGIN/" --data-binary "@${prefix}-signin-request.json" "$AUTH_URL/sign-in/email" || true)
+              if [[ ! "$status" =~ ^2 ]]; then
+                echo "synthetic tenant $label signin failed with HTTP $status" >&2
+                return 1
+              fi
+              jwt=$(fetch_jwt "$jar" "$prefix")
+            fi
+            if [ -z "$jwt" ]; then
+              echo "synthetic tenant $label JWT acquisition failed" >&2
+              return 1
+            fi
+            printf '%s' "$jwt"
+          }
+
+          jwt_a=$(make_identity A "$email_a" "$password_a" a.cookies a)
+          echo "::add-mask::$jwt_a"
+          jwt_b=$(make_identity B "$email_b" "$password_b" b.cookies b)
+          echo "::add-mask::$jwt_b"
+
+          EMAIL_A="$email_a" EMAIL_B="$email_b" JWT_A="$jwt_a" JWT_B="$jwt_b" node - <<'NODE' > tenant-cross-request.json
+          process.stdout.write(JSON.stringify({
+            a: { email: process.env.EMAIL_A, jwt: process.env.JWT_A },
+            b: { email: process.env.EMAIL_B, jwt: process.env.JWT_B },
+          }));
+          NODE
+
+          status=$(curl -sS -X POST -o tenant-cross.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" -H "content-type: application/json" --data-binary @tenant-cross-request.json "$CROSS_URL" || true)
           cat tenant-cross.json || true
           echo
           CROSS_STATUS="$status" node - <<'NODE'
           const fs = require('node:fs');
           const payload = JSON.parse(fs.readFileSync('tenant-cross.json', 'utf8'));
-          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS') {
-            console.error('Cross-tenant production test failed:', JSON.stringify(payload));
+          const checks = Array.isArray(payload?.checks) ? payload.checks : [];
+          const failed = checks.filter((check) => check?.pass !== true);
+          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS' || checks.length < 28 || failed.length > 0) {
+            console.error('Cross-tenant production test failed:', JSON.stringify({ status: process.env.CROSS_STATUS, ready: payload?.ready, cleanup: payload?.cleanup, checkCount: checks.length, failed, error: payload?.error }));
             process.exit(1);
           }
-          const failed = Array.isArray(payload.checks) ? payload.checks.filter((check) => check?.pass !== true) : [{ name: 'checks_missing' }];
-          if (failed.length > 0) {
-            console.error('Cross-tenant checks failed:', JSON.stringify(failed));
-            process.exit(1);
-          }
-          console.log('tenant A/B production isolation: PASS');
+          console.log(`tenant A/B production isolation: PASS (${checks.length} checks, cleanup PASS)`);
           NODE
       - name: Remove one-time cross-tenant test secret
         if: always()
