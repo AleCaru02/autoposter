@@ -70,6 +70,13 @@ assert.match(migration, /ALTER COLUMN owner_user_id SET NOT NULL/, "the internal
 assert.match(migration, /CREATE POLICY profile_members_owner_read[\s\S]*FOR SELECT/, "CUSTOMER membership access must be read-only through RLS");
 assert.doesNotMatch(migration, /CREATE POLICY profile_members_owner_read[\s\S]*FOR ALL/, "the replacement membership policy must not restore customer writes");
 
+const insertPolicyFix = readFileSync("db/migrations/20260830_profile_owner_insert_policy_fix.sql", "utf8");
+assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_insert[\s\S]*FOR INSERT[\s\S]*owner_auth_user_id = public\.current_auth_user_id\(\)/, "new profile INSERT must remain bound to the authenticated owner identity");
+assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_update[\s\S]*FOR UPDATE[\s\S]*owner_user_id = public\.current_app_user_id\(\)/, "profile UPDATE must keep the server-derived owner link immutable to another app user");
+assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_select[\s\S]*FOR SELECT/, "owner profile reads must remain isolated");
+assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_delete[\s\S]*FOR DELETE/, "owner profile deletes must remain isolated");
+assert.doesNotMatch(insertPolicyFix, /CREATE POLICY profiles_owner_isolation[\s\S]*FOR ALL/, "the statement-order regression must not be reintroduced through a single FOR ALL policy");
+
 const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
 assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
 assert.match(onboarding, /const submitLock = useRef\(false\)/, "onboarding must use a synchronous submission lock against rapid duplicate submits");
