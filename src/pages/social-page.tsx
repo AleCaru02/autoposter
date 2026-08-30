@@ -243,7 +243,7 @@ export function SocialPage() {
 
           {active && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
 
-          {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Scegli l’account corretto per questa attività:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
+          {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
 
           {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Il server non ha restituito lo stato di questo collegamento. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
 
