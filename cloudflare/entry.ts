@@ -3,16 +3,13 @@ import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
-import { handleTenantCrossTest } from "./tenant-cross-test-phased.js";
-import { handleTenantMembershipDiagnostic } from "./tenant-membership-diagnostic.js";
-import { handleTenantOwnerMembershipMigration } from "./tenant-owner-profile-policy-fix.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> }; TENANT_CROSS_TEST_TOKEN?: string };
+type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> } };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
 
@@ -111,9 +108,6 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
-    if (path === "/api/internal/tenant-cross-test") return handleTenantCrossTest(request, env);
-    if (path === "/api/internal/tenant-membership-diagnostic") return handleTenantMembershipDiagnostic(request, env);
-    if (path === "/api/internal/tenant-owner-membership-migrate") return handleTenantOwnerMembershipMigration(request, env);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
