@@ -11,19 +11,45 @@ const customerAEmail = `fase3-qa-${marker}-customer-a@example.invalid`;
 const customerBEmail = `fase3-qa-${marker}-customer-b@example.invalid`;
 const adminEmail = `fase3-qa-${marker}-admin@example.invalid`;
 
+function safeRequestLabel(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return "invalid-url";
+  }
+}
+
 function diagnostics(page, label) {
   const events = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") events.push(`console:${message.type()}:${message.text()}`);
   });
   page.on("pageerror", (error) => events.push(`pageerror:${error.message}`));
-  page.on("requestfailed", (request) => events.push(`requestfailed:${request.url()}:${request.failure()?.errorText || "unknown"}`));
+  page.on("requestfailed", (request) => events.push(`requestfailed:${safeRequestLabel(request.url())}:${request.failure()?.errorText || "unknown"}`));
+  page.on("response", (response) => {
+    const requestLabel = safeRequestLabel(response.url());
+    if (requestLabel.includes("/token") || requestLabel.includes("/api/admin/")) events.push(`response:${response.request().method()}:${requestLabel}:${response.status()}`);
+  });
   return async (reason) => {
-    const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1200);
-    const html = (await page.content().catch(() => "")).slice(0, 1600);
+    const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1400);
+    const html = (await page.content().catch(() => "")).slice(0, 1800);
     const title = await page.title().catch(() => "");
-    console.error("FASE3_BROWSER_DIAGNOSTIC", JSON.stringify({ label, reason, url: page.url(), title, body, html, events: events.slice(-30) }));
+    console.error("FASE3_BROWSER_DIAGNOSTIC", JSON.stringify({ label, reason, url: page.url(), title, body, html, events: events.slice(-50) }));
   };
+}
+
+function trackAdminResponses(page) {
+  const responses = [];
+  page.on("response", (response) => {
+    try {
+      const url = new URL(response.url());
+      if (url.origin === base && url.pathname.startsWith("/api/admin/")) responses.push({ path: url.pathname, status: response.status() });
+    } catch {
+      // Ignore non-URL browser events.
+    }
+  });
+  return responses;
 }
 
 async function login(page, email, label) {
@@ -77,27 +103,79 @@ async function verifyCustomer(browser, email, suffix, label) {
   }
 }
 
+async function verifyAdminMobile(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  const dump = diagnostics(page, "SUPER_ADMIN mobile /admin");
+  const adminResponses = trackAdminResponses(page);
+  try {
+    await login(page, adminEmail, "SUPER_ADMIN mobile");
+    await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
+    try {
+      await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
+      await page.getByRole("link", { name: "Overview", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      await page.getByRole("link", { name: "Clienti", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      await page.getByRole("link", { name: "Attività", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+
+      await page.getByRole("link", { name: "Clienti", exact: true }).click();
+      await page.getByRole("heading", { name: "Clienti", exact: true }).waitFor({ timeout: 20000 });
+      const firstCustomer = page.locator("a.admin-row-link").first();
+      await firstCustomer.waitFor({ state: "visible", timeout: 10000 });
+      await firstCustomer.click();
+      await page.getByRole("heading", { name: "Account", exact: true }).waitFor({ timeout: 20000 });
+      await page.getByRole("heading", { name: "Membership", exact: true }).waitFor({ timeout: 10000 });
+
+      await page.getByRole("link", { name: "Attività", exact: true }).click();
+      await page.getByRole("heading", { name: "Attività", exact: true }).waitFor({ timeout: 20000 });
+    } catch (error) {
+      await dump(error instanceof Error ? error.message : "SUPER_ADMIN mobile Backoffice unavailable");
+      throw error;
+    }
+
+    const adminBody = await page.locator("body").innerText();
+    assert.ok(adminBody.includes("Amministrazione"));
+    assert.ok(!adminBody.includes("Dati amministrativi non disponibili."));
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 200), "mobile Admin /me did not return 200");
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/overview" && item.status === 200), "mobile Admin overview did not return 200");
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/customers" && item.status === 200), "mobile Admin customers did not return 200");
+    assert.ok(adminResponses.some((item) => item.path.startsWith("/api/admin/customers/") && item.status === 200), "mobile Admin customer detail did not return 200");
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/activities" && item.status === 200), "mobile Admin activities did not return 200");
+  } finally {
+    await context.close();
+  }
+}
+
+async function verifyAdminDesktop(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const dump = diagnostics(page, "SUPER_ADMIN desktop /admin");
+  const adminResponses = trackAdminResponses(page);
+  try {
+    await login(page, adminEmail, "SUPER_ADMIN desktop");
+    await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
+    try {
+      await page.getByText("Backoffice", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
+      await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
+      await page.getByRole("link", { name: "Clienti", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+      await page.getByRole("link", { name: "Attività", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+    } catch (error) {
+      await dump(error instanceof Error ? error.message : "SUPER_ADMIN desktop Backoffice unavailable");
+      throw error;
+    }
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 200), "desktop Admin /me did not return 200");
+    assert.ok(adminResponses.some((item) => item.path === "/api/admin/overview" && item.status === 200), "desktop Admin overview did not return 200");
+  } finally {
+    await context.close();
+  }
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   await verifyCustomer(browser, customerAEmail, "A", "CUSTOMER A / OWNER A");
   await verifyCustomer(browser, customerBEmail, "B", "CUSTOMER B / OWNER B");
-
-  const adminContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const adminPage = await adminContext.newPage();
-  try {
-    await login(adminPage, adminEmail, "SUPER_ADMIN");
-    await adminPage.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
-    await adminPage.getByText("Backoffice", { exact: true }).waitFor({ timeout: 20000 });
-    await adminPage.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
-    const adminBody = await adminPage.locator("body").innerText();
-    assert.ok(adminBody.includes("Amministrazione"));
-    assert.ok(adminBody.includes("Utenti"));
-    assert.ok(adminBody.includes("Attività"));
-  } finally {
-    await adminContext.close();
-  }
-
-  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied, own-profile flow isolated, SUPER_ADMIN /admin allowed at 390x844");
+  await verifyAdminMobile(browser);
+  await verifyAdminDesktop(browser);
+  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied; SUPER_ADMIN Admin UI/API chain PASS at 390x844 and 1440x900");
 } finally {
   await browser.close();
 }
