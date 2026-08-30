@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { classifyAuthEndpoint, evaluateManagedAuthVerification } from "../cloudflare/managed-auth-capabilities.js";
 
 const authSource = readFileSync(new URL("../src/pages/auth-pages.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const entrySource = readFileSync(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
 
 assert.equal(authSource.includes("/api/auth/account-exists"), false, "auth UI must not query whether an email is registered");
@@ -11,6 +12,12 @@ assert.equal(authSource.includes("Non esiste un account con questa email"), fals
 assert.equal(authSource.includes("Password non corretta."), false, "login must not distinguish valid email from invalid credentials");
 assert.equal(authSource.includes("Email o password non corretti."), true, "login must use a generic credential error");
 assert.equal(authSource.includes("Se esiste un account associato a questa email"), true, "password reset must use a neutral confirmation");
+
+assert.equal(appSource.includes("function AuthRoutes"), false, "auth pages must not be wrapped in descendant Routes under exact auth routes");
+assert.equal(appSource.includes('path="/login" element={<LoginPage />}'), true, "login must render its page directly from the top-level router");
+assert.equal(appSource.includes('path="/registrazione" element={<RegisterPage />}'), true, "registration must render directly from the top-level router");
+assert.equal(appSource.includes('path="/password-dimenticata" element={<ForgotPasswordPage />}'), true, "forgot-password must render directly from the top-level router");
+assert.equal(appSource.includes('path="/reimposta-password" element={<ResetPasswordPage />}'), true, "reset-password must render directly from the top-level router");
 
 const blockedRoute = 'if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);';
 assert.equal(entrySource.includes(blockedRoute), true, "production Worker entry must block the legacy account-existence endpoint");
