@@ -18,6 +18,7 @@ jobs:
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
+      - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
       - { name: Site intelligence UI regression, run: "npm run test:site-intelligence-ui" }
@@ -39,6 +40,18 @@ jobs:
       - { name: OpenAI image contract, run: "npm run test:openai-image" }
       - { name: Build, run: "npm run build" }
       - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
+      - name: Generate one-time cross-tenant test token
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "TENANT_CROSS_TEST_TOKEN=$token" >> "$GITHUB_ENV"
+      - name: Install one-time cross-tenant test secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: printf '%s' "$TENANT_CROSS_TEST_TOKEN" | npx wrangler secret put TENANT_CROSS_TEST_TOKEN
       - name: Deploy Cloudflare Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -66,3 +79,31 @@ jobs:
           }
           console.log('tenant isolation production audit: PASS', JSON.stringify(payload.tenantIsolation));
           NODE
+      - name: Production synthetic tenant A B isolation test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cross_url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-cross-test"
+          status=$(curl -sS -X POST -o tenant-cross.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$cross_url" || true)
+          cat tenant-cross.json || true
+          echo
+          CROSS_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('tenant-cross.json', 'utf8'));
+          if (process.env.CROSS_STATUS !== '200' || payload?.ready !== true || payload?.cleanup !== 'PASS') {
+            console.error('Cross-tenant production test failed:', JSON.stringify(payload));
+            process.exit(1);
+          }
+          const failed = Array.isArray(payload.checks) ? payload.checks.filter((check) => check?.pass !== true) : [{ name: 'checks_missing' }];
+          if (failed.length > 0) {
+            console.error('Cross-tenant checks failed:', JSON.stringify(failed));
+            process.exit(1);
+          }
+          console.log('tenant A/B production isolation: PASS');
+          NODE
+      - name: Remove one-time cross-tenant test secret
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: printf '%s\n' '{"TENANT_CROSS_TEST_TOKEN":null}' | npx wrangler secret bulk
