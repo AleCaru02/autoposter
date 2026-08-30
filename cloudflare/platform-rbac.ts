@@ -1,5 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 
+const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+
 export type PlatformRole = "CUSTOMER" | "SUPER_ADMIN";
 export type PlatformAuthEnv = { DATABASE_URL?: string };
 
@@ -8,7 +10,6 @@ export type AuthenticatedPlatformUser = {
   platformRole: PlatformRole;
 };
 
-type AuthRow = { auth_user_id: string | null };
 type RoleRow = { role: string | null; banned: boolean | null };
 
 type AuthResult =
@@ -33,18 +34,55 @@ export function normalizePlatformRole(nativeRole: string | null | undefined): Pl
   return nativeRole?.trim().toLowerCase() === "admin" ? "SUPER_ADMIN" : "CUSTOMER";
 }
 
+function identityFromRpcPayload(payload: unknown): string | null {
+  if (typeof payload === "string") return payload.trim() || null;
+  if (Array.isArray(payload)) {
+    const first = payload[0];
+    if (typeof first === "string") return first.trim() || null;
+    if (first && typeof first === "object") {
+      const record = first as Record<string, unknown>;
+      for (const key of ["current_auth_user_id", "auth_user_id", "current_platform_identity"]) {
+        if (typeof record[key] === "string" && record[key].trim()) return record[key].trim();
+      }
+    }
+    return null;
+  }
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    for (const key of ["current_auth_user_id", "auth_user_id", "current_platform_identity"]) {
+      if (typeof record[key] === "string" && record[key].trim()) return record[key].trim();
+    }
+  }
+  return null;
+}
+
+async function verifiedAuthUserId(token: string): Promise<string | null> {
+  try {
+    // The production Neon Data API is the JWT-verifying boundary used by the
+    // customer application and RLS. Ask it for the authenticated identity
+    // instead of trusting JWT claims decoded in the Worker or client input.
+    const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: "{}",
+    });
+    if (!response.ok) return null;
+    return identityFromRpcPayload(await response.json());
+  } catch {
+    return null;
+  }
+}
+
 export async function requireAuthenticatedUser(request: Request, env: PlatformAuthEnv): Promise<AuthResult> {
   const token = bearerToken(request);
   if (!token || !env.DATABASE_URL) return { ok: false, response: json({ error: "UNAUTHENTICATED" }, 401) };
 
   try {
-    // Neon verifies the JWT before exposing its claims to Postgres. The browser
-    // never supplies an auth user id or platform role that we trust directly.
-    const authenticatedSql = neon(env.DATABASE_URL, { authToken: token });
-    const identityRows = await authenticatedSql`
-      select public.current_auth_user_id() as auth_user_id
-    ` as AuthRow[];
-    const authUserId = identityRows[0]?.auth_user_id?.trim() || "";
+    const authUserId = await verifiedAuthUserId(token);
     if (!authUserId) return { ok: false, response: json({ error: "UNAUTHENTICATED" }, 401) };
 
     const privilegedSql = neon(env.DATABASE_URL);
