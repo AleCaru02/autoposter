@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useParams } from "react-router-dom";
 import { Activity, Building2, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
-import { authClient } from "../lib/neon-client";
 import { adminRequest } from "../lib/admin-api";
 import "../admin.css";
 
@@ -117,20 +116,16 @@ function ActivitiesPage() {
 }
 
 export function AdminBackoffice() {
-  const session = authClient.useSession();
   const [state, setState] = useState<"CHECKING" | "ALLOWED" | "DENIED">("CHECKING");
   useEffect(() => {
-    if (session.isPending) return;
-    if (!session.data?.user) { setState("DENIED"); return; }
     let active = true;
     void adminRequest<AdminMe>("/api/admin/me").then((body) => {
       if (active) setState(body.platformRole === "SUPER_ADMIN" ? "ALLOWED" : "DENIED");
     }).catch(() => { if (active) setState("DENIED"); });
     return () => { active = false; };
-  }, [session.isPending, session.data?.user]);
+  }, []);
 
-  if (session.isPending || state === "CHECKING") return <main className="center-state">Verifica autorizzazione…</main>;
-  if (!session.data?.user) return <Navigate to="/login" replace />;
+  if (state === "CHECKING") return <main className="center-state">Verifica autorizzazione…</main>;
   if (state === "DENIED") return <Navigate to="/app/dashboard" replace />;
 
   return <AdminShell><Routes>

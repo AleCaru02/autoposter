@@ -45,7 +45,9 @@ assert.equal(ownerMigration.includes("profile_members_owner_read"), true, "works
 assert.equal(ownerMigration.includes("FOR SELECT"), true, "workspace membership policy must not become a role-escalation write path");
 assert.equal(adminAuditMigration.includes("REVOKE ALL ON TABLE public.platform_admin_audit FROM authenticated"), true, "customers must not be able to write global admin audit data");
 assert.equal(app.includes('path="/admin/*"'), true, "admin UI must have a dedicated route");
+assert.equal(app.includes('<RequireAuth><AdminBackoffice /></RequireAuth>'), true, "admin route must remain authenticated before the server-side admin gate runs");
 assert.equal(adminUi.includes('adminRequest<AdminMe>("/api/admin/me")'), true, "admin UI gate must verify server authorization");
+assert.equal(adminUi.includes("authClient.useSession()"), false, "AdminBackoffice must not race a second client session check after RequireAuth");
 assert.equal(adminUi.includes("localStorage") || adminUi.includes("sessionStorage"), false, "admin authorization must not be stored in browser storage");
 assert.equal(adminUi.includes("SUPER_ADMIN") && adminUi.includes("OWNER"), false, "admin UI must not derive platform admin from workspace OWNER");
 
