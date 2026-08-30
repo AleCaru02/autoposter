@@ -75,6 +75,15 @@ async function login(page, email, label) {
   }
 }
 
+async function settleProfilelessAdminLanding(page, label) {
+  try {
+    await page.waitForURL((url) => url.pathname === "/onboarding", { timeout: 20000 });
+    await page.getByRole("heading", { name: "Crea il profilo della tua attività", exact: true }).waitFor({ state: "visible", timeout: 15000 });
+  } catch (error) {
+    throw new Error(`${label} post-login landing did not stabilize on /onboarding: ${error instanceof Error ? error.message : "unknown"}`);
+  }
+}
+
 async function verifyCustomer(browser, email, suffix, label) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
@@ -110,6 +119,7 @@ async function verifyAdminMobile(browser) {
   const adminResponses = trackAdminResponses(page);
   try {
     await login(page, adminEmail, "SUPER_ADMIN mobile");
+    await settleProfilelessAdminLanding(page, "SUPER_ADMIN mobile");
     await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
     try {
       await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
@@ -152,6 +162,7 @@ async function verifyAdminDesktop(browser) {
   const adminResponses = trackAdminResponses(page);
   try {
     await login(page, adminEmail, "SUPER_ADMIN desktop");
+    await settleProfilelessAdminLanding(page, "SUPER_ADMIN desktop");
     await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
     try {
       await page.getByText("Backoffice", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
