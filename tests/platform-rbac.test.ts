@@ -5,6 +5,7 @@ import { bearerToken, normalizePlatformRole, requireAuthenticatedUser, requireSu
 const entry = readFileSync(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
 const adminApi = readFileSync(new URL("../cloudflare/admin-api.ts", import.meta.url), "utf8");
 const rbacSource = readFileSync(new URL("../cloudflare/platform-rbac.ts", import.meta.url), "utf8");
+const adminClientSource = readFileSync(new URL("../src/lib/admin-api.ts", import.meta.url), "utf8");
 const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const adminUi = readFileSync(new URL("../src/pages/admin-pages.tsx", import.meta.url), "utf8");
 const ownerMigration = readFileSync(new URL("../db/migrations/20260830_profile_owner_membership_contract.sql", import.meta.url), "utf8");
@@ -36,6 +37,10 @@ assert.equal(adminApi.includes("requireSuperAdmin(request, env)"), true, "admin 
 assert.equal(adminApi.indexOf("requireSuperAdmin(request, env)") < adminApi.indexOf('if (path === "/api/admin/me")'), true, "authorization must happen before every admin endpoint branch");
 assert.equal(adminApi.includes("request.json("), false, "read-only FASE 3 admin APIs must not accept a browser-supplied role/body");
 assert.equal(adminApi.includes("profile_members") && adminApi.includes("platform_role"), true, "admin detail may report workspace membership but platform role remains separate");
+assert.equal(adminClientSource.includes("authClient.token()"), true, "Admin UI must request the Managed Auth JWT using the documented token() API");
+assert.equal(adminClientSource.includes("getJWTToken"), false, "Admin UI must not rely on a nonexistent optional getJWTToken bridge");
+assert.equal(adminClientSource.includes('authorization: `Bearer ${token}`'), true, "Admin UI must forward the verified Managed Auth JWT as a Bearer token to the Worker");
+assert.equal(adminClientSource.includes("localStorage") || adminClientSource.includes("sessionStorage"), false, "Admin API client must not derive authorization from browser storage");
 assert.equal(ownerMigration.includes("profile_members_owner_read"), true, "workspace OWNER membership must remain customer read-only");
 assert.equal(ownerMigration.includes("FOR SELECT"), true, "workspace membership policy must not become a role-escalation write path");
 assert.equal(adminAuditMigration.includes("REVOKE ALL ON TABLE public.platform_admin_audit FROM authenticated"), true, "customers must not be able to write global admin audit data");
