@@ -2,6 +2,7 @@ import worker from "./worker.js";
 import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
+import { handleTenantPrivilegeMigration } from "./tenant-migration.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
@@ -9,7 +10,7 @@ import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> } };
+type Env = AutopilotEnv & SocialEnv & { ASSETS: { fetch(request: Request): Promise<Response> }; MIGRATION_TOKEN?: string };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
 
@@ -107,6 +108,7 @@ export default {
     if (canonicalRedirect) return canonicalRedirect;
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
+    if (path === "/api/internal/tenant-privilege-migrate") return handleTenantPrivilegeMigration(request, env);
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
