@@ -25,18 +25,6 @@ function readableAuthError(reason: unknown, fallback: string) {
   return fallback;
 }
 
-async function accountExists(email: string) {
-  const response = await withAuthTimeout(fetch("/api/auth/account-exists", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email }),
-  }));
-
-  if (!response.ok) throw new Error("ACCOUNT_CHECK_FAILED");
-  const payload = await response.json() as { exists?: boolean };
-  return payload.exists === true;
-}
-
 function PasswordField({ label, value, onChange, autoComplete, minLength = 8, maxLength = 128 }: {
   label: string;
   value: string;
@@ -67,7 +55,7 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
       callbackURL: `${window.location.origin}/app/dashboard`,
     }));
     if (result?.error) {
-      setError(result.error.message ?? "Accesso con Google non riuscito.");
+      setError("Accesso con Google non riuscito. Riprova.");
       setBusy(false);
     }
   } catch (reason) {
@@ -89,14 +77,9 @@ export function LoginPage() {
     setBusy(true);
 
     try {
-      if (!await accountExists(email.trim())) {
-        setError("Non esiste un account con questa email. Registrati prima di accedere.");
-        return;
-      }
-
       const result = await withAuthTimeout(authClient.signIn.email({ email: email.trim(), password }));
       if (result.error) {
-        setError("Password non corretta.");
+        setError("Email o password non corretti.");
         return;
       }
       navigate("/app/dashboard", { replace: true });
@@ -122,29 +105,24 @@ export function ForgotPasswordPage() {
     setBusy(true);
 
     try {
-      const normalizedEmail = email.trim();
-      if (!await accountExists(normalizedEmail)) {
-        setError("Non esiste un account con questa email. Crea prima il tuo account.");
-        return;
-      }
-
       const result = await withAuthTimeout(authClient.requestPasswordReset({
-        email: normalizedEmail,
+        email: email.trim(),
         redirectTo: `${window.location.origin}/reimposta-password`,
       }));
       if (result.error) {
-        setError(result.error.message ?? "Non è stato possibile richiedere il recupero password.");
+        // Do not reveal whether the address is registered.
+        setSent(true);
         return;
       }
       setSent(true);
     } catch (reason) {
-      setError(readableAuthError(reason, "Non è stato possibile richiedere il recupero password."));
+      setError(readableAuthError(reason, "Il servizio di recupero non è disponibile in questo momento. Riprova."));
     } finally {
       setBusy(false);
     }
   }
 
-  return <AuthLayout title="Password dimenticata" subtitle="Inserisci la tua email per ricevere il link di recupero.">{sent ? <><p className="auth-subtitle">Richiesta inviata. Controlla la posta in arrivo e anche la cartella spam.</p><p className="auth-switch"><NavLink to="/login">Torna all'accesso</NavLink></p></> : <><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Invio…" : "Invia link di recupero"}</button></form><p className="auth-switch"><NavLink to="/login">Torna all'accesso</NavLink></p></>}</AuthLayout>;
+  return <AuthLayout title="Password dimenticata" subtitle="Inserisci la tua email per ricevere il link di recupero.">{sent ? <><p className="auth-subtitle">Se esiste un account associato a questa email, riceverai le istruzioni per reimpostare la password. Controlla anche la cartella spam.</p><p className="auth-switch"><NavLink to="/login">Torna all'accesso</NavLink></p></> : <><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Invio…" : "Invia link di recupero"}</button></form><p className="auth-switch"><NavLink to="/login">Torna all'accesso</NavLink></p></>}</AuthLayout>;
 }
 
 export function ResetPasswordPage() {
@@ -174,7 +152,7 @@ export function ResetPasswordPage() {
     try {
       const result = await withAuthTimeout(authClient.resetPassword({ newPassword: password, token }));
       if (result.error) {
-        setError(result.error.message ?? "Non è stato possibile reimpostare la password.");
+        setError("Non è stato possibile reimpostare la password. Richiedi un nuovo link e riprova.");
         return;
       }
       navigate("/login", { replace: true });
@@ -204,7 +182,7 @@ export function RegisterPage() {
     try {
       const result = await withAuthTimeout(authClient.signUp.email({ name, email: email.trim(), password }));
       if (result.error) {
-        setError(result.error.message ?? "Registrazione non riuscita.");
+        setError("Registrazione non riuscita. Se hai già un account, prova ad accedere o a recuperare la password.");
         return;
       }
       navigate("/onboarding", { replace: true });
