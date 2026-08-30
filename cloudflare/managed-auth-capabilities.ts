@@ -3,13 +3,11 @@ import { neon } from "@neondatabase/serverless";
 const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
 
 type AuthColumnRow = { table_name: string; column_name: string };
+type PlatformStateRow = { native_admin_users: number; platform_admin_audit_present: boolean };
 
 type ProbeState = "PROTECTED" | "ABSENT" | "UNSAFE" | "PRESENT_OTHER" | "NETWORK_ERROR";
 
-type EndpointProbe = {
-  status: number | null;
-  state: ProbeState;
-};
+type EndpointProbe = { status: number | null; state: ProbeState };
 
 export type ManagedAuthVerification = {
   ready: boolean;
@@ -21,6 +19,8 @@ export type ManagedAuthVerification = {
   userBanReasonField: boolean;
   userBanExpiresField: boolean;
   sessionImpersonatedByField: boolean;
+  nativeAdminUsers: number;
+  platformAdminAuditPresent: boolean;
   endpoints: {
     listUsers: EndpointProbe;
     setRole: EndpointProbe;
@@ -43,7 +43,12 @@ function normalizedColumn(tableName: string, columnName: string) {
   return `${tableName}.${columnName}`.toLowerCase().replace(/_/g, "");
 }
 
-export function evaluateManagedAuthVerification(rows: AuthColumnRow[], statuses: Record<keyof ManagedAuthVerification["endpoints"], number | null>, coreStatus: number | null): ManagedAuthVerification {
+export function evaluateManagedAuthVerification(
+  rows: AuthColumnRow[],
+  statuses: Record<keyof ManagedAuthVerification["endpoints"], number | null>,
+  coreStatus: number | null,
+  platformState: { nativeAdminUsers?: number; platformAdminAuditPresent?: boolean } = {},
+): ManagedAuthVerification {
   const columns = new Set(rows.map((row) => normalizedColumn(row.table_name, row.column_name)));
   const userRoleField = columns.has("user.role");
   const userBannedField = columns.has("user.banned");
@@ -74,6 +79,8 @@ export function evaluateManagedAuthVerification(rows: AuthColumnRow[], statuses:
     userBanReasonField,
     userBanExpiresField,
     sessionImpersonatedByField,
+    nativeAdminUsers: Math.max(0, Number(platformState.nativeAdminUsers ?? 0)),
+    platformAdminAuditPresent: platformState.platformAdminAuditPresent === true,
     endpoints,
   };
 }
@@ -108,6 +115,11 @@ export async function handleManagedAuthCapabilities(request: Request, env: { DAT
         and table_name in ('user', 'session')
       order by table_name, ordinal_position
     ` as AuthColumnRow[];
+    const stateRows = await sql`
+      select
+        (select count(*)::int from neon_auth.user where lower(coalesce(role::text, '')) = 'admin') as native_admin_users,
+        (to_regclass('public.platform_admin_audit') is not null) as platform_admin_audit_present
+    ` as PlatformStateRow[];
 
     const jsonHeaders = { "content-type": "application/json" };
     const [coreStatus, listUsers, setRole, banUser, listUserSessions, impersonateUser, stopImpersonating] = await Promise.all([
@@ -120,7 +132,13 @@ export async function handleManagedAuthCapabilities(request: Request, env: { DAT
       probe("/admin/stop-impersonating", { method: "POST", headers: jsonHeaders, body: "{}" }),
     ]);
 
-    const verification = evaluateManagedAuthVerification(rows, { listUsers, setRole, banUser, listUserSessions, impersonateUser, stopImpersonating }, coreStatus);
+    const state = stateRows[0];
+    const verification = evaluateManagedAuthVerification(
+      rows,
+      { listUsers, setRole, banUser, listUserSessions, impersonateUser, stopImpersonating },
+      coreStatus,
+      { nativeAdminUsers: state?.native_admin_users ?? 0, platformAdminAuditPresent: state?.platform_admin_audit_present ?? false },
+    );
     return new Response(JSON.stringify({ service: "post-automatici", database: "reachable", managedAuth: verification }), {
       status: verification.ready ? 200 : 503,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
