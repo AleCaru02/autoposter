@@ -36,6 +36,40 @@ type TenantTableSecurityRow = {
   anonymous_can_delete: boolean;
 };
 
+type OwnerContractRow = {
+  profiles_total: number | string;
+  profiles_with_owner: number | string;
+  profiles_without_owner: number | string;
+  profiles_with_multiple_owners: number | string;
+  profiles_auth_identity_unresolved: number | string;
+  profiles_owner_user_id_mismatch: number | string;
+};
+
+export type OwnerContractSummary = {
+  ready: boolean;
+  profilesTotal: number;
+  profilesWithOwner: number;
+  profilesWithoutOwner: number;
+  profilesWithMultipleOwners: number;
+  profilesAuthIdentityUnresolved: number;
+  profilesOwnerUserIdMismatch: number;
+};
+
+export function evaluateOwnerContract(row: OwnerContractRow): OwnerContractSummary {
+  const profilesTotal = Number(row.profiles_total) || 0;
+  const profilesWithOwner = Number(row.profiles_with_owner) || 0;
+  const profilesWithoutOwner = Number(row.profiles_without_owner) || 0;
+  const profilesWithMultipleOwners = Number(row.profiles_with_multiple_owners) || 0;
+  const profilesAuthIdentityUnresolved = Number(row.profiles_auth_identity_unresolved) || 0;
+  const profilesOwnerUserIdMismatch = Number(row.profiles_owner_user_id_mismatch) || 0;
+  const ready = profilesTotal === profilesWithOwner
+    && profilesWithoutOwner === 0
+    && profilesWithMultipleOwners === 0
+    && profilesAuthIdentityUnresolved === 0
+    && profilesOwnerUserIdMismatch === 0;
+  return { ready, profilesTotal, profilesWithOwner, profilesWithoutOwner, profilesWithMultipleOwners, profilesAuthIdentityUnresolved, profilesOwnerUserIdMismatch };
+}
+
 export type AnonymousProbeOutcome = "BLOCKED_STATUS" | "EMPTY_ROWS" | "ROWS_VISIBLE" | "ERROR_OBJECT" | "UNEXPECTED" | "NETWORK_ERROR";
 export type AnonymousProbe = {
   blocked: boolean;
@@ -154,6 +188,29 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
       order by expected.table_name
     ` as TenantTableSecurityRow[];
 
+    const ownerRows = await sql`
+      with owner_counts as (
+        select p.id,
+               count(pm.user_id) filter (where upper(pm.role) = 'OWNER')::int as owner_count
+        from public.profiles p
+        left join public.profile_members pm on pm.profile_id = p.id
+        group by p.id
+      )
+      select
+        (select count(*)::int from public.profiles) as profiles_total,
+        (select count(*)::int from owner_counts where owner_count = 1) as profiles_with_owner,
+        (select count(*)::int from owner_counts where owner_count = 0) as profiles_without_owner,
+        (select count(*)::int from owner_counts where owner_count > 1) as profiles_with_multiple_owners,
+        (select count(*)::int
+           from public.profiles p
+           left join neon_auth.user nu on nu.id::text = p.owner_auth_user_id
+          where nu.id is null) as profiles_auth_identity_unresolved,
+        (select count(*)::int
+           from public.profiles p
+           left join public.app_users au on au.id = p.owner_user_id
+          where au.id is null or au.auth_user_id is distinct from p.owner_auth_user_id) as profiles_owner_user_id_mismatch
+    ` as OwnerContractRow[];
+
     let anonymousProbe: AnonymousProbe;
     try {
       const anonymous = await fetch(`${DATA_API}/profiles?select=id&limit=1`, { headers: { accept: "application/json" } });
@@ -164,14 +221,23 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
       anonymousProbe = { blocked: false, status: null, outcome: "NETWORK_ERROR", rowCount: null, errorCode: null };
     }
 
-    const summary = evaluateTenantSecurity(rows, anonymousProbe);
-    return new Response(JSON.stringify({ service: "post-automatici", database: "reachable", tenantIsolation: summary }), {
-      status: summary.ready ? 200 : 503,
+    const tenantIsolation = evaluateTenantSecurity(rows, anonymousProbe);
+    const ownerContract = evaluateOwnerContract(ownerRows[0] ?? {
+      profiles_total: 0,
+      profiles_with_owner: 0,
+      profiles_without_owner: 1,
+      profiles_with_multiple_owners: 0,
+      profiles_auth_identity_unresolved: 0,
+      profiles_owner_user_id_mismatch: 0,
+    });
+    const ready = tenantIsolation.ready && ownerContract.ready;
+    return new Response(JSON.stringify({ service: "post-automatici", database: "reachable", ready, tenantIsolation, ownerContract }), {
+      status: ready ? 200 : 503,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
     });
   } catch (reason) {
     console.error("tenant-security-audit", reason instanceof Error ? reason.message : "unknown");
-    return new Response(JSON.stringify({ service: "post-automatici", database: "unreachable", tenantIsolation: { ready: false } }), {
+    return new Response(JSON.stringify({ service: "post-automatici", database: "unreachable", ready: false, tenantIsolation: { ready: false }, ownerContract: { ready: false } }), {
       status: 503,
       headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
     });
