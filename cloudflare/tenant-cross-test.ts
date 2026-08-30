@@ -16,6 +16,7 @@ type Fixture = {
   profileName: string;
 };
 
+type FixtureState = Partial<Fixture> & { email?: string };
 type Check = { name: string; pass: boolean };
 type JsonRecord = Record<string, unknown>;
 
@@ -36,8 +37,7 @@ function secureEquals(left: string, right: string) {
 function authorized(request: Request, secret?: string) {
   if (!secret) return false;
   const header = request.headers.get("authorization") ?? "";
-  const expected = `Bearer ${secret}`;
-  return secureEquals(header, expected);
+  return secureEquals(header, `Bearer ${secret}`);
 }
 
 function randomPassword() {
@@ -61,6 +61,16 @@ function findJwt(value: unknown, depth = 0): string | null {
     if (nested) return nested;
   }
   return null;
+}
+
+function authUserId(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const root = value as JsonRecord;
+  const directUser = root.user && typeof root.user === "object" ? root.user as JsonRecord : null;
+  const data = root.data && typeof root.data === "object" ? root.data as JsonRecord : null;
+  const nestedUser = data?.user && typeof data.user === "object" ? data.user as JsonRecord : null;
+  const id = directUser?.id ?? nestedUser?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function jwtSubject(token: string) {
@@ -107,27 +117,32 @@ async function jwtFromCookie(cookie: string | null, origin: string) {
   return null;
 }
 
-async function createIdentity(label: string, origin: string) {
+async function createIdentity(label: string, origin: string, state: FixtureState) {
   const nonce = crypto.randomUUID().replace(/-/g, "");
   const email = `tenant-${label.toLowerCase()}-${nonce}@example.com`;
   const password = randomPassword();
   const name = `Tenant QA ${label}`;
+  state.email = email;
 
   const signup = await authPost("sign-up/email", { name, email, password }, origin);
   if (!signup.ok) throw new Error(`AUTH_SIGNUP_${label}_${signup.status}`);
   const signupBody = await parsed(signup);
+  state.userId = authUserId(signupBody) ?? state.userId;
   let jwt = findJwt(signupBody) ?? await jwtFromCookie(sessionCookie(signup), origin);
 
   if (!jwt) {
     const signin = await authPost("sign-in/email", { email, password }, origin);
     if (!signin.ok) throw new Error(`AUTH_SIGNIN_${label}_${signin.status}`);
     const signinBody = await parsed(signin);
+    state.userId = authUserId(signinBody) ?? state.userId;
     jwt = findJwt(signinBody) ?? await jwtFromCookie(sessionCookie(signin), origin);
   }
 
   if (!jwt) throw new Error(`AUTH_JWT_${label}_MISSING`);
-  const userId = jwtSubject(jwt);
+  const userId = jwtSubject(jwt) ?? state.userId;
   if (!userId) throw new Error(`AUTH_SUB_${label}_MISSING`);
+  state.userId = userId;
+  state.jwt = jwt;
   return { jwt, userId };
 }
 
@@ -157,9 +172,10 @@ async function profileRows(token: string, profileId: string, select = "id,name")
   return responseRows(await dataApi(token, `profiles?id=eq.${encodeURIComponent(profileId)}&select=${select}`));
 }
 
-async function createFixture(label: string, origin: string): Promise<Fixture> {
-  const identity = await createIdentity(label, origin);
+async function createFixture(label: string, origin: string, state: FixtureState): Promise<Fixture> {
+  const identity = await createIdentity(label, origin, state);
   const profileName = `Tenant QA ${label} ${crypto.randomUUID().slice(0, 8)}`;
+  state.profileName = profileName;
   const insert = await dataApi(identity.jwt, "profiles?select=id,name", {
     method: "POST",
     headers: { prefer: "return=representation" },
@@ -174,6 +190,7 @@ async function createFixture(label: string, origin: string): Promise<Fixture> {
   const rows = await responseRows(insert);
   const profileId = typeof rows[0]?.id === "string" ? rows[0].id : null;
   if (!profileId) throw new Error(`PROFILE_CREATE_${label}_NO_ID`);
+  state.profileId = profileId;
 
   const member = await ownRows(identity.jwt, "profile_members", profileId, "profile_id");
   if (member.length !== 1) throw new Error(`PROFILE_MEMBERSHIP_${label}_MISSING`);
@@ -236,31 +253,38 @@ async function crossWriteChecks(actor: Fixture, target: Fixture, actorLabel: str
 }
 
 export function evaluateCrossTenantChecks(checks: Check[], cleanupOk: boolean) {
-  return cleanupOk && checks.length >= 14 && checks.every((item) => item.pass);
+  return cleanupOk && checks.length >= 16 && checks.every((item) => item.pass);
 }
 
-async function cleanupFixture(sql: ReturnType<typeof neon>, fixture?: Partial<Fixture>) {
-  if (!fixture) return;
-  if (fixture.profileId) {
-    await sql`delete from public.brand_profiles where profile_id = ${fixture.profileId}`;
-    await sql`delete from public.profile_members where profile_id = ${fixture.profileId}`;
-    await sql`delete from public.profiles where id = ${fixture.profileId}`;
+async function resolveUserId(sql: ReturnType<typeof neon>, state: FixtureState) {
+  if (state.userId) return state.userId;
+  if (!state.email) return null;
+  const rows = await sql`select id from neon_auth.user where email = ${state.email} limit 1` as Array<{ id: string }>;
+  return typeof rows[0]?.id === "string" ? rows[0].id : null;
+}
+
+async function cleanupFixture(sql: ReturnType<typeof neon>, state: FixtureState) {
+  if (state.profileId) {
+    await sql`delete from public.brand_profiles where profile_id = ${state.profileId}`;
+    await sql`delete from public.profile_members where profile_id = ${state.profileId}`;
+    await sql`delete from public.profiles where id = ${state.profileId}`;
   }
-  if (fixture.userId) {
-    await sql`delete from neon_auth.session where "userId" = ${fixture.userId}`;
-    await sql`delete from neon_auth.account where "userId" = ${fixture.userId}`;
-    await sql`delete from neon_auth.user where id = ${fixture.userId}`;
+  const userId = await resolveUserId(sql, state);
+  if (userId) {
+    state.userId = userId;
+    await sql`delete from neon_auth.session where "userId" = ${userId}`;
+    await sql`delete from neon_auth.account where "userId" = ${userId}`;
+    await sql`delete from neon_auth.user where id = ${userId}`;
   }
 }
 
-async function verifyCleanup(sql: ReturnType<typeof neon>, fixture?: Partial<Fixture>) {
-  if (!fixture) return true;
-  if (fixture.profileId) {
-    const profiles = await sql`select count(*)::int as count from public.profiles where id = ${fixture.profileId}` as Array<{ count: number | string }>;
+async function verifyCleanup(sql: ReturnType<typeof neon>, state: FixtureState) {
+  if (state.profileId) {
+    const profiles = await sql`select count(*)::int as count from public.profiles where id = ${state.profileId}` as Array<{ count: number | string }>;
     if (Number(profiles[0]?.count ?? 1) !== 0) return false;
   }
-  if (fixture.userId) {
-    const users = await sql`select count(*)::int as count from neon_auth.user where id = ${fixture.userId}` as Array<{ count: number | string }>;
+  if (state.email) {
+    const users = await sql`select count(*)::int as count from neon_auth.user where email = ${state.email}` as Array<{ count: number | string }>;
     if (Number(users[0]?.count ?? 1) !== 0) return false;
   }
   return true;
@@ -277,14 +301,14 @@ export async function handleTenantCrossTest(request: Request, env: CrossTenantEn
   })();
   const sql = neon(env.DATABASE_URL);
   const checks: Check[] = [];
-  let a: Fixture | undefined;
-  let b: Fixture | undefined;
+  const aState: FixtureState = {};
+  const bState: FixtureState = {};
   let executionError: string | null = null;
   let cleanupOk = false;
 
   try {
-    a = await createFixture("A", origin);
-    b = await createFixture("B", origin);
+    const a = await createFixture("A", origin, aState);
+    const b = await createFixture("B", origin, bState);
 
     check(checks, "A_can_read_own_profile", (await profileRows(a.jwt, a.profileId)).length === 1);
     check(checks, "B_can_read_own_profile", (await profileRows(b.jwt, b.profileId)).length === 1);
@@ -297,9 +321,9 @@ export async function handleTenantCrossTest(request: Request, env: CrossTenantEn
     executionError = reason instanceof Error ? reason.message : "TENANT_CROSS_TEST_FAILED";
   } finally {
     try {
-      await cleanupFixture(sql, a);
-      await cleanupFixture(sql, b);
-      cleanupOk = await verifyCleanup(sql, a) && await verifyCleanup(sql, b);
+      await cleanupFixture(sql, aState);
+      await cleanupFixture(sql, bState);
+      cleanupOk = await verifyCleanup(sql, aState) && await verifyCleanup(sql, bState);
     } catch {
       cleanupOk = false;
     }
