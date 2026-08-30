@@ -105,6 +105,7 @@ export default {
     const canonicalRedirect = canonicalNavigation(request, env);
     if (canonicalRedirect) return canonicalRedirect;
     const path = new URL(request.url).pathname;
+    if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
