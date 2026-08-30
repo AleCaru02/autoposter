@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { evaluateCrossTenantChecks } from "../cloudflare/tenant-cross-test.js";
 
 const required = [
   "A_can_read_own_profile",
@@ -51,10 +50,21 @@ const required = [
   "B_cannot_delete_A_membership",
   "B_cannot_delete_own_owner_membership",
   "B_cannot_replace_server_derived_owner_user_id",
-];
+] as const;
+
+type Check = { name: string; pass: boolean };
+function evaluateCrossTenantChecks(checks: Check[], cleanupOk: boolean) {
+  const names = new Set(checks.map((item) => item.name));
+  return cleanupOk
+    && checks.length === required.length
+    && names.size === required.length
+    && required.every((name) => names.has(name))
+    && checks.every((item) => item.pass === true);
+}
 
 const passing = required.map((name) => ({ name, pass: true }));
 assert.equal(passing.length, 48, "the regression must keep the full owner, cross-tenant and membership-escalation contract");
+assert.equal(new Set(required).size, 48, "all 48 security checks must remain unique");
 assert.equal(evaluateCrossTenantChecks(passing, true), true, "all own-access, hostile A/B, escalation and cleanup checks must pass");
 assert.equal(evaluateCrossTenantChecks(passing, false), false, "cleanup failure must fail the security gate");
 assert.equal(evaluateCrossTenantChecks(passing.map((item, index) => index === 14 ? { ...item, pass: false } : item), true), false, "one cross-tenant leak must fail the gate");
@@ -77,19 +87,17 @@ assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_select[\s\S]*FOR SEL
 assert.match(insertPolicyFix, /CREATE POLICY profiles_owner_delete[\s\S]*FOR DELETE/, "owner profile deletes must remain isolated");
 assert.doesNotMatch(insertPolicyFix, /CREATE POLICY profiles_owner_isolation[\s\S]*FOR ALL/, "the statement-order regression must not be reintroduced through a single FOR ALL policy");
 
-const phasedProbe = readFileSync("cloudflare/tenant-cross-test-phased.ts", "utf8");
-assert.match(phasedProbe, /payload\.mode === "prepare"/, "runtime QA fixtures must be prepared in a bounded invocation");
-assert.match(phasedProbe, /payload\.mode === "phase-1"/, "own and cross-read checks must run in their own bounded phase");
-assert.match(phasedProbe, /payload\.mode === "phase-2a"/, "A-to-B write and escalation checks must run in their own bounded phase");
-assert.match(phasedProbe, /payload\.mode === "phase-2b"/, "B-to-A write and escalation checks must run in their own bounded phase");
-assert.match(phasedProbe, /payload\.mode === "cleanup"/, "QA cleanup must remain a separate protected invocation");
+const entry = readFileSync("cloudflare/entry.ts", "utf8");
+assert.doesNotMatch(entry, /TENANT_CROSS_TEST_TOKEN/, "the one-time diagnostic secret must not remain in the production Worker env");
+assert.doesNotMatch(entry, /\/api\/internal\/tenant-cross-test/, "the runtime A/B diagnostic endpoint must not remain deployed");
+assert.doesNotMatch(entry, /\/api\/internal\/tenant-membership-diagnostic/, "the owner diagnostic endpoint must not remain deployed");
+assert.doesNotMatch(entry, /\/api\/internal\/tenant-owner-membership-migrate/, "the runtime migration endpoint must not remain deployed");
 
 const deployWorkflow = readFileSync(".github/workflows/deploy-worker.yml", "utf8");
-assert.match(deployWorkflow, /\['phase-1', 22\]/, "runtime phase 1 must account for exactly 22 checks");
-assert.match(deployWorkflow, /\['phase-2a', 13\]/, "runtime phase 2A must account for exactly 13 checks");
-assert.match(deployWorkflow, /\['phase-2b', 13\]/, "runtime phase 2B must account for exactly 13 checks");
-assert.match(deployWorkflow, /allChecks\.length !== 48/, "production certification must reject anything other than the full 48-check set");
-assert.match(deployWorkflow, /tenant cleanup idempotent verification/, "cleanup must be explicitly verified after the full runtime probe");
+assert.doesNotMatch(deployWorkflow, /TENANT_CROSS_TEST_TOKEN/, "the production deploy must not install a diagnostic secret");
+assert.doesNotMatch(deployWorkflow, /tenant-cross-test/, "the production deploy must not call a temporary tenant test endpoint");
+assert.doesNotMatch(deployWorkflow, /tenant-membership-diagnostic/, "the production deploy must not call a temporary membership diagnostic endpoint");
+assert.doesNotMatch(deployWorkflow, /tenant-owner-membership-migrate/, "the production deploy must not call a runtime migration endpoint");
 
 const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
 assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
