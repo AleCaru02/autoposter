@@ -5,7 +5,7 @@ import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleTenantCrossTest } from "./tenant-cross-test.js";
 import { handleTenantMembershipDiagnostic } from "./tenant-membership-diagnostic.js";
-import { handleTenantOwnerMembershipMigration } from "./tenant-owner-membership-migration.js";
+import { handleTenantOwnerMembershipMigration } from "./tenant-owner-profile-policy-fix.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
@@ -133,7 +133,7 @@ export default {
       ctx.waitUntil(processDuePublications(env).then((result) => {
         console.log("social-publication-run", result);
       }).catch((reason) => {
-        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
+        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown" });
       }));
       return;
     }
