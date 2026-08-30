@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { TENANT_TABLES, classifyAnonymousProbe, evaluateTenantSecurity } from "../cloudflare/tenant-security.js";
+import { TENANT_TABLES, classifyAnonymousProbe, evaluateOwnerContract, evaluateTenantSecurity } from "../cloudflare/tenant-security.js";
 
 const safeRows = TENANT_TABLES.map((table_name) => ({
   table_name,
@@ -44,6 +44,34 @@ assert.equal(safe.expectedTables, TENANT_TABLES.length);
 assert.equal(safe.authBarrierTables, TENANT_TABLES.length);
 assert.equal(safe.openPolicies, 0);
 assert.equal(safe.anonymousPrivilegedTables, 0);
+
+const ownerSafe = evaluateOwnerContract({
+  profiles_total: 20,
+  profiles_with_owner: 20,
+  profiles_without_owner: 0,
+  profiles_with_multiple_owners: 0,
+  profiles_auth_identity_unresolved: 0,
+  profiles_owner_user_id_mismatch: 0,
+});
+assert.equal(ownerSafe.ready, true, "all profiles must have exactly one valid server-linked OWNER");
+assert.equal(ownerSafe.profilesTotal, 20);
+assert.equal(ownerSafe.profilesWithOwner, 20);
+assert.equal(evaluateOwnerContract({ ...{
+  profiles_total: 20,
+  profiles_with_owner: 19,
+  profiles_without_owner: 1,
+  profiles_with_multiple_owners: 0,
+  profiles_auth_identity_unresolved: 0,
+  profiles_owner_user_id_mismatch: 0,
+} }).ready, false, "one missing OWNER must fail closed");
+assert.equal(evaluateOwnerContract({
+  profiles_total: 20,
+  profiles_with_owner: 20,
+  profiles_without_owner: 0,
+  profiles_with_multiple_owners: 0,
+  profiles_auth_identity_unresolved: 0,
+  profiles_owner_user_id_mismatch: 1,
+}).ready, false, "one owner mapping mismatch must fail closed");
 
 const missingRls = safeRows.map((row, index) => index === 0 ? { ...row, rls_enabled: false } : row);
 assert.equal(evaluateTenantSecurity(missingRls, emptyRows).ready, false, "a tenant table without RLS must fail closed");
