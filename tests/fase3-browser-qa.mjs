@@ -11,18 +11,31 @@ const customerAEmail = `fase3-qa-${marker}-customer-a@example.invalid`;
 const customerBEmail = `fase3-qa-${marker}-customer-b@example.invalid`;
 const adminEmail = `fase3-qa-${marker}-admin@example.invalid`;
 
+function safeRequestLabel(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return "invalid-url";
+  }
+}
+
 function diagnostics(page, label) {
   const events = [];
   page.on("console", (message) => {
     if (message.type() === "error" || message.type() === "warning") events.push(`console:${message.type()}:${message.text()}`);
   });
   page.on("pageerror", (error) => events.push(`pageerror:${error.message}`));
-  page.on("requestfailed", (request) => events.push(`requestfailed:${request.url()}:${request.failure()?.errorText || "unknown"}`));
+  page.on("requestfailed", (request) => events.push(`requestfailed:${safeRequestLabel(request.url())}:${request.failure()?.errorText || "unknown"}`));
+  page.on("response", (response) => {
+    const label = safeRequestLabel(response.url());
+    if (label.includes("/token") || label.includes("/api/admin/")) events.push(`response:${response.request().method()}:${label}:${response.status()}`);
+  });
   return async (reason) => {
     const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1200);
     const html = (await page.content().catch(() => "")).slice(0, 1600);
     const title = await page.title().catch(() => "");
-    console.error("FASE3_BROWSER_DIAGNOSTIC", JSON.stringify({ label, reason, url: page.url(), title, body, html, events: events.slice(-30) }));
+    console.error("FASE3_BROWSER_DIAGNOSTIC", JSON.stringify({ label, reason, url: page.url(), title, body, html, events: events.slice(-40) }));
   };
 }
 
@@ -84,11 +97,17 @@ try {
 
   const adminContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const adminPage = await adminContext.newPage();
+  const dumpAdmin = diagnostics(adminPage, "SUPER_ADMIN /admin");
   try {
     await login(adminPage, adminEmail, "SUPER_ADMIN");
     await adminPage.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
-    await adminPage.getByText("Backoffice", { exact: true }).waitFor({ timeout: 20000 });
-    await adminPage.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
+    try {
+      await adminPage.getByText("Backoffice", { exact: true }).waitFor({ timeout: 20000 });
+      await adminPage.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
+    } catch (error) {
+      await dumpAdmin(error instanceof Error ? error.message : "SUPER_ADMIN Backoffice unavailable");
+      throw error;
+    }
     const adminBody = await adminPage.locator("body").innerText();
     assert.ok(adminBody.includes("Amministrazione"));
     assert.ok(adminBody.includes("Utenti"));
