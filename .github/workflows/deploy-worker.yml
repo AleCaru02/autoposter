@@ -79,6 +79,23 @@ jobs:
           }
           console.log('tenant isolation production audit: PASS', JSON.stringify(payload.tenantIsolation));
           NODE
+      - name: Production membership contract diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://autoposter.02alessandrocaruso.workers.dev/api/internal/tenant-membership-diagnostic"
+          status=$(curl -sS -X POST -o membership-contract.json -w "%{http_code}" -H "Authorization: Bearer $TENANT_CROSS_TEST_TOKEN" "$url" || true)
+          cat membership-contract.json || true
+          echo
+          CONTRACT_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync('membership-contract.json', 'utf8'));
+          if (process.env.CONTRACT_STATUS !== '200' || payload?.ready !== true) {
+            console.error('Membership contract diagnostic failed:', JSON.stringify(payload));
+            process.exit(1);
+          }
+          console.log('membership contract diagnostic: PASS');
+          NODE
       - name: Production synthetic tenant A B isolation test
         shell: bash
         run: |
