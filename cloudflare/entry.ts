@@ -3,6 +3,7 @@ import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
+import { handleManagedAuthCapabilities } from "./managed-auth-capabilities.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
@@ -108,6 +109,7 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
+    if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
