@@ -1,10 +1,9 @@
 import { authClient } from "./neon-client";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
-
 export async function adminRequest<T>(path: string): Promise<T> {
-  const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-  if (!token) throw Object.assign(new Error("UNAUTHENTICATED"), { status: 401 });
+  const tokenResult = await authClient.token();
+  const token = tokenResult.data?.token;
+  if (tokenResult.error || !token) throw Object.assign(new Error("UNAUTHENTICATED"), { status: 401 });
   const response = await fetch(path, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   });
