@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   createOAuthState,
   decryptTokenBundle,
@@ -43,6 +44,13 @@ async function run() {
   assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY"]);
   assert.deepEqual(providerCapabilities("GBP").publish, ["POST"]);
   assert.equal(providerCapabilities("FACEBOOK").note.includes("non vengono simulati"), true);
+
+  const socialSource = readFileSync(new URL("../api/_lib/social.ts", import.meta.url), "utf8");
+  const socialUiSource = readFileSync(new URL("../src/pages/social-page.tsx", import.meta.url), "utf8");
+  assert.equal(socialSource.includes("candidates.length === 1"), false, "OAuth callbacks must never auto-select the only discovered social account");
+  assert.equal(socialSource.includes("on conflict (profile_id, provider)"), true, "a profile must keep at most one connection per provider");
+  assert.equal((socialSource.match(/status: \"PENDING_SELECTION\"/g) ?? []).length >= 3, true, "Meta, LinkedIn organization and GBP callbacks must persist explicit selection state");
+  assert.equal(socialUiSource.includes("Puoi collegare un solo account a questa attività. Scegli quale usare:"), true, "the Social UI must explain single-account selection clearly");
 
   console.log("social contract: PASS");
 }

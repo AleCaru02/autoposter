@@ -531,10 +531,6 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
       const pages = await metaPages(token.accessToken, env);
       const candidates = metaCandidates(provider, pages);
       if (!candidates.length) throw new Error(provider === "INSTAGRAM" ? "NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA" : "NESSUNA_PAGINA_FACEBOOK_GESTIBILE");
-      if (candidates.length === 1) {
-        await activateMetaCandidate(sql, state, token.accessToken, candidates[0].id, env);
-        return oauthRedirect(state, { connected: provider });
-      }
       const tokenReference = await encryptTokenBundle({ accessToken: token.accessToken, expiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null, kind: "meta_user_pending" }, env.SOCIAL_TOKEN_KEY!);
       await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), metadata: { candidates } });
       return oauthRedirect(state, { selection: provider });
@@ -547,10 +543,6 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
       if (linkedinOrganizationMode(env)) {
         const candidates = await linkedinOrganizations(token.access_token!, env);
         if (!candidates.length) throw new Error("NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO");
-        if (candidates.length === 1) {
-          await upsertConnection(sql, { profileId: state.profileId, provider, status: "ACTIVE", providerAccountId: candidates[0].id, accountName: candidates[0].name, tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { accountType: "ORGANIZATION" } });
-          return oauthRedirect(state, { connected: provider });
-        }
         await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { candidates, accountType: "ORGANIZATION" } });
         return oauthRedirect(state, { selection: provider });
       }
@@ -564,10 +556,6 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     const tokenReference = await encryptTokenBundle({ accessToken: token.access_token!, refreshToken: token.refresh_token ?? null, expiresAt, kind: "google" }, env.SOCIAL_TOKEN_KEY!);
     const candidates = await googleLocations(token.access_token!);
     if (!candidates.length) throw new Error("NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA");
-    if (candidates.length === 1) {
-      await upsertConnection(sql, { profileId: state.profileId, provider, status: "ACTIVE", providerAccountId: candidates[0].id, accountName: candidates[0].name, tokenReference, permissions: [GOOGLE_SCOPE], expiresAt, metadata: { accountId: candidates[0].accountId, locationName: candidates[0].id } });
-      return oauthRedirect(state, { connected: provider });
-    }
     await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: [GOOGLE_SCOPE], expiresAt, metadata: { candidates } });
     return oauthRedirect(state, { selection: provider });
   } catch (reason) {
