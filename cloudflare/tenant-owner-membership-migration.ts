@@ -251,7 +251,7 @@ export async function handleTenantOwnerMembershipMigration(request: Request, env
         FOR SELECT
         USING (public.owns_profile(profile_id))
       `,
-    ], { isolationMode: "Serializable" });
+    ]);
 
     const post = await sql`
       with owner_counts as (
