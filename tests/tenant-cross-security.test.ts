@@ -95,9 +95,9 @@ assert.doesNotMatch(entry, /\/api\/internal\/tenant-owner-membership-migrate/, "
 
 const deployWorkflow = readFileSync(".github/workflows/deploy-worker.yml", "utf8");
 assert.doesNotMatch(deployWorkflow, /TENANT_CROSS_TEST_TOKEN/, "the production deploy must not install a diagnostic secret");
-assert.doesNotMatch(deployWorkflow, /tenant-cross-test/, "the production deploy must not call a temporary tenant test endpoint");
-assert.doesNotMatch(deployWorkflow, /tenant-membership-diagnostic/, "the production deploy must not call a temporary membership diagnostic endpoint");
-assert.doesNotMatch(deployWorkflow, /tenant-owner-membership-migrate/, "the production deploy must not call a runtime migration endpoint");
+assert.doesNotMatch(deployWorkflow, /Generate one-time cross-tenant test token|Install one-time cross-tenant test secret|Production synthetic tenant A B isolation test|Apply versioned owner membership contract/, "the production deploy must not recreate privileged diagnostic execution");
+assert.match(deployWorkflow, /Production temporary diagnostic routes absent/, "the clean deployment must actively verify that temporary routes are absent");
+assert.match(deployWorkflow, /Production tenant and owner security audit/, "the clean deployment must retain aggregate permanent tenant and owner verification");
 
 const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
 assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
