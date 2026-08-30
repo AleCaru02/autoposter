@@ -70,4 +70,11 @@ assert.match(migration, /ALTER COLUMN owner_user_id SET NOT NULL/, "the internal
 assert.match(migration, /CREATE POLICY profile_members_owner_read[\s\S]*FOR SELECT/, "CUSTOMER membership access must be read-only through RLS");
 assert.doesNotMatch(migration, /CREATE POLICY profile_members_owner_read[\s\S]*FOR ALL/, "the replacement membership policy must not restore customer writes");
 
+const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
+assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
+assert.match(onboarding, /const submitLock = useRef\(false\)/, "onboarding must use a synchronous submission lock against rapid duplicate submits");
+assert.match(onboarding, /if \(submitLock\.current\) return/, "a second concurrent submit must be rejected before createProfile runs");
+assert.match(onboarding, /if \(creatingAnother\) navigate\("\/onboarding", \{ replace: true \}\)/, "the explicit ?new=1 intent must be consumed after one profile creation so refresh cannot repeat it");
+assert.match(onboarding, /disabled=\{submitting\}/, "the UI must expose a coherent disabled state while profile creation is running");
+
 console.log("tenant cross security regression: PASS");
