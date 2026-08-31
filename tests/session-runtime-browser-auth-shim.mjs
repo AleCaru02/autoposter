@@ -2,40 +2,12 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
-const APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
 const password = process.env.AUDIT_SMOKE_PASSWORD || "";
 assert.ok(password.length >= 24, "ephemeral smoke password missing");
 
 const smokeEmail = /^audit-smoke-[a-z0-9]{10,32}-(customer|customer-b|admin)@example\.invalid$/;
-const cachedCookies = new Map();
 const originalFetch = globalThis.fetch.bind(globalThis);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function parseCookie(raw) {
-  const parts = String(raw || "").split(";").map((part) => part.trim()).filter(Boolean);
-  const pair = parts.shift() || "";
-  const index = pair.indexOf("=");
-  if (index <= 0) return null;
-  const cookie = {
-    name: pair.slice(0, index),
-    value: pair.slice(index + 1),
-    url: new URL(AUTH_URL).origin,
-  };
-  for (const attr of parts) {
-    const [name, ...rest] = attr.split("=");
-    const key = name.toLowerCase();
-    const value = rest.join("=");
-    if (key === "httponly") cookie.httpOnly = true;
-    if (key === "secure") cookie.secure = true;
-    if (key === "samesite") {
-      const normalized = value.toLowerCase();
-      if (normalized === "none") cookie.sameSite = "None";
-      else if (normalized === "strict") cookie.sameSite = "Strict";
-      else if (normalized === "lax") cookie.sameSite = "Lax";
-    }
-  }
-  return cookie;
-}
 
 function requestUrl(input) {
   if (typeof input === "string") return input;
@@ -43,25 +15,15 @@ function requestUrl(input) {
   return input?.url || "";
 }
 
-function requestEmail(init) {
-  try {
-    if (typeof init?.body !== "string") return "";
-    const body = JSON.parse(init.body);
-    return typeof body?.email === "string" ? body.email.toLowerCase() : "";
-  } catch {
-    return "";
-  }
-}
-
 function retryAfterMs(response, attempt) {
   const raw = response.headers.get("retry-after");
   if (raw) {
     const seconds = Number(raw);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.max(seconds * 1000, 750), 15000);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.max(seconds * 1000, 1000), 15000);
     const date = Date.parse(raw);
-    if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 750), 15000);
+    if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 1000), 15000);
   }
-  return Math.min(750 * (2 ** attempt), 8000);
+  return Math.min(1000 * (2 ** attempt), 10000);
 }
 
 async function providerFetchWithBackoff(input, init, url) {
@@ -72,7 +34,7 @@ async function providerFetchWithBackoff(input, init, url) {
     if (attempt === 7) return response;
     const waitMs = retryAfterMs(response, attempt);
     try { await response.body?.cancel(); } catch { /* ignore */ }
-    console.log(`SESSION_UI_AUTH_RATE_LIMIT_RETRY: ${attempt + 1}/7 waitMs=${waitMs}`);
+    console.log(`SESSION_UI_NODE_AUTH_RATE_LIMIT_RETRY: ${attempt + 1}/7 waitMs=${waitMs}`);
     await sleep(waitMs);
   }
   return response;
@@ -95,17 +57,47 @@ function patchDialogDangerLocators(page) {
   };
 }
 
-globalThis.fetch = async (input, init) => {
-  const url = requestUrl(input);
-  const email = requestEmail(init);
-  const response = await providerFetchWithBackoff(input, init, url);
-  if ((url === `${AUTH_URL}/sign-in/email` || url === `${AUTH_URL}/sign-up/email`) && response.ok && smokeEmail.test(email)) {
-    const values = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
-    const cookies = values.map(parseCookie).filter(Boolean);
-    if (cookies.length > 0) cachedCookies.set(email, cookies);
-  }
-  return response;
-};
+function patchRealSmokeLoginRetry(page) {
+  const originalWaitForURL = page.waitForURL.bind(page);
+  page.waitForURL = async (target, options = {}) => {
+    let pathname = "";
+    try { pathname = new URL(page.url()).pathname; } catch { /* ignore */ }
+    if (pathname !== "/login") return originalWaitForURL(target, options);
+
+    const emailInput = page.locator('input[type="email"]');
+    const email = (await emailInput.count()) > 0 ? (await emailInput.inputValue().catch(() => "")).toLowerCase() : "";
+    if (!smokeEmail.test(email)) return originalWaitForURL(target, options);
+
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await originalWaitForURL(target, { ...options, timeout: 14000 });
+      } catch (reason) {
+        lastError = reason;
+        let currentPath = "";
+        try { currentPath = new URL(page.url()).pathname; } catch { /* ignore */ }
+        if (currentPath !== "/login") return originalWaitForURL(target, { ...options, timeout: 3000 });
+        if (attempt === 4) break;
+
+        const waitMs = Math.min(4000 * (attempt + 1), 12000);
+        console.log(`SESSION_UI_BROWSER_AUTH_RETRY: ${attempt + 1}/4 waitMs=${waitMs}`);
+        await page.waitForTimeout(waitMs);
+
+        const submit = page.locator('button[type="submit"]');
+        await submit.waitFor({ state: "visible", timeout: 5000 });
+        const enabledDeadline = Date.now() + 15000;
+        while (await submit.isDisabled().catch(() => true)) {
+          if (Date.now() >= enabledDeadline) break;
+          await page.waitForTimeout(250);
+        }
+        if (!(await submit.isDisabled().catch(() => true))) await submit.click();
+      }
+    }
+    throw lastError;
+  };
+}
+
+globalThis.fetch = async (input, init) => providerFetchWithBackoff(input, init, requestUrl(input));
 
 const originalLaunch = chromium.launch.bind(chromium);
 chromium.launch = async (...launchArgs) => {
@@ -117,25 +109,7 @@ chromium.launch = async (...launchArgs) => {
     context.newPage = async (...pageArgs) => {
       const page = await originalNewPage(...pageArgs);
       patchDialogDangerLocators(page);
-      await page.route("**/sign-in/email", async (route) => {
-        await route.fulfill({ status: 204, contentType: "application/json", body: "" });
-      });
-      const originalWaitForURL = page.waitForURL.bind(page);
-      page.waitForURL = async (target, options = {}) => {
-        let pathname = "";
-        try { pathname = new URL(page.url()).pathname; } catch { /* ignore */ }
-        if (pathname === "/login") {
-          const emailInput = page.locator('input[type="email"]');
-          const email = (await emailInput.count()) > 0 ? (await emailInput.inputValue().catch(() => "")).toLowerCase() : "";
-          if (smokeEmail.test(email)) {
-            const cookies = cachedCookies.get(email) || [];
-            assert.ok(cookies.length > 0, `Smoke browser cached session missing for ${email.includes("customer-b") ? "CUSTOMER_B" : email.includes("admin") ? "ADMIN" : "CUSTOMER_A"}`);
-            await context.addCookies(cookies);
-            await page.goto(`${APP_BASE}/app/dashboard`, { waitUntil: "domcontentloaded", timeout: 30000 });
-          }
-        }
-        return originalWaitForURL(target, options);
-      };
+      patchRealSmokeLoginRetry(page);
       return page;
     };
     return context;
@@ -143,4 +117,4 @@ chromium.launch = async (...launchArgs) => {
   return browser;
 };
 
-console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REUSE_EXISTING_SESSIONS_STABLE_DIALOG_RATE_LIMIT_BACKOFF");
+console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REAL_LOGIN_RETRY_STABLE_DIALOG");
