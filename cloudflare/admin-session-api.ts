@@ -78,7 +78,7 @@ async function resolveCustomer(sql: ReturnType<typeof neon>, targetAuthUserId: s
 }
 
 async function listSessions(sql: ReturnType<typeof neon>, targetAuthUserId: string) {
-  return sql`
+  const rows = await sql`
     select
       coalesce(to_jsonb(s)->>'id', '') as id,
       coalesce(to_jsonb(s)->>'createdAt', to_jsonb(s)->>'created_at') as created_at,
@@ -91,7 +91,8 @@ async function listSessions(sql: ReturnType<typeof neon>, targetAuthUserId: stri
     order by coalesce(to_jsonb(s)->>'updatedAt', to_jsonb(s)->>'updated_at', '') desc,
       coalesce(to_jsonb(s)->>'createdAt', to_jsonb(s)->>'created_at', '') desc,
       coalesce(to_jsonb(s)->>'id', '') desc
-  ` as Promise<SessionRow[]>;
+  ` as SessionRow[];
+  return rows;
 }
 
 export async function handleAdminSessionApi(request: Request, env: SessionAdminEnv): Promise<Response | null> {
