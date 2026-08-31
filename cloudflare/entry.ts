@@ -6,6 +6,7 @@ import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleManagedAuthCapabilities } from "./managed-auth-capabilities.js";
 import { handleInitialSuperAdminBootstrap } from "./platform-admin-bootstrap.js";
 import { handleAdminApi } from "./admin-api.js";
+import { handleAdminSessionApi } from "./admin-session-api.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
@@ -117,6 +118,8 @@ export default {
     if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
     if (path === "/api/internal/fase3/bootstrap-super-admin") return handleInitialSuperAdminBootstrap(request, env);
     if (path.startsWith("/api/admin/")) {
+      const sessionResponse = await handleAdminSessionApi(request, env);
+      if (sessionResponse) return sessionResponse;
       const response = await handleAdminApi(request, env);
       if (response) return response;
     }
