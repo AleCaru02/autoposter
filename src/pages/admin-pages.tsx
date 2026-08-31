@@ -213,7 +213,7 @@ function CustomerSessions({ customerId }: { customerId: string }) {
   return <section className="admin-section admin-sessions-section" aria-labelledby="active-sessions-title">
     <div className="admin-section-heading">
       <div><h2 id="active-sessions-title">Sessioni attive</h2><p>Sessioni reali gestite da Neon Managed Auth. Nessuna geolocalizzazione dell’IP.</p></div>
-      <button type="button" className="admin-danger-button" onClick={() => setConfirmAction({ kind: "all" })} disabled={!endpoint || loading || busy || Boolean(loadError) || sessions.length === 0}>Revoca tutte le sessioni</button>
+      {!loading && !loadError && sessions.length > 0 ? <button type="button" className="admin-danger-button" onClick={() => setConfirmAction({ kind: "all" })} disabled={!endpoint || busy}>Revoca tutte le sessioni</button> : null}
     </div>
     {feedback ? <div className="admin-inline-success" role="status">{feedback}</div> : null}
     {mutationError ? <div className="admin-inline-error admin-session-error" role="alert">{mutationError}</div> : null}
