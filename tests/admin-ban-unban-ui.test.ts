@@ -71,7 +71,7 @@ assert.equal(panel.includes('aria-labelledby="unban-confirm-title"'), true, "Unb
 assert.equal(panel.includes("autoFocus"), true, "destructive dialogs should focus a safe cancel action");
 assert.equal(panel.includes('event.key === "Escape"'), true, "dialogs must support Escape cancellation while idle");
 assert.equal(panel.includes(">Annulla</button>"), true, "confirmation cancel action missing");
-assert.equal(panel.includes("Le vecchie sessioni revocate non vengono ripristinate."), true, "Unban UI must not imply restored sessions");
+assert.equal(panel.includes("le vecchie sessioni revocate non vengono ripristinate."), true, "Unban UI must not imply restored sessions");
 assert.equal(panel.includes("L’operazione non elimina i suoi dati."), true, "Ban UI must describe non-destructive data semantics");
 assert.equal(panel.includes("dangerouslySetInnerHTML"), false, "Ban reason must render as ordinary escaped React text");
 
