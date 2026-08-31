@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
   "preview_urls": true,
+  // Permanent verifier: preview upload only, never production deployment.
   "secrets": {
     "required": ["DATABASE_URL", "AUDIT_SMOKE_TOKEN"]
   }
