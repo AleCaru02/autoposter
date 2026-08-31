@@ -9,6 +9,7 @@ assert.ok(password.length >= 24, "ephemeral smoke password missing");
 const smokeEmail = /^audit-smoke-[a-z0-9]{10,32}-(customer|customer-b|admin)@example\.invalid$/;
 const cachedCookies = new Map();
 const originalFetch = globalThis.fetch.bind(globalThis);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function parseCookie(raw) {
   const parts = String(raw || "").split(";").map((part) => part.trim()).filter(Boolean);
@@ -52,6 +53,31 @@ function requestEmail(init) {
   }
 }
 
+function retryAfterMs(response, attempt) {
+  const raw = response.headers.get("retry-after");
+  if (raw) {
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.max(seconds * 1000, 750), 15000);
+    const date = Date.parse(raw);
+    if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 750), 15000);
+  }
+  return Math.min(750 * (2 ** attempt), 8000);
+}
+
+async function providerFetchWithBackoff(input, init, url) {
+  let response = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    response = await originalFetch(input, init);
+    if (response.status !== 429 || !url.startsWith(AUTH_URL)) return response;
+    if (attempt === 7) return response;
+    const waitMs = retryAfterMs(response, attempt);
+    try { await response.body?.cancel(); } catch { /* ignore */ }
+    console.log(`SESSION_UI_AUTH_RATE_LIMIT_RETRY: ${attempt + 1}/7 waitMs=${waitMs}`);
+    await sleep(waitMs);
+  }
+  return response;
+}
+
 function patchDialogDangerLocators(page) {
   const originalPageGetByRole = page.getByRole.bind(page);
   page.getByRole = (role, options) => {
@@ -72,7 +98,7 @@ function patchDialogDangerLocators(page) {
 globalThis.fetch = async (input, init) => {
   const url = requestUrl(input);
   const email = requestEmail(init);
-  const response = await originalFetch(input, init);
+  const response = await providerFetchWithBackoff(input, init, url);
   if ((url === `${AUTH_URL}/sign-in/email` || url === `${AUTH_URL}/sign-up/email`) && response.ok && smokeEmail.test(email)) {
     const values = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
     const cookies = values.map(parseCookie).filter(Boolean);
@@ -117,4 +143,4 @@ chromium.launch = async (...launchArgs) => {
   return browser;
 };
 
-console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REUSE_EXISTING_SESSIONS_STABLE_DIALOG");
+console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REUSE_EXISTING_SESSIONS_STABLE_DIALOG_RATE_LIMIT_BACKOFF");
