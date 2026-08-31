@@ -1,8 +1,6 @@
 name: Audit Viewer Authenticated Runtime
 
 on:
-  push:
-    branches: [chore/harden-audit-ephemeral-runtime]
   workflow_dispatch:
 
 concurrency:
