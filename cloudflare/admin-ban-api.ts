@@ -73,13 +73,24 @@ async function parseBanInput(request: Request): Promise<ParsedBanInput> {
   return { ok: true, reason: reason.value, expiresAt: expiry.value };
 }
 
+async function validEmptyUnbanBody(request: Request) {
+  const text = await request.text();
+  if (!text.trim()) return true;
+  try {
+    const body = JSON.parse(text) as unknown;
+    return Boolean(body && typeof body === "object" && !Array.isArray(body) && Object.keys(body as Record<string, unknown>).length === 0);
+  } catch {
+    return false;
+  }
+}
+
 async function resolveCustomer(sql: ReturnType<typeof neon>, customerId: string) {
   const rows = await sql`
     select
       nu.id::text as auth_user_id,
       coalesce(nu.banned, false) as banned,
-      nullif(to_jsonb(nu)->>'banReason', '') as ban_reason,
-      nullif(to_jsonb(nu)->>'banExpires', '') as ban_expires
+      nullif(nu."banReason", '') as ban_reason,
+      nu."banExpires"::text as ban_expires
     from neon_auth.user nu
     where nu.id::text = ${customerId}
       and lower(coalesce(nu.role::text, '')) <> 'admin'
@@ -131,13 +142,7 @@ export async function handleAdminBanApi(request: Request, env: BanAdminEnv): Pro
     if (!customer) return json({ error: "CUSTOMER_NOT_FOUND" }, 404);
 
     if (operation === "unban") {
-      if (request.headers.get("content-length") && request.headers.get("content-length") !== "0") {
-        let body: unknown;
-        try { body = await request.json(); } catch { return json({ error: "INVALID_UNBAN_INPUT" }, 400); }
-        if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body as Record<string, unknown>).length !== 0) {
-          return json({ error: "INVALID_UNBAN_INPUT" }, 400);
-        }
-      }
+      if (!await validEmptyUnbanBody(request)) return json({ error: "INVALID_UNBAN_INPUT" }, 400);
 
       const rows = await sql`
         update neon_auth.user
@@ -146,8 +151,8 @@ export async function handleAdminBanApi(request: Request, env: BanAdminEnv): Pro
           and lower(coalesce(role::text, '')) <> 'admin'
         returning id::text as auth_user_id,
           coalesce(banned, false) as banned,
-          nullif(to_jsonb(neon_auth.user)->>'banReason', '') as ban_reason,
-          nullif(to_jsonb(neon_auth.user)->>'banExpires', '') as ban_expires
+          nullif("banReason", '') as ban_reason,
+          "banExpires"::text as ban_expires
       ` as CustomerBanRow[];
       if (!rows[0]) return json({ error: "CUSTOMER_NOT_FOUND" }, 404);
 
@@ -170,8 +175,8 @@ export async function handleAdminBanApi(request: Request, env: BanAdminEnv): Pro
         and lower(coalesce(role::text, '')) <> 'admin'
       returning id::text as auth_user_id,
         coalesce(banned, false) as banned,
-        nullif(to_jsonb(neon_auth.user)->>'banReason', '') as ban_reason,
-        nullif(to_jsonb(neon_auth.user)->>'banExpires', '') as ban_expires
+        nullif("banReason", '') as ban_reason,
+        "banExpires"::text as ban_expires
     ` as CustomerBanRow[];
     if (!rows[0]) return json({ error: "CUSTOMER_NOT_FOUND" }, 404);
 
