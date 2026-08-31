@@ -45,7 +45,6 @@ type AuditRow = {
   metadata: unknown;
   created_at: string;
 };
-
 type AuditCountRow = { total: number };
 
 function json(body: unknown, status = 200) {
@@ -88,6 +87,10 @@ function isoFilter(value: string | null) {
   if (normalized.length > 40) return undefined;
   const timestamp = Date.parse(normalized);
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
+}
+
+function hasDuplicateAuditParams(searchParams: URLSearchParams) {
+  return ["page", "limit", "action", "actor", "target", "from", "to"].some((key) => searchParams.getAll(key).length > 1);
 }
 
 const SENSITIVE_AUDIT_KEYS = new Set([
@@ -172,6 +175,7 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
     }
 
     if (path === "/api/admin/audit") {
+      if (hasDuplicateAuditParams(url.searchParams)) return json({ error: "INVALID_AUDIT_FILTER" }, 400);
       const page = positiveInteger(url.searchParams.get("page"), 1, 100000);
       const limit = positiveInteger(url.searchParams.get("limit"), 25, 100);
       const action = boundedFilter(url.searchParams.get("action"), 120);
