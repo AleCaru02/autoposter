@@ -2,6 +2,9 @@ name: Audit Viewer Authenticated Runtime
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - verify/session-provider-contract
 
 concurrency:
   group: audit-viewer-authenticated-runtime
@@ -149,6 +152,9 @@ jobs:
 
       - name: Authenticated Audit API runtime
         run: node tests/audit-viewer-runtime.mjs
+
+      - name: Better Auth session provider contract runtime
+        run: node tests/session-provider-contract.mjs
 
       - name: Install Playwright + Chromium
         run: |
