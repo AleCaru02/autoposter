@@ -1,0 +1,39 @@
+name: Audit Viewer Runtime Verify
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ADMIN_SMOKE_BASE: https://autoposter.02alessandrocaruso.workers.dev
+      ADMIN_SMOKE_EMAIL: ${{ secrets.ADMIN_SMOKE_EMAIL }}
+      ADMIN_SMOKE_PASSWORD: ${{ secrets.ADMIN_SMOKE_PASSWORD }}
+      CUSTOMER_SMOKE_EMAIL: ${{ secrets.CUSTOMER_SMOKE_EMAIL }}
+      CUSTOMER_SMOKE_PASSWORD: ${{ secrets.CUSTOMER_SMOKE_PASSWORD }}
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Verify credential channel configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ADMIN_SMOKE_EMAIL ADMIN_SMOKE_PASSWORD CUSTOMER_SMOKE_EMAIL CUSTOMER_SMOKE_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "MISSING_RUNTIME_CREDENTIAL_SECRET: $name" >&2
+              exit 2
+            fi
+          done
+          echo "runtime credential channel: CONFIGURED"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - { name: Authenticated Audit API runtime, run: "node tests/admin-audit-runtime.mjs" }
+      - name: Install Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install chromium
+      - { name: Audit Viewer desktop/mobile browser runtime, run: "node tests/admin-browser-smoke.mjs" }
