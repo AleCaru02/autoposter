@@ -136,6 +136,16 @@ async function dataIdentity(token, expectedId) {
   return { status: response.status, accepted: Boolean(response.ok && value === expectedId) };
 }
 
+async function waitForDataIdentity(token, expectedId, label) {
+  let last = { status: 0, accepted: false };
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    last = await dataIdentity(token, expectedId);
+    if (last.accepted) return last;
+    await sleep(500);
+  }
+  throw new Error(`${label} Data API token not ready after retry (last status ${last.status})`);
+}
+
 async function providerAdmin(jar, path, body) {
   const response = await authFetch(jar, path, { method: "POST", body: JSON.stringify(body) });
   await readJson(response);
@@ -175,8 +185,8 @@ assert.equal(preflight.profilesWithoutOwner, 0, "profilesWithoutOwner baseline m
 const customer = await signUp(emails.customer, "Ban Smoke Customer");
 const adminCandidate = await signUp(emails.admin, "Ban Smoke Admin");
 assert.notEqual(customer.id, adminCandidate.id, "customer/admin identity collision");
-assert.equal((await dataIdentity(customer.token, customer.id)).accepted, true, "customer Data API token not ready");
-assert.equal((await dataIdentity(adminCandidate.token, adminCandidate.id)).accepted, true, "admin candidate Data API token not ready");
+await waitForDataIdentity(customer.token, customer.id, "customer");
+await waitForDataIdentity(adminCandidate.token, adminCandidate.id, "admin candidate");
 
 const promoted = await controller("promote");
 assert.equal(promoted.qaAdmins, 1, "ADMIN_SMOKE promotion missing");
