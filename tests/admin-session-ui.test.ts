@@ -55,7 +55,9 @@ assert.equal(sessionUi.includes("https://"), false, "Session UI must not call ex
 
 assert.equal(sessionUi.includes('if (!endpoint || !confirmAction || busy) return;'), true, "revoke must fail closed for missing customer target and double submit");
 assert.equal(sessionUi.includes('disabled={busy}>Revoca sessione</button>'), true, "single revoke button must disable during mutation");
-assert.equal(sessionUi.includes('disabled={!endpoint || loading || busy || Boolean(loadError) || sessions.length === 0}'), true, "revoke-all must be unavailable while loading/error/empty/busy");
+const revokeAllRender = '!loading && !loadError && sessions.length > 0 ? <button type="button" className="admin-danger-button" onClick={() => setConfirmAction({ kind: "all" })} disabled={!endpoint || busy}>Revoca tutte le sessioni</button> : null';
+assert.equal(sessionUi.includes(revokeAllRender), true, "revoke-all must be rendered only after a successful non-empty list load");
+assert.equal(sessionUi.includes('disabled={!endpoint || loading || busy || Boolean(loadError) || sessions.length === 0}'), false, "empty/loading state must not leave a disabled revoke-all button rendered");
 assert.equal(sessionUi.includes('`${endpoint}/${encodeURIComponent(confirmAction.session.id)}`'), true, "single revoke must use only the opened customer endpoint plus safe session id");
 assert.equal(sessionUi.includes('{ method: "DELETE" }'), true, "Session revoke mutations must use DELETE");
 assert.equal(sessionUi.includes("setRefreshKey((value) => value + 1)"), true, "successful revoke must refresh the canonical list");
