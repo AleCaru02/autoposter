@@ -51,13 +51,13 @@ type ConfirmAction = { kind: "single"; session: AdminSession } | { kind: "all" }
 function formatDate(value: string | null | undefined) {
   if (!value) return "Non disponibile";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Non disponibile" : new Intl.DateTimeFormat("it-IT", { dateStyle: "medium" }).format(date);
+  return Number.isNaN(date.getTime()) ? "Non disponibile" : new Intl.DateTimeFormat("it-IT", { dateStyle: "medium", timeZone: "Europe/Rome" }).format(date);
 }
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "Non disponibile";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Non disponibile" : new Intl.DateTimeFormat("it-IT", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime()) ? "Non disponibile" : new Intl.DateTimeFormat("it-IT", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Rome" }).format(date);
 }
 
 function sessionDeviceLabel(userAgent: string | null) {
@@ -144,11 +144,11 @@ function SessionConfirmModal({ action, busy, onCancel, onConfirm }: { action: Co
   const isAll = action.kind === "all";
   const label = isAll ? "tutte le sessioni attive di questo cliente" : sessionDeviceLabel(action.session.userAgent);
   return <div className="admin-modal-backdrop" role="presentation">
-    <div className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="session-confirm-title">
+    <div className="admin-modal" role="dialog" aria-modal="true" aria-labelledby="session-confirm-title" tabIndex={-1} onKeyDown={(event) => { if (event.key === "Escape" && !busy) onCancel(); }}>
       <h2 id="session-confirm-title">{isAll ? "Revoca tutte le sessioni" : "Revoca sessione"}</h2>
       <p>{isAll ? "Tutte le sessioni attive di questo cliente verranno invalidate. L’amministratore resterà connesso." : `Il cliente verrà disconnesso da questa sessione: ${label}.`}</p>
       <div className="admin-modal-actions">
-        <button type="button" className="secondary" onClick={onCancel} disabled={busy}>Annulla</button>
+        <button type="button" className="secondary" onClick={onCancel} disabled={busy} autoFocus>Annulla</button>
         <button type="button" className="danger" onClick={onConfirm} disabled={busy}>{busy ? "Revoca in corso…" : isAll ? "Revoca tutte" : "Revoca sessione"}</button>
       </div>
     </div>
@@ -156,11 +156,11 @@ function SessionConfirmModal({ action, busy, onCancel, onConfirm }: { action: Co
 }
 
 function CustomerSessions({ customerId }: { customerId: string }) {
-  const encodedId = encodeURIComponent(customerId);
-  const endpoint = `/api/admin/customers/${encodedId}/sessions`;
+  const endpoint = customerId ? `/api/admin/customers/${encodeURIComponent(customerId)}/sessions` : null;
   const [sessions, setSessions] = useState<AdminSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [busy, setBusy] = useState(false);
@@ -168,19 +168,30 @@ function CustomerSessions({ customerId }: { customerId: string }) {
 
   useEffect(() => {
     let active = true;
+    setSessions([]);
     setLoading(true);
-    setError(null);
+    setLoadError(null);
+    if (!endpoint) {
+      setLoading(false);
+      setLoadError("Target cliente non disponibile. Nessuna sessione è stata richiesta.");
+      return () => { active = false; };
+    }
     void adminRequest<{ sessions: AdminSession[] }>(endpoint)
       .then((body) => { if (active) setSessions(Array.isArray(body.sessions) ? body.sessions : []); })
-      .catch(() => { if (active) setError("Sessioni non disponibili. Riprova."); })
+      .catch(() => {
+        if (active) {
+          setSessions([]);
+          setLoadError("Sessioni non disponibili. Riprova.");
+        }
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [endpoint, refreshKey]);
 
   async function confirmRevoke() {
-    if (!confirmAction || busy) return;
+    if (!endpoint || !confirmAction || busy) return;
     setBusy(true);
-    setError(null);
+    setMutationError(null);
     setFeedback(null);
     try {
       if (confirmAction.kind === "single") {
@@ -193,7 +204,7 @@ function CustomerSessions({ customerId }: { customerId: string }) {
       setConfirmAction(null);
       setRefreshKey((value) => value + 1);
     } catch {
-      setError("Revoca non riuscita. Nessuna operazione è stata mostrata come completata.");
+      setMutationError("Revoca non riuscita. La lista non è stata modificata e nessun successo è stato mostrato.");
     } finally {
       setBusy(false);
     }
@@ -202,22 +213,25 @@ function CustomerSessions({ customerId }: { customerId: string }) {
   return <section className="admin-section admin-sessions-section" aria-labelledby="active-sessions-title">
     <div className="admin-section-heading">
       <div><h2 id="active-sessions-title">Sessioni attive</h2><p>Sessioni reali gestite da Neon Managed Auth. Nessuna geolocalizzazione dell’IP.</p></div>
-      <button type="button" className="admin-danger-button" onClick={() => setConfirmAction({ kind: "all" })} disabled={loading || busy || sessions.length === 0}>Revoca tutte le sessioni</button>
+      <button type="button" className="admin-danger-button" onClick={() => setConfirmAction({ kind: "all" })} disabled={!endpoint || loading || busy || Boolean(loadError) || sessions.length === 0}>Revoca tutte le sessioni</button>
     </div>
     {feedback ? <div className="admin-inline-success" role="status">{feedback}</div> : null}
-    {error ? <div className="admin-inline-error admin-session-error" role="alert">{error}</div> : null}
-    {loading ? <div className="admin-session-loading">Caricamento sessioni…</div> : sessions.length === 0 ? <div className="admin-empty admin-session-empty"><strong>Nessuna sessione attiva.</strong><span>Il cliente non ha sessioni Managed Auth attive.</span></div> : <div className="admin-session-list">{sessions.map((session) => <article className="admin-session-card" key={session.id}>
-      <div className="admin-session-card-main">
-        <div className="admin-session-title"><strong>{sessionDeviceLabel(session.userAgent)}</strong><span className={`admin-badge ${sessionState(session.expiresAt) === "Attiva" ? "admin" : ""}`}>{sessionState(session.expiresAt)}</span></div>
-        <dl className="admin-session-details">
-          <div><dt>IP</dt><dd>{session.ipAddress || "Non disponibile"}</dd></div>
-          <div><dt>Creata</dt><dd>{formatDateTime(session.createdAt)}</dd></div>
-          <div><dt>Ultima attività</dt><dd>{formatDateTime(session.updatedAt)}</dd></div>
-          <div><dt>Scadenza</dt><dd>{formatDateTime(session.expiresAt)}</dd></div>
-        </dl>
-      </div>
-      <button type="button" className="admin-danger-button admin-session-revoke" onClick={() => setConfirmAction({ kind: "single", session })} disabled={busy}>Revoca sessione</button>
-    </article>)}</div>}
+    {mutationError ? <div className="admin-inline-error admin-session-error" role="alert">{mutationError}</div> : null}
+    {loading ? <div className="admin-session-loading">Caricamento sessioni…</div>
+      : loadError ? <div className="admin-session-load-error" role="alert"><strong>{loadError}</strong><button type="button" className="secondary" onClick={() => setRefreshKey((value) => value + 1)} disabled={busy || !endpoint}>Riprova</button></div>
+        : sessions.length === 0 ? <div className="admin-empty admin-session-empty"><strong>Nessuna sessione attiva.</strong><span>Il cliente non ha sessioni Managed Auth attive.</span></div>
+          : <div className="admin-session-list">{sessions.map((session) => <article className="admin-session-card" key={session.id}>
+            <div className="admin-session-card-main">
+              <div className="admin-session-title"><strong>{sessionDeviceLabel(session.userAgent)}</strong><span className={`admin-badge ${sessionState(session.expiresAt) === "Attiva" ? "admin" : ""}`}>{sessionState(session.expiresAt)}</span></div>
+              <dl className="admin-session-details">
+                <div><dt>IP</dt><dd>{session.ipAddress || "Non disponibile"}</dd></div>
+                <div><dt>Creata</dt><dd>{formatDateTime(session.createdAt)}</dd></div>
+                <div><dt>Ultima attività</dt><dd>{formatDateTime(session.updatedAt)}</dd></div>
+                <div><dt>Scadenza</dt><dd>{formatDateTime(session.expiresAt)}</dd></div>
+              </dl>
+            </div>
+            <button type="button" className="admin-danger-button admin-session-revoke" onClick={() => setConfirmAction({ kind: "single", session })} disabled={busy}>Revoca sessione</button>
+          </article>)}</div>}
     {confirmAction ? <SessionConfirmModal action={confirmAction} busy={busy} onCancel={() => { if (!busy) setConfirmAction(null); }} onConfirm={() => { void confirmRevoke(); }} /> : null}
   </section>;
 }
@@ -228,8 +242,12 @@ function CustomerDetailPage() {
   const { data, error, loading } = useAdminData<{ customer: Customer; profiles: Profile[]; memberships: Membership[]; socialConnectionsByProfile: Array<{ profile_id: string; connections: number }> }>(path);
   if (loading) return <Loading />;
   if (error || !data) return <ErrorState message={error || "Cliente non disponibile."} />;
+  if (!data.customer.auth_user_id) return <ErrorState message="Identificatore cliente non disponibile. Gestione sessioni bloccata." />;
   const socialMap = new Map(data.socialConnectionsByProfile.map((item) => [item.profile_id, item.connections]));
-  return <><header className="admin-page-header"><div><NavLink className="admin-back" to="/admin/clienti">← Clienti</NavLink><h1>{data.customer.name || "Cliente"}</h1><p>{data.customer.email || "Email non disponibile"}</p></div><span className={`admin-badge ${data.customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{data.customer.platform_role}</span></header><section className="admin-detail-grid"><article><h2>Account</h2><dl><div><dt>Creato</dt><dd>{formatDate(data.customer.created_at)}</dd></div><div><dt>Stato</dt><dd>{data.customer.banned ? "Sospeso" : "Attivo"}</dd></div><div><dt>Attività</dt><dd>{data.profiles.length}</dd></div></dl></article><article><h2>Membership</h2>{data.memberships.length ? <ul className="admin-list">{data.memberships.map((item) => <li key={`${item.profile_id}-${item.role}`}><span>{item.profile_name}</span><strong>{item.role}</strong></li>)}</ul> : <p>Nessuna membership disponibile.</p>}</article></section><CustomerSessions customerId={data.customer.auth_user_id} /><section className="admin-section"><h2>Attività associate</h2><div className="admin-card-list">{data.profiles.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.industry || "Settore non indicato"}</span></div><div><span>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{socialMap.get(profile.id) ?? 0} social collegati</span></div></article>)}</div></section></>;
+  const sessionPanel = data.customer.platform_role === "SUPER_ADMIN"
+    ? <section className="admin-section admin-sessions-section"><h2>Sessioni attive</h2><p className="admin-muted">Gestione sessioni non disponibile per account SUPER_ADMIN.</p></section>
+    : <CustomerSessions customerId={data.customer.auth_user_id} />;
+  return <><header className="admin-page-header"><div><NavLink className="admin-back" to="/admin/clienti">← Clienti</NavLink><h1>{data.customer.name || "Cliente"}</h1><p>{data.customer.email || "Email non disponibile"}</p></div><span className={`admin-badge ${data.customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{data.customer.platform_role}</span></header><section className="admin-detail-grid"><article><h2>Account</h2><dl><div><dt>Creato</dt><dd>{formatDate(data.customer.created_at)}</dd></div><div><dt>Stato</dt><dd>{data.customer.banned ? "Sospeso" : "Attivo"}</dd></div><div><dt>Attività</dt><dd>{data.profiles.length}</dd></div></dl></article><article><h2>Membership</h2>{data.memberships.length ? <ul className="admin-list">{data.memberships.map((item) => <li key={`${item.profile_id}-${item.role}`}><span>{item.profile_name}</span><strong>{item.role}</strong></li>)}</ul> : <p>Nessuna membership disponibile.</p>}</article></section>{sessionPanel}<section className="admin-section"><h2>Attività associate</h2><div className="admin-card-list">{data.profiles.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.industry || "Settore non indicato"}</span></div><div><span>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{socialMap.get(profile.id) ?? 0} social collegati</span></div></article>)}</div></section></>;
 }
 
 function ActivitiesPage() {
