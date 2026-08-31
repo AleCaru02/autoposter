@@ -22,9 +22,17 @@ function expectedEmails(marker) {
   ]);
 }
 
+const recognizedSmokeEmail = /^audit-smoke-([a-z0-9]{10,32})-(customer|admin)@example\.invalid$/;
+
+function recognizedUser(user) {
+  const match = recognizedSmokeEmail.exec(user.email || "");
+  if (!match) return null;
+  return { ...user, marker: match[1], kind: match[2] };
+}
+
 async function usersForMarker(sql, marker) {
   const pattern = `audit-smoke-${marker}-%@example.invalid`;
-  return await sql`
+  const rows = await sql`
     select u.id::text as id,
       lower(coalesce(to_jsonb(u)->>'email', '')) as email,
       lower(coalesce(u.role::text, '')) as role
@@ -32,10 +40,24 @@ async function usersForMarker(sql, marker) {
     where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
     order by lower(coalesce(to_jsonb(u)->>'email', ''))
   `;
+  return rows.map(recognizedUser).filter(Boolean).filter((user) => user.marker === marker);
+}
+
+async function allRecognizedSmokeUsers(sql) {
+  const rows = await sql`
+    select u.id::text as id,
+      lower(coalesce(to_jsonb(u)->>'email', '')) as email,
+      lower(coalesce(u.role::text, '')) as role
+    from neon_auth.user u
+    where lower(coalesce(to_jsonb(u)->>'email', '')) like 'audit-smoke-%@example.invalid'
+    order by lower(coalesce(to_jsonb(u)->>'email', ''))
+  `;
+  return rows.map(recognizedUser).filter(Boolean);
 }
 
 async function state(sql, marker) {
   const users = await usersForMarker(sql, marker);
+  const recognized = await allRecognizedSmokeUsers(sql);
   const pattern = `audit-smoke-${marker}-%@example.invalid`;
   const metrics = await sql`
     select
@@ -81,6 +103,9 @@ async function state(sql, marker) {
     qaSessions: Number(row.qa_sessions || 0),
     qaAccounts: Number(row.qa_accounts || 0),
     qaAuditRows: Number(row.qa_audit_rows || 0),
+    recognizedQaUsers: recognized.length,
+    recognizedQaAdmins: recognized.filter((user) => user.role === "admin").length,
+    recognizedQaMarkers: [...new Set(recognized.map((user) => user.marker))].length,
     superAdmins: Number(row.super_admins || 0),
     profilesTotal: Number(row.profiles_total || 0),
     profilesWithoutOwner: Number(row.profiles_without_owner || 0),
@@ -104,13 +129,7 @@ async function promote(sql, marker) {
   return { ok: true, status: 200, body: { promoted: true, ...after } };
 }
 
-async function cleanup(sql, marker) {
-  const users = await usersForMarker(sql, marker);
-  const allowed = expectedEmails(marker);
-  if (users.length > 2 || users.some((user) => !allowed.has(user.email))) {
-    return { ok: false, status: 409, body: { error: "SMOKE_CLEANUP_SCOPE_MISMATCH", count: users.length } };
-  }
-
+async function cleanupUsers(sql, users) {
   for (const user of users) {
     await sql`delete from public.profiles where owner_auth_user_id = ${user.id}`;
     await sql`
@@ -123,8 +142,31 @@ async function cleanup(sql, marker) {
     await sql`delete from public.app_users where auth_user_id = ${user.id}`;
     await sql`delete from neon_auth.user where id::text = ${user.id}`;
   }
+}
 
+async function cleanup(sql, marker) {
+  const users = await usersForMarker(sql, marker);
+  const allowed = expectedEmails(marker);
+  if (users.length > 2 || users.some((user) => !allowed.has(user.email))) {
+    return { ok: false, status: 409, body: { error: "SMOKE_CLEANUP_SCOPE_MISMATCH", count: users.length } };
+  }
+  await cleanupUsers(sql, users);
   return { ok: true, status: 200, body: { cleaned: true, ...(await state(sql, marker)) } };
+}
+
+async function cleanupRecognizedResidue(sql, marker) {
+  const users = await allRecognizedSmokeUsers(sql);
+  if (users.some((user) => !recognizedSmokeEmail.test(user.email))) {
+    return { ok: false, status: 409, body: { error: "STALE_SMOKE_SCOPE_MISMATCH" } };
+  }
+  const cleanedUsers = users.length;
+  const cleanedAdmins = users.filter((user) => user.role === "admin").length;
+  await cleanupUsers(sql, users);
+  const after = await state(sql, marker);
+  if (after.recognizedQaUsers !== 0 || after.recognizedQaAdmins !== 0) {
+    return { ok: false, status: 409, body: { error: "STALE_SMOKE_CLEANUP_POSTCONDITION", recognizedQaUsers: after.recognizedQaUsers, recognizedQaAdmins: after.recognizedQaAdmins } };
+  }
+  return { ok: true, status: 200, body: { cleaned: true, cleanedUsers, cleanedAdmins, ...after } };
 }
 
 export default {
@@ -137,13 +179,17 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
     if (!validMarker(body?.marker)) return json({ error: "INVALID_MARKER" }, 400);
-    if (!["preflight", "state", "promote", "cleanup"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
+    if (!["preflight", "state", "promote", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
 
     const sql = neon(env.DATABASE_URL);
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
       if (body.action === "promote") {
         const result = await promote(sql, body.marker);
+        return json(result.body, result.status);
+      }
+      if (body.action === "cleanup-residue") {
+        const result = await cleanupRecognizedResidue(sql, body.marker);
         return json(result.body, result.status);
       }
       const result = await cleanup(sql, body.marker);
