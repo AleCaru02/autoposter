@@ -18,11 +18,12 @@ function validMarker(value) {
 function expectedEmails(marker) {
   return new Set([
     `audit-smoke-${marker}-customer@example.invalid`,
+    `audit-smoke-${marker}-customer-b@example.invalid`,
     `audit-smoke-${marker}-admin@example.invalid`,
   ]);
 }
 
-const recognizedSmokeEmail = /^audit-smoke-([a-z0-9]{10,32})-(customer|admin)@example\.invalid$/;
+const recognizedSmokeEmail = /^audit-smoke-([a-z0-9]{10,32})-(customer|customer-b|admin)@example\.invalid$/;
 
 function recognizedUser(user) {
   const match = recognizedSmokeEmail.exec(user.email || "");
@@ -115,11 +116,10 @@ async function state(sql, marker) {
 async function promote(sql, marker) {
   const users = await usersForMarker(sql, marker);
   const allowed = expectedEmails(marker);
-  if (users.length !== 2 || users.some((user) => !allowed.has(user.email))) {
+  if (users.length !== 3 || users.some((user) => !allowed.has(user.email))) {
     return { ok: false, status: 409, body: { error: "SMOKE_IDENTITY_SCOPE_MISMATCH", count: users.length } };
   }
-  const targetEmail = `audit-smoke-${marker}-admin@example.invalid`;
-  const target = users.find((user) => user.email === targetEmail);
+  const target = users.find((user) => user.kind === "admin");
   if (!target) return { ok: false, status: 409, body: { error: "SMOKE_ADMIN_NOT_FOUND" } };
   await sql`update neon_auth.user set role = 'admin' where id::text = ${target.id}`;
   const after = await state(sql, marker);
@@ -127,6 +127,25 @@ async function promote(sql, marker) {
     return { ok: false, status: 409, body: { error: "SMOKE_ADMIN_PROMOTION_POSTCONDITION", qaAdmins: after.qaAdmins, superAdmins: after.superAdmins } };
   }
   return { ok: true, status: 200, body: { promoted: true, ...after } };
+}
+
+async function banState(sql, marker) {
+  const users = await usersForMarker(sql, marker);
+  const states = [];
+  for (const user of users) {
+    const rows = await sql`
+      select coalesce(u.banned, false) as banned,
+        nullif(u."banReason", '') as ban_reason,
+        u."banExpires"::text as ban_expires,
+        (select count(*)::int from neon_auth.session s where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = u.id::text) as sessions
+      from neon_auth.user u
+      where u.id::text = ${user.id}
+      limit 1
+    `;
+    const row = rows[0] || {};
+    states.push({ kind: user.kind, id: user.id, banned: row.banned === true, banReason: row.ban_reason ?? null, banExpires: row.ban_expires ?? null, sessions: Number(row.sessions || 0) });
+  }
+  return { states };
 }
 
 async function cleanupUsers(sql, users) {
@@ -147,7 +166,7 @@ async function cleanupUsers(sql, users) {
 async function cleanup(sql, marker) {
   const users = await usersForMarker(sql, marker);
   const allowed = expectedEmails(marker);
-  if (users.length > 2 || users.some((user) => !allowed.has(user.email))) {
+  if (users.length > 3 || users.some((user) => !allowed.has(user.email))) {
     return { ok: false, status: 409, body: { error: "SMOKE_CLEANUP_SCOPE_MISMATCH", count: users.length } };
   }
   await cleanupUsers(sql, users);
@@ -179,11 +198,12 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
     if (!validMarker(body?.marker)) return json({ error: "INVALID_MARKER" }, 400);
-    if (!["preflight", "state", "promote", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
+    if (!["preflight", "state", "promote", "ban-state", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
 
     const sql = neon(env.DATABASE_URL);
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
+      if (body.action === "ban-state") return json(await banState(sql, body.marker));
       if (body.action === "promote") {
         const result = await promote(sql, body.marker);
         return json(result.body, result.status);
@@ -195,7 +215,7 @@ export default {
       const result = await cleanup(sql, body.marker);
       return json(result.body, result.status);
     } catch (reason) {
-      console.error("audit-viewer-preview-controller", reason instanceof Error ? reason.message : "unknown");
+      console.error("admin-ban-runtime-preview-controller", reason instanceof Error ? reason.message : "unknown");
       return json({ error: "CONTROLLER_FAILED" }, 500);
     }
   },
