@@ -6,6 +6,8 @@ const APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
 const password = process.env.AUDIT_SMOKE_PASSWORD || "";
 assert.ok(password.length >= 24, "ephemeral smoke password missing");
 
+const smokeEmail = /^audit-smoke-[a-z0-9]{10,32}-(customer|customer-b|admin)@example\.invalid$/;
+
 const originalLaunch = chromium.launch.bind(chromium);
 chromium.launch = async (...launchArgs) => {
   const browser = await originalLaunch(...launchArgs);
@@ -22,7 +24,7 @@ chromium.launch = async (...launchArgs) => {
         if (pathname === "/login") {
           const emailInput = page.locator('input[type="email"]');
           const email = (await emailInput.count()) > 0 ? await emailInput.inputValue().catch(() => "") : "";
-          if (email.includes("-customer-b@example.invalid")) {
+          if (smokeEmail.test(email)) {
             const status = await page.evaluate(async ({ authUrl, emailValue, passwordValue }) => {
               const response = await fetch(`${authUrl}/sign-in/email`, {
                 method: "POST",
@@ -32,7 +34,7 @@ chromium.launch = async (...launchArgs) => {
               });
               return response.status;
             }, { authUrl: AUTH_URL, emailValue: email, passwordValue: password });
-            assert.ok(status >= 200 && status < 300, `CUSTOMER_B browser Managed Auth signin failed (${status})`);
+            assert.ok(status >= 200 && status < 300, `Smoke browser Managed Auth signin failed (${status})`);
             await page.goto(`${APP_BASE}/app/dashboard`, { waitUntil: "domcontentloaded", timeout: 30000 });
           }
         }
