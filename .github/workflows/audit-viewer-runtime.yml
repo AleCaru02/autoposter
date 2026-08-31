@@ -90,8 +90,10 @@ jobs:
       - name: Authenticated Audit API runtime
         run: node tests/audit-viewer-runtime.mjs
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright + Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
 
       - name: Audit Viewer desktop/mobile browser runtime
         run: node tests/audit-viewer-browser.mjs
