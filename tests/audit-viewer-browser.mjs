@@ -37,6 +37,10 @@ function diagnostics(page) {
   return { critical, adminResponses };
 }
 
+function isExpectedForbiddenResourceConsole(entry) {
+  return /^console:error:Failed to load resource: the server responded with a status of 403(?:\s|\(|$)/.test(entry);
+}
+
 async function login(page, email) {
   const response = await page.goto(`${base}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.equal(response?.status(), 200, "login document unavailable");
@@ -60,6 +64,7 @@ async function verifyCustomerOwner(browser) {
     await page.getByRole("heading", { name: "Le tue attività", exact: true }).waitFor({ timeout: 20000 });
     const profilesBody = await page.locator("body").innerText();
     assert.ok(profilesBody.includes(`Audit Smoke ${marker}`), "OWNER cannot see own profile");
+    assert.deepEqual(diag.critical, [], `CUSTOMER/OWNER pre-denial critical browser errors: ${JSON.stringify(diag.critical)}`);
 
     await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
@@ -67,7 +72,8 @@ async function verifyCustomerOwner(browser) {
     assert.ok(!body.includes("Backoffice"), "CUSTOMER/OWNER received Backoffice content");
     assert.ok(!body.includes("Registro delle operazioni amministrative autorizzate"), "CUSTOMER/OWNER received Audit content");
     assert.ok(diag.adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 403), "CUSTOMER/OWNER browser did not receive /api/admin/me 403");
-    assert.deepEqual(diag.critical, [], `CUSTOMER/OWNER critical browser errors: ${JSON.stringify(diag.critical)}`);
+    const unexpectedDenialErrors = diag.critical.filter((entry) => !isExpectedForbiddenResourceConsole(entry));
+    assert.deepEqual(unexpectedDenialErrors, [], `CUSTOMER/OWNER unexpected denial errors: ${JSON.stringify(unexpectedDenialErrors)}`);
     return { customerRoute: "PASS", ownerRoute: "PASS" };
   } finally {
     await context.close();
