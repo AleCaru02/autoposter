@@ -39,17 +39,29 @@ function diagnostics(page, label) {
   };
 }
 
-function trackAdminResponses(page) {
+function trackAdminFlow(page) {
   const responses = [];
   page.on("response", (response) => {
     try {
       const url = new URL(response.url());
-      if (url.origin === base && url.pathname.startsWith("/api/admin/")) responses.push({ path: url.pathname, status: response.status() });
+      const method = response.request().method();
+      if (url.hostname.includes(".neonauth.") && url.pathname.endsWith("/token")) {
+        responses.push({ kind: "token", path: "/token", method, status: response.status() });
+      } else if (url.origin === base && url.pathname.startsWith("/api/admin/")) {
+        responses.push({ kind: "admin", path: url.pathname, method, status: response.status() });
+      }
     } catch {
       // Ignore non-URL browser events.
     }
   });
   return responses;
+}
+
+function assertTokenBeforeAdmin(flow, adminPath, label) {
+  const adminIndex = flow.findIndex((item) => item.kind === "admin" && item.path === adminPath && item.status === 200);
+  assert.ok(adminIndex >= 0, `${label} ${adminPath} did not return 200`);
+  const tokenIndex = flow.findLastIndex((item, index) => index < adminIndex && item.kind === "token" && item.path === "/token" && item.method === "GET" && item.status === 200);
+  assert.ok(tokenIndex >= 0, `${label} ${adminPath} was not preceded by a successful Managed Auth /token request`);
 }
 
 async function login(page, email, label) {
@@ -120,9 +132,9 @@ async function openAdminFromFreshPage(context, viewportLabel) {
 
     const page = await context.newPage();
     const dump = diagnostics(page, `SUPER_ADMIN ${viewportLabel} /admin fresh-page`);
-    const adminResponses = trackAdminResponses(page);
+    const adminFlow = trackAdminFlow(page);
     await page.goto(`${base}/admin`, { waitUntil: "domcontentloaded" });
-    return { page, dump, adminResponses };
+    return { page, dump, adminFlow };
   } finally {
     await loginPage.close();
   }
@@ -131,7 +143,7 @@ async function openAdminFromFreshPage(context, viewportLabel) {
 async function verifyAdminMobile(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
-    const { page, dump, adminResponses } = await openAdminFromFreshPage(context, "mobile");
+    const { page, dump, adminFlow } = await openAdminFromFreshPage(context, "mobile");
     try {
       await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
       await page.getByRole("link", { name: "Overview", exact: true }).waitFor({ state: "visible", timeout: 10000 });
@@ -156,11 +168,12 @@ async function verifyAdminMobile(browser) {
     const adminBody = await page.locator("body").innerText();
     assert.ok(adminBody.includes("Amministrazione"));
     assert.ok(!adminBody.includes("Dati amministrativi non disponibili."));
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 200), "mobile Admin /me did not return 200");
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/overview" && item.status === 200), "mobile Admin overview did not return 200");
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/customers" && item.status === 200), "mobile Admin customers did not return 200");
-    assert.ok(adminResponses.some((item) => item.path.startsWith("/api/admin/customers/") && item.status === 200), "mobile Admin customer detail did not return 200");
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/activities" && item.status === 200), "mobile Admin activities did not return 200");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/me", "mobile Admin");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/overview", "mobile Admin");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/customers", "mobile Admin");
+    assert.ok(adminFlow.some((item) => item.kind === "admin" && item.path.startsWith("/api/admin/customers/") && item.status === 200), "mobile Admin customer detail did not return 200");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/activities", "mobile Admin");
+    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "390x844", flow: adminFlow }));
   } finally {
     await context.close();
   }
@@ -169,7 +182,7 @@ async function verifyAdminMobile(browser) {
 async function verifyAdminDesktop(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
-    const { page, dump, adminResponses } = await openAdminFromFreshPage(context, "desktop");
+    const { page, dump, adminFlow } = await openAdminFromFreshPage(context, "desktop");
     try {
       await page.getByText("Backoffice", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
       await page.getByRole("heading", { name: "Overview", exact: true }).waitFor({ timeout: 20000 });
@@ -179,8 +192,9 @@ async function verifyAdminDesktop(browser) {
       await dump(error instanceof Error ? error.message : "SUPER_ADMIN desktop Backoffice unavailable");
       throw error;
     }
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 200), "desktop Admin /me did not return 200");
-    assert.ok(adminResponses.some((item) => item.path === "/api/admin/overview" && item.status === 200), "desktop Admin overview did not return 200");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/me", "desktop Admin");
+    assertTokenBeforeAdmin(adminFlow, "/api/admin/overview", "desktop Admin");
+    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "1440x900", flow: adminFlow }));
   } finally {
     await context.close();
   }
@@ -192,7 +206,7 @@ try {
   await verifyCustomer(browser, customerBEmail, "B", "CUSTOMER B / OWNER B");
   await verifyAdminMobile(browser);
   await verifyAdminDesktop(browser);
-  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied; SUPER_ADMIN Admin UI/API chain PASS from fresh authenticated page at 390x844 and 1440x900");
+  console.log("FASE3_BROWSER_QA: PASS — CUSTOMER A/B workspace OWNER /admin denied; SUPER_ADMIN Managed Auth /token → Admin UI/API chain PASS from fresh authenticated page at 390x844 and 1440x900");
 } finally {
   await browser.close();
 }
