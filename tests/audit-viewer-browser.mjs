@@ -10,11 +10,22 @@ assert.ok(password.length >= 24);
 const customerEmail = `audit-smoke-${marker}-customer@example.invalid`;
 const adminEmail = `audit-smoke-${marker}-admin@example.invalid`;
 
+function sanitizeDiagnostic(value) {
+  return String(value || "")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED_JWT]")
+    .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
+    .replace(/(authorization|cookie|password|session[-_ ]?token|access[-_ ]?token|refresh[-_ ]?token|api[-_ ]?key|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[REDACTED_EMAIL]")
+    .slice(0, 280);
+}
+
 function diagnostics(page) {
   const critical = [];
   const adminResponses = [];
-  page.on("pageerror", (error) => critical.push(`pageerror:${error.name}`));
-  page.on("console", (message) => { if (message.type() === "error") critical.push("console:error"); });
+  page.on("pageerror", (error) => critical.push(`pageerror:${sanitizeDiagnostic(error.name)}:${sanitizeDiagnostic(error.message)}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") critical.push(`console:error:${sanitizeDiagnostic(message.text())}`);
+  });
   page.on("response", (response) => {
     try {
       const url = new URL(response.url());
