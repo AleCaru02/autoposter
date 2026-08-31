@@ -169,4 +169,5 @@ try {
   await browser.close();
 }
 
+await import("./session-runtime-browser-auth-shim.mjs");
 await import("./session-management-ui-runtime.mjs");
