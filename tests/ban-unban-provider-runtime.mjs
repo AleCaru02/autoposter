@@ -86,6 +86,17 @@ async function identityToken(jar) {
   return token;
 }
 
+async function signUp(email, name) {
+  const jar = new CookieJar();
+  const response = await authFetch(jar, "/sign-up/email", {
+    method: "POST",
+    body: JSON.stringify({ email, password, name }),
+  });
+  assert.ok(response.ok, `Managed Auth sign-up failed (${response.status})`);
+  const token = await identityToken(jar);
+  return { jar, token, id: decodeSub(token) };
+}
+
 async function signIn(email) {
   const jar = new CookieJar();
   const response = await authFetch(jar, "/sign-in/email", {
@@ -131,14 +142,19 @@ async function providerAdmin(jar, path, body) {
   return response.status;
 }
 
-async function readBanState() {
+async function controller(action) {
   const response = await fetch(controllerUrl, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json", "x-audit-smoke-token": controllerToken },
-    body: JSON.stringify({ action: "ban-state", marker }),
+    body: JSON.stringify({ action, marker }),
   });
   const body = await readJson(response);
-  assert.equal(response.status, 200, `ban-state controller HTTP ${response.status}`);
+  assert.equal(response.status, 200, `${action} controller HTTP ${response.status}`);
+  return body;
+}
+
+async function readBanState() {
+  const body = await controller("ban-state");
   assert.ok(Array.isArray(body?.states), "ban-state controller missing states");
   return body.states;
 }
@@ -149,12 +165,26 @@ function byKind(states, kind) {
   return found;
 }
 
-const customer = await signIn(emails.customer);
+const preflight = await controller("preflight");
+assert.equal(preflight.qaUsers, 0, "preflight QA users must be zero");
+assert.equal(preflight.qaSessions, 0, "preflight QA sessions must be zero");
+assert.equal(preflight.qaAdmins, 0, "preflight QA admins must be zero");
+assert.equal(preflight.superAdmins, 1, "real SUPER_ADMIN baseline must be exactly one");
+assert.equal(preflight.profilesWithoutOwner, 0, "profilesWithoutOwner baseline must be zero");
+
+const customer = await signUp(emails.customer, "Ban Smoke Customer");
+const adminCandidate = await signUp(emails.admin, "Ban Smoke Admin");
+assert.notEqual(customer.id, adminCandidate.id, "customer/admin identity collision");
+assert.equal((await dataIdentity(customer.token, customer.id)).accepted, true, "customer Data API token not ready");
+assert.equal((await dataIdentity(adminCandidate.token, adminCandidate.id)).accepted, true, "admin candidate Data API token not ready");
+
+const promoted = await controller("promote");
+assert.equal(promoted.qaAdmins, 1, "ADMIN_SMOKE promotion missing");
+assert.equal(promoted.superAdmins, 2, "temporary SUPER_ADMIN count must be two");
 const admin = await signIn(emails.admin);
-assert.notEqual(customer.id, admin.id, "customer/admin identity collision");
+assert.equal(admin.id, adminCandidate.id, "ADMIN_SMOKE identity changed after promotion");
 assert.equal((await getSession(customer.jar)).active, true, "customer baseline session inactive");
 assert.equal((await getSession(admin.jar)).active, true, "admin baseline session inactive");
-assert.equal((await dataIdentity(customer.token, customer.id)).accepted, true, "customer Data API token not ready");
 
 const customerBanDenied = await providerAdmin(customer.jar, "/admin/ban-user", { userId: admin.id, banReason: "qa-denied" });
 const customerUnbanDenied = await providerAdmin(customer.jar, "/admin/unban-user", { userId: admin.id });
