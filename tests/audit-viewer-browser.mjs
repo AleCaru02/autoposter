@@ -168,3 +168,5 @@ try {
 } finally {
   await browser.close();
 }
+
+await import("./session-management-ui-runtime.mjs");
