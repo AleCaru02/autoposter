@@ -145,7 +145,7 @@ export default {
       ctx.waitUntil(processDuePublications(env).then((result) => {
         console.log("social-publication-run", result);
       }).catch((reason) => {
-        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown" });
+        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
       }));
       return;
     }
