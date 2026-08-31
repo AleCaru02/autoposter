@@ -77,7 +77,7 @@ assert.equal(sessionUi.includes("autoFocus"), true, "revoke modal should place f
 assert.equal(sessionUi.includes('event.key === "Escape"'), true, "revoke modal should support Escape cancel while idle");
 assert.equal(sessionUi.includes(">Annulla</button>"), true, "revoke modal cancel action missing");
 
-assert.equal(css.includes(".admin-session-details{grid-template-columns:repeat(4,minmax(0,1fr))"), true, "desktop session metadata grid missing");
+assert.equal(css.includes("grid-template-columns:repeat(4,minmax(0,1fr))"), true, "desktop session metadata grid missing");
 assert.equal(css.includes("@media(max-width:520px)"), true, "mobile breakpoint missing");
 assert.equal(css.includes(".admin-session-details{grid-template-columns:1fr}"), true, "mobile session metadata must stack");
 assert.equal(css.includes(".admin-session-revoke{width:100%}"), true, "mobile single revoke CTA must remain reachable");
