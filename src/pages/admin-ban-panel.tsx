@@ -6,6 +6,7 @@ type BanState = {
   banned: boolean;
   reason: string | null;
   expiresAt: string | null;
+  metadataKnown: boolean;
 };
 
 type BanMutationResponse = {
@@ -47,7 +48,7 @@ export function AdminBanPanel({
   initialBanned: boolean;
 }) {
   const endpoint = customerId ? `/api/admin/customers/${encodeURIComponent(customerId)}` : null;
-  const [state, setState] = useState<BanState>({ banned: initialBanned, reason: null, expiresAt: null });
+  const [state, setState] = useState<BanState>({ banned: initialBanned, reason: null, expiresAt: null, metadataKnown: false });
   const [dialog, setDialog] = useState<BanDialog>(null);
   const [reason, setReason] = useState("");
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
@@ -115,6 +116,7 @@ export function AdminBanPanel({
         banned: true,
         reason: response.customer.reason,
         expiresAt: response.customer.expiresAt,
+        metadataKnown: true,
       });
       setDialog(null);
       setFeedback(response.sessionRevocation?.ok === false
@@ -137,7 +139,7 @@ export function AdminBanPanel({
       if (!response.customer || response.customer.id !== customerId || response.customer.banned !== false) {
         throw new Error("UNBAN_STATE_NOT_CONFIRMED");
       }
-      setState({ banned: false, reason: null, expiresAt: null });
+      setState({ banned: false, reason: null, expiresAt: null, metadataKnown: true });
       setDialog(null);
       setFeedback("Account riattivato. Il cliente può autenticarsi di nuovo.");
     } catch {
@@ -167,8 +169,8 @@ export function AdminBanPanel({
         <span className={`admin-badge ${state.banned ? "danger" : "admin"}`}>{state.banned ? "Sospeso" : "Attivo"}</span>
       </div>
       {state.banned ? <div className="admin-ban-meta">
-        <div><span>Durata</span><strong>{expiryLabel ? `Fino al ${expiryLabel}` : "Senza scadenza"}</strong></div>
-        <div><span>Motivo</span><strong>{state.reason || "Non indicato in questa operazione"}</strong></div>
+        <div><span>Durata</span><strong>{!state.metadataKnown ? "Dettaglio non disponibile in questa vista" : expiryLabel ? `Fino al ${expiryLabel}` : "Senza scadenza"}</strong></div>
+        <div><span>Motivo</span><strong>{!state.metadataKnown ? "Dettaglio non disponibile in questa vista" : state.reason || "Non indicato"}</strong></div>
       </div> : <p className="admin-muted">L’account non è bloccato.</p>}
     </div>
 
