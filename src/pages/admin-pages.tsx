@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useParams } from "react-router-dom";
 import { Building2, LayoutDashboard, ScrollText, ShieldCheck, Users } from "lucide-react";
 import { adminRequest } from "../lib/admin-api";
 import { AdminAuditPage } from "./admin-audit-page";
+import { AdminBanPanel } from "./admin-ban-panel";
 import "../admin.css";
 
 type AdminMe = { platformRole: "SUPER_ADMIN" };
@@ -20,6 +21,8 @@ type Customer = {
   created_at: string | null;
   platform_role: "CUSTOMER" | "SUPER_ADMIN";
   banned: boolean | null;
+  ban_reason: string | null;
+  ban_expires: string | null;
   profile_count: number;
   onboarding_completed: number;
   onboarding_incomplete: number;
@@ -244,10 +247,13 @@ function CustomerDetailPage() {
   if (error || !data) return <ErrorState message={error || "Cliente non disponibile."} />;
   if (!data.customer.auth_user_id) return <ErrorState message="Identificatore cliente non disponibile. Gestione sessioni bloccata." />;
   const socialMap = new Map(data.socialConnectionsByProfile.map((item) => [item.profile_id, item.connections]));
+  const banPanel = data.customer.platform_role === "SUPER_ADMIN"
+    ? <section className="admin-section admin-ban-panel"><h2>Accesso account</h2><p className="admin-muted">Ban/Unban non disponibile per account SUPER_ADMIN.</p></section>
+    : <AdminBanPanel customerId={data.customer.auth_user_id} customerName={data.customer.name || data.customer.email || "Cliente"} initialBanned={data.customer.banned === true} initialReason={data.customer.ban_reason} initialExpiresAt={data.customer.ban_expires} />;
   const sessionPanel = data.customer.platform_role === "SUPER_ADMIN"
     ? <section className="admin-section admin-sessions-section"><h2>Sessioni attive</h2><p className="admin-muted">Gestione sessioni non disponibile per account SUPER_ADMIN.</p></section>
     : <CustomerSessions customerId={data.customer.auth_user_id} />;
-  return <><header className="admin-page-header"><div><NavLink className="admin-back" to="/admin/clienti">← Clienti</NavLink><h1>{data.customer.name || "Cliente"}</h1><p>{data.customer.email || "Email non disponibile"}</p></div><span className={`admin-badge ${data.customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{data.customer.platform_role}</span></header><section className="admin-detail-grid"><article><h2>Account</h2><dl><div><dt>Creato</dt><dd>{formatDate(data.customer.created_at)}</dd></div><div><dt>Stato</dt><dd>{data.customer.banned ? "Sospeso" : "Attivo"}</dd></div><div><dt>Attività</dt><dd>{data.profiles.length}</dd></div></dl></article><article><h2>Membership</h2>{data.memberships.length ? <ul className="admin-list">{data.memberships.map((item) => <li key={`${item.profile_id}-${item.role}`}><span>{item.profile_name}</span><strong>{item.role}</strong></li>)}</ul> : <p>Nessuna membership disponibile.</p>}</article></section>{sessionPanel}<section className="admin-section"><h2>Attività associate</h2><div className="admin-card-list">{data.profiles.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.industry || "Settore non indicato"}</span></div><div><span>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{socialMap.get(profile.id) ?? 0} social collegati</span></div></article>)}</div></section></>;
+  return <><header className="admin-page-header"><div><NavLink className="admin-back" to="/admin/clienti">← Clienti</NavLink><h1>{data.customer.name || "Cliente"}</h1><p>{data.customer.email || "Email non disponibile"}</p></div><span className={`admin-badge ${data.customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{data.customer.platform_role}</span></header><section className="admin-detail-grid"><article><h2>Account</h2><dl><div><dt>Creato</dt><dd>{formatDate(data.customer.created_at)}</dd></div><div><dt>Attività</dt><dd>{data.profiles.length}</dd></div></dl></article><article><h2>Membership</h2>{data.memberships.length ? <ul className="admin-list">{data.memberships.map((item) => <li key={`${item.profile_id}-${item.role}`}><span>{item.profile_name}</span><strong>{item.role}</strong></li>)}</ul> : <p>Nessuna membership disponibile.</p>}</article></section>{banPanel}{sessionPanel}<section className="admin-section"><h2>Attività associate</h2><div className="admin-card-list">{data.profiles.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.industry || "Settore non indicato"}</span></div><div><span>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{socialMap.get(profile.id) ?? 0} social collegati</span></div></article>)}</div></section></>;
 }
 
 function ActivitiesPage() {

@@ -24,6 +24,7 @@ jobs:
       - { name: Admin Session Management regression, run: "npm run test:admin-session-management" }
       - { name: Admin Session Management UI regression, run: "npm run test:admin-session-ui" }
       - { name: Admin Ban Unban regression, run: "npm run test:admin-ban-unban" }
+      - { name: Admin Ban Unban UI regression, run: "npm run test:admin-ban-unban-ui" }
       - { name: Audit Viewer ephemeral runtime static safety, run: "npm run test:audit-runtime-static" }
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }

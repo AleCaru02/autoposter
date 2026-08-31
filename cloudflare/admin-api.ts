@@ -18,6 +18,8 @@ type CustomerRow = {
   created_at: string | null;
   role: string | null;
   banned: boolean | null;
+  ban_reason: string | null;
+  ban_expires: string | null;
   profile_count: number;
   onboarding_completed: number;
   onboarding_incomplete: number;
@@ -147,7 +149,9 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
           nullif(to_jsonb(nu)->>'email', '') as email,
           coalesce(to_jsonb(nu)->>'createdAt', to_jsonb(nu)->>'created_at') as created_at,
           nu.role::text as role,
-          coalesce(nu.banned, false) as banned,
+          (coalesce(nu.banned, false) and (nu."banExpires" is null or nu."banExpires" > now())) as banned,
+          nullif(nu."banReason", '') as ban_reason,
+          nu."banExpires"::text as ban_expires,
           (select count(*)::int from public.profiles p where p.owner_auth_user_id = nu.id::text) as profile_count,
           (select count(*)::int from public.profiles p where p.owner_auth_user_id = nu.id::text and p.onboarding_completed is true) as onboarding_completed,
           (select count(*)::int from public.profiles p where p.owner_auth_user_id = nu.id::text and coalesce(p.onboarding_completed, false) is false) as onboarding_incomplete
@@ -239,7 +243,9 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
           nullif(to_jsonb(nu)->>'email', '') as email,
           coalesce(to_jsonb(nu)->>'createdAt', to_jsonb(nu)->>'created_at') as created_at,
           nu.role::text as role,
-          coalesce(nu.banned, false) as banned
+          (coalesce(nu.banned, false) and (nu."banExpires" is null or nu."banExpires" > now())) as banned,
+          nullif(nu."banReason", '') as ban_reason,
+          nu."banExpires"::text as ban_expires
         from neon_auth.user nu
         where nu.id::text = ${targetAuthUserId}
         limit 1
