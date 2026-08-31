@@ -38,10 +38,10 @@ async function authFetch(jar, path, init = {}) {
   headers.set("origin", APP_BASE);
   headers.set("referer", `${APP_BASE}/`);
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const cookie = jar.header();
+  const cookie = jar?.header?.() || "";
   if (cookie) headers.set("cookie", cookie);
   const response = await fetch(`${AUTH_URL}${path}`, { ...init, headers, redirect: "manual" });
-  jar.absorb(response.headers);
+  jar?.absorb?.(response.headers);
   return response;
 }
 
@@ -70,7 +70,7 @@ async function signIn(email) {
   });
   assert.ok(response.ok, `Managed Auth signin failed (${response.status})`);
   const token = await identityToken(jar);
-  return { jar, id: decodeSub(token) };
+  return { jar, token, id: decodeSub(token) };
 }
 
 function unwrapSessions(body) {
@@ -101,8 +101,22 @@ function isSessionActive(result) {
 
 async function adminPost(jar, path, body) {
   const response = await authFetch(jar, path, { method: "POST", body: JSON.stringify(body) });
-  const parsed = await readJson(response);
-  return { response, body: parsed };
+  return { response, body: await readJson(response) };
+}
+
+async function adminPostBearer(token, path, body) {
+  const response = await authFetch(null, path, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return { response, body: await readJson(response) };
+}
+
+async function getSessionBearer(token) {
+  const response = await authFetch(null, "/get-session", { headers: { authorization: `Bearer ${token}` } });
+  const body = await readJson(response);
+  return { response, session: getSessionRecord(body), user: getUserRecord(body) };
 }
 
 function valueType(value) {
@@ -161,6 +175,17 @@ assert.ok(isSessionActive(secondaryBefore), "CUSTOMER_SMOKE secondary session no
 const customerDenied = await adminPost(customerPrimary.jar, "/admin/list-user-sessions", { userId: customerPrimary.id });
 assert.equal(customerDenied.response.status, 403, `CUSTOMER_SMOKE admin plugin access expected 403, got ${customerDenied.response.status}`);
 
+// Product bridge probe: the Worker currently receives a Neon JWT from authClient.token().
+// Test whether Managed Auth Admin Plugin accepts that JWT without Better Auth cookies.
+const bearerGetSession = await getSessionBearer(admin.token);
+const bearerList = await adminPostBearer(admin.token, "/admin/list-user-sessions", { userId: customerPrimary.id });
+const bearerBridge = {
+  getSessionStatus: bearerGetSession.response.status,
+  getSessionAuthenticated: Boolean(bearerGetSession.response.ok && bearerGetSession.user?.id === admin.id),
+  listStatus: bearerList.response.status,
+  listAccepted: bearerList.response.ok && Array.isArray(unwrapSessions(bearerList.body)),
+};
+
 const list = await adminPost(admin.jar, "/admin/list-user-sessions", { userId: customerPrimary.id });
 assert.ok(list.response.ok, `list-user-sessions failed (${list.response.status})`);
 const sessions = unwrapSessions(list.body);
@@ -204,6 +229,7 @@ console.log("SESSION_PROVIDER_CONTRACT: PASS", JSON.stringify({
   revokeSingle: "PASS",
   invalidationE2E: "PASS",
   revokeAll: "PASS",
+  bearerBridge,
   fields,
   secretFieldNames: secretFields,
   rawPayloadLogged: false,
