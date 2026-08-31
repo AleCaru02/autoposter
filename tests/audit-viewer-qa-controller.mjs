@@ -55,6 +55,33 @@ async function allRecognizedSmokeUsers(sql) {
   return rows.map(recognizedUser).filter(Boolean);
 }
 
+async function banState(sql, marker) {
+  const pattern = `audit-smoke-${marker}-%@example.invalid`;
+  const rows = await sql`
+    select
+      lower(coalesce(to_jsonb(u)->>'email', '')) as email,
+      lower(coalesce(to_jsonb(u)->>'banned', 'false')) as banned_raw,
+      nullif(to_jsonb(u)->>'banReason', '') as ban_reason,
+      nullif(to_jsonb(u)->>'banExpires', '') as ban_expires,
+      (select count(*)::int from neon_auth.session s where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = u.id::text) as sessions
+    from neon_auth.user u
+    where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+    order by lower(coalesce(to_jsonb(u)->>'email', ''))
+  `;
+  const states = rows.map((row) => {
+    const match = recognizedSmokeEmail.exec(row.email || "");
+    if (!match || match[1] !== marker) return null;
+    return {
+      kind: match[2],
+      banned: String(row.banned_raw || "false") === "true",
+      banReason: row.ban_reason ?? null,
+      banExpires: row.ban_expires ?? null,
+      sessions: Number(row.sessions || 0),
+    };
+  }).filter(Boolean);
+  return { states };
+}
+
 async function state(sql, marker) {
   const users = await usersForMarker(sql, marker);
   const recognized = await allRecognizedSmokeUsers(sql);
@@ -179,11 +206,12 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
     if (!validMarker(body?.marker)) return json({ error: "INVALID_MARKER" }, 400);
-    if (!["preflight", "state", "promote", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
+    if (!["preflight", "state", "ban-state", "promote", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
 
     const sql = neon(env.DATABASE_URL);
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
+      if (body.action === "ban-state") return json(await banState(sql, body.marker));
       if (body.action === "promote") {
         const result = await promote(sql, body.marker);
         return json(result.body, result.status);
