@@ -118,7 +118,6 @@ async function cleanup(sql, marker) {
       using public.app_users au
       where pm.user_id = au.id and au.auth_user_id = ${user.id}
     `;
-    await sql`delete from public.platform_admin_audit where actor_auth_user_id = ${user.id}`;
     await sql`delete from neon_auth.session s where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = ${user.id}`;
     await sql`delete from neon_auth.account a where coalesce(to_jsonb(a)->>'userId', to_jsonb(a)->>'user_id', '') = ${user.id}`;
     await sql`delete from public.app_users where auth_user_id = ${user.id}`;
