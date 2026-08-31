@@ -128,13 +128,7 @@ jobs:
               -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
               --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
               "$AUDIT_SMOKE_CONTROLLER_URL")
-            CLEANUP_STATUS="$cleanup_status" node - <<'NODE'
-            const fs = require('node:fs');
-            const body = JSON.parse(fs.readFileSync('audit-stale-cleanup.json', 'utf8'));
-            if (process.env.CLEANUP_STATUS !== '200' || body.cleaned !== true) throw new Error('stale QA residue cleanup failed');
-            if (body.recognizedQaUsers !== 0 || body.recognizedQaAdmins !== 0) throw new Error('stale QA residue remains after scoped cleanup');
-            console.log('STALE_QA_RESIDUE_CLEANUP: PASS', JSON.stringify({ cleanedUsers: body.cleanedUsers, cleanedAdmins: body.cleanedAdmins }));
-            NODE
+            CLEANUP_STATUS="$cleanup_status" node -e "const fs=require('node:fs'); const body=JSON.parse(fs.readFileSync('audit-stale-cleanup.json','utf8')); if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true) throw new Error('stale QA residue cleanup failed'); if(body.recognizedQaUsers!==0||body.recognizedQaAdmins!==0) throw new Error('stale QA residue remains after scoped cleanup'); console.log('STALE_QA_RESIDUE_CLEANUP: PASS',JSON.stringify({cleanedUsers:body.cleanedUsers,cleanedAdmins:body.cleanedAdmins}));"
             status=$(read_preflight)
             if [ "$status" != "200" ]; then
               echo "post-residue preflight failed HTTP $status" >&2
