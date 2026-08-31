@@ -72,8 +72,9 @@ async function verifyAudit(page, flow) {
   await page.getByRole("button", { name: "Applica filtri", exact: true }).click();
   await responsePromise;
   assert.ok(flow.some((item) => item.path === "/api/admin/audit" && item.status === 200 && item.search.includes("action=")), "Audit action filter did not execute");
+  const clearPromise = page.waitForResponse((response) => response.url().includes("/api/admin/audit?") && !response.url().includes("action=") && response.status() === 200, { timeout: 20000 });
   await page.getByRole("button", { name: "Azzera", exact: true }).click();
-  await page.waitForResponse((response) => response.url().includes("/api/admin/audit?") && !response.url().includes("action=") && response.status() === 200, { timeout: 20000 });
+  await clearPromise;
 }
 
 async function verifyAdmin(browser, viewport, label, deep) {
