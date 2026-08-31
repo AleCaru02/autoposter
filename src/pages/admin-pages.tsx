@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useParams } from "react-router-dom";
-import { Activity, Building2, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
+import { Building2, LayoutDashboard, ScrollText, ShieldCheck, Users } from "lucide-react";
 import { adminRequest } from "../lib/admin-api";
+import { AdminAuditPage } from "./admin-audit-page";
 import "../admin.css";
 
 type AdminMe = { platformRole: "SUPER_ADMIN" };
@@ -52,6 +53,7 @@ function AdminShell({ children }: { children: ReactNode }) {
         <NavLink end to="/admin"><LayoutDashboard size={18} />Overview</NavLink>
         <NavLink to="/admin/clienti"><Users size={18} />Clienti</NavLink>
         <NavLink to="/admin/attivita"><Building2 size={18} />Attività</NavLink>
+        <NavLink to="/admin/audit"><ScrollText size={18} />Audit</NavLink>
       </nav>
       <NavLink className="admin-customer-link" to="/app/dashboard">Torna alla dashboard</NavLink>
     </aside>
@@ -133,6 +135,7 @@ export function AdminBackoffice() {
     <Route path="clienti" element={<CustomersPage />} />
     <Route path="clienti/:id" element={<CustomerDetailPage />} />
     <Route path="attivita" element={<ActivitiesPage />} />
+    <Route path="audit" element={<AdminAuditPage />} />
     <Route path="*" element={<Navigate to="/admin" replace />} />
   </Routes></AdminShell>;
 }
