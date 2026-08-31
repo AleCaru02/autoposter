@@ -74,6 +74,9 @@ jobs:
       - name: Authenticated runtime RBAC and admin API matrix
         run: npm run test:fase3-runtime-qa
 
+      - name: Audit detail runtime certification
+        run: npm run test:fase3-audit-detail
+
       - name: Install browser QA runtime
         run: |
           npm install --no-save playwright@1.55.0
