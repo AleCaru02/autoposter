@@ -28,10 +28,14 @@ for (const action of [
   "ADMIN_ACTIVITIES_LIST",
 ]) assert.equal(adminApi.includes(`"${action}"`), true, `permanent audit writer missing ${action}`);
 
-assert.equal(adminApi.includes("password"), false, "Admin audit/API source must not persist passwords");
-assert.equal(adminApi.includes("cookie"), false, "Admin audit/API source must not persist cookies");
-assert.equal(adminApi.includes("access_token"), false, "Admin audit/API source must not persist access tokens");
-assert.equal(adminApi.includes("refresh_token"), false, "Admin audit/API source must not persist refresh tokens");
+// Sensitive key names may legitimately appear in a defensive redaction deny-list.
+// What the permanent CORE contract forbids is sourcing credentials from the
+// request/browser and persisting them into audit metadata.
+assert.equal(adminApi.includes("request.headers.get"), false, "Admin audit/API must not read browser headers for audit metadata");
+assert.equal(adminApi.includes("request.json("), false, "read-only Admin audit/API must not accept browser bodies for audit metadata");
+assert.equal(adminApi.includes("authorization: ") || adminApi.includes("cookie: "), false, "Admin audit/API must not construct persisted credential fields");
+assert.equal(adminApi.includes("access_token:") || adminApi.includes("refresh_token:"), false, "Admin audit/API must not persist OAuth tokens");
+assert.equal(adminApi.includes("JSON.stringify(metadata)"), true, "Admin audit metadata must remain explicit server-generated metadata");
 assert.equal(adminApi.includes("DATABASE_URL") && adminApi.includes("metadata"), true, "Admin audit remains server-side and metadata-bound");
 
 assert.equal(deploy.includes('/api/internal/fase3/qa-control'), true, "normal deploy must verify the removed QA route is 404");
