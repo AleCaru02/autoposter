@@ -20,6 +20,8 @@ jobs:
       - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
       - { name: FASE 3 CORE harness absence and audit regression, run: "npm run test:fase3-core" }
       - { name: Admin Audit Viewer regression, run: "npm run test:admin-audit-viewer" }
+      - { name: Admin Session Management regression, run: "npm run test:admin-session-management" }
+      - { name: Admin Session Management UI regression, run: "npm run test:admin-session-ui" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Crawler regression, run: "npm run test:crawler" }
