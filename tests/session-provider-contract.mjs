@@ -4,9 +4,13 @@ const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon
 const APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
 const marker = process.env.AUDIT_SMOKE_MARKER || "";
 const password = process.env.AUDIT_SMOKE_PASSWORD || "";
+const controllerUrl = process.env.AUDIT_SMOKE_CONTROLLER_URL || "";
+const controllerToken = process.env.AUDIT_SMOKE_TOKEN_VALUE || "";
 
 assert.match(marker, /^[a-z0-9]{10,32}$/);
 assert.ok(password.length >= 24, "ephemeral smoke password missing");
+assert.ok(controllerUrl.startsWith("https://"), "preview controller URL missing");
+assert.ok(controllerToken.length >= 32, "preview controller token missing");
 
 const emails = {
   customer: `audit-smoke-${marker}-customer@example.invalid`,
@@ -43,6 +47,19 @@ async function authFetch(jar, path, init = {}) {
   const response = await fetch(`${AUTH_URL}${path}`, { ...init, headers, redirect: "manual" });
   jar?.absorb?.(response.headers);
   return response;
+}
+
+async function controllerPost(action, extra = {}) {
+  const response = await fetch(controllerUrl, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "x-audit-smoke-token": controllerToken,
+    },
+    body: JSON.stringify({ action, marker, ...extra }),
+  });
+  return { response, body: await readJson(response) };
 }
 
 function decodeSub(token) {
@@ -139,6 +156,21 @@ function extractSessionToken(session) {
   const token = session.token || session.sessionToken || "";
   return typeof token === "string" ? token : "";
 }
+function extractSessionId(session) {
+  const id = session?.id;
+  return typeof id === "string" ? id : "";
+}
+function assertSanitizedFallbackSessions(sessions) {
+  assert.ok(Array.isArray(sessions), "fallback session list missing array");
+  const allowed = new Set(["id", "createdAt", "updatedAt", "expiresAt", "ipAddress", "userAgent"]);
+  for (const session of sessions) {
+    assert.ok(session && typeof session === "object" && !Array.isArray(session), "invalid fallback session row");
+    for (const key of Object.keys(session)) assert.ok(allowed.has(key), `fallback leaked non-display field ${key}`);
+    assert.equal(typeof session.id, "string", "fallback session id missing");
+    assert.equal(Object.prototype.hasOwnProperty.call(session, "token"), false, "fallback leaked session token");
+    assert.equal(Object.prototype.hasOwnProperty.call(session, "userId"), false, "fallback leaked server-only userId");
+  }
+}
 
 const customerPrimary = await signIn(emails.customer);
 const customerSecondary = await signIn(emails.customer);
@@ -207,6 +239,54 @@ const sessionsAfterAll = unwrapSessions(afterAll.body);
 assert.ok(Array.isArray(sessionsAfterAll), "post revoke-all response missing session array");
 assert.equal(sessionsAfterAll.length, 0, `revoke-all left ${sessionsAfterAll.length} sessions`);
 
+// Verified fallback for product server-side operations: the Admin Plugin cannot be bridged
+// with the existing JWT or with a native session token in Authorization: Bearer.
+const dbPrimary = await signIn(emails.customer);
+const dbSecondary = await signIn(emails.customer);
+const dbPrimaryBefore = await getSession(dbPrimary.jar);
+const dbSecondaryBefore = await getSession(dbSecondary.jar);
+const adminStillActive = await getSession(admin.jar);
+assert.ok(isSessionActive(dbPrimaryBefore) && isSessionActive(dbSecondaryBefore), "fallback customer sessions not active");
+assert.ok(isSessionActive(adminStillActive), "ADMIN_SMOKE session unexpectedly invalid before fallback test");
+const dbPrimarySessionId = extractSessionId(dbPrimaryBefore.session);
+const dbSecondarySessionId = extractSessionId(dbSecondaryBefore.session);
+const adminSessionId = extractSessionId(adminStillActive.session);
+assert.ok(dbPrimarySessionId && dbSecondarySessionId && adminSessionId, "session id missing for DB fallback probe");
+
+const fallbackList = await controllerPost("session-list");
+assert.equal(fallbackList.response.status, 200, `fallback session-list failed (${fallbackList.response.status})`);
+assert.equal(fallbackList.body?.targetUserId, dbPrimary.id, "fallback list target mismatch");
+assertSanitizedFallbackSessions(fallbackList.body?.sessions);
+assert.ok(fallbackList.body.sessions.some((row) => row.id === dbPrimarySessionId), "fallback list missing primary session");
+assert.ok(fallbackList.body.sessions.some((row) => row.id === dbSecondarySessionId), "fallback list missing secondary session");
+
+const idorAttempt = await controllerPost("session-revoke-one", { targetUserId: dbPrimary.id, sessionId: adminSessionId });
+assert.equal(idorAttempt.response.status, 404, `cross-target session revoke must fail closed, got ${idorAttempt.response.status}`);
+assert.ok(isSessionActive(await getSession(admin.jar)), "cross-target revoke invalidated ADMIN_SMOKE session");
+assert.ok(isSessionActive(await getSession(dbPrimary.jar)), "cross-target revoke invalidated CUSTOMER_SMOKE session");
+
+const fallbackSingle = await controllerPost("session-revoke-one", { targetUserId: dbPrimary.id, sessionId: dbPrimarySessionId });
+assert.equal(fallbackSingle.response.status, 200, `fallback revoke-one failed (${fallbackSingle.response.status})`);
+assert.equal(fallbackSingle.body?.sessionId, dbPrimarySessionId, "fallback revoke-one returned wrong session id");
+assert.equal(isSessionActive(await getSession(dbPrimary.jar)), false, "DB fallback revoked session remained active");
+assert.ok(isSessionActive(await getSession(dbSecondary.jar)), "DB fallback revoke-one invalidated other customer session");
+
+const fallbackAfterSingle = await controllerPost("session-list");
+assert.equal(fallbackAfterSingle.response.status, 200, "fallback list after single revoke failed");
+assertSanitizedFallbackSessions(fallbackAfterSingle.body?.sessions);
+assert.equal(fallbackAfterSingle.body.sessions.some((row) => row.id === dbPrimarySessionId), false, "revoked session remained in fallback list");
+assert.ok(fallbackAfterSingle.body.sessions.some((row) => row.id === dbSecondarySessionId), "remaining session missing after single revoke");
+
+const fallbackAll = await controllerPost("session-revoke-all", { targetUserId: dbPrimary.id });
+assert.equal(fallbackAll.response.status, 200, `fallback revoke-all failed (${fallbackAll.response.status})`);
+assert.ok(Number(fallbackAll.body?.count || 0) >= 1, "fallback revoke-all deleted no customer sessions");
+assert.equal(isSessionActive(await getSession(dbSecondary.jar)), false, "DB fallback revoke-all left customer session active");
+assert.ok(isSessionActive(await getSession(admin.jar)), "DB fallback revoke-all affected ADMIN_SMOKE session");
+const fallbackAfterAll = await controllerPost("session-list");
+assert.equal(fallbackAfterAll.response.status, 200, "fallback list after revoke-all failed");
+assertSanitizedFallbackSessions(fallbackAfterAll.body?.sessions);
+assert.equal(fallbackAfterAll.body.sessions.length, 0, "fallback revoke-all left target sessions");
+
 const secretFields = fields.filter((field) => field.classification === "SECRET_DO_NOT_EXPOSE").map((field) => field.field);
 console.log("SESSION_PROVIDER_CONTRACT: PASS", JSON.stringify({
   listUserSessions: "PASS",
@@ -216,6 +296,15 @@ console.log("SESSION_PROVIDER_CONTRACT: PASS", JSON.stringify({
   revokeAll: "PASS",
   jwtBearerBridge,
   sessionTokenBearerBridge,
+  dbFallback: {
+    list: "PASS",
+    sanitized: "PASS",
+    targetConsistency: "PASS",
+    revokeSingle: "PASS",
+    invalidationE2E: "PASS",
+    revokeAll: "PASS",
+    adminSessionUnaffected: "PASS",
+  },
   fields,
   secretFieldNames: secretFields,
   rawPayloadLogged: false,
