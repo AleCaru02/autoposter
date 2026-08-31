@@ -18,11 +18,12 @@ function validMarker(value) {
 function expectedEmails(marker) {
   return new Set([
     `audit-smoke-${marker}-customer@example.invalid`,
+    `audit-smoke-${marker}-customer-b@example.invalid`,
     `audit-smoke-${marker}-admin@example.invalid`,
   ]);
 }
 
-const recognizedSmokeEmail = /^audit-smoke-([a-z0-9]{10,32})-(customer|admin)@example\.invalid$/;
+const recognizedSmokeEmail = /^audit-smoke-([a-z0-9]{10,32})-(customer|customer-b|admin)@example\.invalid$/;
 
 function recognizedUser(user) {
   const match = recognizedSmokeEmail.exec(user.email || "");
@@ -147,7 +148,7 @@ async function cleanupUsers(sql, users) {
 async function cleanup(sql, marker) {
   const users = await usersForMarker(sql, marker);
   const allowed = expectedEmails(marker);
-  if (users.length > 2 || users.some((user) => !allowed.has(user.email))) {
+  if (users.length > 3 || users.some((user) => !allowed.has(user.email))) {
     return { ok: false, status: 409, body: { error: "SMOKE_CLEANUP_SCOPE_MISMATCH", count: users.length } };
   }
   await cleanupUsers(sql, users);
