@@ -6,7 +6,6 @@ type BanState = {
   banned: boolean;
   reason: string | null;
   expiresAt: string | null;
-  metadataKnown: boolean;
 };
 
 type BanMutationResponse = {
@@ -42,13 +41,17 @@ export function AdminBanPanel({
   customerId,
   customerName,
   initialBanned,
+  initialReason,
+  initialExpiresAt,
 }: {
   customerId: string;
   customerName: string;
   initialBanned: boolean;
+  initialReason: string | null;
+  initialExpiresAt: string | null;
 }) {
   const endpoint = customerId ? `/api/admin/customers/${encodeURIComponent(customerId)}` : null;
-  const [state, setState] = useState<BanState>({ banned: initialBanned, reason: null, expiresAt: null, metadataKnown: false });
+  const [state, setState] = useState<BanState>({ banned: initialBanned, reason: initialReason, expiresAt: initialExpiresAt });
   const [dialog, setDialog] = useState<BanDialog>(null);
   const [reason, setReason] = useState("");
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
@@ -116,7 +119,6 @@ export function AdminBanPanel({
         banned: true,
         reason: response.customer.reason,
         expiresAt: response.customer.expiresAt,
-        metadataKnown: true,
       });
       setDialog(null);
       if (response.sessionRevocation?.ok === false || response.auditRecorded === false) {
@@ -142,7 +144,7 @@ export function AdminBanPanel({
       if (!response.customer || response.customer.id !== customerId || response.customer.banned !== false) {
         throw new Error("UNBAN_STATE_NOT_CONFIRMED");
       }
-      setState({ banned: false, reason: null, expiresAt: null, metadataKnown: true });
+      setState({ banned: false, reason: null, expiresAt: null });
       setDialog(null);
       setFeedback(response.auditRecorded === false
         ? "Account riattivato, ma la registrazione Audit non è stata confermata. Verifica l’Audit amministrativo."
@@ -174,8 +176,8 @@ export function AdminBanPanel({
         <span className={`admin-badge ${state.banned ? "danger" : "admin"}`}>{state.banned ? "Sospeso" : "Attivo"}</span>
       </div>
       {state.banned ? <div className="admin-ban-meta">
-        <div><span>Durata</span><strong>{!state.metadataKnown ? "Dettaglio non disponibile in questa vista" : expiryLabel ? `Fino al ${expiryLabel}` : "Senza scadenza"}</strong></div>
-        <div><span>Motivo</span><strong>{!state.metadataKnown ? "Dettaglio non disponibile in questa vista" : state.reason || "Non indicato"}</strong></div>
+        <div><span>Durata</span><strong>{expiryLabel ? `Fino al ${expiryLabel}` : "Senza scadenza"}</strong></div>
+        <div><span>Motivo</span><strong>{state.reason || "Non indicato"}</strong></div>
       </div> : <p className="admin-muted">L’account non è bloccato.</p>}
     </div>
 
