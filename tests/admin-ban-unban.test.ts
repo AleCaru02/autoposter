@@ -11,8 +11,9 @@ if (!denied.ok) assert.equal(denied.response.status, 401);
 assert.equal(normalizePlatformRole("OWNER"), "CUSTOMER", "workspace OWNER must remain denied from Ban/Unban");
 assert.equal(normalizePlatformRole("admin"), "SUPER_ADMIN");
 
-assert.equal(entry.includes('handleAdminBanApi(request, env)'), true, "Ban/Unban must route through the Worker Admin boundary");
-assert.ok(entry.indexOf('handleAdminBanApi(request, env)') < entry.indexOf('handleAdminSessionApi(request, env)'), "Ban router must run before generic Admin handling");
+const adminRouter = entry.slice(entry.indexOf('if (path.startsWith("/api/admin/"))'));
+assert.equal(adminRouter.includes('handleAdminBanApi(request, env)'), true, "Ban/Unban must route through the Worker Admin boundary");
+assert.ok(adminRouter.indexOf('handleAdminBanApi(request, env)') < adminRouter.indexOf('handleAdminSessionApi(request, env)'), "Ban router must run before Session/generic Admin handling");
 assert.equal(api.includes('path.match(/^\\/api\\/admin\\/customers\\/([^/]+)\\/(ban|unban)$/)'), true, "Ban/Unban route contract missing");
 assert.equal(api.includes('request.method !== "POST"'), true, "Ban/Unban must be POST-only");
 assert.equal(api.includes("requireSuperAdmin(request, env)"), true, "Ban/Unban must require SUPER_ADMIN");
