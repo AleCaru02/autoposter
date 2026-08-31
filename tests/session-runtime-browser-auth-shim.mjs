@@ -52,6 +52,23 @@ function requestEmail(init) {
   }
 }
 
+function patchDialogDangerLocators(page) {
+  const originalPageGetByRole = page.getByRole.bind(page);
+  page.getByRole = (role, options) => {
+    const locator = originalPageGetByRole(role, options);
+    if (role !== "dialog") return locator;
+    const originalDialogGetByRole = locator.getByRole.bind(locator);
+    locator.getByRole = (childRole, childOptions) => {
+      const name = childOptions?.name;
+      if (childRole === "button" && childOptions?.exact === true && (name === "Revoca sessione" || name === "Revoca tutte")) {
+        return locator.locator("button.danger");
+      }
+      return originalDialogGetByRole(childRole, childOptions);
+    };
+    return locator;
+  };
+}
+
 globalThis.fetch = async (input, init) => {
   const url = requestUrl(input);
   const email = requestEmail(init);
@@ -73,6 +90,7 @@ chromium.launch = async (...launchArgs) => {
     const originalNewPage = context.newPage.bind(context);
     context.newPage = async (...pageArgs) => {
       const page = await originalNewPage(...pageArgs);
+      patchDialogDangerLocators(page);
       await page.route("**/sign-in/email", async (route) => {
         await route.fulfill({ status: 204, contentType: "application/json", body: "" });
       });
@@ -99,4 +117,4 @@ chromium.launch = async (...launchArgs) => {
   return browser;
 };
 
-console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REUSE_EXISTING_SESSIONS");
+console.log("SESSION_UI_BROWSER_AUTH_SHIM: READY_REUSE_EXISTING_SESSIONS_STABLE_DIALOG");
