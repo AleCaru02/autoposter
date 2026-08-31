@@ -18,6 +18,7 @@ jobs:
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
+      - { name: FASE 3 CORE harness absence and audit regression, run: "npm run test:fase3-core" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Crawler regression, run: "npm run test:crawler" }
@@ -203,6 +204,7 @@ jobs:
           set -euo pipefail
           base="https://autoposter.02alessandrocaruso.workers.dev"
           for path in \
+            /api/internal/fase3/qa-control \
             /api/internal/tenant-cross-test \
             /api/internal/tenant-membership-diagnostic \
             /api/internal/tenant-owner-membership-migrate; do
@@ -212,4 +214,22 @@ jobs:
               exit 1
             fi
           done
-          echo "temporary tenant diagnostic routes: ABSENT"
+          echo "temporary diagnostic routes: ABSENT"
+      - name: Production temporary FASE 3 QA secret absent
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler secret list --format json > worker-secrets.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const secrets = JSON.parse(fs.readFileSync('worker-secrets.json', 'utf8'));
+          const names = Array.isArray(secrets) ? secrets.map((item) => item?.name).filter(Boolean) : [];
+          if (names.includes('FASE3_QA_TOKEN')) {
+            console.error('Temporary FASE 3 QA secret still exists');
+            process.exit(1);
+          }
+          console.log('temporary FASE 3 QA secret: ABSENT');
+          NODE
