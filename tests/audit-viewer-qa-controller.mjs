@@ -15,6 +15,10 @@ function validMarker(value) {
   return typeof value === "string" && /^[a-z0-9]{10,32}$/.test(value);
 }
 
+function validOpaqueId(value) {
+  return typeof value === "string" && value.length >= 8 && value.length <= 256 && /^[A-Za-z0-9._:-]+$/.test(value);
+}
+
 function expectedEmails(marker) {
   return new Set([
     `audit-smoke-${marker}-customer@example.invalid`,
@@ -41,6 +45,12 @@ async function usersForMarker(sql, marker) {
     order by lower(coalesce(to_jsonb(u)->>'email', ''))
   `;
   return rows.map(recognizedUser).filter(Boolean).filter((user) => user.marker === marker);
+}
+
+async function smokeUser(sql, marker, kind) {
+  const users = await usersForMarker(sql, marker);
+  const target = users.find((user) => user.kind === kind);
+  return target || null;
 }
 
 async function allRecognizedSmokeUsers(sql) {
@@ -129,6 +139,65 @@ async function promote(sql, marker) {
   return { ok: true, status: 200, body: { promoted: true, ...after } };
 }
 
+function sanitizeSession(row) {
+  return {
+    id: String(row.id || ""),
+    createdAt: row.created_at ?? null,
+    updatedAt: row.updated_at ?? null,
+    expiresAt: row.expires_at ?? null,
+    ipAddress: row.ip_address ?? null,
+    userAgent: row.user_agent ?? null,
+  };
+}
+
+async function sessionRows(sql, userId) {
+  return sql`
+    select
+      coalesce(to_jsonb(s)->>'id', '') as id,
+      coalesce(to_jsonb(s)->>'createdAt', to_jsonb(s)->>'created_at') as created_at,
+      coalesce(to_jsonb(s)->>'updatedAt', to_jsonb(s)->>'updated_at') as updated_at,
+      coalesce(to_jsonb(s)->>'expiresAt', to_jsonb(s)->>'expires_at') as expires_at,
+      coalesce(to_jsonb(s)->>'ipAddress', to_jsonb(s)->>'ip_address') as ip_address,
+      coalesce(to_jsonb(s)->>'userAgent', to_jsonb(s)->>'user_agent') as user_agent
+    from neon_auth.session s
+    where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = ${userId}
+    order by coalesce(to_jsonb(s)->>'createdAt', to_jsonb(s)->>'created_at', '') desc,
+      coalesce(to_jsonb(s)->>'id', '') desc
+  `;
+}
+
+async function sessionFallbackList(sql, marker) {
+  const customer = await smokeUser(sql, marker, "customer");
+  if (!customer) return { ok: false, status: 409, body: { error: "SMOKE_CUSTOMER_NOT_FOUND" } };
+  const rows = await sessionRows(sql, customer.id);
+  return { ok: true, status: 200, body: { targetUserId: customer.id, sessions: rows.map(sanitizeSession) } };
+}
+
+async function sessionFallbackRevokeOne(sql, marker, targetUserId, sessionId) {
+  const customer = await smokeUser(sql, marker, "customer");
+  if (!customer || targetUserId !== customer.id) return { ok: false, status: 409, body: { error: "SMOKE_SESSION_TARGET_SCOPE_MISMATCH" } };
+  if (!validOpaqueId(sessionId)) return { ok: false, status: 400, body: { error: "INVALID_SESSION_ID" } };
+  const deleted = await sql`
+    delete from neon_auth.session s
+    where coalesce(to_jsonb(s)->>'id', '') = ${sessionId}
+      and coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = ${targetUserId}
+    returning coalesce(to_jsonb(s)->>'id', '') as id
+  `;
+  if (deleted.length !== 1) return { ok: false, status: 404, body: { error: "SESSION_NOT_FOUND_FOR_TARGET" } };
+  return { ok: true, status: 200, body: { revoked: true, sessionId: String(deleted[0].id || "") } };
+}
+
+async function sessionFallbackRevokeAll(sql, marker, targetUserId) {
+  const customer = await smokeUser(sql, marker, "customer");
+  if (!customer || targetUserId !== customer.id) return { ok: false, status: 409, body: { error: "SMOKE_SESSION_TARGET_SCOPE_MISMATCH" } };
+  const deleted = await sql`
+    delete from neon_auth.session s
+    where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = ${targetUserId}
+    returning coalesce(to_jsonb(s)->>'id', '') as id
+  `;
+  return { ok: true, status: 200, body: { revoked: true, count: deleted.length } };
+}
+
 async function cleanupUsers(sql, users) {
   for (const user of users) {
     await sql`delete from public.profiles where owner_auth_user_id = ${user.id}`;
@@ -179,13 +248,25 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
     if (!validMarker(body?.marker)) return json({ error: "INVALID_MARKER" }, 400);
-    if (!["preflight", "state", "promote", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
+    if (!["preflight", "state", "promote", "cleanup", "cleanup-residue", "session-list", "session-revoke-one", "session-revoke-all"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
 
     const sql = neon(env.DATABASE_URL);
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
       if (body.action === "promote") {
         const result = await promote(sql, body.marker);
+        return json(result.body, result.status);
+      }
+      if (body.action === "session-list") {
+        const result = await sessionFallbackList(sql, body.marker);
+        return json(result.body, result.status);
+      }
+      if (body.action === "session-revoke-one") {
+        const result = await sessionFallbackRevokeOne(sql, body.marker, body.targetUserId, body.sessionId);
+        return json(result.body, result.status);
+      }
+      if (body.action === "session-revoke-all") {
+        const result = await sessionFallbackRevokeAll(sql, body.marker, body.targetUserId);
         return json(result.body, result.status);
       }
       if (body.action === "cleanup-residue") {
