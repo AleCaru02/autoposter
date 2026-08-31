@@ -119,9 +119,12 @@ export function AdminBanPanel({
         metadataKnown: true,
       });
       setDialog(null);
-      setFeedback(response.sessionRevocation?.ok === false
-        ? "Account bloccato, ma la revoca delle sessioni non è stata confermata. Controlla l’Audit prima di considerare conclusa l’operazione."
-        : "Account bloccato. Le nuove autenticazioni sono negate e le sessioni esistenti sono state revocate dal backend.");
+      if (response.sessionRevocation?.ok === false || response.auditRecorded === false) {
+        const missing = [response.sessionRevocation?.ok === false ? "revoca sessioni" : null, response.auditRecorded === false ? "audit" : null].filter(Boolean).join(" e ");
+        setFeedback(`Account bloccato, ma ${missing} non è stato confermato. Controlla l’Audit prima di considerare conclusa l’operazione.`);
+      } else {
+        setFeedback("Account bloccato. Le nuove autenticazioni sono negate e le sessioni esistenti sono state revocate dal backend.");
+      }
     } catch {
       setMutationError("Blocco non riuscito o non confermato dal backend. Lo stato mostrato non è stato modificato.");
     } finally {
@@ -141,7 +144,9 @@ export function AdminBanPanel({
       }
       setState({ banned: false, reason: null, expiresAt: null, metadataKnown: true });
       setDialog(null);
-      setFeedback("Account riattivato. Il cliente può autenticarsi di nuovo.");
+      setFeedback(response.auditRecorded === false
+        ? "Account riattivato, ma la registrazione Audit non è stata confermata. Verifica l’Audit amministrativo."
+        : "Account riattivato. Il cliente può autenticarsi di nuovo.");
     } catch {
       setMutationError("Riattivazione non riuscita o non confermata dal backend. Lo stato mostrato non è stato modificato.");
     } finally {
