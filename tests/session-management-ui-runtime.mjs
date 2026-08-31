@@ -228,7 +228,6 @@ async function assertBrowserSafe(page, diag, secrets) {
   assert.deepEqual(diag.critical, [], `critical browser errors: ${JSON.stringify(diag.critical)}`);
 }
 
-// The permanent Audit runtime already created/promoted OWNER A and ADMIN_SMOKE.
 const a1 = await signIn(emails.owner, uaA1);
 const a2 = await signIn(emails.owner, uaA2);
 const customerB = await signUp(emails.customerB, "Session Smoke Customer B", uaB);
@@ -256,11 +255,9 @@ try {
   result.customerDenied = await verifyDenied(browser, emails.customerB, a1.id, "CUSTOMER");
   result.ownerDenied = await verifyDenied(browser, emails.owner, a1.id, "OWNER");
 
-  // Desktop: loading no-flicker, controlled load error, recovery, list, modal and real single revoke.
   const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const { page: desktop, diag: desktopDiag } = await adminCustomerPage(desktopContext, a1.id);
   try {
-    // Controlled verifier-only load failure. Production is untouched.
     await desktop.route(`**/api/admin/customers/${encodeURIComponent(a1.id)}/sessions`, async (route) => {
       if (route.request().method() === "GET") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "VERIFIER_CONTROLLED_FAILURE" }) });
       else await route.continue();
@@ -297,7 +294,6 @@ try {
     result.superAdminList = "PASS";
     result.desktop.list = "PASS";
 
-    // Desktop revoke-all control/modal is reachable; cancel without mutation.
     await desktop.getByRole("button", { name: "Revoca tutte le sessioni", exact: true }).click();
     let dialog = desktop.getByRole("dialog");
     await dialog.getByRole("heading", { name: "Revoca tutte le sessioni", exact: true }).waitFor();
@@ -313,7 +309,6 @@ try {
     assert.ok((await dialog.innerText()).includes("iPhone · Safari"));
     assert.equal(await dialog.getByRole("button", { name: "Annulla", exact: true }).count(), 1);
 
-    // Controlled mutation failure: no false success and auth session remains valid.
     await desktop.route(`**/api/admin/customers/${encodeURIComponent(a1.id)}/sessions/${encodeURIComponent(a1Id)}`, async (route) => {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "VERIFIER_CONTROLLED_MUTATION_FAILURE" }) });
     }, { times: 1 });
@@ -322,8 +317,7 @@ try {
     assert.equal((await getSession(a1)).active, true, "controlled mutation failure altered Session A");
     assert.ok(await desktop.locator(".admin-session-card").filter({ hasText: "iPhone · Safari" }).count() >= 1, "failed mutation removed Session A visually");
 
-    // Real single revoke with delayed route proves double-submit guard.
-    await a1Card.getByRole("button", { name: "Revoca sessione", exact: true }).click();
+    // The product intentionally leaves the confirmation modal open after a failed mutation. Retry through that same modal.
     dialog = desktop.getByRole("dialog");
     let deleteCount = 0;
     await desktop.route(`**/api/admin/customers/${encodeURIComponent(a1.id)}/sessions/${encodeURIComponent(a1Id)}`, async (route) => {
@@ -360,7 +354,6 @@ try {
     await assertBrowserSafe(desktop, desktopDiag, secretValues);
   } finally { await desktopContext.close(); }
 
-  // Restore >=2 valid A sessions before revoke-all: preserved A2 + new A3.
   const a3 = await signIn(emails.owner, uaA3);
   const a3Before = await getSession(a3);
   assert.equal(a3Before.active, true);
@@ -368,7 +361,6 @@ try {
   assert.ok(a3Id && a3Id !== a2Id);
   secretValues.push(a3.token, ...a3.jar.secrets(), String(a3Before.session?.token || ""));
 
-  // Mobile: list, modal/single reachability, real revoke-all, empty state and isolation.
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const { page: mobile, diag: mobileDiag } = await adminCustomerPage(mobileContext, a1.id);
   try {
@@ -383,7 +375,6 @@ try {
     result.mobile.list = "PASS";
     result.mobile.overflow = "PASS";
 
-    // Mobile single revoke is reachable and modal usable; cancel.
     const a2Card = mobile.locator(".admin-session-card").filter({ hasText: "Android · Chrome" }).first();
     await a2Card.getByRole("button", { name: "Revoca sessione", exact: true }).click();
     let dialog = mobile.getByRole("dialog");
@@ -394,7 +385,6 @@ try {
     result.mobile.single = "PASS";
     result.mobile.modal = "PASS";
 
-    // Real revoke-all with delayed route proves double-submit guard.
     await mobile.getByRole("button", { name: "Revoca tutte le sessioni", exact: true }).click();
     dialog = mobile.getByRole("dialog");
     await dialog.getByRole("heading", { name: "Revoca tutte le sessioni", exact: true }).waitFor();
@@ -432,7 +422,6 @@ try {
     await assertBrowserSafe(mobile, mobileDiag, secretValues);
   } finally { await mobileContext.close(); }
 
-  // Desktop empty state on a fresh load: CTA must be absent from DOM.
   const emptyDesktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const { page: emptyDesktop, diag: emptyDesktopDiag } = await adminCustomerPage(emptyDesktopContext, a1.id);
   try {
@@ -442,7 +431,6 @@ try {
     await assertBrowserSafe(emptyDesktop, emptyDesktopDiag, secretValues);
   } finally { await emptyDesktopContext.close(); }
 
-  // Customer B XSS/safe-render probe: controlled HTML-like userAgent must not execute or become markup.
   const xssContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const { page: xssPage, diag: xssDiag } = await adminCustomerPage(xssContext, customerB.id);
   try {
@@ -457,7 +445,6 @@ try {
     await assertBrowserSafe(xssPage, xssDiag, secretValues);
   } finally { await xssContext.close(); }
 
-  // Final Admin and Customer B preservation + cross-user impact zero.
   assert.equal((await getSession(customerB)).active, true);
   assert.equal((await getSession(adminDirect)).active, true);
   const bList = await productApi(`/api/admin/customers/${encodeURIComponent(customerB.id)}/sessions`, adminDirect.token, 200);
