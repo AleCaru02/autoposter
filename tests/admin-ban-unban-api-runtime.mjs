@@ -197,16 +197,16 @@ await waitIdentity(owner.token, owner.id, "OWNER_A");
 await waitIdentity(customer.token, customer.id, "CUSTOMER_B");
 await waitIdentity(adminCandidate.token, adminCandidate.id, "ADMIN candidate");
 
+// CUSTOMER_B is intentionally still a plain platform CUSTOMER here.
+let controllerState = await controller("state");
+assert.equal(controllerState.qaProfiles, 0, "plain CUSTOMER baseline unexpectedly owns a profile");
+
 const ownerInsert = await insertProfile(owner.token, ownerSlug, `Ban API Owner ${marker}`);
 assert.ok(ownerInsert.response.ok && firstRow(ownerInsert.body)?.id, `OWNER fixture insert failed (${ownerInsert.response.status})`);
 const ownerProfileId = String(firstRow(ownerInsert.body).id);
-const customerInsert = await insertProfile(customer.token, customerSlug, `Ban API Customer ${marker}`);
-assert.ok(customerInsert.response.ok && firstRow(customerInsert.body)?.id, `CUSTOMER_B fixture insert failed (${customerInsert.response.status})`);
-const customerProfileId = String(firstRow(customerInsert.body).id);
-
-let controllerState = await controller("state");
-assert.ok(controllerState.qaProfiles >= 2, "QA profile ownership not persisted");
-assert.ok(controllerState.qaOwners >= 2, "workspace OWNER contract not established for fixtures");
+controllerState = await controller("state");
+assert.ok(controllerState.qaProfiles >= 1, "OWNER_A profile ownership not persisted");
+assert.ok(controllerState.qaOwners >= 1, "OWNER_A workspace OWNER contract not established");
 
 const promoted = await controller("promote");
 assert.equal(promoted.qaAdmins, 1);
@@ -215,11 +215,12 @@ const admin = await signIn(emails.admin);
 assert.equal(admin.id, adminCandidate.id);
 assert.equal((await productRequest(admin.token, "/api/admin/me")).status, 200);
 
+// Distinct authorization probes: CUSTOMER_B has no profile; OWNER_A owns one.
 const customerBanDenied = await productRequest(customer.token, `/api/admin/customers/${owner.id}/ban`, "POST", {});
-const ownerBanDenied = await productRequest(owner.token, `/api/admin/customers/${customer.id}/ban`, "POST", {});
 const customerUnbanDenied = await productRequest(customer.token, `/api/admin/customers/${owner.id}/unban`, "POST", {});
+const ownerBanDenied = await productRequest(owner.token, `/api/admin/customers/${customer.id}/ban`, "POST", {});
 const ownerUnbanDenied = await productRequest(owner.token, `/api/admin/customers/${customer.id}/unban`, "POST", {});
-for (const result of [customerBanDenied, ownerBanDenied, customerUnbanDenied, ownerUnbanDenied]) assert.equal(result.status, 403, "CUSTOMER/OWNER Admin Ban API must return 403");
+for (const result of [customerBanDenied, customerUnbanDenied, ownerBanDenied, ownerUnbanDenied]) assert.equal(result.status, 403, "CUSTOMER/OWNER Admin Ban API must return 403");
 
 const targetAttack = await productRequest(admin.token, `/api/admin/customers/${owner.id}/ban`, "POST", { userId: customer.id, reason: "must reject" });
 assert.equal(targetAttack.status, 400, "arbitrary userId body field was accepted");
@@ -231,10 +232,16 @@ assert.equal((await productRequest(admin.token, `/api/admin/customers/${owner.id
 assert.equal((await productRequest(admin.token, `/api/admin/customers/${owner.id}/ban`, "POST", { expiresAt: new Date(Date.now() - 1000).toISOString() })).status, 400, "past expiry accepted");
 assert.equal((await productRequest(admin.token, `/api/admin/customers/${owner.id}/ban`, "POST", { reason: "x".repeat(501) })).status, 400, "oversized reason accepted");
 
+// CUSTOMER_B now gets its own tenant fixture for unaffected-user regression.
+const customerInsert = await insertProfile(customer.token, customerSlug, `Ban API Customer ${marker}`);
+assert.ok(customerInsert.response.ok && firstRow(customerInsert.body)?.id, `CUSTOMER_B fixture insert failed (${customerInsert.response.status})`);
+const customerProfileId = String(firstRow(customerInsert.body).id);
+controllerState = await controller("state");
+assert.ok(controllerState.qaProfiles >= 2 && controllerState.qaOwners >= 2, "tenant fixtures not fully established");
+
 const preBanToken = owner.token;
 const tokenFingerprint = createHash("sha256").update(preBanToken).digest("hex");
-const preBanSession = await getSession(owner.jar);
-assert.equal(preBanSession.active, true, "OWNER session missing before Ban API call");
+assert.equal((await getSession(owner.jar)).active, true, "OWNER session missing before Ban API call");
 banState = await controller("ban-state");
 assert.ok(stateKind(banState.states, "customer").sessions >= 1, "OWNER DB session missing before Ban API call");
 
@@ -315,8 +322,8 @@ assert.equal(stateKind((await controller("ban-state")).states, "customer-b").ban
 
 console.log("ADMIN_BAN_UNBAN_API_RUNTIME: PASS", JSON.stringify({
   customerBanDenied: "PASS",
-  ownerBanDenied: "PASS",
   customerUnbanDenied: "PASS",
+  ownerBanDenied: "PASS",
   ownerUnbanDenied: "PASS",
   targetAttack: "DENIED",
   invalidInputs: "DENIED",
