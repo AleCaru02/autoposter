@@ -18,6 +18,8 @@ const emails = {
   admin: `audit-smoke-${marker}-admin@example.invalid`,
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 class CookieJar {
   constructor() { this.values = new Map(); }
   absorb(headers) {
@@ -91,11 +93,45 @@ async function dataApi(path, token, init = {}) {
   return fetch(`${DATA_API}${path}`, { ...init, headers });
 }
 
+function rpcIdentity(body) {
+  if (typeof body === "string") return body.trim() || null;
+  if (Array.isArray(body)) {
+    const first = body[0];
+    if (typeof first === "string") return first.trim() || null;
+    if (first && typeof first === "object") return first.current_auth_user_id || first.auth_user_id || first.current_platform_identity || null;
+  }
+  if (body && typeof body === "object") return body.current_auth_user_id || body.auth_user_id || body.current_platform_identity || null;
+  return null;
+}
+
+async function waitForDataApiIdentity(token, expectedId) {
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await dataApi("/rpc/current_auth_user_id", token, { method: "POST", body: "{}" });
+    lastStatus = response.status;
+    const body = await readJson(response);
+    if (response.ok && rpcIdentity(body) === expectedId) return;
+    await sleep(500);
+  }
+  throw new Error(`Data API did not recognize freshly authenticated identity (last status ${lastStatus})`);
+}
+
 async function adminApi(path, token, expected) {
-  const response = await fetch(`${APP_BASE}${path}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` } });
-  const body = await readJson(response);
-  assert.equal(response.status, expected, `${path} expected ${expected}, got ${response.status}`);
-  return body;
+  let lastStatus = 0;
+  let lastBody = null;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const response = await fetch(`${APP_BASE}${path}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` } });
+    lastStatus = response.status;
+    lastBody = await readJson(response);
+    if (lastStatus === expected) return lastBody;
+    if (lastStatus === 401 && (expected === 403 || expected === 200)) {
+      await sleep(500);
+      continue;
+    }
+    break;
+  }
+  assert.equal(lastStatus, expected, `${path} expected ${expected}, got ${lastStatus}`);
+  return lastBody;
 }
 
 async function controller(action) {
@@ -173,6 +209,8 @@ results.baselineProfiles = preflight.profilesTotal;
 const customer = await signUp(emails.customer, "Audit Smoke Customer");
 const adminCandidate = await signUp(emails.admin, "Audit Smoke Admin");
 assert.notEqual(customer.id, adminCandidate.id);
+await waitForDataApiIdentity(customer.token, customer.id);
+await waitForDataApiIdentity(adminCandidate.token, adminCandidate.id);
 
 await adminApi("/api/admin/audit", customer.token, 403);
 results.customerApi = "PASS";
@@ -223,6 +261,7 @@ assert.equal(promoted.superAdmins, 2);
 
 const admin = await signIn(emails.admin);
 assert.equal(admin.id, adminCandidate.id);
+await waitForDataApiIdentity(admin.token, admin.id);
 const me = await adminApi("/api/admin/me", admin.token, 200);
 assert.equal(me.platformRole, "SUPER_ADMIN");
 results.superAdminApi = "PASS";
@@ -281,15 +320,14 @@ assertStableOrdering(page1.audit);
 assertStableOrdering(page2.audit);
 results.pagination = "PASS";
 
-const invalidCases = [
+for (const path of [
   "/api/admin/audit?limit=-1",
   "/api/admin/audit?limit=999999",
   "/api/admin/audit?from=not-a-date",
   `/api/admin/audit?from=${encodeURIComponent(runtimeTo)}&to=${encodeURIComponent(runtimeFrom)}`,
   `/api/admin/audit?action=${encodeURIComponent("x".repeat(121))}`,
   "/api/admin/audit?action=ADMIN_ACCESS&action=ADMIN_OVERVIEW_VIEW",
-];
-for (const path of invalidCases) await adminApi(path, admin.token, 400);
+]) await adminApi(path, admin.token, 400);
 results.invalid = "PASS";
 
 const emptyActor = `audit-smoke-no-match-${marker}`;
