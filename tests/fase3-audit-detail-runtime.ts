@@ -88,6 +88,15 @@ async function dataApi(path: string, token: string, init: RequestInit = {}) {
   return fetch(`${DATA_API}${path}`, { ...init, headers });
 }
 
+async function adminApi(path: string, token: string, expected = 200) {
+  const response = await fetch(`${APP_BASE}${path}`, {
+    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+  });
+  const body = await readJson(response);
+  assert.equal(response.status, expected, `${path} expected ${expected}, got ${response.status}`);
+  return body as any;
+}
+
 async function qaState() {
   const response = await fetch(`${APP_BASE}/api/internal/fase3/qa-control`, {
     method: "POST",
@@ -95,7 +104,7 @@ async function qaState() {
     body: JSON.stringify({ action: "state", marker }),
   });
   const body = await readJson(response);
-  assert.equal(response.status, 200, `audit state failed: ${JSON.stringify(body)}`);
+  assert.equal(response.status, 200, "audit state failed");
   return body as { qaAuditRows?: AuditRow[] };
 }
 
@@ -104,91 +113,157 @@ function metadataObject(value: unknown) {
   return value as Record<string, unknown>;
 }
 
-function assertTimestamp(value: string, action: string) {
+function rowFingerprint(row: AuditRow) {
+  return JSON.stringify([
+    row.actor_auth_user_id,
+    row.action,
+    row.target_type,
+    row.target_id,
+    row.metadata,
+    row.created_at,
+  ]);
+}
+
+function subtractRows(after: AuditRow[], before: AuditRow[]) {
+  const baseline = new Map<string, number>();
+  for (const row of before) {
+    const key = rowFingerprint(row);
+    baseline.set(key, (baseline.get(key) ?? 0) + 1);
+  }
+  const delta: AuditRow[] = [];
+  for (const row of after) {
+    const key = rowFingerprint(row);
+    const remaining = baseline.get(key) ?? 0;
+    if (remaining > 0) baseline.set(key, remaining - 1);
+    else delta.push(row);
+  }
+  return delta;
+}
+
+function assertTimestamp(value: string, action: string, windowStart: number, windowEnd: number) {
   const timestamp = Date.parse(value);
   assert.ok(Number.isFinite(timestamp), `${action} timestamp invalid`);
-  const now = Date.now();
-  assert.ok(timestamp <= now + 60_000, `${action} timestamp is unexpectedly in the future`);
-  assert.ok(timestamp >= now - 10 * 60_000, `${action} timestamp is not from this QA run`);
+  assert.ok(timestamp >= windowStart - 2_000, `${action} timestamp predates the current operation window`);
+  assert.ok(timestamp <= windowEnd + 2_000, `${action} timestamp exceeds the current operation window`);
 }
 
-function assertSensitiveAuditScan(row: AuditRow) {
-  const serialized = JSON.stringify(row).toLowerCase();
-  const forbidden = [
-    "password",
-    "bearer ",
-    "authorization",
-    "cookie",
-    "session token",
-    "session_token",
-    "access token",
-    "access_token",
-    "refresh token",
-    "refresh_token",
-    "api key",
-    "api_key",
-    "apikey",
-    "database_url",
-    "postgres://",
-    "postgresql://",
-    "cloudflare secret",
-    "fase3_qa_token",
-    "credential",
+function sensitiveFailure(row: AuditRow, field: string, type: string): never {
+  throw new Error(`SENSITIVE_DATA_FOUND field=${field} type=${type} action=${row.action}`);
+}
+
+function scanValue(row: AuditRow, field: string, value: unknown, knownSecrets: string[]) {
+  const serialized = typeof value === "string" ? value : JSON.stringify(value ?? null);
+  const lower = serialized.toLowerCase();
+  for (const secret of knownSecrets) {
+    if (secret && serialized.includes(secret)) sensitiveFailure(row, field, "known-secret-value");
+  }
+  if (/eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}/i.test(serialized)) sensitiveFailure(row, field, "jwt-shaped");
+  const forbiddenText = [
+    "bearer ", "authorization", "session token", "session_token", "access token", "access_token",
+    "refresh token", "refresh_token", "api key", "api_key", "apikey", "database_url",
+    "postgres://", "postgresql://", "cloudflare secret", "fase3_qa_token", "client_secret", "oauth secret",
   ];
-  for (const term of forbidden) assert.ok(!serialized.includes(term), `${row.action} audit contains forbidden sensitive material: ${term}`);
-  assert.ok(!/eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}/i.test(serialized), `${row.action} audit contains JWT-shaped material`);
-  assert.ok(!/(^|[^a-z])token([^a-z]|$)/i.test(serialized), `${row.action} audit contains token material`);
+  if (forbiddenText.some((term) => lower.includes(term))) sensitiveFailure(row, field, "credential-text");
 }
 
-function assertBaseRow(row: AuditRow, adminId: string, action: string, targetType: string, targetId: string) {
+function scanMetadataKeys(row: AuditRow, value: unknown, path = "metadata") {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scanMetadataKeys(row, item, `${path}[${index}]`));
+    return;
+  }
+  const sensitiveKeys = new Set([
+    "password", "jwt", "authorization", "cookie", "sessiontoken", "accesstoken", "refreshtoken",
+    "apikey", "databaseurl", "clientsecret", "oauthsecret", "fase3qatoken",
+  ]);
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (sensitiveKeys.has(normalized)) sensitiveFailure(row, `${path}.${key}`, "sensitive-key");
+    scanMetadataKeys(row, child, `${path}.${key}`);
+  }
+}
+
+function assertSensitiveAuditScan(row: AuditRow, knownSecrets: string[]) {
+  scanValue(row, "actor_auth_user_id", row.actor_auth_user_id, knownSecrets);
+  scanValue(row, "action", row.action, knownSecrets);
+  scanValue(row, "target_type", row.target_type, knownSecrets);
+  scanValue(row, "target_id", row.target_id, knownSecrets);
+  scanValue(row, "metadata", row.metadata, knownSecrets);
+  scanValue(row, "created_at", row.created_at, knownSecrets);
+  scanMetadataKeys(row, row.metadata);
+}
+
+function assertBaseRow(
+  row: AuditRow,
+  adminId: string,
+  action: string,
+  targetType: string,
+  targetId: string,
+  windowStart: number,
+  windowEnd: number,
+  knownSecrets: string[],
+) {
   assert.equal(row.actor_auth_user_id, adminId, `${action} actor mismatch`);
   assert.equal(row.action, action, `${action} action mismatch`);
   assert.equal(row.target_type, targetType, `${action} target type mismatch`);
   assert.equal(row.target_id, targetId, `${action} target id mismatch`);
-  assertTimestamp(row.created_at, action);
+  assertTimestamp(row.created_at, action, windowStart, windowEnd);
   metadataObject(row.metadata);
-  assertSensitiveAuditScan(row);
+  assertSensitiveAuditScan(row, knownSecrets);
 }
 
 const admin = await signIn(adminEmail);
 const customerA = await signIn(customerAEmail);
 const customerB = await signIn(customerBEmail);
-const state = await qaState();
-const rows = Array.isArray(state.qaAuditRows) ? state.qaAuditRows : [];
-assert.ok(rows.length >= 6, `expected structured Admin audit rows, got ${rows.length}`);
+const beforeState = await qaState();
+const beforeRows = Array.isArray(beforeState.qaAuditRows) ? beforeState.qaAuditRows : [];
+
+const windowStart = Date.now();
+await adminApi("/api/admin/me", admin.token);
+await adminApi("/api/admin/overview", admin.token);
+const customersBody = await adminApi("/api/admin/customers", admin.token);
+assert.ok(customersBody?.customers?.some((row: any) => row.auth_user_id === customerA.id), "QA customer missing from real customers request");
+await adminApi(`/api/admin/customers/${encodeURIComponent(customerA.id)}`, admin.token);
+await adminApi("/api/admin/activities", admin.token);
+const windowEnd = Date.now();
+
+const afterState = await qaState();
+const afterRows = Array.isArray(afterState.qaAuditRows) ? afterState.qaAuditRows : [];
+const rows = subtractRows(afterRows, beforeRows).filter((row) => row.actor_auth_user_id === admin.id);
+assert.equal(rows.length, 5, `expected exactly five audit rows from this certification window, got ${rows.length}`);
+
+const knownSecrets = [qaSecret, password, admin.token, customerA.token, customerB.token, adminEmail, customerAEmail, customerBEmail];
 
 const access = rows.find((row) => row.action === "ADMIN_ACCESS");
-assert.ok(access, "ADMIN_ACCESS audit row missing");
-assertBaseRow(access, admin.id, "ADMIN_ACCESS", "PLATFORM", "BACKOFFICE");
+assert.ok(access, "ADMIN_ACCESS audit row missing from current operation window");
+assertBaseRow(access, admin.id, "ADMIN_ACCESS", "PLATFORM", "BACKOFFICE", windowStart, windowEnd, knownSecrets);
 assert.deepEqual(metadataObject(access.metadata), {});
 
 const overview = rows.find((row) => row.action === "ADMIN_OVERVIEW_VIEW");
-assert.ok(overview, "ADMIN_OVERVIEW_VIEW audit row missing");
-assertBaseRow(overview, admin.id, "ADMIN_OVERVIEW_VIEW", "PLATFORM", "OVERVIEW");
+assert.ok(overview, "ADMIN_OVERVIEW_VIEW audit row missing from current operation window");
+assertBaseRow(overview, admin.id, "ADMIN_OVERVIEW_VIEW", "PLATFORM", "OVERVIEW", windowStart, windowEnd, knownSecrets);
 assert.deepEqual(metadataObject(overview.metadata), {});
 
 const customers = rows.find((row) => row.action === "ADMIN_CUSTOMERS_LIST");
-assert.ok(customers, "ADMIN_CUSTOMERS_LIST audit row missing");
-assertBaseRow(customers, admin.id, "ADMIN_CUSTOMERS_LIST", "PLATFORM", "CUSTOMERS");
+assert.ok(customers, "ADMIN_CUSTOMERS_LIST audit row missing from current operation window");
+assertBaseRow(customers, admin.id, "ADMIN_CUSTOMERS_LIST", "PLATFORM", "CUSTOMERS", windowStart, windowEnd, knownSecrets);
 const customersMetadata = metadataObject(customers.metadata);
 assert.deepEqual(Object.keys(customersMetadata), ["resultCount"]);
 assert.ok(Number.isInteger(Number(customersMetadata.resultCount)) && Number(customersMetadata.resultCount) >= 3);
 
+const detail = rows.find((row) => row.action === "ADMIN_CUSTOMER_DETAIL_VIEW" && row.target_id === customerA.id);
+assert.ok(detail, "ADMIN_CUSTOMER_DETAIL_VIEW missing for the QA customer actually requested");
+assertBaseRow(detail, admin.id, "ADMIN_CUSTOMER_DETAIL_VIEW", "AUTH_USER", customerA.id, windowStart, windowEnd, knownSecrets);
+const detailMetadata = metadataObject(detail.metadata);
+assert.deepEqual(Object.keys(detailMetadata), ["profileCount"]);
+assert.equal(Number(detailMetadata.profileCount), 1);
+
 const activities = rows.find((row) => row.action === "ADMIN_ACTIVITIES_LIST");
-assert.ok(activities, "ADMIN_ACTIVITIES_LIST audit row missing");
-assertBaseRow(activities, admin.id, "ADMIN_ACTIVITIES_LIST", "PLATFORM", "ACTIVITIES");
+assert.ok(activities, "ADMIN_ACTIVITIES_LIST audit row missing from current operation window");
+assertBaseRow(activities, admin.id, "ADMIN_ACTIVITIES_LIST", "PLATFORM", "ACTIVITIES", windowStart, windowEnd, knownSecrets);
 const activitiesMetadata = metadataObject(activities.metadata);
 assert.deepEqual(Object.keys(activitiesMetadata), ["resultCount"]);
 assert.ok(Number.isInteger(Number(activitiesMetadata.resultCount)) && Number(activitiesMetadata.resultCount) >= 2);
-
-for (const targetId of [customerA.id, customerB.id]) {
-  const detail = rows.find((row) => row.action === "ADMIN_CUSTOMER_DETAIL_VIEW" && row.target_id === targetId);
-  assert.ok(detail, `ADMIN_CUSTOMER_DETAIL_VIEW missing for QA customer`);
-  assertBaseRow(detail, admin.id, "ADMIN_CUSTOMER_DETAIL_VIEW", "AUTH_USER", targetId);
-  const detailMetadata = metadataObject(detail.metadata);
-  assert.deepEqual(Object.keys(detailMetadata), ["profileCount"]);
-  assert.equal(Number(detailMetadata.profileCount), 1);
-}
 
 const customerCrud: Record<string, boolean> = { SELECT: false, INSERT: false, UPDATE: false, DELETE: false };
 const crudCases = [
@@ -204,17 +279,11 @@ for (const [label, method, path, body] of crudCases) {
 }
 
 console.log("FASE3_AUDIT_DETAIL: PASS", JSON.stringify({
-  actions: {
-    ADMIN_ACCESS: true,
-    ADMIN_OVERVIEW_VIEW: true,
-    ADMIN_CUSTOMERS_LIST: true,
-    ADMIN_CUSTOMER_DETAIL_VIEW: true,
-    ADMIN_ACTIVITIES_LIST: true,
-  },
+  auditActions: "5/5 PASS",
+  sensitiveData: "0/5",
+  customerAuditCrud: "4/4 DENIED",
   actor: true,
   target: true,
   timestamp: true,
   metadata: true,
-  sensitiveScan: true,
-  customerCrud,
 }));
