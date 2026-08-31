@@ -3,6 +3,14 @@ import { neon } from "@neondatabase/serverless";
 type QaEnv = { DATABASE_URL?: string; FASE3_QA_TOKEN?: string };
 type QaUser = { id: string; email: string; role: string | null };
 type QaAction = "promote_admin" | "state" | "cleanup";
+type QaAuditRow = {
+  actor_auth_user_id: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata: unknown;
+  created_at: string;
+};
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -64,6 +72,7 @@ async function state(sql: ReturnType<typeof neon>, marker: string) {
   ` as Array<Record<string, boolean>>;
 
   const auditCounts = new Map<string, number>();
+  const qaAuditRows: QaAuditRow[] = [];
   let qaProfiles = 0;
   let qaOwners = 0;
   for (const user of users) {
@@ -74,6 +83,28 @@ async function state(sql: ReturnType<typeof neon>, marker: string) {
       group by action
     ` as Array<{ action: string; count: number }>;
     for (const row of rows) auditCounts.set(row.action, (auditCounts.get(row.action) ?? 0) + Number(row.count));
+
+    const auditRows = await sql`
+      select
+        actor_auth_user_id::text as actor_auth_user_id,
+        action,
+        target_type,
+        target_id,
+        metadata,
+        created_at::text as created_at
+      from public.platform_admin_audit
+      where actor_auth_user_id = ${user.id}
+        and action in (
+          'ADMIN_ACCESS',
+          'ADMIN_OVERVIEW_VIEW',
+          'ADMIN_CUSTOMERS_LIST',
+          'ADMIN_CUSTOMER_DETAIL_VIEW',
+          'ADMIN_ACTIVITIES_LIST'
+        )
+      order by created_at asc, id asc
+    ` as QaAuditRow[];
+    qaAuditRows.push(...auditRows);
+
     const profileRows = await sql`
       select
         (select count(*)::int from public.profiles where owner_auth_user_id = ${user.id}) as profiles,
@@ -94,6 +125,7 @@ async function state(sql: ReturnType<typeof neon>, marker: string) {
     metrics: metrics[0] ?? null,
     auditProtection: protection[0] ?? null,
     qaAuditActions: Object.fromEntries([...auditCounts.entries()].sort(([a], [b]) => a.localeCompare(b))),
+    qaAuditRows,
   };
 }
 
