@@ -166,14 +166,16 @@ async function verifyAdminMobile(browser) {
     }
 
     const adminBody = await page.locator("body").innerText();
-    assert.ok(adminBody.includes("Amministrazione"));
+    assert.equal(new URL(page.url()).pathname, "/admin/attivita", "mobile Admin did not remain on the Activities route");
     assert.ok(!adminBody.includes("Dati amministrativi non disponibili."));
+    const layout = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
+    assert.ok(layout.scrollWidth <= layout.viewportWidth + 2, `mobile Admin has document-level horizontal overflow: ${layout.scrollWidth} > ${layout.viewportWidth}`);
+    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "390x844", flow: adminFlow }));
     assertTokenBeforeAdmin(adminFlow, "/api/admin/me", "mobile Admin");
     assertTokenBeforeAdmin(adminFlow, "/api/admin/overview", "mobile Admin");
     assertTokenBeforeAdmin(adminFlow, "/api/admin/customers", "mobile Admin");
     assert.ok(adminFlow.some((item) => item.kind === "admin" && item.path.startsWith("/api/admin/customers/") && item.status === 200), "mobile Admin customer detail did not return 200");
     assertTokenBeforeAdmin(adminFlow, "/api/admin/activities", "mobile Admin");
-    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "390x844", flow: adminFlow }));
   } finally {
     await context.close();
   }
@@ -192,9 +194,9 @@ async function verifyAdminDesktop(browser) {
       await dump(error instanceof Error ? error.message : "SUPER_ADMIN desktop Backoffice unavailable");
       throw error;
     }
+    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "1440x900", flow: adminFlow }));
     assertTokenBeforeAdmin(adminFlow, "/api/admin/me", "desktop Admin");
     assertTokenBeforeAdmin(adminFlow, "/api/admin/overview", "desktop Admin");
-    console.log("FASE3_ADMIN_NETWORK", JSON.stringify({ viewport: "1440x900", flow: adminFlow }));
   } finally {
     await context.close();
   }
