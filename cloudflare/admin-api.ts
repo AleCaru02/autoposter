@@ -34,6 +34,19 @@ type ProfileRow = {
 
 type MembershipRow = { profile_id: string; profile_name: string; role: string };
 type SocialCountRow = { profile_id: string; connections: number };
+type AuditRow = {
+  id: string;
+  actor_auth_user_id: string;
+  actor_name: string | null;
+  actor_email: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata: unknown;
+  created_at: string;
+};
+
+type AuditCountRow = { total: number };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -55,6 +68,42 @@ async function authorize(request: Request, env: AdminEnv) {
   const auth = await requireSuperAdmin(request, env);
   if (!auth.ok) return auth;
   return auth;
+}
+
+function positiveInteger(value: string | null, fallback: number, max: number) {
+  if (!value) return fallback;
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= max ? parsed : null;
+}
+
+function boundedFilter(value: string | null, maxLength: number) {
+  const normalized = value?.trim() || "";
+  return normalized.length <= maxLength ? normalized || null : undefined;
+}
+
+function isoFilter(value: string | null) {
+  const normalized = value?.trim() || "";
+  if (!normalized) return null;
+  if (normalized.length > 40) return undefined;
+  const timestamp = Date.parse(normalized);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
+}
+
+const SENSITIVE_AUDIT_KEYS = new Set([
+  "password", "jwt", "authorization", "cookie", "sessiontoken", "accesstoken", "refreshtoken",
+  "apikey", "databaseurl", "clientsecret", "oauthsecret", "fase3qatoken",
+]);
+
+function safeAuditMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(safeAuditMetadata);
+  if (!value || typeof value !== "object") return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    output[key] = SENSITIVE_AUDIT_KEYS.has(normalized) ? "[REDACTED]" : safeAuditMetadata(child);
+  }
+  return output;
 }
 
 export async function handleAdminApi(request: Request, env: AdminEnv): Promise<Response | null> {
@@ -120,6 +169,59 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
       `;
       await audit(env, auth.user.authUserId, "ADMIN_ACTIVITIES_LIST", "PLATFORM", "ACTIVITIES", { resultCount: rows.length });
       return json({ activities: rows });
+    }
+
+    if (path === "/api/admin/audit") {
+      const page = positiveInteger(url.searchParams.get("page"), 1, 100000);
+      const limit = positiveInteger(url.searchParams.get("limit"), 25, 100);
+      const action = boundedFilter(url.searchParams.get("action"), 120);
+      const actor = boundedFilter(url.searchParams.get("actor"), 256);
+      const target = boundedFilter(url.searchParams.get("target"), 256);
+      const from = isoFilter(url.searchParams.get("from"));
+      const to = isoFilter(url.searchParams.get("to"));
+      if (page === null || limit === null || action === undefined || actor === undefined || target === undefined || from === undefined || to === undefined) {
+        return json({ error: "INVALID_AUDIT_FILTER" }, 400);
+      }
+      if (from && to && Date.parse(from) > Date.parse(to)) return json({ error: "INVALID_AUDIT_DATE_RANGE" }, 400);
+      const offset = (page - 1) * limit;
+
+      const countRows = await sql`
+        select count(*)::int as total
+        from public.platform_admin_audit a
+        left join neon_auth.user nu on nu.id::text = a.actor_auth_user_id
+        where (${action}::text is null or a.action = ${action})
+          and (${actor}::text is null or position(lower(${actor}) in lower(concat_ws(' ', a.actor_auth_user_id, nullif(to_jsonb(nu)->>'name', ''), nullif(to_jsonb(nu)->>'email', '')))) > 0)
+          and (${target}::text is null or position(lower(${target}) in lower(concat_ws(' ', a.target_type, a.target_id))) > 0)
+          and (${from}::timestamptz is null or a.created_at >= ${from}::timestamptz)
+          and (${to}::timestamptz is null or a.created_at <= ${to}::timestamptz)
+      ` as AuditCountRow[];
+      const rows = await sql`
+        select
+          a.id::text as id,
+          a.actor_auth_user_id,
+          nullif(to_jsonb(nu)->>'name', '') as actor_name,
+          nullif(to_jsonb(nu)->>'email', '') as actor_email,
+          a.action,
+          a.target_type,
+          a.target_id,
+          a.metadata,
+          a.created_at
+        from public.platform_admin_audit a
+        left join neon_auth.user nu on nu.id::text = a.actor_auth_user_id
+        where (${action}::text is null or a.action = ${action})
+          and (${actor}::text is null or position(lower(${actor}) in lower(concat_ws(' ', a.actor_auth_user_id, nullif(to_jsonb(nu)->>'name', ''), nullif(to_jsonb(nu)->>'email', '')))) > 0)
+          and (${target}::text is null or position(lower(${target}) in lower(concat_ws(' ', a.target_type, a.target_id))) > 0)
+          and (${from}::timestamptz is null or a.created_at >= ${from}::timestamptz)
+          and (${to}::timestamptz is null or a.created_at <= ${to}::timestamptz)
+        order by a.created_at desc, a.id desc
+        limit ${limit} offset ${offset}
+      ` as AuditRow[];
+      const total = Number(countRows[0]?.total ?? 0);
+      return json({
+        audit: rows.map((row) => ({ ...row, metadata: safeAuditMetadata(row.metadata) })),
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+        filters: { action, actor, target, from, to },
+      });
     }
 
     const customerMatch = path.match(/^\/api\/admin\/customers\/([^/]+)$/);
