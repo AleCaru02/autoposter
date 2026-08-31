@@ -21,6 +21,8 @@ type Customer = {
   created_at: string | null;
   platform_role: "CUSTOMER" | "SUPER_ADMIN";
   banned: boolean | null;
+  ban_reason: string | null;
+  ban_expires: string | null;
   profile_count: number;
   onboarding_completed: number;
   onboarding_incomplete: number;
@@ -247,7 +249,7 @@ function CustomerDetailPage() {
   const socialMap = new Map(data.socialConnectionsByProfile.map((item) => [item.profile_id, item.connections]));
   const banPanel = data.customer.platform_role === "SUPER_ADMIN"
     ? <section className="admin-section admin-ban-panel"><h2>Accesso account</h2><p className="admin-muted">Ban/Unban non disponibile per account SUPER_ADMIN.</p></section>
-    : <AdminBanPanel customerId={data.customer.auth_user_id} customerName={data.customer.name || data.customer.email || "Cliente"} initialBanned={data.customer.banned === true} />;
+    : <AdminBanPanel customerId={data.customer.auth_user_id} customerName={data.customer.name || data.customer.email || "Cliente"} initialBanned={data.customer.banned === true} initialReason={data.customer.ban_reason} initialExpiresAt={data.customer.ban_expires} />;
   const sessionPanel = data.customer.platform_role === "SUPER_ADMIN"
     ? <section className="admin-section admin-sessions-section"><h2>Sessioni attive</h2><p className="admin-muted">Gestione sessioni non disponibile per account SUPER_ADMIN.</p></section>
     : <CustomerSessions customerId={data.customer.auth_user_id} />;
