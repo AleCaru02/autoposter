@@ -84,26 +84,21 @@ function unwrapSessions(body) {
 function getSessionRecord(body) {
   return body?.session || body?.data?.session || null;
 }
-
 function getUserRecord(body) {
   return body?.user || body?.data?.user || null;
 }
-
 async function getSession(jar) {
   const response = await authFetch(jar, "/get-session");
   const body = await readJson(response);
   return { response, body, session: getSessionRecord(body), user: getUserRecord(body) };
 }
-
 function isSessionActive(result) {
   return Boolean(result.response.ok && result.session && result.user && typeof result.user.id === "string");
 }
-
 async function adminPost(jar, path, body) {
   const response = await authFetch(jar, path, { method: "POST", body: JSON.stringify(body) });
   return { response, body: await readJson(response) };
 }
-
 async function adminPostBearer(token, path, body) {
   const response = await authFetch(null, path, {
     method: "POST",
@@ -112,7 +107,6 @@ async function adminPostBearer(token, path, body) {
   });
   return { response, body: await readJson(response) };
 }
-
 async function getSessionBearer(token) {
   const response = await authFetch(null, "/get-session", { headers: { authorization: `Bearer ${token}` } });
   const body = await readJson(response);
@@ -124,37 +118,22 @@ function valueType(value) {
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
-
 function classifyField(field) {
   const normalized = field.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (["token", "sessiontoken", "jwt", "accesstoken", "refreshtoken", "cookie", "authorization", "secret", "credential"].includes(normalized)) {
-    return { classification: "SECRET_DO_NOT_EXPOSE", intendedUse: "provider operation only; never browser/API response" };
-  }
-  if (["id", "createdat", "updatedat", "expiresat", "ipaddress", "useragent"].includes(normalized)) {
-    return { classification: "SAFE_TO_DISPLAY", intendedUse: "admin session list" };
-  }
-  if (["userid", "impersonatedby"].includes(normalized)) {
-    return { classification: "SERVER_ONLY", intendedUse: "target consistency / security checks" };
-  }
+  if (["token", "sessiontoken", "jwt", "accesstoken", "refreshtoken", "cookie", "authorization", "secret", "credential"].includes(normalized)) return { classification: "SECRET_DO_NOT_EXPOSE", intendedUse: "provider operation only; never browser/API response" };
+  if (["id", "createdat", "updatedat", "expiresat", "ipaddress", "useragent"].includes(normalized)) return { classification: "SAFE_TO_DISPLAY", intendedUse: "admin session list" };
+  if (["userid", "impersonatedby"].includes(normalized)) return { classification: "SERVER_ONLY", intendedUse: "target consistency / security checks" };
   return { classification: "SERVER_ONLY", intendedUse: "not exposed unless explicitly reviewed" };
 }
-
 function classifySessionFields(sessions) {
   const keys = [...new Set(sessions.flatMap((session) => session && typeof session === "object" ? Object.keys(session) : []))].sort();
   return keys.map((field) => {
     const values = sessions.filter((session) => session && Object.prototype.hasOwnProperty.call(session, field)).map((session) => session[field]);
     const types = [...new Set(values.map(valueType))].sort();
     const meta = classifyField(field);
-    return {
-      field,
-      present: values.length === sessions.length ? "YES" : `PARTIAL_${values.length}_OF_${sessions.length}`,
-      type: types.join("|") || "unknown",
-      classification: meta.classification,
-      intendedUse: meta.intendedUse,
-    };
+    return { field, present: values.length === sessions.length ? "YES" : `PARTIAL_${values.length}_OF_${sessions.length}`, type: types.join("|") || "unknown", classification: meta.classification, intendedUse: meta.intendedUse };
   });
 }
-
 function extractSessionToken(session) {
   if (!session || typeof session !== "object") return "";
   const token = session.token || session.sessionToken || "";
@@ -169,21 +148,32 @@ assert.notEqual(customerPrimary.id, admin.id, "admin/customer identity collision
 
 const primaryBefore = await getSession(customerPrimary.jar);
 const secondaryBefore = await getSession(customerSecondary.jar);
+const adminBefore = await getSession(admin.jar);
 assert.ok(isSessionActive(primaryBefore), "CUSTOMER_SMOKE primary session not active before probe");
 assert.ok(isSessionActive(secondaryBefore), "CUSTOMER_SMOKE secondary session not active before probe");
+assert.ok(isSessionActive(adminBefore), "ADMIN_SMOKE session not active before probe");
 
 const customerDenied = await adminPost(customerPrimary.jar, "/admin/list-user-sessions", { userId: customerPrimary.id });
 assert.equal(customerDenied.response.status, 403, `CUSTOMER_SMOKE admin plugin access expected 403, got ${customerDenied.response.status}`);
 
-// Product bridge probe: the Worker currently receives a Neon JWT from authClient.token().
-// Test whether Managed Auth Admin Plugin accepts that JWT without Better Auth cookies.
 const bearerGetSession = await getSessionBearer(admin.token);
 const bearerList = await adminPostBearer(admin.token, "/admin/list-user-sessions", { userId: customerPrimary.id });
-const bearerBridge = {
+const jwtBearerBridge = {
   getSessionStatus: bearerGetSession.response.status,
   getSessionAuthenticated: Boolean(bearerGetSession.response.ok && bearerGetSession.user?.id === admin.id),
   listStatus: bearerList.response.status,
   listAccepted: bearerList.response.ok && Array.isArray(unwrapSessions(bearerList.body)),
+};
+
+const adminSessionToken = extractSessionToken(adminBefore.session);
+assert.ok(adminSessionToken.length >= 16, "ADMIN_SMOKE native session token unavailable");
+const sessionTokenGetSession = await getSessionBearer(adminSessionToken);
+const sessionTokenList = await adminPostBearer(adminSessionToken, "/admin/list-user-sessions", { userId: customerPrimary.id });
+const sessionTokenBearerBridge = {
+  getSessionStatus: sessionTokenGetSession.response.status,
+  getSessionAuthenticated: Boolean(sessionTokenGetSession.response.ok && sessionTokenGetSession.user?.id === admin.id),
+  listStatus: sessionTokenList.response.status,
+  listAccepted: sessionTokenList.response.ok && Array.isArray(unwrapSessions(sessionTokenList.body)),
 };
 
 const list = await adminPost(admin.jar, "/admin/list-user-sessions", { userId: customerPrimary.id });
@@ -196,10 +186,8 @@ assert.ok(fields.length > 0, "session field contract empty");
 
 const primaryToken = extractSessionToken(primaryBefore.session);
 assert.ok(primaryToken.length >= 16, "current CUSTOMER_SMOKE session token unavailable for revoke probe");
-
 const revokeSingle = await adminPost(admin.jar, "/admin/revoke-user-session", { sessionToken: primaryToken });
 assert.ok(revokeSingle.response.ok, `revoke-user-session failed (${revokeSingle.response.status})`);
-
 const primaryAfter = await getSession(customerPrimary.jar);
 assert.equal(isSessionActive(primaryAfter), false, "revoked CUSTOMER_SMOKE session remained valid");
 const secondaryAfterSingle = await getSession(customerSecondary.jar);
@@ -209,13 +197,10 @@ const beforeAll = await adminPost(admin.jar, "/admin/list-user-sessions", { user
 assert.ok(beforeAll.response.ok, `list-user-sessions before revoke-all failed (${beforeAll.response.status})`);
 const sessionsBeforeAll = unwrapSessions(beforeAll.body);
 assert.ok(Array.isArray(sessionsBeforeAll) && sessionsBeforeAll.length >= 1, "no remaining session available for revoke-all probe");
-
 const revokeAll = await adminPost(admin.jar, "/admin/revoke-user-sessions", { userId: customerPrimary.id });
 assert.ok(revokeAll.response.ok, `revoke-user-sessions failed (${revokeAll.response.status})`);
-
 const secondaryAfterAll = await getSession(customerSecondary.jar);
 assert.equal(isSessionActive(secondaryAfterAll), false, "revoke-all left CUSTOMER_SMOKE session valid");
-
 const afterAll = await adminPost(admin.jar, "/admin/list-user-sessions", { userId: customerPrimary.id });
 assert.ok(afterAll.response.ok, `list-user-sessions after revoke-all failed (${afterAll.response.status})`);
 const sessionsAfterAll = unwrapSessions(afterAll.body);
@@ -229,7 +214,8 @@ console.log("SESSION_PROVIDER_CONTRACT: PASS", JSON.stringify({
   revokeSingle: "PASS",
   invalidationE2E: "PASS",
   revokeAll: "PASS",
-  bearerBridge,
+  jwtBearerBridge,
+  sessionTokenBearerBridge,
   fields,
   secretFieldNames: secretFields,
   rawPayloadLogged: false,
