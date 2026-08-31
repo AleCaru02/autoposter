@@ -37,8 +37,9 @@ assert.equal(adminApi.includes("requireSuperAdmin(request, env)"), true, "admin 
 assert.equal(adminApi.indexOf("requireSuperAdmin(request, env)") < adminApi.indexOf('if (path === "/api/admin/me")'), true, "authorization must happen before every admin endpoint branch");
 assert.equal(adminApi.includes("request.json("), false, "read-only FASE 3 admin APIs must not accept a browser-supplied role/body");
 assert.equal(adminApi.includes("profile_members") && adminApi.includes("platform_role"), true, "admin detail may report workspace membership but platform role remains separate");
-assert.equal(adminClientSource.includes("authClient.token()"), true, "Admin UI must request the Managed Auth JWT using the documented token() API");
-assert.equal(adminClientSource.includes("getJWTToken"), false, "Admin UI must not rely on a nonexistent optional getJWTToken bridge");
+assert.equal(adminClientSource.includes("authClient.token("), true, "Admin UI must request the Managed Auth JWT using token()");
+assert.equal(adminClientSource.includes('"X-Force-Fetch": "1"'), true, "Admin token retrieval must bypass Neon get-session cache so /token reaches Managed Auth");
+assert.equal(adminClientSource.includes("getJWTToken"), false, "Admin UI must not reintroduce getJWTToken");
 assert.equal(adminClientSource.includes('authorization: `Bearer ${token}`'), true, "Admin UI must forward the verified Managed Auth JWT as a Bearer token to the Worker");
 assert.equal(adminClientSource.includes("localStorage") || adminClientSource.includes("sessionStorage"), false, "Admin API client must not derive authorization from browser storage");
 assert.equal(ownerMigration.includes("profile_members_owner_read"), true, "workspace OWNER membership must remain customer read-only");
