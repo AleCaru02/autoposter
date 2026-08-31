@@ -56,7 +56,14 @@ jobs:
             --config tests/wrangler.audit-runtime.jsonc \
             --keep-vars \
             --preview-alias "$AUDIT_PREVIEW_ALIAS" \
-            --secrets-file .audit-runtime-secrets.env
+            --secrets-file .audit-runtime-secrets.env | tee audit-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' audit-upload.log | tail -n 1)
+          if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
+            echo "preview version id not captured" >&2
+            exit 1
+          fi
+          echo "AUDIT_PREVIEW_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          echo "AUDIT_PREVIEW_UPLOADED=true" >> "$GITHUB_ENV"
 
       - name: Preview controller preflight
         shell: bash
@@ -144,6 +151,52 @@ jobs:
           console.log('AUDIT_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ nativeAdminUsers: auth.managedAuth.nativeAdminUsers, profilesTotal: tenant.ownerContract.profilesTotal, profilesWithoutOwner: tenant.ownerContract.profilesWithoutOwner }));
           NODE
 
+      - name: Delete non-deployed preview controller version
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ "${AUDIT_PREVIEW_UPLOADED:-}" != "true" ]; then
+            echo "AUDIT_PREVIEW_CONTROLLER_CLEANUP: no preview version was uploaded"
+            exit 0
+          fi
+          if ! printf '%s' "${AUDIT_PREVIEW_VERSION_ID:-}" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
+            echo "preview version id unavailable for cleanup" >&2
+            exit 1
+          fi
+          delete_status=$(curl -sS -o audit-version-delete.json -w "%{http_code}" \
+            -X DELETE \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/autoposter/versions/$AUDIT_PREVIEW_VERSION_ID")
+          if [ "$delete_status" != "200" ]; then
+            echo "preview version delete failed HTTP $delete_status" >&2
+            exit 1
+          fi
+          DELETE_STATUS="$delete_status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('audit-version-delete.json', 'utf8'));
+          if (process.env.DELETE_STATUS !== '200' || body?.success !== true) throw new Error('preview version delete response invalid');
+          NODE
+          verify_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/autoposter/versions/$AUDIT_PREVIEW_VERSION_ID" || true)
+          if [ "$verify_status" != "404" ]; then
+            echo "preview version still addressable after delete: HTTP $verify_status" >&2
+            exit 1
+          fi
+          controller_status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+            --data "{\"action\":\"state\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
+            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          if [ "$controller_status" = "200" ]; then
+            echo "preview controller remained usable after version deletion" >&2
+            exit 1
+          fi
+          echo "AUDIT_PREVIEW_CONTROLLER_CLEANUP: PASS — version deleted; preview controller unusable; never deployed to production traffic"
+
       - name: Remove local ephemeral credential material
         if: always()
         shell: bash
@@ -153,4 +206,4 @@ jobs:
             chmod 600 .audit-runtime-secrets.env || true
             shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env
           fi
-          rm -f audit-preflight.json audit-cleanup.json tenant-audit.json auth-audit.json
+          rm -f audit-preflight.json audit-cleanup.json tenant-audit.json auth-audit.json audit-upload.log audit-version-delete.json
