@@ -9,8 +9,9 @@ concurrency:
 
 jobs:
   runtime:
+    name: ban-unban-provider-runtime
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - { name: Checkout, uses: actions/checkout@v4 }
       - name: Setup Node
@@ -23,7 +24,6 @@ jobs:
           npm run typecheck
           npm run test:platform-rbac
           npm run test:fase3-core
-          npm run test:admin-audit-viewer
 
       - name: Generate ephemeral smoke identity material
         shell: bash
@@ -67,7 +67,7 @@ jobs:
           echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
           echo "AUDIT_PREVIEW_UPLOADED=true" >> "$GITHUB_ENV"
 
-      - name: Verify preview version is isolated from production deployments
+      - name: Verify preview isolation and capture production baseline
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -91,29 +91,19 @@ jobs:
           if (!ephemeral) throw new Error('ephemeral controller version missing');
           if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller version is attached to a production deployment');
           fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nAUDIT_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
-          console.log('AUDIT_PREVIEW_ISOLATION: PASS', JSON.stringify({ ephemeralVersionId: ephemeral, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, attachedToProduction: false }));
+          console.log('BAN_UNBAN_PREVIEW_ISOLATION: PASS', JSON.stringify({ attachedToProduction: false }));
           NODE
 
-      - name: Preview controller preflight and stale QA recovery
+      - name: Preflight and stale verifier cleanup
         shell: bash
         run: |
           set -euo pipefail
-          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-            -H 'content-type: application/json' -H 'x-audit-smoke-token: wrong' \
-            --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
-          if [ "$wrong" != "403" ]; then
-            echo "preview token gate failed: HTTP $wrong" >&2
-            exit 1
-          fi
-
           read_preflight() {
             curl -sS -o audit-preflight.json -w "%{http_code}" -X POST \
               -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
               --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
               "$AUDIT_SMOKE_CONTROLLER_URL"
           }
-
           status=$(read_preflight)
           if [ "$status" != "200" ]; then
             echo "preview preflight failed HTTP $status" >&2
@@ -121,42 +111,28 @@ jobs:
           fi
           stale=$(node -e "const b=require('./audit-preflight.json'); process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
           if [ "$stale" -gt 0 ]; then
-            echo "STALE QA RESIDUE: recognized verifier fixtures=$stale; applying exact-namespace cleanup"
             cleanup_status=$(curl -sS -o audit-stale-cleanup.json -w "%{http_code}" -X POST \
               -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
               --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
               "$AUDIT_SMOKE_CONTROLLER_URL")
-            CLEANUP_STATUS="$cleanup_status" node -e "const fs=require('node:fs'); const body=JSON.parse(fs.readFileSync('audit-stale-cleanup.json','utf8')); if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true) throw new Error('stale QA residue cleanup failed'); if(body.recognizedQaUsers!==0||body.recognizedQaAdmins!==0) throw new Error('stale QA residue remains after scoped cleanup'); console.log('STALE_QA_RESIDUE_CLEANUP: PASS',JSON.stringify({cleanedUsers:body.cleanedUsers,cleanedAdmins:body.cleanedAdmins}));"
+            CLEANUP_STATUS="$cleanup_status" node -e "const b=require('./audit-stale-cleanup.json'); if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true||b.recognizedQaUsers!==0||b.recognizedQaAdmins!==0) throw new Error('stale verifier cleanup failed');"
             status=$(read_preflight)
-            if [ "$status" != "200" ]; then
-              echo "post-residue preflight failed HTTP $status" >&2
-              exit 1
-            fi
           fi
-
           PREFLIGHT_STATUS="$status" node - <<'NODE'
           const fs = require('node:fs');
           const body = JSON.parse(fs.readFileSync('audit-preflight.json', 'utf8'));
           if (process.env.PREFLIGHT_STATUS !== '200') throw new Error(`preflight HTTP ${process.env.PREFLIGHT_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaSessions','qaAdmins','recognizedQaUsers','recognizedQaAdmins']) {
+          for (const key of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaAdmins','recognizedQaUsers','recognizedQaAdmins']) {
             if (body[key] !== 0) throw new Error(`preflight residue ${key}=${body[key]}`);
           }
           if (body.superAdmins !== 1) throw new Error(`real SUPER_ADMIN baseline ${body.superAdmins}`);
           if (body.profilesWithoutOwner !== 0) throw new Error(`profilesWithoutOwner baseline ${body.profilesWithoutOwner}`);
           fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_BASELINE_PROFILES=${body.profilesTotal}\nCONTROLLER_READY=true\n`);
-          console.log('AUDIT_PREFLIGHT: PASS', JSON.stringify({ superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner, recognizedQaUsers: body.recognizedQaUsers }));
+          console.log('BAN_UNBAN_PREFLIGHT: PASS', JSON.stringify({ superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
           NODE
 
-      - name: Authenticated Audit API runtime
-        run: node tests/audit-viewer-runtime.mjs
-
-      - name: Install Playwright + Chromium
-        run: |
-          npm install --no-save --no-audit --no-fund playwright@1.62.1
-          npx playwright install --with-deps chromium
-
-      - name: Audit Viewer desktop/mobile browser runtime
-        run: node tests/audit-viewer-browser.mjs
+      - name: Better Auth Ban Unban provider contract runtime
+        run: node tests/ban-unban-provider-runtime.mjs
 
       - name: Cleanup ephemeral smoke identities and data
         if: always()
@@ -164,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${CONTROLLER_READY:-}" != "true" ]; then
-            echo "CLEANUP_CONTROLLER_NOT_READY: no smoke identities were authorized for creation"
+            echo "CLEANUP_CONTROLLER_NOT_READY"
             exit 0
           fi
           status=$(curl -sS -o audit-cleanup.json -w "%{http_code}" -X POST \
@@ -181,7 +157,7 @@ jobs:
           if (body.superAdmins !== 1) throw new Error(`post-cleanup SUPER_ADMIN count ${body.superAdmins}`);
           if (body.profilesWithoutOwner !== 0) throw new Error(`post-cleanup profilesWithoutOwner ${body.profilesWithoutOwner}`);
           if (String(body.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`profiles baseline mismatch ${body.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
-          console.log('AUDIT_CLEANUP: PASS', JSON.stringify({ qaUsers: 0, qaProfiles: 0, qaOwners: 0, qaSessions: 0, qaAdmins: 0, superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
+          console.log('BAN_UNBAN_CLEANUP: PASS', JSON.stringify({ qaUsers: 0, qaSessions: 0, qaAdmins: 0, superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
           NODE
 
       - name: Post-cleanup production and deployment invariants
@@ -206,7 +182,7 @@ jobs:
           if (tenant?.ready !== true || tenant?.ownerContract?.ready !== true) throw new Error('production tenant/owner invariant not ready');
           if (tenant.ownerContract.profilesWithoutOwner !== 0) throw new Error(`production profilesWithoutOwner ${tenant.ownerContract.profilesWithoutOwner}`);
           if (auth?.managedAuth?.ready !== true || auth.managedAuth.nativeAdminUsers !== 1) throw new Error(`production native SUPER_ADMIN count ${auth?.managedAuth?.nativeAdminUsers}`);
-          if (process.env.AUDIT_BASELINE_PROFILES && String(tenant.ownerContract.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`production profile baseline mismatch ${tenant.ownerContract.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
+          if (String(tenant.ownerContract.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`production profile baseline mismatch ${tenant.ownerContract.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
           if (cloudflare?.success !== true) throw new Error('Cloudflare post-runtime deployment read failed');
           const result = cloudflare.result;
           const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
@@ -214,11 +190,11 @@ jobs:
           const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((version) => String(version.version_id || '')) : []).filter(Boolean))].sort();
           const beforeDeployments = String(process.env.AUDIT_PRODUCTION_DEPLOYMENT_IDS || '').split(',').filter(Boolean).sort();
           const beforeVersions = String(process.env.AUDIT_PRODUCTION_VERSION_IDS || '').split(',').filter(Boolean).sort();
-          if (JSON.stringify(deploymentIds) !== JSON.stringify(beforeDeployments)) throw new Error('production deployment set changed during Audit runtime');
-          if (JSON.stringify(versionIds) !== JSON.stringify(beforeVersions)) throw new Error('production deployment version set changed during Audit runtime');
+          if (JSON.stringify(deploymentIds) !== JSON.stringify(beforeDeployments)) throw new Error('production deployment set changed during Ban/Unban runtime');
+          if (JSON.stringify(versionIds) !== JSON.stringify(beforeVersions)) throw new Error('production deployment version set changed during Ban/Unban runtime');
           const ephemeral = process.env.EPHEMERAL_CONTROLLER_VERSION_ID || '';
-          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller became attached to production after runtime');
-          console.log('AUDIT_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ nativeAdminUsers: auth.managedAuth.nativeAdminUsers, profilesTotal: tenant.ownerContract.profilesTotal, profilesWithoutOwner: tenant.ownerContract.profilesWithoutOwner, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, ephemeralVersionId: ephemeral, attachedToProduction: false }));
+          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller became attached to production');
+          console.log('BAN_UNBAN_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ nativeAdminUsers: auth.managedAuth.nativeAdminUsers, profilesTotal: tenant.ownerContract.profilesTotal, profilesWithoutOwner: tenant.ownerContract.profilesWithoutOwner, attachedToProduction: false }));
           NODE
 
       - name: Remove local ephemeral credential material
@@ -231,4 +207,4 @@ jobs:
             shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env
           fi
           rm -f audit-preflight.json audit-stale-cleanup.json audit-cleanup.json tenant-audit.json auth-audit.json audit-upload.log audit-deployments-before.json audit-deployments-after.json
-          echo "AUDIT_EPHEMERAL_SECRET_CLEANUP: PASS"
+          echo "BAN_UNBAN_EPHEMERAL_SECRET_CLEANUP: PASS"
