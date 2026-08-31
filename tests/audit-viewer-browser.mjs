@@ -99,9 +99,9 @@ async function verifyDesktop(browser) {
     const { page, diag } = await openAdminAudit(context, "desktop");
     await page.getByRole("link", { name: "Audit", exact: true }).waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".admin-audit-desktop tbody tr").first().waitFor({ state: "visible", timeout: 20000 });
-    await page.getByRole("navigation", { name: "Paginazione audit" }).waitFor({ state: "visible", timeout: 10000 });
+    await page.getByRole("navigation", { name: "Paginazione audit", exact: true }).waitFor({ state: "visible", timeout: 10000 });
 
-    const actionInput = page.getByLabel("Azione");
+    const actionInput = page.getByRole("combobox", { name: "Azione", exact: true });
     await actionInput.fill("ADMIN_ACCESS");
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/admin/audit?") && response.status() === 200, { timeout: 20000 }),
@@ -111,7 +111,7 @@ async function verifyDesktop(browser) {
     const codes = await page.locator(".admin-audit-desktop tbody tr td:nth-child(2) code").allTextContents();
     assert.ok(codes.length > 0 && codes.every((value) => value === "ADMIN_ACCESS"), "desktop action filter mixed results");
 
-    await page.getByLabel("Actor").fill(`audit-smoke-no-match-${marker}`);
+    await page.getByRole("textbox", { name: "Actor", exact: true }).fill(`audit-smoke-no-match-${marker}`);
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/admin/audit?") && response.status() === 200, { timeout: 20000 }),
       page.getByRole("button", { name: "Applica filtri", exact: true }).click(),
@@ -140,8 +140,8 @@ async function verifyMobile(browser) {
     await page.getByRole("link", { name: "Audit", exact: true }).waitFor({ state: "visible", timeout: 10000 });
     const firstCard = page.locator(".admin-audit-mobile .admin-audit-card").first();
     await firstCard.waitFor({ state: "visible", timeout: 20000 });
-    await page.getByRole("navigation", { name: "Paginazione audit" }).waitFor({ state: "visible", timeout: 10000 });
-    await page.getByLabel("Azione").fill("ADMIN_ACCESS");
+    await page.getByRole("navigation", { name: "Paginazione audit", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+    await page.getByRole("combobox", { name: "Azione", exact: true }).fill("ADMIN_ACCESS");
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/admin/audit?") && response.status() === 200, { timeout: 20000 }),
       page.getByRole("button", { name: "Applica filtri", exact: true }).click(),
