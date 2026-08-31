@@ -2,6 +2,8 @@ name: Audit Viewer Authenticated Runtime
 
 on:
   workflow_dispatch:
+  push:
+    branches: [verify/session-management-api-runtime]
 
 concurrency:
   group: audit-viewer-authenticated-runtime
@@ -24,6 +26,7 @@ jobs:
           npm run test:platform-rbac
           npm run test:fase3-core
           npm run test:admin-audit-viewer
+          npm run test:admin-session-management
 
       - name: Generate ephemeral smoke identity material
         shell: bash
@@ -149,6 +152,9 @@ jobs:
 
       - name: Authenticated Audit API runtime
         run: node tests/audit-viewer-runtime.mjs
+
+      - name: Session Management product API runtime
+        run: node tests/session-management-api-runtime.mjs
 
       - name: Install Playwright + Chromium
         run: |
