@@ -8,11 +8,11 @@ const config = fs.readFileSync("tests/wrangler.auth-feasibility.jsonc", "utf8");
 
 assert.match(worker, /const AUTH_UPSTREAM = "https:\/\/ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
 assert.match(worker, /const APP_ORIGIN = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
-assert.match(worker, /const APP_HOST = "autoposter\.02alessandrocaruso\.workers\.dev"/);
 assert.match(worker, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(worker, /REQUEST_ALLOWLIST/);
-assert.match(worker, /headers\.set\("x-forwarded-host", APP_HOST\)/);
-assert.match(worker, /headers\.set\("x-forwarded-proto", "https"\)/);
+assert.match(worker, /FORWARDED_FROM_CLIENT/);
+assert.match(worker, /INVALID_HOSTNAME/);
+assert.doesNotMatch(worker, /headers\.set\("x-forwarded-(?:host|proto)"/);
 assert.match(worker, /request\.headers\.get\("origin"\) !== APP_ORIGIN/);
 assert.match(worker, /ORIGIN_NOT_ALLOWED/);
 assert.match(worker, /cache-control", "no-store"/i);
