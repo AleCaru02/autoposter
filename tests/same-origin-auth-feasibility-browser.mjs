@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
-const base = process.env.AUTH_FEASIBILITY_BASE || "";
+const previewBase = process.env.AUTH_FEASIBILITY_BASE || "";
 const marker = process.env.AUTH_FEASIBILITY_MARKER || "";
 const password = process.env.AUTH_FEASIBILITY_PASSWORD || "";
-assert.match(base, /^https:\/\/[a-z0-9-]+-autoposter\.02alessandrocaruso\.workers\.dev$/);
+const appOrigin = "https://autoposter.02alessandrocaruso.workers.dev";
+assert.match(previewBase, /^https:\/\/[a-z0-9-]+-autoposter\.02alessandrocaruso\.workers\.dev$/);
 assert.match(marker, /^[a-z0-9]{10,32}$/);
 assert.ok(password.length >= 24);
 
@@ -39,6 +40,14 @@ function cookieAttributes(raw) {
   };
 }
 
+function safeFailure(body) {
+  if (!body || typeof body !== "object") return { bodyType: typeof body };
+  const record = body;
+  const keys = Object.keys(record).slice(0, 20);
+  const code = typeof record.code === "string" ? record.code : typeof record.error === "string" ? record.error : null;
+  return { keys, code };
+}
+
 async function pageJson(page, path, init = {}) {
   return page.evaluate(async ({ path, init }) => {
     const response = await fetch(path, { ...init, credentials: "include" });
@@ -50,10 +59,47 @@ async function pageJson(page, path, init = {}) {
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
+let directNeonBrowserRequest = false;
+
+await context.route(`${appOrigin}/__qa/auth-feasibility`, async (route) => {
+  await route.fulfill({
+    status: 200,
+    contentType: "text/html; charset=utf-8",
+    headers: { "cache-control": "no-store" },
+    body: "<!doctype html><meta charset=utf-8><title>Auth feasibility</title><main>same-origin auth feasibility</main>",
+  });
+});
+
+await context.route(`${appOrigin}/api/auth/**`, async (route) => {
+  const request = route.request();
+  const original = new URL(request.url());
+  const preview = new URL(previewBase);
+  preview.pathname = original.pathname;
+  preview.search = original.search;
+  const headers = await request.allHeaders();
+  delete headers.host;
+  const response = await route.fetch({ url: preview.toString(), headers, maxRedirects: 0 });
+  await route.fulfill({ response });
+});
+
 const page = await context.newPage();
+page.on("request", (request) => {
+  try {
+    if (new URL(request.url()).hostname.includes("neonauth")) directNeonBrowserRequest = true;
+  } catch { /* ignore */ }
+});
+
 try {
-  const loaded = await page.goto(`${base}/__qa/auth-feasibility`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  const foreign = await fetch(`${previewBase}/api/auth/sign-up/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", origin: "https://evil.invalid" },
+    body: "{}",
+  });
+  assert.equal(foreign.status, 403, "foreign Origin was not denied by feasibility proxy");
+
+  const loaded = await page.goto(`${appOrigin}/__qa/auth-feasibility`, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.equal(loaded?.status(), 200);
+  assert.equal(new URL(page.url()).origin, appOrigin, "browser is not running on real app origin");
 
   const signUpResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/sign-up/email", { timeout: 30000 });
   const signUp = await pageJson(page, "/api/auth/sign-up/email", {
@@ -62,6 +108,7 @@ try {
     body: JSON.stringify({ email, password, name }),
   });
   const signUpNetwork = await signUpResponsePromise;
+  if (!signUp.ok) console.log("SAME_ORIGIN_AUTH_FEASIBILITY_SAFE_FAILURE:", JSON.stringify({ stage: "sign-up", status: signUp.status, ...safeFailure(signUp.body) }));
   assert.ok(signUp.ok, `proxied sign-up failed (${signUp.status})`);
 
   const headerArray = await signUpNetwork.headersArray();
@@ -70,12 +117,12 @@ try {
   assert.ok(setCookieSummaries.every((cookie) => cookie.name && cookie.httpOnly && cookie.secure), "credential cookie missing HttpOnly/Secure");
   assert.ok(setCookieSummaries.every((cookie) => !cookie.domainPresent || !cookie.domain?.includes("neonauth")), "cookie remains bound to Neon auth domain");
 
-  const stored = await context.cookies(base);
+  const stored = await context.cookies(appOrigin);
   const setNames = new Set(setCookieSummaries.map((cookie) => cookie.name));
   const storedRelevant = stored.filter((cookie) => setNames.has(cookie.name));
   assert.ok(storedRelevant.length >= 1, "browser did not store proxied auth cookie");
   assert.ok(storedRelevant.every((cookie) => cookie.httpOnly && cookie.secure), "stored auth cookie security attributes changed");
-  assert.ok(storedRelevant.every((cookie) => !cookie.domain.includes("neonauth")), "browser stored cookie for Neon host instead of proxy host");
+  assert.ok(storedRelevant.every((cookie) => !cookie.domain.includes("neonauth")), "browser stored cookie for Neon host instead of app host");
 
   let cookieReturned = false;
   page.on("request", async (request) => {
@@ -100,6 +147,7 @@ try {
   const token = await pageJson(page, "/api/auth/token", { headers: { accept: "application/json" } });
   const nativeToken = token.body?.token || token.body?.data?.token || "";
   assert.ok(token.ok && typeof nativeToken === "string" && nativeToken.length > 40, "native token unavailable through same-origin proxy");
+  assert.equal(directNeonBrowserRequest, false, "browser bypassed same-origin auth boundary");
 
   const summary = {
     proxiedLoginResponse: "PASS",
@@ -110,6 +158,8 @@ try {
     sessionRecognized: "PASS",
     refreshPersistence: "PASS",
     nativeTokenFlow: "PASS",
+    foreignOrigin: "DENIED",
+    directNeonBrowserUsage: "NONE",
     sensitiveFindings: 0,
   };
   console.log("SAME_ORIGIN_AUTH_COOKIE_FEASIBILITY: PASS", JSON.stringify(summary));
