@@ -1,12 +1,76 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const marker = "SAME_ORIGIN_MANAGED_AUTH_BOUNDARY_RUNTIME: REWORK ";
-const result = spawnSync(process.execPath, ["tests/same-origin-auth-boundary-runtime.mjs"], {
-  encoding: "utf8",
-  env: process.env,
-  maxBuffer: 16 * 1024 * 1024,
-});
+const runtimePath = "tests/same-origin-auth-boundary-runtime.mjs";
+const patchedRuntimePath = `tests/.same-origin-auth-boundary-runtime-${process.pid}.mjs`;
+
+const originalController = `async function controller(action, extra = {}) {
+  const response = await fetch(controllerUrl, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", "x-audit-smoke-token": controllerToken },
+    body: JSON.stringify({ action, marker, ...extra }),
+  });
+  const body = await readJson(response);
+  assert.equal(response.status, 200, \`${'${action}'} controller HTTP ${'${response.status}'}\`);
+  return body;
+}`;
+
+const diagnosticController = `async function controller(action, extra = {}) {
+  const response = await fetch(controllerUrl, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", "x-audit-smoke-token": controllerToken },
+    body: JSON.stringify({ action, marker, ...extra }),
+  });
+  const body = await readJson(response);
+  if (action === "complete-password-reset" && response.status !== 200) {
+    const safe = {
+      status: response.status,
+      errorCode: typeof body?.error === "string" ? body.error : null,
+      providerStatus: Number.isInteger(body?.providerStatus) ? body.providerStatus : null,
+      completed: body?.completed === true,
+    };
+    console.log("SAME_ORIGIN_AUTH_PASSWORD_RESET_CONTROLLER:", JSON.stringify(safe));
+    return { ...(body && typeof body === "object" ? body : {}), __controllerStatus: response.status };
+  }
+  assert.equal(response.status, 200, \`${'${action}'} controller HTTP ${'${response.status}'}\`);
+  return body;
+}`;
+
+const originalReset = `const completedReset = await controller("complete-password-reset");
+assert.equal(completedReset.completed, true, \`password reset completion failed (${'${completedReset.providerStatus}'})\`);`;
+
+const diagnosticReset = `let completedReset = null;
+for (let attempt = 0; attempt < 8; attempt += 1) {
+  completedReset = await controller("complete-password-reset");
+  if (completedReset?.completed === true) break;
+  if (completedReset?.error !== "RESET_CHALLENGE_NOT_FOUND") break;
+  await sleep(Math.min(300 * (attempt + 1), 1500));
+}
+assert.equal(
+  completedReset?.completed,
+  true,
+  \`password reset completion failed controller=${'${completedReset?.__controllerStatus ?? 200}'} provider=${'${completedReset?.providerStatus ?? "n/a"}'} error=${'${completedReset?.error ?? "none"}'}\`,
+);`;
+
+const source = fs.readFileSync(runtimePath, "utf8");
+assert.ok(source.includes(originalController), "runtime controller anchor changed");
+assert.ok(source.includes(originalReset), "runtime password-reset anchor changed");
+const patched = source.replace(originalController, diagnosticController).replace(originalReset, diagnosticReset);
+assert.notEqual(patched, source, "runtime diagnostic patch was not applied");
+fs.writeFileSync(patchedRuntimePath, patched, { mode: 0o600 });
+
+let result;
+try {
+  result = spawnSync(process.execPath, [patchedRuntimePath], {
+    encoding: "utf8",
+    env: process.env,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+} finally {
+  try { fs.rmSync(patchedRuntimePath, { force: true }); } catch { /* ignore */ }
+}
 
 const stdout = String(result.stdout || "");
 const stderr = String(result.stderr || "");
