@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 const worker = fs.readFileSync("tests/same-origin-auth-feasibility-worker.mjs", "utf8");
 const browser = fs.readFileSync("tests/same-origin-auth-feasibility-browser.mjs", "utf8");
-const workflow = fs.readFileSync(".github/workflows/same-origin-auth-feasibility.yml", "utf8");
+const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
 const config = fs.readFileSync("tests/wrangler.auth-feasibility.jsonc", "utf8");
 
 assert.match(worker, /const AUTH_UPSTREAM = "https:\/\/ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
@@ -28,10 +28,13 @@ assert.match(browser, /refreshPersistence/);
 assert.match(browser, /nativeTokenFlow/);
 assert.match(browser, /sensitiveFindings: 0/);
 assert.doesNotMatch(browser, /console\.log\([^\n]*(?:password|nativeToken|\.value)/);
+assert.match(workflow, /name: Audit Viewer Authenticated Runtime/);
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /\n\s*(push|pull_request|schedule):/);
 assert.match(workflow, /refs\/heads\/verify\/same-origin-auth-cookie-feasibility/);
+assert.match(workflow, /same-origin-auth-cookie-feasibility/);
 assert.match(workflow, /wrangler versions upload/);
+assert.match(workflow, /wrangler\.auth-feasibility\.jsonc/);
 assert.match(workflow, /--preview-alias/);
 assert.doesNotMatch(workflow, /wrangler (?:deploy|versions deploy)/);
 assert.match(workflow, /if: always\(\)/);
