@@ -59,6 +59,18 @@ for (const [key, value] of Object.entries(summary.impersonation || {})) {
 replayWithoutLegacyClassification();
 if (stderr) process.stderr.write(stderr);
 
+const supplement = spawnSync(process.execPath, ["tests/same-origin-auth-boundary-runtime-supplement.mjs"], {
+  encoding: "utf8",
+  env: process.env,
+  maxBuffer: 8 * 1024 * 1024,
+});
+if (supplement.stdout) process.stdout.write(String(supplement.stdout));
+if (supplement.stderr) process.stderr.write(String(supplement.stderr));
+if (supplement.status !== 0) process.exit(supplement.status === null ? 1 : supplement.status || 1);
+if (!String(supplement.stdout || "").includes("SAME_ORIGIN_AUTH_BOUNDARY_SUPPLEMENT: PASS")) {
+  throw new Error("same-origin supplemental runtime did not produce PASS marker");
+}
+
 const oauth = summary.authRuntime.oauthObservation || {};
 console.log("GOOGLE_OAUTH_PROTOCOL: PASS", JSON.stringify({
   providerHost: oauth.providerHost || null,
