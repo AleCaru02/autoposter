@@ -2,7 +2,6 @@ import controller from "./audit-viewer-qa-controller.mjs";
 
 const AUTH_UPSTREAM = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
 const APP_ORIGIN = "https://autoposter.02alessandrocaruso.workers.dev";
-const APP_HOST = "autoposter.02alessandrocaruso.workers.dev";
 const AUTH_PREFIX = "/api/auth";
 const CONTROL_PATH = "/__qa/control";
 const PAGE_PATH = "/__qa/auth-feasibility";
@@ -51,10 +50,11 @@ function requestHeaders(request) {
     if (HOP_BY_HOP.has(lower) || FORWARDED_FROM_CLIENT.has(lower) || !REQUEST_ALLOWLIST.has(lower)) continue;
     headers.append(name, value);
   }
-  // The preview verifier simulates the future production Worker boundary. These
-  // forwarded values are server-owned constants, never taken from client input.
-  headers.set("x-forwarded-host", APP_HOST);
-  headers.set("x-forwarded-proto", "https");
+  // Provider contract observation from runtime #35: Neon Managed Auth rejects an
+  // external forwarded hostname with INVALID_HOSTNAME. The feasibility proxy
+  // therefore keeps Neon as the canonical upstream host. The app Origin remains
+  // independently fail-closed at this Worker boundary and is never derived from
+  // client-controlled forwarded headers.
   return headers;
 }
 
