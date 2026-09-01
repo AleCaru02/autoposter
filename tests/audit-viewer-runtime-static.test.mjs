@@ -66,7 +66,8 @@ assert.doesNotMatch(runtime, /@gmail\.com|@outlook\.com|@hotmail\.com|@icloud\.c
 
 assert.match(browserRunner, /page\.evaluate/);
 assert.match(browserRunner, /credentials:\s*"include"/);
-assert.doesNotMatch(browserRunner, /context\.request\.(post|get)\(/);
+assert.match(browserRunner, /assert\.doesNotMatch\(source, \/context\\\.request/);
+assert.match(browserRunner, /patched verifier still uses BrowserContext\.request for provider session mutation/);
 assert.match(browserRunner, /browser native start response did not identify CUSTOMER_A/);
 assert.match(browserRunner, /browser cookie session did not switch to CUSTOMER_A after in-page native start/);
 assert.match(browserRunner, /source anchor missing/);
