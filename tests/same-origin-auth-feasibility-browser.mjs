@@ -4,7 +4,6 @@ import { chromium } from "playwright";
 const previewBase = process.env.AUTH_FEASIBILITY_BASE || "";
 const marker = process.env.AUTH_FEASIBILITY_MARKER || "";
 const password = process.env.AUTH_FEASIBILITY_PASSWORD || "";
-const appOrigin = "https://autoposter.02alessandrocaruso.workers.dev";
 assert.match(previewBase, /^https:\/\/[a-z0-9-]+-autoposter\.02alessandrocaruso\.workers\.dev$/);
 assert.match(marker, /^[a-z0-9]{10,32}$/);
 assert.ok(password.length >= 24);
@@ -60,27 +59,8 @@ async function pageJson(page, path, init = {}) {
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
 let directNeonBrowserRequest = false;
-
-// The preview alias cannot be attached to production traffic. Keep the browser on
-// the real preview network path so Set-Cookie is processed natively by Chromium,
-// and normalize only the request Origin/Referer after independently proving that
-// arbitrary foreign origins are rejected by the verifier proxy. The future
-// production Worker receives this same canonical app Origin without rewriting.
-await context.route(`${previewBase}/api/auth/**`, async (route) => {
-  const request = route.request();
-  const headers = await request.allHeaders();
-  delete headers.forwarded;
-  delete headers["x-forwarded-host"];
-  delete headers["x-forwarded-proto"];
-  delete headers["x-forwarded-for"];
-  if (request.method() === "POST") {
-    headers.origin = appOrigin;
-    headers.referer = `${appOrigin}/`;
-  }
-  await route.continue({ headers });
-});
-
 const page = await context.newPage();
+
 page.on("request", (request) => {
   try {
     if (new URL(request.url()).hostname.includes("neonauth")) directNeonBrowserRequest = true;
@@ -159,7 +139,8 @@ try {
     foreignOrigin: "DENIED",
     directNeonBrowserUsage: "NONE",
     browserTransport: "REAL_PREVIEW_NETWORK",
-    trustedOriginSimulation: "CANONICAL_APP_ORIGIN",
+    incomingOrigin: "NATIVE_SAME_ORIGIN",
+    providerOrigin: "CANONICAL_APP_ORIGIN_AFTER_BOUNDARY_VALIDATION",
     sensitiveFindings: 0,
   };
   console.log("SAME_ORIGIN_AUTH_COOKIE_FEASIBILITY: PASS", JSON.stringify(summary));
