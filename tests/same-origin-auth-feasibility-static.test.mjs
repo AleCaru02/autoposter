@@ -25,11 +25,15 @@ assert.doesNotMatch(worker, /console\.(?:log|error)\([^\n]*(?:cookie|authorizati
 assert.doesNotMatch(worker, /jwt\.sign|createToken|session table|insert into neon_auth\.session/i);
 
 assert.match(browser, /const appOrigin = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
-assert.match(browser, /context\.route\(`\$\{appOrigin\}\/api\/auth\/\*\*`/);
-assert.match(browser, /route\.fetch\(\{ url: preview\.toString\(\), headers, maxRedirects: 0 \}\)/);
+assert.match(browser, /context\.route\(`\$\{previewBase\}\/api\/auth\/\*\*`/);
+assert.match(browser, /headers\.origin = appOrigin/);
+assert.match(browser, /headers\.referer = `\$\{appOrigin\}\//);
+assert.match(browser, /route\.continue\(\{ headers \}\)/);
+assert.doesNotMatch(browser, /route\.fetch\(/);
+assert.doesNotMatch(browser, /route\.fulfill\(/);
 assert.match(browser, /credentials: "include"/);
 assert.match(browser, /headersArray\(\)/);
-assert.match(browser, /context\.cookies\(appOrigin\)/);
+assert.match(browser, /context\.cookies\(previewBase\)/);
 assert.match(browser, /origin: "https:\/\/evil\.invalid"/);
 assert.match(browser, /foreign\.status, 403/);
 assert.match(browser, /directNeonBrowserRequest/);
@@ -37,6 +41,8 @@ assert.match(browser, /cookieReturnedToProxy/);
 assert.match(browser, /sessionRecognized/);
 assert.match(browser, /refreshPersistence/);
 assert.match(browser, /nativeTokenFlow/);
+assert.match(browser, /browserTransport: "REAL_PREVIEW_NETWORK"/);
+assert.match(browser, /trustedOriginSimulation: "CANONICAL_APP_ORIGIN"/);
 assert.match(browser, /sensitiveFindings: 0/);
 assert.doesNotMatch(browser, /console\.log\([^\n]*(?:password|nativeToken|\.value)/);
 
