@@ -3,15 +3,22 @@ import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
 const runtime = fs.readFileSync("tests/same-origin-auth-boundary-runtime.mjs", "utf8");
+const runner = fs.readFileSync("tests/same-origin-auth-boundary-runtime-runner.mjs", "utf8");
 const controller = fs.readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
 const config = fs.readFileSync("tests/wrangler.audit-runtime.jsonc", "utf8");
 
-assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m);
+assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m, "manual runtime must remain workflow_dispatch only");
 assert.doesNotMatch(workflow, /^\s+push:/m);
 assert.doesNotMatch(workflow, /^\s+pull_request:/m);
+assert.doesNotMatch(workflow, /^\s+schedule:/m);
 assert.match(workflow, /group:\s*audit-viewer-authenticated-runtime\s*$/m);
-assert.match(workflow, /refs\/heads\/verify\/same-origin-auth-boundary-runtime/);
-assert.match(workflow, /same-origin-auth-boundary-runtime/);
+assert.match(workflow, /cancel-in-progress:\s*false\s*$/m);
+assert.match(workflow, /same-origin-auth-boundary-runtime:\s*\n\s+if:\s*github\.ref == 'refs\/heads\/verify\/same-origin-auth-boundary-runtime'/m, "same-origin job must be exact-branch scoped");
+assert.match(workflow, /runtime:\s*\n\s+if:\s*github\.ref != 'refs\/heads\/verify\/same-origin-auth-boundary-runtime'/m, "legacy Audit runtime must not run on same-origin verifier branch");
+assert.match(workflow, /node tests\/same-origin-auth-boundary-runtime-runner\.mjs/);
+assert.match(workflow, /AUDIT_SMOKE_NEXT_PASSWORD/);
+assert.match(workflow, /printf 'AUDIT_SMOKE_TOKEN=%s\\nAUDIT_SMOKE_NEXT_PASSWORD=%s\\n'/, "Preview secrets file must contain only scoped controller secrets");
+assert.match(workflow, /::add-mask::\$next_password/);
 assert.match(workflow, /wrangler\s+versions\s+upload\b/);
 assert.match(workflow, /--preview-alias/);
 assert.doesNotMatch(workflow, /\bwrangler\s+(?:deploy|versions\s+deploy|triggers\s+deploy)\b/i);
@@ -51,10 +58,19 @@ assert.match(runtime, /self impersonation/);
 assert.match(runtime, /banned impersonation target/);
 assert.match(runtime, /old impersonated context remained active/);
 assert.match(runtime, /original Admin session did not remain independently valid/);
-assert.match(runtime, /SAME_ORIGIN_MANAGED_AUTH_BOUNDARY_RUNTIME:\s*REWORK/);
 assert.match(runtime, /sensitiveFindings:\s*0/);
 assert.doesNotMatch(runtime, /console\.log\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
 assert.doesNotMatch(runtime, /console\.error\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
+
+assert.match(runner, /OAUTH_FINAL_EXTERNAL_IDP_SESSION_NOT_CERTIFIED/);
+assert.match(runner, /NO_NON_PERSONAL_QA_IDENTITY_CONFIGURED_IN_VERIFIER/);
+assert.match(runner, /GOOGLE_OAUTH_PROTOCOL:\s*PASS/);
+assert.match(runner, /GOOGLE_OAUTH_FULL_IDP_E2E:\s*BLOCKED/);
+assert.match(runner, /SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME:\s*PASS/);
+assert.match(runner, /result\.status !== 2 \|\| !summaryLine/);
+assert.match(runner, /sensitiveFindings, 0/);
+assert.match(runner, /directBrowserNeonAuth, 0/);
+assert.doesNotMatch(runner, /console\.log\([^\n]*(?:password|authorization|cookie|token)/i);
 
 assert.match(controller, /customer-b@example\.invalid/);
 assert.match(controller, /impersonation-state/);
@@ -63,6 +79,7 @@ assert.match(controller, /password-reset-state/);
 assert.match(controller, /complete-password-reset/);
 assert.match(controller, /reset-password:/);
 assert.match(controller, /AUDIT_SMOKE_NEXT_PASSWORD/);
+assert.match(controller, /delete from neon_auth\.verification/);
 assert.doesNotMatch(controller, /console\.log\([^\n]*(?:token|password|cookie|authorization)/i);
 assert.match(controller, /cleanup-residue/);
 
