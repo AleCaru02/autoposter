@@ -73,7 +73,15 @@ assert.match(runner, /SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME:\s*PASS/);
 assert.match(runner, /result\.status !== 2 \|\| !summaryLine/);
 assert.match(runner, /sensitiveFindings, 0/);
 assert.match(runner, /directBrowserNeonAuth, 0/);
-assert.doesNotMatch(runner, /console\.log\([^\n]*(?:password|authorization|cookie|token)/i);
+assert.match(runner, /runtime controller anchor changed/);
+assert.match(runner, /runtime password-reset anchor changed/);
+assert.match(runner, /attempt < 8/);
+assert.match(runner, /RESET_CHALLENGE_NOT_FOUND/);
+assert.match(runner, /errorCode:/);
+assert.match(runner, /providerStatus:/);
+assert.match(runner, /__controllerStatus/);
+assert.match(runner, /fs\.rmSync\(patchedRuntimePath/);
+assert.doesNotMatch(runner, /console\.log\([^\n]*(?:controllerToken|nextPassword|AUDIT_SMOKE_NEXT_PASSWORD|authorization|cookie|\.value)/i);
 
 assert.match(supplement, /failed login emitted authenticated session cookie/);
 assert.match(supplement, /session cookie Path is not root/);
