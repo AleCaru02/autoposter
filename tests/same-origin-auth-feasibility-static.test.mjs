@@ -12,7 +12,7 @@ assert.match(worker, /PREVIEW_HOST_RE/);
 assert.match(worker, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(worker, /REQUEST_ALLOWLIST/);
 assert.match(worker, /FORWARDED_FROM_CLIENT/);
-assert.match(worker, /INVALID_HOSTNAME/);
+assert.match(worker, /rejects an external x-forwarded-host/);
 assert.doesNotMatch(worker, /headers\.set\("x-forwarded-(?:host|proto)"/);
 assert.match(worker, /allowedProxyOrigin\(url\.origin\)/);
 assert.match(worker, /request\.headers\.get\("origin"\) !== url\.origin/);
