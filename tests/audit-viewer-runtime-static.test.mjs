@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 const workflow = readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
 const controller = readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
 const runtime = readFileSync("tests/admin-impersonation-provider-runtime.mjs", "utf8");
+const browserRunner = readFileSync("tests/admin-impersonation-provider-browser-runner.mjs", "utf8");
 
 assert.match(workflow, /name:\s*Audit Viewer Authenticated Runtime/);
 assert.match(workflow, /workflow_dispatch:/);
@@ -24,6 +25,8 @@ assert.match(workflow, /audit-smoke-\$\{marker\}-customer@example\.invalid/);
 assert.match(workflow, /audit-smoke-\$\{marker\}-customer-b@example\.invalid/);
 assert.match(workflow, /audit-smoke-\$\{marker\}-admin@example\.invalid/);
 assert.match(workflow, /node --check tests\/admin-impersonation-provider-runtime\.mjs/);
+assert.match(workflow, /node --check tests\/admin-impersonation-provider-browser-runner\.mjs/);
+assert.match(workflow, /run:\s*node tests\/admin-impersonation-provider-browser-runner\.mjs/);
 assert.match(workflow, /npm run test:banned-user-rls/);
 assert.match(workflow, /npm run test:tenant-cross-security/);
 
@@ -61,7 +64,18 @@ assert.doesNotMatch(runtime, /console\.log\([^\n]*(\.body|\.token|\.cookie|passw
 assert.doesNotMatch(runtime, /console\.error\([^\n]*(\.body|\.token|\.cookie|password)/i);
 assert.doesNotMatch(runtime, /@gmail\.com|@outlook\.com|@hotmail\.com|@icloud\.com/);
 
+assert.match(browserRunner, /page\.evaluate/);
+assert.match(browserRunner, /credentials:\s*"include"/);
+assert.doesNotMatch(browserRunner, /context\.request\.(post|get)\(/);
+assert.match(browserRunner, /browser native start response did not identify CUSTOMER_A/);
+assert.match(browserRunner, /browser cookie session did not switch to CUSTOMER_A after in-page native start/);
+assert.match(browserRunner, /source anchor missing/);
+assert.doesNotMatch(browserRunner, /console\.log\([^\n]*(\.body|\.token|\.cookie|password)/i);
+assert.doesNotMatch(browserRunner, /console\.error\([^\n]*(\.body|\.token|\.cookie|password)/i);
+
 const syntax = spawnSync(process.execPath, ["--check", "tests/admin-impersonation-provider-runtime.mjs"], { encoding: "utf8" });
 assert.equal(syntax.status, 0, syntax.stderr || syntax.stdout || "provider runtime syntax check failed");
+const browserRunnerSyntax = spawnSync(process.execPath, ["--check", "tests/admin-impersonation-provider-browser-runner.mjs"], { encoding: "utf8" });
+assert.equal(browserRunnerSyntax.status, 0, browserRunnerSyntax.stderr || browserRunnerSyntax.stdout || "provider browser runner syntax check failed");
 
 console.log("Audit Viewer ephemeral runtime static safety: PASS");
