@@ -1,6 +1,8 @@
 import controller from "./audit-viewer-qa-controller.mjs";
 
 const AUTH_UPSTREAM = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
+const APP_ORIGIN = "https://autoposter.02alessandrocaruso.workers.dev";
+const APP_HOST = "autoposter.02alessandrocaruso.workers.dev";
 const AUTH_PREFIX = "/api/auth";
 const CONTROL_PATH = "/__qa/control";
 const PAGE_PATH = "/__qa/auth-feasibility";
@@ -49,8 +51,9 @@ function requestHeaders(request) {
     if (HOP_BY_HOP.has(lower) || FORWARDED_FROM_CLIENT.has(lower) || !REQUEST_ALLOWLIST.has(lower)) continue;
     headers.append(name, value);
   }
-  const incoming = new URL(request.url);
-  headers.set("x-forwarded-host", incoming.host);
+  // The preview verifier simulates the future production Worker boundary. These
+  // forwarded values are server-owned constants, never taken from client input.
+  headers.set("x-forwarded-host", APP_HOST);
   headers.set("x-forwarded-proto", "https");
   return headers;
 }
@@ -76,6 +79,7 @@ async function proxyAuth(request) {
   const suffix = allowedAuthPath(url.pathname);
   if (!suffix) return json({ error: "AUTH_PATH_NOT_ALLOWED" }, 404);
   if (request.method !== "GET" && request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  if (request.method === "POST" && request.headers.get("origin") !== APP_ORIGIN) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
   const length = Number(request.headers.get("content-length") || "0");
   if (Number.isFinite(length) && length > MAX_BODY_BYTES) return json({ error: "AUTH_REQUEST_TOO_LARGE" }, 413);
 
