@@ -7,10 +7,14 @@ const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "
 const config = fs.readFileSync("tests/wrangler.auth-feasibility.jsonc", "utf8");
 
 assert.match(worker, /const AUTH_UPSTREAM = "https:\/\/ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
+assert.match(worker, /const APP_ORIGIN = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
+assert.match(worker, /const APP_HOST = "autoposter\.02alessandrocaruso\.workers\.dev"/);
 assert.match(worker, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(worker, /REQUEST_ALLOWLIST/);
-assert.match(worker, /x-forwarded-host/);
-assert.match(worker, /x-forwarded-proto/);
+assert.match(worker, /headers\.set\("x-forwarded-host", APP_HOST\)/);
+assert.match(worker, /headers\.set\("x-forwarded-proto", "https"\)/);
+assert.match(worker, /request\.headers\.get\("origin"\) !== APP_ORIGIN/);
+assert.match(worker, /ORIGIN_NOT_ALLOWED/);
 assert.match(worker, /cache-control", "no-store"/i);
 assert.match(worker, /getSetCookie/);
 assert.match(worker, /AUTH_PATH_NOT_ALLOWED/);
@@ -19,15 +23,23 @@ assert.match(worker, /AUTH_REQUEST_TOO_LARGE/);
 assert.doesNotMatch(worker, /request\.headers\.get\(["'](?:x-forwarded-host|x-forwarded-proto)["']\)/i);
 assert.doesNotMatch(worker, /console\.(?:log|error)\([^\n]*(?:cookie|authorization|password|token)/i);
 assert.doesNotMatch(worker, /jwt\.sign|createToken|session table|insert into neon_auth\.session/i);
+
+assert.match(browser, /const appOrigin = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
+assert.match(browser, /context\.route\(`\$\{appOrigin\}\/api\/auth\/\*\*`/);
+assert.match(browser, /route\.fetch\(\{ url: preview\.toString\(\), headers, maxRedirects: 0 \}\)/);
 assert.match(browser, /credentials: "include"/);
 assert.match(browser, /headersArray\(\)/);
-assert.match(browser, /context\.cookies\(base\)/);
+assert.match(browser, /context\.cookies\(appOrigin\)/);
+assert.match(browser, /origin: "https:\/\/evil\.invalid"/);
+assert.match(browser, /foreign\.status, 403/);
+assert.match(browser, /directNeonBrowserRequest/);
 assert.match(browser, /cookieReturnedToProxy/);
 assert.match(browser, /sessionRecognized/);
 assert.match(browser, /refreshPersistence/);
 assert.match(browser, /nativeTokenFlow/);
 assert.match(browser, /sensitiveFindings: 0/);
 assert.doesNotMatch(browser, /console\.log\([^\n]*(?:password|nativeToken|\.value)/);
+
 assert.match(workflow, /name: Audit Viewer Authenticated Runtime/);
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /\n\s*(push|pull_request|schedule):/);
