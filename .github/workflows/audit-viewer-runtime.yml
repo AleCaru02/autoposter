@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: same-origin-auth-cookie-feasibility
+  group: audit-viewer-authenticated-runtime
   cancel-in-progress: false
 
 jobs:
@@ -58,8 +58,8 @@ jobs:
           echo "AUTH_FEASIBILITY_BASE=https://${alias}-autoposter.02alessandrocaruso.workers.dev" >> "$GITHUB_ENV"
           echo "AUTH_FEASIBILITY_CONTROL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/__qa/control" >> "$GITHUB_ENV"
           echo "AUDIT_SMOKE_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
-          printf 'AUDIT_SMOKE_TOKEN=%s\n' "$token" > .auth-feasibility-secrets.env
-          chmod 600 .auth-feasibility-secrets.env
+          printf 'AUDIT_SMOKE_TOKEN=%s\n' "$token" > .audit-runtime-secrets.env
+          chmod 600 .audit-runtime-secrets.env
       - name: Upload feasibility Worker as non-deployed preview version
         shell: bash
         env:
@@ -67,10 +67,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler versions upload --config tests/wrangler.auth-feasibility.jsonc --keep-vars --preview-alias "$AUTH_FEASIBILITY_PREVIEW_ALIAS" --secrets-file .auth-feasibility-secrets.env | tee auth-feasibility-upload.log
+          npx wrangler versions upload --config tests/wrangler.auth-feasibility.jsonc --keep-vars --preview-alias "$AUTH_FEASIBILITY_PREVIEW_ALIAS" --secrets-file .audit-runtime-secrets.env | tee auth-feasibility-upload.log
           version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' auth-feasibility-upload.log | tail -n 1)
           if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then echo "preview version id not captured" >&2; exit 1; fi
           echo "AUTH_FEASIBILITY_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
       - name: Verify Preview isolation and capture production baseline
         shell: bash
         env:
@@ -88,9 +89,11 @@ jobs:
           if(!deployments.length)throw new Error('no production deployments returned');
           const deploymentIds=deployments.map(i=>String(i.id||'')).filter(Boolean).sort();
           const versionIds=[...new Set(deployments.flatMap(i=>Array.isArray(i.versions)?i.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
-          const ephemeral=process.env.AUTH_FEASIBILITY_VERSION_ID||'';
+          const ephemeral=process.env.EPHEMERAL_CONTROLLER_VERSION_ID||'';
+          if(!ephemeral)throw new Error('ephemeral controller version missing');
           if(versionIds.includes(ephemeral))throw new Error('feasibility version attached to production');
           fs.appendFileSync(process.env.GITHUB_ENV,`AUTH_FEASIBILITY_PROD_DEPLOYMENTS=${deploymentIds.join(',')}\nAUTH_FEASIBILITY_PROD_VERSIONS=${versionIds.join(',')}\n`);
+          console.log('AUDIT_PREVIEW_ISOLATION: PASS',JSON.stringify({attachedToProduction:false}));
           console.log('SAME_ORIGIN_AUTH_PREVIEW_ISOLATION: PASS',JSON.stringify({attachedToProduction:false}));
           NODE
       - name: Feasibility preflight
@@ -148,8 +151,8 @@ jobs:
           const versionIds=[...new Set(deployments.flatMap(i=>Array.isArray(i.versions)?i.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
           const beforeD=String(process.env.AUTH_FEASIBILITY_PROD_DEPLOYMENTS||'').split(',').filter(Boolean).sort();
           const beforeV=String(process.env.AUTH_FEASIBILITY_PROD_VERSIONS||'').split(',').filter(Boolean).sort();
-          if(JSON.stringify(deploymentIds)!==JSON.stringify(beforeD)||JSON.stringify(versionIds)!==JSON.stringify(beforeV))throw new Error('production deployment set changed during feasibility probe');
-          if(versionIds.includes(process.env.AUTH_FEASIBILITY_VERSION_ID||''))throw new Error('feasibility version attached to production');
+          if(JSON.stringify(deploymentIds)!==JSON.stringify(beforeD)||JSON.stringify(versionIds)!==JSON.stringify(beforeV))throw new Error('production deployment set changed during Audit runtime');
+          if(versionIds.includes(process.env.EPHEMERAL_CONTROLLER_VERSION_ID||''))throw new Error('feasibility version attached to production');
           console.log('SAME_ORIGIN_AUTH_FEASIBILITY_PRODUCTION_INVARIANT: PASS',JSON.stringify({attachedToProduction:false,deploymentUnchanged:true}));
           NODE
       - name: Remove local ephemeral credential material
@@ -157,6 +160,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f .auth-feasibility-secrets.env ]; then chmod 600 .auth-feasibility-secrets.env || true; shred -u .auth-feasibility-secrets.env 2>/dev/null || rm -f .auth-feasibility-secrets.env; fi
+          if [ -f .audit-runtime-secrets.env ]; then chmod 600 .audit-runtime-secrets.env || true; shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env; fi
           rm -f auth-feasibility-preflight.json auth-feasibility-cleanup.json auth-feasibility-upload.log auth-feasibility-deployments-before.json auth-feasibility-deployments-after.json
           echo "SAME_ORIGIN_AUTH_FEASIBILITY_EPHEMERAL_SECRET_CLEANUP: PASS"
