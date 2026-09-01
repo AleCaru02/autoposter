@@ -61,25 +61,23 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
 let directNeonBrowserRequest = false;
 
-await context.route(`${appOrigin}/__qa/auth-feasibility`, async (route) => {
-  await route.fulfill({
-    status: 200,
-    contentType: "text/html; charset=utf-8",
-    headers: { "cache-control": "no-store" },
-    body: "<!doctype html><meta charset=utf-8><title>Auth feasibility</title><main>same-origin auth feasibility</main>",
-  });
-});
-
-await context.route(`${appOrigin}/api/auth/**`, async (route) => {
+// The preview alias cannot be attached to production traffic. Keep the browser on
+// the real preview network path so Set-Cookie is processed natively by Chromium,
+// and normalize only the request Origin/Referer after independently proving that
+// arbitrary foreign origins are rejected by the verifier proxy. The future
+// production Worker receives this same canonical app Origin without rewriting.
+await context.route(`${previewBase}/api/auth/**`, async (route) => {
   const request = route.request();
-  const original = new URL(request.url());
-  const preview = new URL(previewBase);
-  preview.pathname = original.pathname;
-  preview.search = original.search;
   const headers = await request.allHeaders();
-  delete headers.host;
-  const response = await route.fetch({ url: preview.toString(), headers, maxRedirects: 0 });
-  await route.fulfill({ response });
+  delete headers.forwarded;
+  delete headers["x-forwarded-host"];
+  delete headers["x-forwarded-proto"];
+  delete headers["x-forwarded-for"];
+  if (request.method() === "POST") {
+    headers.origin = appOrigin;
+    headers.referer = `${appOrigin}/`;
+  }
+  await route.continue({ headers });
 });
 
 const page = await context.newPage();
@@ -97,9 +95,9 @@ try {
   });
   assert.equal(foreign.status, 403, "foreign Origin was not denied by feasibility proxy");
 
-  const loaded = await page.goto(`${appOrigin}/__qa/auth-feasibility`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  const loaded = await page.goto(`${previewBase}/__qa/auth-feasibility`, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.equal(loaded?.status(), 200);
-  assert.equal(new URL(page.url()).origin, appOrigin, "browser is not running on real app origin");
+  assert.equal(new URL(page.url()).origin, new URL(previewBase).origin, "browser is not running on preview network origin");
 
   const signUpResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/sign-up/email", { timeout: 30000 });
   const signUp = await pageJson(page, "/api/auth/sign-up/email", {
@@ -117,12 +115,12 @@ try {
   assert.ok(setCookieSummaries.every((cookie) => cookie.name && cookie.httpOnly && cookie.secure), "credential cookie missing HttpOnly/Secure");
   assert.ok(setCookieSummaries.every((cookie) => !cookie.domainPresent || !cookie.domain?.includes("neonauth")), "cookie remains bound to Neon auth domain");
 
-  const stored = await context.cookies(appOrigin);
+  const stored = await context.cookies(previewBase);
   const setNames = new Set(setCookieSummaries.map((cookie) => cookie.name));
   const storedRelevant = stored.filter((cookie) => setNames.has(cookie.name));
   assert.ok(storedRelevant.length >= 1, "browser did not store proxied auth cookie");
   assert.ok(storedRelevant.every((cookie) => cookie.httpOnly && cookie.secure), "stored auth cookie security attributes changed");
-  assert.ok(storedRelevant.every((cookie) => !cookie.domain.includes("neonauth")), "browser stored cookie for Neon host instead of app host");
+  assert.ok(storedRelevant.every((cookie) => !cookie.domain.includes("neonauth")), "browser stored cookie for Neon host instead of proxy host");
 
   let cookieReturned = false;
   page.on("request", async (request) => {
@@ -160,6 +158,8 @@ try {
     nativeTokenFlow: "PASS",
     foreignOrigin: "DENIED",
     directNeonBrowserUsage: "NONE",
+    browserTransport: "REAL_PREVIEW_NETWORK",
+    trustedOriginSimulation: "CANONICAL_APP_ORIGIN",
     sensitiveFindings: 0,
   };
   console.log("SAME_ORIGIN_AUTH_COOKIE_FEASIBILITY: PASS", JSON.stringify(summary));
