@@ -9,6 +9,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
 const FORWARDED_FROM_CLIENT = new Set(["forwarded", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-for"]);
 const REQUEST_ALLOWLIST = new Set(["accept", "content-type", "cookie", "origin", "referer", "user-agent"]);
+const PREVIEW_HOST_RE = /^authprobe-[0-9]+-autoposter\.02alessandrocaruso\.workers\.dev$/;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -43,6 +44,17 @@ function allowedAuthPath(pathname) {
   return suffix;
 }
 
+function allowedProxyOrigin(origin) {
+  try {
+    const value = new URL(origin);
+    if (value.protocol !== "https:") return false;
+    if (value.origin === APP_ORIGIN) return true;
+    return PREVIEW_HOST_RE.test(value.hostname) && value.port === "";
+  } catch {
+    return false;
+  }
+}
+
 function requestHeaders(request) {
   const headers = new Headers();
   for (const [name, value] of request.headers) {
@@ -50,11 +62,13 @@ function requestHeaders(request) {
     if (HOP_BY_HOP.has(lower) || FORWARDED_FROM_CLIENT.has(lower) || !REQUEST_ALLOWLIST.has(lower)) continue;
     headers.append(name, value);
   }
-  // Provider contract observation from runtime #35: Neon Managed Auth rejects an
-  // external forwarded hostname with INVALID_HOSTNAME. The feasibility proxy
-  // therefore keeps Neon as the canonical upstream host. The app Origin remains
-  // independently fail-closed at this Worker boundary and is never derived from
-  // client-controlled forwarded headers.
+  // Runtime #35 proved Neon rejects an external x-forwarded-host. Keep Neon as
+  // the canonical upstream host. Runtime #37 proved Chromium will not reliably
+  // spoof its protected Origin header. The proxy therefore validates true
+  // same-origin at its own boundary and only then canonicalizes the provider-side
+  // Origin/Referer to the real app origin. No client forwarded header is trusted.
+  headers.set("origin", APP_ORIGIN);
+  headers.set("referer", `${APP_ORIGIN}/`);
   return headers;
 }
 
@@ -76,10 +90,11 @@ function responseHeaders(upstream) {
 async function proxyAuth(request) {
   if (unsafeRawPath(request.url)) return json({ error: "INVALID_AUTH_PATH" }, 400);
   const url = new URL(request.url);
+  if (!allowedProxyOrigin(url.origin)) return json({ error: "PROXY_ORIGIN_NOT_ALLOWED" }, 403);
   const suffix = allowedAuthPath(url.pathname);
   if (!suffix) return json({ error: "AUTH_PATH_NOT_ALLOWED" }, 404);
   if (request.method !== "GET" && request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
-  if (request.method === "POST" && request.headers.get("origin") !== APP_ORIGIN) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
+  if (request.method === "POST" && request.headers.get("origin") !== url.origin) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
   const length = Number(request.headers.get("content-length") || "0");
   if (Number.isFinite(length) && length > MAX_BODY_BYTES) return json({ error: "AUTH_REQUEST_TOO_LARGE" }, 413);
 
