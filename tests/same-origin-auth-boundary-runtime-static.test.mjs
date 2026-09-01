@@ -4,6 +4,7 @@ import fs from "node:fs";
 const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
 const runtime = fs.readFileSync("tests/same-origin-auth-boundary-runtime.mjs", "utf8");
 const runner = fs.readFileSync("tests/same-origin-auth-boundary-runtime-runner.mjs", "utf8");
+const supplement = fs.readFileSync("tests/same-origin-auth-boundary-runtime-supplement.mjs", "utf8");
 const controller = fs.readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
 const config = fs.readFileSync("tests/wrangler.audit-runtime.jsonc", "utf8");
 
@@ -62,6 +63,8 @@ assert.match(runtime, /sensitiveFindings:\s*0/);
 assert.doesNotMatch(runtime, /console\.log\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
 assert.doesNotMatch(runtime, /console\.error\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
 
+assert.match(runner, /same-origin-auth-boundary-runtime-supplement\.mjs/);
+assert.match(runner, /SAME_ORIGIN_AUTH_BOUNDARY_SUPPLEMENT:\s*PASS/);
 assert.match(runner, /OAUTH_FINAL_EXTERNAL_IDP_SESSION_NOT_CERTIFIED/);
 assert.match(runner, /NO_NON_PERSONAL_QA_IDENTITY_CONFIGURED_IN_VERIFIER/);
 assert.match(runner, /GOOGLE_OAUTH_PROTOCOL:\s*PASS/);
@@ -71,6 +74,20 @@ assert.match(runner, /result\.status !== 2 \|\| !summaryLine/);
 assert.match(runner, /sensitiveFindings, 0/);
 assert.match(runner, /directBrowserNeonAuth, 0/);
 assert.doesNotMatch(runner, /console\.log\([^\n]*(?:password|authorization|cookie|token)/i);
+
+assert.match(supplement, /failed login emitted authenticated session cookie/);
+assert.match(supplement, /session cookie Path is not root/);
+assert.match(supplement, /safe own write before ban failed/);
+assert.match(supplement, /same exact pre-ban JWT retained write access after ban/);
+assert.match(supplement, /foreign OAuth Origin was not denied/);
+assert.match(supplement, /untrusted OAuth callback was accepted/);
+assert.match(supplement, /\/api\/auth\/sign-in\/social/);
+assert.match(supplement, /\/api\/auth\/callback\/google/);
+assert.match(supplement, /ownerAdminRoute/);
+assert.match(supplement, /logoutProtectedRoute/);
+assert.match(supplement, /directBrowserNeonAuth:\s*0/);
+assert.match(supplement, /sensitiveFindings:\s*0/);
+assert.doesNotMatch(supplement, /console\.log\([^\n]*(?:password|authorization|cookie|token)/i);
 
 assert.match(controller, /customer-b@example\.invalid/);
 assert.match(controller, /impersonation-state/);
