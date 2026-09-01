@@ -28,6 +28,9 @@ jobs:
       - { name: Admin Ban Unban regression, run: "npm run test:admin-ban-unban" }
       - { name: Admin Ban Unban UI regression, run: "npm run test:admin-ban-unban-ui" }
       - { name: Audit Viewer ephemeral runtime static safety, run: "npm run test:audit-runtime-static" }
+      - { name: Same-origin Auth boundary runtime static safety, run: "node tests/same-origin-auth-boundary-runtime-static.test.mjs" }
+      - name: Auth runtime workflow syntax
+        run: ruby -e 'require "yaml"; YAML.load_file(".github/workflows/audit-viewer-runtime.yml"); puts "workflow yaml parse: PASS"'
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
