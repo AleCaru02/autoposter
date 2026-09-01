@@ -17,6 +17,8 @@ jobs:
       - { name: Install, run: "npm install --no-audit --no-fund" }
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
+      - { name: Same-origin Auth proxy regression, run: "npm run test:auth-proxy" }
+      - { name: Same-origin Auth boundary static regression, run: "npm run test:auth-boundary-static" }
       - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
       - { name: FASE 3 CORE harness absence and audit regression, run: "npm run test:fase3-core" }
       - { name: Admin Audit Viewer regression, run: "npm run test:admin-audit-viewer" }
@@ -84,6 +86,31 @@ jobs:
           }
           console.log('production application smoke: PASS', JSON.stringify({ status: process.env.APP_STATUS, htmlBytes: html.length }));
           NODE
+      - name: Production same-origin Auth proxy smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          session_status=$(curl -sS -D auth-session-headers.txt -o auth-session.json -w "%{http_code}" -H 'accept: application/json' "$base/api/auth/get-session" || true)
+          if [ "$session_status" != "200" ]; then
+            echo "same-origin get-session failed: HTTP $session_status" >&2
+            exit 1
+          fi
+          if ! tr -d '\r' < auth-session-headers.txt | grep -Eiq '^cache-control:.*no-store'; then
+            echo "same-origin get-session missing no-store" >&2
+            exit 1
+          fi
+          foreign_status=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H 'origin: https://evil.invalid' -H 'content-type: application/json' --data '{}' "$base/api/auth/sign-in/email" || true)
+          if [ "$foreign_status" != "403" ]; then
+            echo "foreign Origin was not denied: HTTP $foreign_status" >&2
+            exit 1
+          fi
+          override_status=$(curl -sS -o /dev/null -w "%{http_code}" "$base/api/auth/get-session?upstream=https%3A%2F%2Fevil.invalid" || true)
+          if [ "$override_status" != "400" ]; then
+            echo "Auth upstream override was not denied: HTTP $override_status" >&2
+            exit 1
+          fi
+          echo "production same-origin Auth proxy smoke: PASS"
       - name: Production tenant and owner security audit
         shell: bash
         run: |
