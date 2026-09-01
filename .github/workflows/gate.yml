@@ -36,7 +36,8 @@ jobs:
           node --check tests/same-origin-auth-boundary-runtime-supplement.mjs
           node --check tests/audit-viewer-qa-controller.mjs
       - name: Auth runtime workflow syntax
-        run: ruby -e 'require "yaml"; YAML.load_file(".github/workflows/audit-viewer-runtime.yml"); puts "workflow yaml parse: PASS"'
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/audit-viewer-runtime.yml"); puts "workflow yaml parse PASS"'
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
