@@ -8,13 +8,18 @@ const config = fs.readFileSync("tests/wrangler.auth-feasibility.jsonc", "utf8");
 
 assert.match(worker, /const AUTH_UPSTREAM = "https:\/\/ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
 assert.match(worker, /const APP_ORIGIN = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
+assert.match(worker, /PREVIEW_HOST_RE/);
 assert.match(worker, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(worker, /REQUEST_ALLOWLIST/);
 assert.match(worker, /FORWARDED_FROM_CLIENT/);
 assert.match(worker, /INVALID_HOSTNAME/);
 assert.doesNotMatch(worker, /headers\.set\("x-forwarded-(?:host|proto)"/);
-assert.match(worker, /request\.headers\.get\("origin"\) !== APP_ORIGIN/);
+assert.match(worker, /allowedProxyOrigin\(url\.origin\)/);
+assert.match(worker, /request\.headers\.get\("origin"\) !== url\.origin/);
+assert.match(worker, /headers\.set\("origin", APP_ORIGIN\)/);
+assert.match(worker, /headers\.set\("referer", `\$\{APP_ORIGIN\}\//);
 assert.match(worker, /ORIGIN_NOT_ALLOWED/);
+assert.match(worker, /PROXY_ORIGIN_NOT_ALLOWED/);
 assert.match(worker, /cache-control", "no-store"/i);
 assert.match(worker, /getSetCookie/);
 assert.match(worker, /AUTH_PATH_NOT_ALLOWED/);
@@ -24,13 +29,9 @@ assert.doesNotMatch(worker, /request\.headers\.get\(["'](?:x-forwarded-host|x-fo
 assert.doesNotMatch(worker, /console\.(?:log|error)\([^\n]*(?:cookie|authorization|password|token)/i);
 assert.doesNotMatch(worker, /jwt\.sign|createToken|session table|insert into neon_auth\.session/i);
 
-assert.match(browser, /const appOrigin = "https:\/\/autoposter\.02alessandrocaruso\.workers\.dev"/);
-assert.match(browser, /context\.route\(`\$\{previewBase\}\/api\/auth\/\*\*`/);
-assert.match(browser, /headers\.origin = appOrigin/);
-assert.match(browser, /headers\.referer = `\$\{appOrigin\}\//);
-assert.match(browser, /route\.continue\(\{ headers \}\)/);
-assert.doesNotMatch(browser, /route\.fetch\(/);
-assert.doesNotMatch(browser, /route\.fulfill\(/);
+assert.match(browser, /page\.goto\(`\$\{previewBase\}\/__qa\/auth-feasibility`/);
+assert.doesNotMatch(browser, /context\.route\(/);
+assert.doesNotMatch(browser, /route\.(?:continue|fetch|fulfill)\(/);
 assert.match(browser, /credentials: "include"/);
 assert.match(browser, /headersArray\(\)/);
 assert.match(browser, /context\.cookies\(previewBase\)/);
@@ -42,7 +43,8 @@ assert.match(browser, /sessionRecognized/);
 assert.match(browser, /refreshPersistence/);
 assert.match(browser, /nativeTokenFlow/);
 assert.match(browser, /browserTransport: "REAL_PREVIEW_NETWORK"/);
-assert.match(browser, /trustedOriginSimulation: "CANONICAL_APP_ORIGIN"/);
+assert.match(browser, /incomingOrigin: "NATIVE_SAME_ORIGIN"/);
+assert.match(browser, /providerOrigin: "CANONICAL_APP_ORIGIN_AFTER_BOUNDARY_VALIDATION"/);
 assert.match(browser, /sensitiveFindings: 0/);
 assert.doesNotMatch(browser, /console\.log\([^\n]*(?:password|nativeToken|\.value)/);
 
