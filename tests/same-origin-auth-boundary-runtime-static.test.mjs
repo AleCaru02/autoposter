@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
+const runtime = fs.readFileSync("tests/same-origin-auth-boundary-runtime.mjs", "utf8");
+const controller = fs.readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
+const config = fs.readFileSync("tests/wrangler.audit-runtime.jsonc", "utf8");
+
+assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m);
+assert.doesNotMatch(workflow, /^\s+push:/m);
+assert.doesNotMatch(workflow, /^\s+pull_request:/m);
+assert.match(workflow, /group:\s*audit-viewer-authenticated-runtime\s*$/m);
+assert.match(workflow, /refs\/heads\/verify\/same-origin-auth-boundary-runtime/);
+assert.match(workflow, /same-origin-auth-boundary-runtime/);
+assert.match(workflow, /wrangler\s+versions\s+upload\b/);
+assert.match(workflow, /--preview-alias/);
+assert.doesNotMatch(workflow, /\bwrangler\s+(?:deploy|versions\s+deploy|triggers\s+deploy)\b/i);
+assert.match(workflow, /if:\s*always\(\)/);
+assert.match(workflow, /SAME_ORIGIN_AUTH_BOUNDARY_CLEANUP:\s*PASS/);
+assert.match(workflow, /SAME_ORIGIN_AUTH_BOUNDARY_POST_CLEANUP:\s*PASS/);
+assert.match(workflow, /SAME_ORIGIN_AUTH_BOUNDARY_EPHEMERAL_SECRET_CLEANUP:\s*PASS/);
+assert.doesNotMatch(workflow, /actions\/upload-artifact/i);
+
+assert.match(runtime, /const AUTH_URL = `\$\{APP_BASE\}\/api\/auth`/);
+assert.doesNotMatch(runtime, /neonauth\.us-west-2\.aws\.neon\.tech/);
+assert.match(runtime, /directNeon/);
+assert.match(runtime, /sameOriginAuth/);
+assert.match(runtime, /cookieReturned/);
+assert.match(runtime, /credentials: "include"/);
+assert.match(runtime, /\/sign-up\/email/);
+assert.match(runtime, /\/sign-in\/email/);
+assert.match(runtime, /\/sign-out/);
+assert.match(runtime, /\/get-session/);
+assert.match(runtime, /\/token/);
+assert.match(runtime, /\/request-password-reset/);
+assert.match(runtime, /complete-password-reset/);
+assert.match(runtime, /\/sign-in\/social/);
+assert.match(runtime, /redirect_uri/);
+assert.match(runtime, /statePresent/);
+assert.match(runtime, /code_challenge/);
+assert.match(runtime, /\/api\/admin\/customers\/\$\{encodeURIComponent\(customer\.id\)\}\/sessions/);
+assert.match(runtime, /USER_SESSION_REVOKED/);
+assert.match(runtime, /USER_SESSIONS_REVOKED/);
+assert.match(runtime, /\/ban`/);
+assert.match(runtime, /\/unban`/);
+assert.match(runtime, /pre-ban JWT retained tenant access after ban/);
+assert.match(runtime, /\/admin\/impersonate-user/);
+assert.match(runtime, /\/admin\/stop-impersonating/);
+assert.match(runtime, /nested impersonation/);
+assert.match(runtime, /self impersonation/);
+assert.match(runtime, /banned impersonation target/);
+assert.match(runtime, /old impersonated context remained active/);
+assert.match(runtime, /original Admin session did not remain independently valid/);
+assert.match(runtime, /SAME_ORIGIN_MANAGED_AUTH_BOUNDARY_RUNTIME:\s*REWORK/);
+assert.match(runtime, /sensitiveFindings:\s*0/);
+assert.doesNotMatch(runtime, /console\.log\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
+assert.doesNotMatch(runtime, /console\.error\([^\n]*(?:password|authorization|cookie|nativeToken|\.value)/i);
+
+assert.match(controller, /customer-b@example\.invalid/);
+assert.match(controller, /impersonation-state/);
+assert.match(controller, /audit-state/);
+assert.match(controller, /password-reset-state/);
+assert.match(controller, /complete-password-reset/);
+assert.match(controller, /reset-password:/);
+assert.match(controller, /AUDIT_SMOKE_NEXT_PASSWORD/);
+assert.doesNotMatch(controller, /console\.log\([^\n]*(?:token|password|cookie|authorization)/i);
+assert.match(controller, /cleanup-residue/);
+
+assert.match(config, /"main"\s*:\s*"\.\/audit-viewer-qa-controller\.mjs"/);
+assert.match(config, /"preview_urls"\s*:\s*true/);
+assert.doesNotMatch(config, /"routes"\s*:/);
+
+console.log("same-origin Auth boundary runtime static safety: PASS");
