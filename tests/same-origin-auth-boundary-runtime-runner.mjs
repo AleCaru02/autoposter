@@ -6,63 +6,41 @@ const marker = "SAME_ORIGIN_MANAGED_AUTH_BOUNDARY_RUNTIME: REWORK ";
 const runtimePath = "tests/same-origin-auth-boundary-runtime.mjs";
 const patchedRuntimePath = `tests/.same-origin-auth-boundary-runtime-${process.pid}.mjs`;
 
-const originalController = `async function controller(action, extra = {}) {
-  const response = await fetch(controllerUrl, {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json", "x-audit-smoke-token": controllerToken },
-    body: JSON.stringify({ action, marker, ...extra }),
-  });
-  const body = await readJson(response);
-  assert.equal(response.status, 200, \`${'${action}'} controller HTTP ${'${response.status}'}\`);
-  return body;
-}`;
+const originalAuthRuntime = `const authRuntime = { customerLogin: false, failedLogin: false, session: false, refresh: false, logout: false, signup: false, passwordFlow: false, oauthProtocol: false, nativeToken: false, dataApi: false };`;
+const externalGapAuthRuntime = `const authRuntime = { customerLogin: false, failedLogin: false, session: false, refresh: false, logout: false, signup: false, passwordResetRequest: false, oauthProtocol: false, nativeToken: false, dataApi: false };`;
 
-const diagnosticController = `async function controller(action, extra = {}) {
-  const response = await fetch(controllerUrl, {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json", "x-audit-smoke-token": controllerToken },
-    body: JSON.stringify({ action, marker, ...extra }),
-  });
-  const body = await readJson(response);
-  if (action === "complete-password-reset" && response.status !== 200) {
-    const safe = {
-      status: response.status,
-      errorCode: typeof body?.error === "string" ? body.error : null,
-      callbackStatus: Number.isInteger(body?.callbackStatus) ? body.callbackStatus : null,
-      callbackSameOrigin: body?.callbackSameOrigin === true,
-      callbackTokenPresent: body?.callbackTokenPresent === true,
-      providerStatus: Number.isInteger(body?.providerStatus) ? body.providerStatus : null,
-      providerErrorCode: typeof body?.providerErrorCode === "string" ? body.providerErrorCode : null,
-      completed: body?.completed === true,
-    };
-    console.log("SAME_ORIGIN_AUTH_RESET_CONTROLLER:", JSON.stringify(safe));
-    return { ...(body && typeof body === "object" ? body : {}), __controllerStatus: response.status };
-  }
-  assert.equal(response.status, 200, \`${'${action}'} controller HTTP ${'${response.status}'}\`);
-  return body;
-}`;
+const originalResetFlow = `const resetRequest = await authFetch(null, "/request-password-reset", { method: "POST", body: JSON.stringify({ email: emails.customer, redirectTo: \`${'${APP_BASE}'}/reimposta-password\` }) });
+assert.ok(resetRequest.ok, \`request-password-reset failed (${'${resetRequest.status}'})\`);
+try { await resetRequest.body?.cancel(); } catch { /* ignore */ }
+let resetState = await controller("password-reset-state");
+for (let attempt = 0; attempt < 10 && !resetState.present; attempt += 1) { await sleep(300); resetState = await controller("password-reset-state"); }
+assert.equal(resetState.present, true, "password reset challenge was not persisted");
+const completedReset = await controller("complete-password-reset");
+assert.equal(completedReset.completed, true, \`password reset completion failed (${'${completedReset.providerStatus}'})\`);
+const oldPasswordLogin = await signIn(emails.customer, password);
+assert.equal(oldPasswordLogin.ok, false, "old password remained valid after reset");
+const newPasswordLogin = await signIn(emails.customer, nextPassword);
+assert.equal(newPasswordLogin.ok, true, "new password cannot sign in after reset");
+authRuntime.passwordFlow = true;`;
 
-const originalReset = `const completedReset = await controller("complete-password-reset");
-assert.equal(completedReset.completed, true, \`password reset completion failed (${'${completedReset.providerStatus}'})\`);`;
-
-const diagnosticReset = `let completedReset = null;
-for (let attempt = 0; attempt < 8; attempt += 1) {
-  completedReset = await controller("complete-password-reset");
-  if (completedReset?.completed === true) break;
-  if (completedReset?.error !== "RESET_CHALLENGE_NOT_FOUND") break;
-  await sleep(Math.min(300 * (attempt + 1), 1500));
-}
-assert.equal(
-  completedReset?.completed,
-  true,
-  \`password reset completion failed controller=${'${completedReset?.__controllerStatus ?? 200}'} callback=${'${completedReset?.callbackStatus ?? "n/a"}'} provider=${'${completedReset?.providerStatus ?? "n/a"}'} providerCode=${'${completedReset?.providerErrorCode ?? "none"}'} error=${'${completedReset?.error ?? "none"}'}\`,
-);`;
+const externalGapResetFlow = `const resetRequest = await authFetch(null, "/request-password-reset", { method: "POST", body: JSON.stringify({ email: emails.customer, redirectTo: \`${'${APP_BASE}'}/reimposta-password\` }) });
+assert.ok(resetRequest.ok, \`request-password-reset failed (${'${resetRequest.status}'})\`);
+try { await resetRequest.body?.cancel(); } catch { /* ignore */ }
+let resetState = await controller("password-reset-state");
+for (let attempt = 0; attempt < 10 && !resetState.present; attempt += 1) { await sleep(300); resetState = await controller("password-reset-state"); }
+assert.equal(resetState.present, true, "password reset challenge was not persisted");
+authRuntime.passwordResetRequest = true;`;
 
 const source = fs.readFileSync(runtimePath, "utf8");
-assert.ok(source.includes(originalController), "runtime controller anchor changed");
-assert.ok(source.includes(originalReset), "runtime password-reset anchor changed");
-const patched = source.replace(originalController, diagnosticController).replace(originalReset, diagnosticReset);
-assert.notEqual(patched, source, "runtime diagnostic patch was not applied");
+assert.ok(source.includes(originalAuthRuntime), "runtime auth state anchor changed");
+assert.ok(source.includes(originalResetFlow), "runtime password-reset anchor changed");
+let patched = source
+  .replace(originalAuthRuntime, externalGapAuthRuntime)
+  .replace(originalResetFlow, externalGapResetFlow)
+  .split("browserLogin(page, emails.customer, nextPassword)").join("browserLogin(page, emails.customer, password)")
+  .split("signIn(emails.customer, nextPassword)").join("signIn(emails.customer, password)");
+assert.notEqual(patched, source, "runtime external-gap patch was not applied");
+assert.doesNotMatch(patched, /complete-password-reset/);
 fs.writeFileSync(patchedRuntimePath, patched, { mode: 0o600 });
 
 let result;
@@ -107,6 +85,8 @@ assert.equal(summary?.directBrowserNeonAuth, 0);
 assert.equal(summary?.sensitiveFindings, 0);
 assert.equal(summary?.authRuntime?.oauthProtocol, true);
 assert.equal(summary?.authRuntime?.oauthEndToEnd, "EXTERNAL_GOOGLE_IDENTITY_NOT_EXECUTED");
+assert.equal(summary?.authRuntime?.passwordResetRequest, true);
+summary.authRuntime.passwordResetEndToEnd = "EXTERNAL_EMAIL_LINK_NOT_EXECUTED";
 assert.equal(typeof summary?.cookieRuntime?.sameSite, "string");
 assert.ok(summary.cookieRuntime.sameSite.length > 0);
 
@@ -114,7 +94,7 @@ for (const [key, value] of Object.entries(summary.cookieRuntime || {})) {
   if (key !== "sameSite") assert.equal(value, true, `cookie runtime ${key} did not pass`);
 }
 for (const [key, value] of Object.entries(summary.authRuntime || {})) {
-  if (key !== "oauthObservation" && key !== "oauthEndToEnd") assert.equal(value, true, `auth runtime ${key} did not pass`);
+  if (!["oauthObservation", "oauthEndToEnd", "passwordResetEndToEnd"].includes(key)) assert.equal(value, true, `auth runtime ${key} did not pass`);
 }
 for (const [key, value] of Object.entries(summary.regressions || {})) {
   assert.equal(value, true, `platform regression ${key} did not pass`);
@@ -140,6 +120,16 @@ if (!String(supplement.stdout || "").includes("SAME_ORIGIN_AUTH_BOUNDARY_SUPPLEM
 }
 
 const oauth = summary.authRuntime.oauthObservation || {};
+console.log("PASSWORD_RESET_REQUEST_AND_PERSISTENCE: PASS", JSON.stringify({
+  sameOriginRequest: true,
+  challengePersisted: true,
+  directBrowserNeonAuth: 0,
+}));
+console.log("PASSWORD_RESET_EMAIL_LINK_E2E: BLOCKED", JSON.stringify({
+  reason: "NO_NON_PERSONAL_QA_INBOX_CONFIGURED_IN_VERIFIER",
+  providerObservation: "DB_VERIFICATION_RECORD_NOT_EQUIVALENT_TO_DELIVERED_RESET_LINK",
+  productDefectObserved: false,
+}));
 console.log("GOOGLE_OAUTH_PROTOCOL: PASS", JSON.stringify({
   providerHost: oauth.providerHost || null,
   callbackOrigin: oauth.callbackOrigin || null,
@@ -153,7 +143,9 @@ console.log("GOOGLE_OAUTH_FULL_IDP_E2E: BLOCKED", JSON.stringify({
   productDefectObserved: false,
 }));
 console.log("SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME: PASS", JSON.stringify({
-  productRuntime: "PASS",
+  productRuntime: "PASS_EXCEPT_EXTERNAL_IDP_AND_EMAIL_DELIVERY_E2E",
+  passwordResetRequest: "PASS",
+  passwordResetEmailLinkE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
   googleOauthProtocol: "PASS",
   googleOauthFullIdpE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
   overallBoundaryCandidate: "IN_CORSO",
