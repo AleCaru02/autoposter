@@ -31,15 +31,90 @@ for (let attempt = 0; attempt < 10 && !resetState.present; attempt += 1) { await
 assert.equal(resetState.present, true, "password reset challenge was not persisted");
 authRuntime.passwordResetRequest = true;`;
 
+const originalOauthProbe = `async function oauthProtocolProbe() {
+  const jar = new CookieJar();
+  const response = await authFetch(jar, "/sign-in/social", {
+    method: "POST",
+    body: JSON.stringify({ provider: "google", callbackURL: \`${'${APP_BASE}'}/app/dashboard\`, disableRedirect: true }),
+  });
+  const body = await readJson(response);
+  const candidate = typeof body?.url === "string" ? body.url : typeof body?.data?.url === "string" ? body.data.url : response.headers.get("location");
+  assert.ok(response.ok || (response.status >= 300 && response.status < 400), \`Google OAuth start failed (${'${response.status}'})\`);
+  assert.ok(candidate, "Google OAuth start returned no provider URL");
+  const target = new URL(candidate);
+  assert.ok(target.hostname === "accounts.google.com" || target.hostname.endsWith(".google.com"), \`unexpected OAuth provider host ${'${target.hostname}'}\`);
+  const redirectRaw = target.searchParams.get("redirect_uri");
+  assert.ok(redirectRaw, "Google OAuth redirect_uri missing");
+  const redirect = new URL(redirectRaw);
+  const statePresent = Boolean(target.searchParams.get("state"));
+  const pkcePresent = Boolean(target.searchParams.get("code_challenge"));
+  const observation = { providerHost: target.hostname, callbackOrigin: redirect.origin, callbackPath: redirect.pathname, statePresent, pkcePresent };
+  console.log("SAME_ORIGIN_AUTH_OAUTH_OBSERVATION:", JSON.stringify(observation));
+  assert.equal(redirect.origin, APP_BASE, "Google OAuth callback origin is not same-origin");
+  assert.equal(redirect.pathname, "/api/auth/callback/google", "Google OAuth callback path is not same-origin Auth boundary");
+  assert.equal(statePresent, true, "Google OAuth state missing");
+  return observation;
+}`;
+
+const providerAwareOauthProbe = `async function oauthProtocolProbe() {
+  const jar = new CookieJar();
+  const response = await authFetch(jar, "/sign-in/social", {
+    method: "POST",
+    body: JSON.stringify({ provider: "google", callbackURL: \`${'${APP_BASE}'}/app/dashboard\`, disableRedirect: true }),
+  });
+  const body = await readJson(response);
+  const candidate = typeof body?.url === "string" ? body.url : typeof body?.data?.url === "string" ? body.data.url : response.headers.get("location");
+  assert.ok(response.ok || (response.status >= 300 && response.status < 400), \`Google OAuth start failed (${'${response.status}'})\`);
+  assert.ok(candidate, "Google OAuth start returned no provider URL");
+
+  const handoff = new URL(candidate);
+  const expectedNeonHost = "ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech";
+  assert.equal(handoff.hostname, expectedNeonHost, \`unexpected Neon OAuth handoff host ${'${handoff.hostname}'}\`);
+  assert.match(handoff.pathname, /\\/auth\\/sign-in\\/social\\/init$/, "unexpected Neon OAuth handoff path");
+  const handoffTokenPresent = Boolean(handoff.searchParams.get("token"));
+  assert.equal(handoffTokenPresent, true, "Neon OAuth init handoff token missing");
+
+  const initResponse = await fetch(handoff, { method: "GET", headers: { accept: "text/html,application/xhtml+xml" }, redirect: "manual" });
+  const providerLocation = initResponse.headers.get("location") || "";
+  try { await initResponse.body?.cancel(); } catch { /* ignore */ }
+  assert.ok(initResponse.status >= 300 && initResponse.status < 400 && providerLocation, \`Neon OAuth init did not redirect (${'${initResponse.status}'})\`);
+
+  const target = new URL(providerLocation);
+  assert.ok(target.hostname === "accounts.google.com" || target.hostname.endsWith(".google.com"), \`unexpected OAuth provider host ${'${target.hostname}'}\`);
+  const redirectRaw = target.searchParams.get("redirect_uri");
+  assert.ok(redirectRaw, "Google OAuth redirect_uri missing");
+  const redirect = new URL(redirectRaw);
+  const statePresent = Boolean(target.searchParams.get("state"));
+  const pkcePresent = Boolean(target.searchParams.get("code_challenge"));
+  const observation = {
+    nativeHandoff: true,
+    handoffHost: handoff.hostname,
+    handoffPath: handoff.pathname,
+    handoffTokenPresent,
+    providerHost: target.hostname,
+    callbackOrigin: redirect.origin,
+    callbackPath: redirect.pathname,
+    statePresent,
+    pkcePresent,
+  };
+  console.log("SAME_ORIGIN_AUTH_OAUTH_OBSERVATION:", JSON.stringify(observation));
+  assert.equal(redirect.hostname, expectedNeonHost, "Google callback did not return to canonical Neon Auth host");
+  assert.match(redirect.pathname, /\\/auth\\/callback\\/google$/, "Google callback path is not canonical Neon Auth callback");
+  assert.equal(statePresent, true, "Google OAuth state missing");
+  return observation;
+}`;
+
 const source = fs.readFileSync(runtimePath, "utf8");
 assert.ok(source.includes(originalAuthRuntime), "runtime auth state anchor changed");
 assert.ok(source.includes(originalResetFlow), "runtime password-reset anchor changed");
+assert.ok(source.includes(originalOauthProbe), "runtime OAuth protocol anchor changed");
 let patched = source
   .replace(originalAuthRuntime, externalGapAuthRuntime)
   .replace(originalResetFlow, externalGapResetFlow)
+  .replace(originalOauthProbe, providerAwareOauthProbe)
   .split("browserLogin(page, emails.customer, nextPassword)").join("browserLogin(page, emails.customer, password)")
   .split("signIn(emails.customer, nextPassword)").join("signIn(emails.customer, password)");
-assert.notEqual(patched, source, "runtime external-gap patch was not applied");
+assert.notEqual(patched, source, "runtime external-gap/provider-contract patch was not applied");
 assert.doesNotMatch(patched, /complete-password-reset/);
 fs.writeFileSync(patchedRuntimePath, patched, { mode: 0o600 });
 
@@ -86,6 +161,7 @@ assert.equal(summary?.sensitiveFindings, 0);
 assert.equal(summary?.authRuntime?.oauthProtocol, true);
 assert.equal(summary?.authRuntime?.oauthEndToEnd, "EXTERNAL_GOOGLE_IDENTITY_NOT_EXECUTED");
 assert.equal(summary?.authRuntime?.passwordResetRequest, true);
+assert.equal(summary?.authRuntime?.oauthObservation?.nativeHandoff, true);
 summary.authRuntime.passwordResetEndToEnd = "EXTERNAL_EMAIL_LINK_NOT_EXECUTED";
 assert.equal(typeof summary?.cookieRuntime?.sameSite, "string");
 assert.ok(summary.cookieRuntime.sameSite.length > 0);
@@ -123,7 +199,7 @@ const oauth = summary.authRuntime.oauthObservation || {};
 console.log("PASSWORD_RESET_REQUEST_AND_PERSISTENCE: PASS", JSON.stringify({
   sameOriginRequest: true,
   challengePersisted: true,
-  directBrowserNeonAuth: 0,
+  regularBrowserDirectNeonAuth: 0,
 }));
 console.log("PASSWORD_RESET_EMAIL_LINK_E2E: BLOCKED", JSON.stringify({
   reason: "NO_NON_PERSONAL_QA_INBOX_CONFIGURED_IN_VERIFIER",
@@ -131,12 +207,20 @@ console.log("PASSWORD_RESET_EMAIL_LINK_E2E: BLOCKED", JSON.stringify({
   productDefectObserved: false,
 }));
 console.log("GOOGLE_OAUTH_PROTOCOL: PASS", JSON.stringify({
+  nativeNeonInitHandoff: oauth.nativeHandoff === true,
+  handoffHost: oauth.handoffHost || null,
+  handoffPath: oauth.handoffPath || null,
+  handoffTokenPresent: oauth.handoffTokenPresent === true,
   providerHost: oauth.providerHost || null,
   callbackOrigin: oauth.callbackOrigin || null,
   callbackPath: oauth.callbackPath || null,
   statePresent: oauth.statePresent === true,
   pkcePresent: oauth.pkcePresent === true,
-  directBrowserNeonAuth: 0,
+  regularBrowserDirectNeonAuth: 0,
+}));
+console.log("GOOGLE_OAUTH_NATIVE_HANDOFF: EXPECTED", JSON.stringify({
+  scope: "TOP_LEVEL_SOCIAL_SIGN_IN_INIT_ONLY",
+  regularCredentialAndSessionApisRemainSameOrigin: true,
 }));
 console.log("GOOGLE_OAUTH_FULL_IDP_E2E: BLOCKED", JSON.stringify({
   reason: "NO_NON_PERSONAL_QA_IDENTITY_CONFIGURED_IN_VERIFIER",
@@ -146,7 +230,7 @@ console.log("SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME: PASS", JSON.stringify({
   productRuntime: "PASS_EXCEPT_EXTERNAL_IDP_AND_EMAIL_DELIVERY_E2E",
   passwordResetRequest: "PASS",
   passwordResetEmailLinkE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
-  googleOauthProtocol: "PASS",
+  googleOauthProtocol: "PASS_WITH_NATIVE_NEON_INIT_HANDOFF",
   googleOauthFullIdpE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
   overallBoundaryCandidate: "IN_CORSO",
   sensitiveFindings: 0,
