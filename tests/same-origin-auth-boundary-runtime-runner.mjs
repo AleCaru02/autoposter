@@ -69,6 +69,7 @@ const providerAwareOauthProbe = `async function oauthProtocolProbe() {
 
   const handoff = new URL(candidate);
   const expectedNeonHost = "ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech";
+  const expectedCallbackHost = "neonauth.us-west-2.aws.neon.tech";
   assert.equal(handoff.hostname, expectedNeonHost, \`unexpected Neon OAuth handoff host ${'${handoff.hostname}'}\`);
   assert.match(handoff.pathname, /\\/auth\\/sign-in\\/social\\/init$/, "unexpected Neon OAuth handoff path");
   const handoffTokenPresent = Boolean(handoff.searchParams.get("token"));
@@ -93,14 +94,16 @@ const providerAwareOauthProbe = `async function oauthProtocolProbe() {
     handoffTokenPresent,
     providerHost: target.hostname,
     callbackOrigin: redirect.origin,
+    callbackHost: redirect.hostname,
     callbackPath: redirect.pathname,
     statePresent,
     pkcePresent,
   };
   console.log("SAME_ORIGIN_AUTH_OAUTH_OBSERVATION:", JSON.stringify(observation));
-  assert.equal(redirect.hostname, expectedNeonHost, "Google callback did not return to canonical Neon Auth host");
-  assert.match(redirect.pathname, /\\/auth\\/callback\\/google$/, "Google callback path is not canonical Neon Auth callback");
+  assert.equal(redirect.hostname, expectedCallbackHost, "Google callback did not return to the allowlisted Neon Managed Auth callback host");
+  assert.equal(redirect.pathname, "/auth/oauth/callback/google", "Google callback path is not the allowlisted Neon Managed Auth OAuth callback");
   assert.equal(statePresent, true, "Google OAuth state missing");
+  assert.equal(pkcePresent, true, "Google OAuth PKCE challenge missing");
   return observation;
 }`;
 
@@ -213,6 +216,7 @@ console.log("GOOGLE_OAUTH_PROTOCOL: PASS", JSON.stringify({
   handoffTokenPresent: oauth.handoffTokenPresent === true,
   providerHost: oauth.providerHost || null,
   callbackOrigin: oauth.callbackOrigin || null,
+  callbackHost: oauth.callbackHost || null,
   callbackPath: oauth.callbackPath || null,
   statePresent: oauth.statePresent === true,
   pkcePresent: oauth.pkcePresent === true,
@@ -220,6 +224,7 @@ console.log("GOOGLE_OAUTH_PROTOCOL: PASS", JSON.stringify({
 }));
 console.log("GOOGLE_OAUTH_NATIVE_HANDOFF: EXPECTED", JSON.stringify({
   scope: "TOP_LEVEL_SOCIAL_SIGN_IN_INIT_ONLY",
+  callbackBoundary: "NEON_MANAGED_AUTH_CENTRAL_OAUTH_CALLBACK",
   regularCredentialAndSessionApisRemainSameOrigin: true,
 }));
 console.log("GOOGLE_OAUTH_FULL_IDP_E2E: BLOCKED", JSON.stringify({
@@ -230,7 +235,7 @@ console.log("SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME: PASS", JSON.stringify({
   productRuntime: "PASS_EXCEPT_EXTERNAL_IDP_AND_EMAIL_DELIVERY_E2E",
   passwordResetRequest: "PASS",
   passwordResetEmailLinkE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
-  googleOauthProtocol: "PASS_WITH_NATIVE_NEON_INIT_HANDOFF",
+  googleOauthProtocol: "PASS_WITH_NATIVE_NEON_INIT_AND_CENTRAL_CALLBACK",
   googleOauthFullIdpE2e: "BLOCKED_EXTERNAL_TEST_COVERAGE_GAP",
   overallBoundaryCandidate: "IN_CORSO",
   sensitiveFindings: 0,
