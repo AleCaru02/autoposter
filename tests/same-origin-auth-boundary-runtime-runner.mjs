@@ -28,10 +28,14 @@ const diagnosticController = `async function controller(action, extra = {}) {
     const safe = {
       status: response.status,
       errorCode: typeof body?.error === "string" ? body.error : null,
+      callbackStatus: Number.isInteger(body?.callbackStatus) ? body.callbackStatus : null,
+      callbackSameOrigin: body?.callbackSameOrigin === true,
+      callbackTokenPresent: body?.callbackTokenPresent === true,
       providerStatus: Number.isInteger(body?.providerStatus) ? body.providerStatus : null,
+      providerErrorCode: typeof body?.providerErrorCode === "string" ? body.providerErrorCode : null,
       completed: body?.completed === true,
     };
-    console.log("SAME_ORIGIN_AUTH_PASSWORD_RESET_CONTROLLER:", JSON.stringify(safe));
+    console.log("SAME_ORIGIN_AUTH_RESET_CONTROLLER:", JSON.stringify(safe));
     return { ...(body && typeof body === "object" ? body : {}), __controllerStatus: response.status };
   }
   assert.equal(response.status, 200, \`${'${action}'} controller HTTP ${'${response.status}'}\`);
@@ -51,7 +55,7 @@ for (let attempt = 0; attempt < 8; attempt += 1) {
 assert.equal(
   completedReset?.completed,
   true,
-  \`password reset completion failed controller=${'${completedReset?.__controllerStatus ?? 200}'} provider=${'${completedReset?.providerStatus ?? "n/a"}'} error=${'${completedReset?.error ?? "none"}'}\`,
+  \`password reset completion failed controller=${'${completedReset?.__controllerStatus ?? 200}'} callback=${'${completedReset?.callbackStatus ?? "n/a"}'} provider=${'${completedReset?.providerStatus ?? "n/a"}'} providerCode=${'${completedReset?.providerErrorCode ?? "none"}'} error=${'${completedReset?.error ?? "none"}'}\`,
 );`;
 
 const source = fs.readFileSync(runtimePath, "utf8");
