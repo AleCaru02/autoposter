@@ -72,8 +72,16 @@ assert.match(runner, /DB_VERIFICATION_RECORD_NOT_EQUIVALENT_TO_DELIVERED_RESET_L
 assert.match(runner, /PASSWORD_RESET_REQUEST_AND_PERSISTENCE:\s*PASS/);
 assert.match(runner, /PASSWORD_RESET_EMAIL_LINK_E2E:\s*BLOCKED/);
 assert.match(runner, /GOOGLE_OAUTH_PROTOCOL:\s*PASS/);
+assert.match(runner, /GOOGLE_OAUTH_NATIVE_HANDOFF:\s*EXPECTED/);
 assert.match(runner, /GOOGLE_OAUTH_FULL_IDP_E2E:\s*BLOCKED/);
 assert.match(runner, /SAME_ORIGIN_AUTH_AUTOMATED_RUNTIME:\s*PASS/);
+assert.match(runner, /ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech/);
+assert.match(runner, /auth\\\/sign-in\\\/social\\\/init/);
+assert.match(runner, /auth\\\/callback\\\/google/);
+assert.match(runner, /handoffTokenPresent = Boolean\(handoff\.searchParams\.get\("token"\)\)/);
+assert.match(runner, /TOP_LEVEL_SOCIAL_SIGN_IN_INIT_ONLY/);
+assert.match(runner, /regularCredentialAndSessionApisRemainSameOrigin:\s*true/);
+assert.match(runner, /runtime OAuth protocol anchor changed/);
 assert.match(runner, /result\.status !== 2 \|\| !summaryLine/);
 assert.match(runner, /sensitiveFindings, 0/);
 assert.match(runner, /directBrowserNeonAuth, 0/);
