@@ -31,6 +31,30 @@ for (let attempt = 0; attempt < 10 && !resetState.present; attempt += 1) { await
 assert.equal(resetState.present, true, "password reset challenge was not persisted");
 authRuntime.passwordResetRequest = true;`;
 
+const originalBrowserPageJson = `async function browserPageJson(page, path, init = {}) {
+  return page.evaluate(async ({ path, init }) => {
+    const response = await fetch(path, { ...init, credentials: "include" });
+    let body = null;
+    try { body = await response.json(); } catch { /* ignore */ }
+    return { status: response.status, ok: response.ok, body };
+  }, { path, init });
+}`;
+
+const anchoredBrowserPageJson = `async function browserPageJson(page, path, init = {}) {
+  let currentOrigin = null;
+  try { currentOrigin = new URL(page.url()).origin; } catch { /* about:blank or invalid */ }
+  if (currentOrigin !== APP_BASE) {
+    const anchor = await page.goto(\`${'${APP_BASE}'}/\`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    assert.ok(anchor && anchor.status() >= 200 && anchor.status() < 400, "browser Auth probe could not anchor to app origin");
+  }
+  return page.evaluate(async ({ path, init }) => {
+    const response = await fetch(path, { ...init, credentials: "include" });
+    let body = null;
+    try { body = await response.json(); } catch { /* ignore */ }
+    return { status: response.status, ok: response.ok, body };
+  }, { path, init });
+}`;
+
 const originalOauthProbe = `async function oauthProtocolProbe() {
   const jar = new CookieJar();
   const response = await authFetch(jar, "/sign-in/social", {
@@ -110,14 +134,17 @@ const providerAwareOauthProbe = `async function oauthProtocolProbe() {
 const source = fs.readFileSync(runtimePath, "utf8");
 assert.ok(source.includes(originalAuthRuntime), "runtime auth state anchor changed");
 assert.ok(source.includes(originalResetFlow), "runtime password-reset anchor changed");
+assert.ok(source.includes(originalBrowserPageJson), "runtime browser fetch anchor changed");
 assert.ok(source.includes(originalOauthProbe), "runtime OAuth protocol anchor changed");
 let patched = source
   .replace(originalAuthRuntime, externalGapAuthRuntime)
   .replace(originalResetFlow, externalGapResetFlow)
+  .replace(originalBrowserPageJson, anchoredBrowserPageJson)
   .replace(originalOauthProbe, providerAwareOauthProbe)
   .split("browserLogin(page, emails.customer, nextPassword)").join("browserLogin(page, emails.customer, password)")
   .split("signIn(emails.customer, nextPassword)").join("signIn(emails.customer, password)");
 assert.notEqual(patched, source, "runtime external-gap/provider-contract patch was not applied");
+assert.match(patched, /browser Auth probe could not anchor to app origin/);
 assert.doesNotMatch(patched, /complete-password-reset/);
 fs.writeFileSync(patchedRuntimePath, patched, { mode: 0o600 });
 
