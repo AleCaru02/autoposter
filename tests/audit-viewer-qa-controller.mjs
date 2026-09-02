@@ -192,14 +192,62 @@ async function completePasswordReset(sql, marker, env) {
   `;
   const identifier = String(rows[0]?.identifier || "");
   if (!identifier.startsWith("reset-password:") || identifier.length <= 15) return { status: 409, body: { error: "RESET_CHALLENGE_NOT_FOUND" } };
-  const token = identifier.slice("reset-password:".length);
+
+  const challenge = identifier.slice("reset-password:".length);
+  const callbackUrl = `${APP_BASE}/reimposta-password`;
+  const linkResponse = await fetch(`${APP_BASE}/api/auth/reset-password/${encodeURIComponent(challenge)}?callbackURL=${encodeURIComponent(callbackUrl)}`, {
+    method: "GET",
+    headers: { accept: "text/html,application/xhtml+xml,application/json" },
+    redirect: "manual",
+  });
+  const location = linkResponse.headers.get("location") || "";
+  try { await linkResponse.body?.cancel(); } catch { /* ignore */ }
+  if (![301, 302, 303, 307, 308].includes(linkResponse.status) || !location) {
+    return { status: 409, body: { error: "RESET_CALLBACK_NOT_REDIRECTED", callbackStatus: linkResponse.status, callbackSameOrigin: false, callbackTokenPresent: false } };
+  }
+
+  let redirect;
+  try { redirect = new URL(location, APP_BASE); } catch {
+    return { status: 409, body: { error: "RESET_CALLBACK_LOCATION_INVALID", callbackStatus: linkResponse.status, callbackSameOrigin: false, callbackTokenPresent: false } };
+  }
+  const callbackSameOrigin = redirect.origin === APP_BASE && redirect.pathname === "/reimposta-password";
+  const callbackError = redirect.searchParams.get("error");
+  const finalChallenge = redirect.searchParams.get("token") || "";
+  if (!callbackSameOrigin) {
+    return { status: 409, body: { error: "RESET_CALLBACK_ORIGIN_MISMATCH", callbackStatus: linkResponse.status, callbackSameOrigin: false, callbackTokenPresent: Boolean(finalChallenge) } };
+  }
+  if (callbackError) {
+    return { status: 409, body: { error: "RESET_CALLBACK_REJECTED", callbackStatus: linkResponse.status, callbackSameOrigin: true, callbackTokenPresent: false } };
+  }
+  if (!finalChallenge) {
+    return { status: 409, body: { error: "RESET_CALLBACK_TOKEN_MISSING", callbackStatus: linkResponse.status, callbackSameOrigin: true, callbackTokenPresent: false } };
+  }
+
   const response = await fetch(`${APP_BASE}/api/auth/reset-password`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json", origin: APP_BASE, referer: `${APP_BASE}/reimposta-password` },
-    body: JSON.stringify({ newPassword: env.AUDIT_SMOKE_NEXT_PASSWORD, token }),
+    body: JSON.stringify({ newPassword: env.AUDIT_SMOKE_NEXT_PASSWORD, token: finalChallenge }),
   });
-  try { await response.body?.cancel(); } catch { /* ignore */ }
-  return { status: response.ok ? 200 : 409, body: { completed: response.ok, providerStatus: response.status } };
+  let providerErrorCode = null;
+  if (!response.ok) {
+    try {
+      const providerBody = await response.json();
+      providerErrorCode = typeof providerBody?.code === "string" ? providerBody.code : null;
+    } catch { /* ignore non-JSON provider body */ }
+  } else {
+    try { await response.body?.cancel(); } catch { /* ignore */ }
+  }
+  return {
+    status: response.ok ? 200 : 409,
+    body: {
+      completed: response.ok,
+      callbackStatus: linkResponse.status,
+      callbackSameOrigin: true,
+      callbackTokenPresent: true,
+      providerStatus: response.status,
+      providerErrorCode,
+    },
+  };
 }
 
 async function promote(sql, marker) {
