@@ -47,7 +47,11 @@ function configuredAppOrigin(env: ImpersonationEnv) {
 
 function sameOriginMutation(request: Request, env: ImpersonationEnv) {
   const expected = configuredAppOrigin(env);
-  return Boolean(expected && request.headers.get("origin") === expected);
+  if (!expected) return false;
+  let requestOrigin: string;
+  try { requestOrigin = new URL(request.url).origin; }
+  catch { return false; }
+  return requestOrigin === expected && request.headers.get("origin") === expected;
 }
 
 function decodeSegment(value: string) {
