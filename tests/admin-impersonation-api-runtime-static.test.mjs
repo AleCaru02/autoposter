@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const workflow = readFileSync(new URL("../.github/workflows/audit-viewer-runtime.yml", import.meta.url), "utf8");
+const gate = readFileSync(new URL("../.github/workflows/gate.yml", import.meta.url), "utf8");
 const runtime = readFileSync(new URL("./admin-impersonation-api-runtime.mjs", import.meta.url), "utf8");
 const adminTarget = readFileSync(new URL("./admin-impersonation-api-admin-target-runtime.mjs", import.meta.url), "utf8");
 const controller = readFileSync(new URL("./audit-viewer-qa-controller.mjs", import.meta.url), "utf8");
@@ -12,6 +13,8 @@ for (const forbiddenTrigger of ["push:", "pull_request:", "schedule:"]) {
 }
 assert.ok(workflow.includes("github.ref == 'refs/heads/verify/admin-impersonation-api-runtime'"), "runtime branch lock missing");
 assert.ok(workflow.includes("name: admin-impersonation-api-runtime"), "runtime job name missing");
+assert.ok(workflow.includes("concurrency:"), "existing concurrency contract missing");
+assert.ok(workflow.includes("cancel-in-progress: false"), "runtime concurrency must not cancel an in-flight verifier");
 assert.ok(workflow.includes("wrangler versions upload"), "isolated Preview upload missing");
 assert.ok(workflow.includes("--preview-alias"), "Preview alias missing");
 assert.equal(/\bwrangler\s+(?:versions\s+)?deploy\b/.test(workflow), false, "runtime verifier must never deploy to production");
@@ -33,6 +36,28 @@ assert.ok(workflow.includes("IMPERSONATION_API_EPHEMERAL_SECRET_CLEANUP: PASS"))
 assert.ok(workflow.includes("qaAuditRows"), "cleanup must prove impersonation audit fixture removal");
 assert.ok(workflow.includes("impersonation-state"), "cleanup must prove no active QA impersonation session remains");
 assert.ok(workflow.includes("attachedToProduction:false"), "Preview isolation postcondition missing");
+
+const requiredGateCoverage = [
+  "npm run typecheck",
+  "npm run test:auth-security",
+  "npm run test:auth-proxy",
+  "npm run test:auth-boundary-static",
+  "npm run test:platform-rbac",
+  "npm run test:admin-audit-viewer",
+  "npm run test:admin-session-management",
+  "npm run test:admin-ban-unban",
+  "npm run test:admin-impersonation-api",
+  "node tests/admin-impersonation-api-runtime-static.test.mjs",
+  "npm run test:banned-user-rls",
+  "npm run test:tenant-security",
+  "npm run test:tenant-cross-security",
+  "npm run build",
+  "npx wrangler deploy --dry-run",
+];
+for (const command of requiredGateCoverage) {
+  assert.ok(gate.includes(command), `verifier Gate coverage missing: ${command}`);
+}
+assert.ok(gate.includes("pull_request:"), "automatic verifier Gate must run on PRs to main");
 
 for (const route of ["/api/admin/customers/", "/impersonate", "/api/admin/impersonation/stop"]) {
   assert.ok(runtime.includes(route), `product impersonation route coverage missing: ${route}`);
@@ -70,7 +95,11 @@ for (const source of [runtime, adminTarget, controller]) {
   assert.equal(/console\.(?:log|error)\([^\n]*(?:password|\.token|cookie\.header\(|authorization:\s*`Bearer)/i.test(source), false, "verifier must not log credential material");
   assert.equal(/console\.(?:log|error)\([^\n]*\.body\b/i.test(source), false, "verifier must not log raw provider/product response bodies");
 }
+for (const source of [workflow, runtime, adminTarget, controller]) {
+  assert.equal(/console\.(?:log|error)\([^\n]*(?:CLOUDFLARE_API_TOKEN|DATABASE_URL|AUDIT_SMOKE_PASSWORD|AUDIT_SMOKE_TOKEN_VALUE)/i.test(source), false, "verifier must not print production or ephemeral secrets");
+}
 assert.equal(runtime.includes("storageState"), false, "API runtime must not persist browser auth state as an artifact");
 assert.equal(workflow.includes("artifacts"), false, "workflow must not create credential-bearing artifacts");
+assert.equal(workflow.includes("wrangler delete"), false, "verifier must not destructively delete the production Worker");
 
 console.log("Admin impersonation API runtime static safety: PASS");
