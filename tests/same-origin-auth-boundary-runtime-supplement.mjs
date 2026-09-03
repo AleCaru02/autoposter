@@ -218,7 +218,8 @@ try {
   assert.equal(Boolean(providerUrl.searchParams.get("state")), true);
   assert.equal(Boolean(providerUrl.searchParams.get("code_challenge")), true);
 
-  await page.getByRole("button", { name: "Esci", exact: true }).click();
+  await page.getByRole("button", { name: "Apri altre sezioni", exact: true }).click();
+  await page.getByRole("dialog", { name: "Altre sezioni" }).getByRole("button", { name: "Esci", exact: true }).click();
   await page.waitForURL((url) => url.pathname === "/login", { timeout: 20000 });
   await page.goto(`${APP_BASE}/app/dashboard`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForURL((url) => url.pathname === "/login", { timeout: 20000 });
