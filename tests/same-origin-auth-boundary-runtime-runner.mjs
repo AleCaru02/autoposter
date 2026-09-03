@@ -141,10 +141,31 @@ let patched = source
   .replace(originalResetFlow, externalGapResetFlow)
   .replace(originalBrowserPageJson, anchoredBrowserPageJson)
   .replace(originalOauthProbe, providerAwareOauthProbe)
+  .replace(
+    "  const temporaryExpiry = new Date(Date.now() + 4500).toISOString();",
+    "  const temporaryExpiry = new Date(Date.now() + 120000).toISOString();",
+  )
+  .replace(
+    '  assert.equal((await signIn(emails.customer, nextPassword)).ok, false, "temporary ban did not block login");',
+    [
+      "  const tempBlockedLogin = await signIn(emails.customer, nextPassword);",
+      '  assert.equal(tempBlockedLogin.ok, false, "temporary ban did not block login");',
+      '  assert.notEqual(tempBlockedLogin.status, 429, "temporary ban verification remained rate-limited");',
+      "  const expiryRefresh = new Date(Date.now() + 4500).toISOString();",
+      '  const tempExpiryRefresh = await productRequest(adminFresh.token, `/api/admin/customers/${encodeURIComponent(customer.id)}/ban`, "POST", { reason: `qa-temp-expiry-${marker}`, expiresAt: expiryRefresh });',
+      "  assert.ok(tempExpiryRefresh.status === 200 || tempExpiryRefresh.status === 207);",
+    ].join("\n"),
+  )
+  .replace(
+    "  await sleep(5500);",
+    "  await sleep(Math.max(0, Date.parse(expiryRefresh) - Date.now() + 1500));",
+  )
   .split("browserLogin(page, emails.customer, nextPassword)").join("browserLogin(page, emails.customer, password)")
   .split("signIn(emails.customer, nextPassword)").join("signIn(emails.customer, password)");
 assert.notEqual(patched, source, "runtime external-gap/provider-contract patch was not applied");
 assert.match(patched, /browser Auth probe could not anchor to app origin/);
+assert.match(patched, /temporary ban verification remained rate-limited/);
+assert.match(patched, /Date\.parse\(expiryRefresh\)/);
 assert.doesNotMatch(patched, /complete-password-reset/);
 fs.writeFileSync(patchedRuntimePath, patched, { mode: 0o600 });
 
