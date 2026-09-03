@@ -3,6 +3,7 @@ import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, 
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
+import { ImpersonationBanner } from "./impersonation-banner";
 
 const links = [
   ["Dashboard", "/app/dashboard", LayoutDashboard],
@@ -37,6 +38,7 @@ export function AppShell() {
   }
 
   return <div className="shell">
+    <ImpersonationBanner />
     <aside className="sidebar">
       <label className="profile-switcher profile-switcher-top"><span>Attività</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
       <nav>{links.map(([label, href, Icon]) => <NavLink key={href} to={href} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Icon size={17} /><span>{label}</span></NavLink>)}</nav>
