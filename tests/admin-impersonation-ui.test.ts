@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
+const action = readFileSync(new URL("../src/components/admin-impersonation-route-action.tsx", import.meta.url), "utf8");
+const banner = readFileSync(new URL("../src/components/impersonation-banner.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("../src/impersonation.css", import.meta.url), "utf8");
+const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+const adminApi = readFileSync(new URL("../src/lib/admin-api.ts", import.meta.url), "utf8");
+
+assert.ok(app.includes("<AdminImpersonationRouteAction />"), "Admin customer detail impersonation action must be globally route-bound");
+assert.ok(action.includes('/^\\/admin\\/clienti\\/([^/]+)\\/?$/'), "CTA must only bind to exact Admin customer detail routes");
+assert.ok(action.includes('customer.platform_role === "CUSTOMER"'), "CTA must hide for Admin targets");
+assert.ok(action.includes("customer.banned !== true"), "CTA must hide for banned customers");
+assert.ok(action.includes("customer.auth_user_id !== currentAdminId"), "CTA must hide for current Admin self-target");
+assert.ok(action.includes('adminRequest<CustomerDetailResponse>(`/api/admin/customers/${encodeURIComponent(targetId)}`)'), "CTA target state must come from Admin server read model");
+assert.ok(action.includes('`/api/admin/customers/${encodeURIComponent(targetId)}/impersonate`'), "start endpoint must derive target only from route customer id");
+assert.ok(action.includes('{ method: "POST" }'), "impersonation start must use POST without client authority body");
+assert.equal(action.includes("targetUserId"), false, "UI must not send a targetUserId authority field");
+assert.equal(action.includes("sessionId"), false, "UI must not let the browser choose an Admin session");
+assert.ok(action.includes("Visualizza come cliente"), "Admin CTA copy missing");
+assert.ok(action.includes("Visualizza come questo cliente?"), "confirmation modal title missing");
+assert.ok(action.includes("Le azioni relative all'impersonation sono tracciate"), "confirmation audit disclosure missing");
+assert.ok(action.includes("puoi terminare la visualizzazione in qualsiasi momento"), "confirmation stop disclosure missing");
+assert.ok(action.includes('role="dialog"') && action.includes('aria-modal="true"'), "confirmation modal semantics missing");
+assert.ok(action.includes("autoFocus"), "confirmation should focus safe cancel action");
+assert.ok(action.includes('event.key === "Escape"'), "confirmation must support Escape while idle");
+assert.ok(action.includes("if (!visible || !targetId || busy) return;"), "start must fail closed and block double submit");
+assert.ok(action.includes('window.location.assign("/app/dashboard")'), "start must redirect to customer dashboard only after API success");
+assert.ok(action.indexOf('await adminRequest<StartResponse>') < action.indexOf('window.location.assign("/app/dashboard")'), "customer redirect must happen only after start mutation resolves");
+
+assert.ok(shell.includes("<ImpersonationBanner />"), "persistent banner must be mounted in shared customer AppShell");
+assert.ok(banner.includes('fetch("/api/auth/get-session"'), "banner state must be derived from the native same-origin Managed Auth session");
+assert.ok(banner.includes("session?.impersonatedBy") && banner.includes("session?.impersonated_by"), "banner must recognize the real provider impersonatedBy marker");
+assert.ok(banner.includes("Stai visualizzando l'account di"), "persistent banner copy missing");
+assert.ok(banner.includes("Termina visualizzazione"), "persistent stop CTA missing");
+assert.ok(banner.includes('fetch("/api/admin/impersonation/stop"'), "banner must use certified product stop API");
+assert.ok(banner.includes('method: "POST"'), "stop must use POST");
+assert.ok(banner.includes("authClient.token"), "stop must carry the current native JWT boundary, not a custom credential");
+assert.ok(banner.includes("credentials: \"include\""), "same-origin session cookie round-trip must be explicit");
+assert.ok(banner.includes("if (!snapshot?.active || !snapshot.userId || !snapshot.impersonatedBy || busy) return;"), "stop must fail closed and block double submit");
+assert.ok(banner.includes("La sessione resta invariata: riprova."), "stop failure must keep banner and expose retry semantics");
+assert.ok(banner.includes('window.location.assign(`/admin/clienti/${encodeURIComponent(targetId)}`)'), "successful stop must return to the exact original customer detail");
+const stopFetch = banner.indexOf('fetch("/api/admin/impersonation/stop"');
+const restoreRead = banner.indexOf("const restored = await readManagedSession()", stopFetch);
+const adminRedirect = banner.indexOf("window.location.assign(`/admin/clienti/", restoreRead);
+assert.ok(stopFetch >= 0 && restoreRead > stopFetch && adminRedirect > restoreRead, "Admin redirect must happen only after stop and native Admin restoration are verified");
+assert.equal(banner.includes("localStorage"), false, "banner source of truth must not use localStorage");
+assert.equal(banner.includes("sessionStorage"), false, "banner source of truth must not use sessionStorage");
+assert.equal(action.includes("localStorage") || action.includes("sessionStorage"), false, "Admin CTA must not persist impersonation state in browser storage");
+assert.equal(action.includes("neonauth") || banner.includes("neonauth"), false, "UI must not introduce direct browser Neon Auth calls");
+assert.equal(action.includes("console.log") || banner.includes("console.log"), false, "UI must not log auth/session material");
+assert.equal(adminApi.includes("localStorage"), false, "existing Admin bearer boundary must remain non-persistent");
+
+assert.ok(main.includes('import "./impersonation.css";'), "impersonation styles must be loaded globally");
+assert.ok(css.includes(".impersonation-banner{position:sticky"), "banner must remain persistent during customer navigation/scroll");
+assert.ok(css.includes("z-index:45"), "banner must stay visually prominent above customer shell content");
+assert.ok(css.includes("min-height:44px"), "stop CTA must preserve touch target size");
+assert.ok(css.includes("@media(max-width:760px)"), "mobile impersonation layout breakpoint missing");
+assert.ok(css.includes(".impersonation-banner{margin-left:0"), "banner must span mobile customer viewport");
+assert.ok(css.includes(".admin-impersonation-launcher{right:14px;bottom:14px;left:14px"), "mobile Admin CTA must remain reachable without horizontal overflow");
+assert.ok(css.includes("max-height:calc(100vh - 28px)"), "confirmation modal must remain contained on short mobile viewports");
+assert.ok(css.includes("overflow:auto"), "mobile confirmation modal must support contained scrolling");
+
+console.log("Admin impersonation UI regression: PASS");
