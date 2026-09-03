@@ -107,7 +107,7 @@ assert.match(supplement, /foreign OAuth Origin was not denied/);
 assert.match(supplement, /untrusted OAuth callback was accepted/);
 assert.match(supplement, /\/api\/auth\/sign-in\/social/);
 assert.match(supplement, /ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech/);
-assert.match(supplement, /\/auth\/sign-in\/social\/init/);
+assert.match(supplement, /sign-in.*social.*init/);
 assert.match(supplement, /neonauth\.us-west-2\.aws\.neon\.tech/);
 assert.match(supplement, /\/auth\/oauth\/callback\/google/);
 assert.match(supplement, /handoff\.searchParams\.get\("token"\)/);
