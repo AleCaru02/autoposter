@@ -1,0 +1,222 @@
+name: FASE 4B Entitlement Authenticated Runtime
+
+on:
+  push:
+    branches: [verify/fase4b-entitlement-runtime]
+
+concurrency:
+  group: fase4b-entitlement-authenticated-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+
+      - name: Certified static and regression gate
+        run: |
+          npm run typecheck
+          npm run test:entitlements
+          npm run test:entitlement-migration
+          npm run test:platform-rbac
+          npm run test:fase3-core
+          npm run test:tenant-security
+          npm run test:tenant-cross-security
+          npm run test:ai-economics
+          npm run test:openai
+          npm run test:openai-image
+          npm run build
+          npx wrangler deploy --dry-run
+
+      - name: Generate ephemeral FASE 4B QA identity material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="fase4bqa-${GITHUB_RUN_ID}"
+          email_a="fase4b-entitlement-${marker}-a@example.invalid"
+          email_b="fase4b-entitlement-${marker}-b@example.invalid"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "::add-mask::$email_a"
+          echo "::add-mask::$email_b"
+          echo "FASE4B_QA_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "FASE4B_QA_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "FASE4B_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "FASE4B_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "FASE4B_QA_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'FASE4B_QA_TOKEN=%s\n' "$token" > .fase4b-runtime-secrets.env
+          chmod 600 .fase4b-runtime-secrets.env
+
+      - name: Upload isolated FASE 4B controller preview
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload \
+            --config tests/wrangler.fase4b-entitlement-runtime.jsonc \
+            --keep-vars \
+            --preview-alias "$FASE4B_PREVIEW_ALIAS" \
+            --secrets-file .fase4b-runtime-secrets.env | tee fase4b-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase4b-upload.log | tail -n 1)
+          if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
+            echo "preview version id not captured" >&2
+            exit 1
+          fi
+          echo "FASE4B_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          echo "FASE4B_CONTROLLER_READY_FOR_PREFLIGHT=true" >> "$GITHUB_ENV"
+
+      - name: Verify preview is not attached to production
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
+            -o fase4b-deployments-before.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('fase4b-deployments-before.json','utf8'));
+          if (body?.success !== true) throw new Error('Cloudflare deployment read failed');
+          const result = body.result;
+          const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
+          if (!deployments.length) throw new Error('no production deployments returned');
+          const deploymentIds = deployments.map((item) => String(item.id || '')).filter(Boolean).sort();
+          const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((v) => String(v.version_id || '')) : []).filter(Boolean))].sort();
+          const ephemeral = process.env.FASE4B_CONTROLLER_VERSION_ID || '';
+          if (!ephemeral) throw new Error('ephemeral controller version missing');
+          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller attached to production');
+          fs.appendFileSync(process.env.GITHUB_ENV, `FASE4B_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nFASE4B_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
+          console.log('FASE4B_PREVIEW_ISOLATION: PASS', JSON.stringify({ attachedToProduction:false, productionDeployments:deploymentIds.length }));
+          NODE
+
+      - name: Controller preflight and stale QA recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H 'x-fase4b-qa-token: wrong' \
+            --data "{\"action\":\"preflight\",\"marker\":\"$FASE4B_QA_MARKER\"}" \
+            "$FASE4B_QA_CONTROLLER_URL" || true)
+          if [ "$wrong" != "403" ]; then
+            echo "controller token gate failed: HTTP $wrong" >&2
+            exit 1
+          fi
+
+          read_state() {
+            curl -sS -o fase4b-preflight.json -w "%{http_code}" -X POST \
+              -H 'content-type: application/json' -H "x-fase4b-qa-token: $FASE4B_QA_TOKEN_VALUE" \
+              --data "{\"action\":\"preflight\",\"marker\":\"$FASE4B_QA_MARKER\"}" \
+              "$FASE4B_QA_CONTROLLER_URL"
+          }
+
+          status=$(read_state)
+          if [ "$status" != "200" ]; then echo "preflight failed HTTP $status" >&2; exit 1; fi
+          stale=$(node -e "const b=require('./fase4b-preflight.json');process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
+          if [ "$stale" -gt 0 ]; then
+            cleanup_status=$(curl -sS -o fase4b-stale-cleanup.json -w "%{http_code}" -X POST \
+              -H 'content-type: application/json' -H "x-fase4b-qa-token: $FASE4B_QA_TOKEN_VALUE" \
+              --data "{\"action\":\"cleanup-residue\",\"marker\":\"$FASE4B_QA_MARKER\"}" \
+              "$FASE4B_QA_CONTROLLER_URL")
+            CLEANUP_STATUS="$cleanup_status" node -e "const b=require('./fase4b-stale-cleanup.json');if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true||b.recognizedQaUsers!==0)throw new Error('stale QA cleanup failed')"
+            status=$(read_state)
+          fi
+
+          PREFLIGHT_STATUS="$status" node - <<'NODE'
+          const fs=require('node:fs');
+          const b=JSON.parse(fs.readFileSync('fase4b-preflight.json','utf8'));
+          if(process.env.PREFLIGHT_STATUS!=='200')throw new Error(`preflight HTTP ${process.env.PREFLIGHT_STATUS}`);
+          for(const key of ['qaUsers','qaProfiles','qaOwners','qaEntitlementOverrides','qaUsageEvents','qaUsageBuckets','recognizedQaUsers']) if(b[key]!==0) throw new Error(`preflight residue ${key}=${b[key]}`);
+          if(b.superAdmins!==1)throw new Error(`SUPER_ADMIN baseline ${b.superAdmins}`);
+          if(b.profilesWithoutOwner!==0||b.multipleOwners!==0||b.ownerMismatch!==0)throw new Error('owner invariants failed');
+          if(b.openPolicies!==0||b.anonymousPrivilegedTables!==0)throw new Error('security baseline failed');
+          fs.appendFileSync(process.env.GITHUB_ENV,`FASE4B_BASELINE_PROFILES=${b.profilesTotal}\nFASE4B_QA_READY=true\n`);
+          console.log('FASE4B_PREFLIGHT: PASS',JSON.stringify({profilesTotal:b.profilesTotal,superAdmins:b.superAdmins,profilesWithoutOwner:b.profilesWithoutOwner}));
+          NODE
+
+      - name: FASE 4B entitlement and usage production runtime
+        run: node tests/fase4b-entitlement-runtime.mjs
+
+      - name: Cleanup FASE 4B ephemeral fixtures
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${FASE4B_QA_READY:-}" != "true" ]; then
+            echo "FASE4B_CLEANUP_NOT_ARMED: no QA fixtures authorized"
+            exit 0
+          fi
+          status=$(curl -sS -o fase4b-cleanup.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-fase4b-qa-token: $FASE4B_QA_TOKEN_VALUE" \
+            --data "{\"action\":\"cleanup\",\"marker\":\"$FASE4B_QA_MARKER\"}" \
+            "$FASE4B_QA_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const fs=require('node:fs');
+          const b=JSON.parse(fs.readFileSync('fase4b-cleanup.json','utf8'));
+          if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true)throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}`);
+          for(const key of ['qaUsers','qaProfiles','qaOwners','qaEntitlementOverrides','qaUsageEvents','qaUsageBuckets','qaAppUsers','qaSessions','qaAccounts']) if(b[key]!==0)throw new Error(`cleanup residue ${key}=${b[key]}`);
+          if(b.superAdmins!==1)throw new Error(`SUPER_ADMIN post-cleanup ${b.superAdmins}`);
+          if(String(b.profilesTotal)!==String(process.env.FASE4B_BASELINE_PROFILES))throw new Error(`profile baseline mismatch ${b.profilesTotal} != ${process.env.FASE4B_BASELINE_PROFILES}`);
+          if(b.profilesWithoutOwner!==0||b.multipleOwners!==0||b.ownerMismatch!==0)throw new Error('post-cleanup owner invariants failed');
+          if(b.openPolicies!==0||b.anonymousPrivilegedTables!==0)throw new Error('post-cleanup security invariants failed');
+          console.log('FASE4B_CLEANUP: PASS',JSON.stringify({qaUsers:0,qaProfiles:0,qaEntitlementOverrides:0,qaUsageEvents:0,qaUsageBuckets:0,superAdmins:b.superAdmins,profilesTotal:b.profilesTotal,profilesWithoutOwner:b.profilesWithoutOwner}));
+          NODE
+
+      - name: Post-cleanup production and deployment invariants
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o fase4b-tenant-audit.json
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities -o fase4b-auth-audit.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
+            -o fase4b-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const tenant=JSON.parse(fs.readFileSync('fase4b-tenant-audit.json','utf8'));
+          const auth=JSON.parse(fs.readFileSync('fase4b-auth-audit.json','utf8'));
+          const cf=JSON.parse(fs.readFileSync('fase4b-deployments-after.json','utf8'));
+          if(tenant?.ready!==true||tenant?.ownerContract?.ready!==true)throw new Error('tenant invariant not ready');
+          if(tenant.ownerContract.profilesWithoutOwner!==0)throw new Error(`profilesWithoutOwner ${tenant.ownerContract.profilesWithoutOwner}`);
+          if(auth?.managedAuth?.ready!==true||auth.managedAuth.nativeAdminUsers!==1)throw new Error(`native SUPER_ADMIN ${auth?.managedAuth?.nativeAdminUsers}`);
+          if(process.env.FASE4B_BASELINE_PROFILES&&String(tenant.ownerContract.profilesTotal)!==String(process.env.FASE4B_BASELINE_PROFILES))throw new Error('profile baseline changed');
+          if(cf?.success!==true)throw new Error('Cloudflare deployment read failed');
+          const result=cf.result;
+          const deployments=Array.isArray(result?.deployments)?result.deployments:Array.isArray(result)?result:[];
+          const deploymentIds=deployments.map(x=>String(x.id||'')).filter(Boolean).sort();
+          const versionIds=[...new Set(deployments.flatMap(x=>Array.isArray(x.versions)?x.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
+          const beforeDeployments=String(process.env.FASE4B_PRODUCTION_DEPLOYMENT_IDS||'').split(',').filter(Boolean).sort();
+          const beforeVersions=String(process.env.FASE4B_PRODUCTION_VERSION_IDS||'').split(',').filter(Boolean).sort();
+          if(JSON.stringify(deploymentIds)!==JSON.stringify(beforeDeployments)||JSON.stringify(versionIds)!==JSON.stringify(beforeVersions))throw new Error('production deployment changed during verifier');
+          if(versionIds.includes(process.env.FASE4B_CONTROLLER_VERSION_ID||''))throw new Error('QA preview attached to production');
+          console.log('FASE4B_POST_CLEANUP_PRODUCTION: PASS',JSON.stringify({nativeAdminUsers:auth.managedAuth.nativeAdminUsers,profilesTotal:tenant.ownerContract.profilesTotal,profilesWithoutOwner:tenant.ownerContract.profilesWithoutOwner,productionDeploymentUnchanged:true}));
+          NODE
+
+      - name: Remove local ephemeral credential material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f .fase4b-runtime-secrets.env ]; then
+            chmod 600 .fase4b-runtime-secrets.env || true
+            shred -u .fase4b-runtime-secrets.env 2>/dev/null || rm -f .fase4b-runtime-secrets.env
+          fi
+          rm -f fase4b-preflight.json fase4b-stale-cleanup.json fase4b-cleanup.json fase4b-upload.log fase4b-deployments-before.json fase4b-deployments-after.json fase4b-tenant-audit.json fase4b-auth-audit.json
+          echo "FASE4B_EPHEMERAL_SECRET_CLEANUP: PASS"
