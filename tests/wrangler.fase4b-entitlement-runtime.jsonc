@@ -1,0 +1,12 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "autoposter",
+  "main": "./fase4b-entitlement-qa-controller.mjs",
+  "compatibility_date": "2026-08-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
+  "preview_urls": true,
+  "secrets": {
+    "required": ["DATABASE_URL", "FASE4B_QA_TOKEN"]
+  }
+}
