@@ -33,6 +33,8 @@ jobs:
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
+      - { name: Entitlement domain regression, run: "npm run test:entitlements" }
+      - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
       - { name: Site intelligence UI regression, run: "npm run test:site-intelligence-ui" }
