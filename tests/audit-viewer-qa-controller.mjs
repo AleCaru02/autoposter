@@ -190,6 +190,23 @@ async function auditState(sql, marker) {
   })) };
 }
 
+async function realAdminTarget(sql, marker) {
+  const users = await usersForMarker(sql, marker);
+  const qaAdmin = users.find((user) => user.kind === "admin");
+  if (!qaAdmin) return { status: 409, body: { error: "QA_ADMIN_NOT_READY" } };
+  const rows = await sql`
+    select id::text as id
+    from neon_auth.user
+    where lower(coalesce(role::text,''))='admin' and id::text <> ${qaAdmin.id}
+    order by id::text
+    limit 2
+  `;
+  if (rows.length !== 1 || typeof rows[0]?.id !== "string") {
+    return { status: 409, body: { error: "REAL_ADMIN_TARGET_SCOPE_MISMATCH", count: rows.length } };
+  }
+  return { status: 200, body: { id: rows[0].id } };
+}
+
 async function promote(sql, marker) {
   const users = await usersForMarker(sql, marker);
   const allowed = expectedEmails(marker);
@@ -248,13 +265,14 @@ export default {
     let body;
     try { body = await request.json(); } catch { return json({ error: "INVALID_JSON" }, 400); }
     if (!validMarker(body?.marker)) return json({ error: "INVALID_MARKER" }, 400);
-    if (!["preflight", "state", "promote", "impersonation-state", "user-state", "audit-state", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
+    if (!["preflight", "state", "promote", "impersonation-state", "user-state", "audit-state", "real-admin-target", "cleanup", "cleanup-residue"].includes(body?.action)) return json({ error: "INVALID_ACTION" }, 400);
     const sql = neon(env.DATABASE_URL);
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
       if (body.action === "impersonation-state") return json(await impersonationState(sql, body.marker));
       if (body.action === "user-state") return json(await userState(sql, body.marker));
       if (body.action === "audit-state") return json(await auditState(sql, body.marker));
+      if (body.action === "real-admin-target") { const result = await realAdminTarget(sql, body.marker); return json(result.body, result.status); }
       if (body.action === "promote") { const result = await promote(sql, body.marker); return json(result.body, result.status); }
       if (body.action === "cleanup-residue") { const result = await cleanupRecognizedResidue(sql, body.marker); return json(result.body, result.status); }
       const result = await cleanup(sql, body.marker);
