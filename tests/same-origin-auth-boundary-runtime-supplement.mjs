@@ -118,12 +118,12 @@ async function dataPatch(token, industry) {
   return { response, body: await readJson(response) };
 }
 
-const failed = await signIn(customerEmail, `${nextPassword}-wrong`);
+const failed = await signIn(customerEmail, `${password}-wrong`);
 assert.equal(failed.ok, false, "failed login unexpectedly succeeded");
 assert.equal(failed.metadata.filter((item) => item.name.includes("session")).length, 0, "failed login emitted authenticated session cookie");
 assert.equal((await session(failed.jar)).active, false, "failed login created session");
 
-const customer = await signIn(customerEmail, nextPassword);
+const customer = await signIn(customerEmail, password);
 assert.equal(customer.ok, true);
 const credentialCookies = customer.metadata.filter((item) => item.name.includes("session"));
 assert.ok(credentialCookies.length >= 1, "login emitted no session credential cookie");
@@ -143,7 +143,7 @@ const postBanWrite = await dataPatch(customer.token, `QA Auth Boundary forbidden
 assert.ok(!postBanWrite.response.ok || !Array.isArray(postBanWrite.body) || postBanWrite.body.length === 0, "same exact pre-ban JWT retained write access after ban");
 const unban = await productRequest(admin.token, `/api/admin/customers/${encodeURIComponent((await session(customer.jar)).userId || ban.body?.customer?.id || "")}/unban`, "POST", {});
 assert.ok(unban.status === 200 || unban.status === 207, `supplement unban failed (${unban.status})`);
-assert.equal((await signIn(customerEmail, nextPassword)).ok, true, "login not restored after supplement unban");
+assert.equal((await signIn(customerEmail, password)).ok, true, "login not restored after supplement unban");
 
 const foreignOrigin = await fetch(`${AUTH_URL}/sign-in/social`, {
   method: "POST",
@@ -177,7 +177,7 @@ try {
 
   await page.goto(`${APP_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.locator('input[type="email"]').fill(customerEmail);
-  await page.locator('input[type="password"]').fill(nextPassword);
+  await page.locator('input[type="password"]').fill(password);
   await page.getByRole("button", { name: "Accedi", exact: true }).click();
   await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
 
@@ -196,14 +196,27 @@ try {
     return { status: response.status, ok: response.ok, url: body?.url || body?.data?.url || null };
   }, APP_BASE);
   assert.equal(oauth.ok, true, `browser Google OAuth start failed (${oauth.status})`);
-  const providerUrl = new URL(oauth.url);
+  assert.ok(oauth.url, "browser Google OAuth start returned no URL");
+
+  const handoff = new URL(oauth.url);
+  assert.equal(handoff.hostname, "ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech", "unexpected Neon OAuth handoff host");
+  assert.match(handoff.pathname, /\/auth\/sign-in\/social\/init$/, "unexpected Neon OAuth handoff path");
+  assert.equal(Boolean(handoff.searchParams.get("token")), true, "Neon OAuth init handoff token missing");
+
+  const initResponse = await fetch(handoff, { method: "GET", headers: { accept: "text/html,application/xhtml+xml" }, redirect: "manual" });
+  const providerLocation = initResponse.headers.get("location") || "";
+  try { await initResponse.body?.cancel(); } catch { /* ignore */ }
+  assert.ok(initResponse.status >= 300 && initResponse.status < 400 && providerLocation, `Neon OAuth init did not redirect (${initResponse.status})`);
+
+  const providerUrl = new URL(providerLocation);
   assert.ok(providerUrl.hostname === "accounts.google.com" || providerUrl.hostname.endsWith(".google.com"));
   const redirectRaw = providerUrl.searchParams.get("redirect_uri");
   assert.ok(redirectRaw);
   const redirect = new URL(redirectRaw);
-  assert.equal(redirect.origin, APP_BASE);
-  assert.equal(redirect.pathname, "/api/auth/callback/google");
+  assert.equal(redirect.hostname, "neonauth.us-west-2.aws.neon.tech");
+  assert.equal(redirect.pathname, "/auth/oauth/callback/google");
   assert.equal(Boolean(providerUrl.searchParams.get("state")), true);
+  assert.equal(Boolean(providerUrl.searchParams.get("code_challenge")), true);
 
   await page.getByRole("button", { name: "Esci", exact: true }).click();
   await page.waitForURL((url) => url.pathname === "/login", { timeout: 20000 });
