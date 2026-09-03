@@ -12,6 +12,7 @@ assert.equal(api.includes('path.match(/^\\/api\\/admin\\/customers\\/([^/]+)\\/i
 assert.equal(api.includes('path === "/api/admin/impersonation/stop"'), true, "stop route contract missing");
 assert.equal(api.includes('request.method !== "POST"'), true, "impersonation mutations must be POST-only");
 assert.equal(api.includes("sameOriginMutation(request, env)"), true, "impersonation mutations must enforce same-origin browser context");
+assert.equal(api.includes("requestOrigin === expected && request.headers.get(\"origin\") === expected"), true, "impersonation mutations must bind both request host and Origin to the canonical app origin");
 assert.equal(api.includes('return json({ error: "ORIGIN_NOT_ALLOWED" }, 403)'), true, "foreign/missing Origin must fail closed");
 assert.equal(api.includes("validEmptyBody(request)"), true, "impersonation API must reject client-supplied target/session state");
 assert.equal(api.includes('Object.keys(body as Record<string, unknown>).length === 0'), true, "impersonation request body must be empty when present");
