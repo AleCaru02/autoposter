@@ -106,7 +106,15 @@ assert.match(supplement, /same exact pre-ban JWT retained write access after ban
 assert.match(supplement, /foreign OAuth Origin was not denied/);
 assert.match(supplement, /untrusted OAuth callback was accepted/);
 assert.match(supplement, /\/api\/auth\/sign-in\/social/);
-assert.match(supplement, /\/api\/auth\/callback\/google/);
+assert.match(supplement, /ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech/);
+assert.match(supplement, /\/auth\/sign-in\/social\/init/);
+assert.match(supplement, /neonauth\.us-west-2\.aws\.neon\.tech/);
+assert.match(supplement, /\/auth\/oauth\/callback\/google/);
+assert.match(supplement, /handoff\.searchParams\.get\("token"\)/);
+assert.match(supplement, /providerUrl\.searchParams\.get\("code_challenge"\)/);
+assert.match(supplement, /signIn\(customerEmail, password\)/);
+assert.match(supplement, /fill\(password\)/);
+assert.doesNotMatch(supplement, /signIn\(customerEmail, nextPassword\)/);
 assert.match(supplement, /ownerAdminRoute/);
 assert.match(supplement, /logoutProtectedRoute/);
 assert.match(supplement, /directBrowserNeonAuth:\s*0/);
