@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
-import { estimateTerraCostUsd } from "./openai-text.js";
 import { generateOpenAIPlan, generateOpenAIStrategy, type OpenAIEditorialPlan, type OpenAIStrategy } from "./openai-strategy-planner.js";
+import { StrategyPlannerMetering } from "./strategy-planner-metering.js";
 
 export type StrategyPlannerRefreshEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string };
 export type RefreshPolicy = { strategyRefreshDays: number; planRefreshDays: number };
@@ -31,13 +31,28 @@ export async function ensureOpenAIStrategyPlannerFresh(env: StrategyPlannerRefre
   if(!decision.refreshStrategy&&!decision.refreshPlan) return { strategyRefreshed:false, planRefreshed:false };
   const schedules=await sql`select provider,posts_per_week,preferred_slots,timezone,enabled from public.schedules where profile_id=${profileId}::uuid and enabled=true order by provider` as unknown as ScheduleRow[];
   const recent=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
-  let strategy=validStrategy(existing.aiStrategy)?existing.aiStrategy:null; let strategyResult:Awaited<ReturnType<typeof generateOpenAIStrategy>>|null=null;
-  if(decision.refreshStrategy){strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives});strategy=strategyResult.output;const total=Object.values(strategy.contentMix).reduce((sum,value)=>sum+value,0);if(total!==100)throw new Error("OPENAI_STRATEGIST_INVALID_MIX");}
-  if(!strategy) throw new Error("OPENAI_STRATEGY_MISSING");
-  let planResult:Awaited<ReturnType<typeof generateOpenAIPlan>>|null=null; if(decision.refreshPlan) planResult=await generateOpenAIPlan({apiKey:env.OPENAI_API_KEY,profile,strategy,schedules,recentTopics:recent.map(r=>r.topic).filter(Boolean)});
-  const now=new Date().toISOString(); const persisted={...existing,aiStrategy:strategy,aiStrategyGeneratedAt:strategyResult?now:existing.aiStrategyGeneratedAt,aiEditorialPlan:planResult?.output??existing.aiEditorialPlan,aiEditorialPlanGeneratedAt:planResult?now:existing.aiEditorialPlanGeneratedAt,aiAgentsVersion:2,aiAgentsModel:"gpt-5.6-terra"};
-  await sql`insert into public.content_strategies (profile_id,objectives,platform_strategy,updated_at) values (${profileId}::uuid,${JSON.stringify([strategy.primaryObjective])}::jsonb,${JSON.stringify(persisted)}::jsonb,now()) on conflict (profile_id) do update set objectives=excluded.objectives,platform_strategy=excluded.platform_strategy,updated_at=now()`;
-  if(strategyResult){const cost=strategyResult.usage.inputTokens!==null&&strategyResult.usage.outputTokens!==null?estimateTerraCostUsd(strategyResult.usage.inputTokens,strategyResult.usage.outputTokens):null;await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata) values (${profileId}::uuid,'AGENT_STRATEGIST','gpt-5.6-terra',${strategyResult.usage.inputTokens},${strategyResult.usage.outputTokens},${cost},${JSON.stringify({openai_response_id:strategyResult.responseId,openai_request_id:strategyResult.requestId,agent:"STRATEGIST",refresh:true})}::jsonb)`;}
-  if(planResult){const cost=planResult.usage.inputTokens!==null&&planResult.usage.outputTokens!==null?estimateTerraCostUsd(planResult.usage.inputTokens,planResult.usage.outputTokens):null;await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata) values (${profileId}::uuid,'AGENT_PLANNER','gpt-5.6-terra',${planResult.usage.inputTokens},${planResult.usage.outputTokens},${cost},${JSON.stringify({openai_response_id:planResult.responseId,openai_request_id:planResult.requestId,agent:"PLANNER",refresh:true,horizon_days:planResult.output.horizonDays,items:planResult.output.items.length})}::jsonb)`;}
-  return { strategyRefreshed:Boolean(strategyResult), planRefreshed:Boolean(planResult) };
+  const meter=new StrategyPlannerMetering(env.DATABASE_URL);const cycle=decision.refreshStrategy?"STRATEGY_PLAN" as const:"PLAN" as const;const reservation=await meter.reserve({profileId,cycle});
+  if(reservation.status==="DENIED")throw new Error(reservation.code);
+  if(reservation.status==="COMPLETED")return reservation.cached.response as {strategyRefreshed:boolean;planRefreshed:boolean};
+  if(reservation.status==="IN_PROGRESS")throw new Error("STRATEGY_GENERATION_IN_PROGRESS");
+  if(reservation.status==="RELEASED")throw new Error("METERING_FAILED");
+  const eventId=reservation.eventId;let logicalCommitted=false;
+  try{
+    await meter.markProviderStarted(eventId);
+    let strategy=validStrategy(existing.aiStrategy)?existing.aiStrategy:null;let strategyResult:Awaited<ReturnType<typeof generateOpenAIStrategy>>|null=null;
+    if(decision.refreshStrategy){
+      strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives});
+      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_STRATEGIST",model:"gpt-5.6-terra",inputTokens:strategyResult.usage.inputTokens,outputTokens:strategyResult.usage.outputTokens,responseId:strategyResult.responseId,requestId:strategyResult.requestId,metadata:{agent:"STRATEGIST",refresh:true}});
+      strategy=strategyResult.output;const total=Object.values(strategy.contentMix).reduce((sum,value)=>sum+value,0);if(total!==100)throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
+    }
+    if(!strategy)throw new Error("OPENAI_STRATEGY_MISSING");
+    let planResult:Awaited<ReturnType<typeof generateOpenAIPlan>>|null=null;
+    if(decision.refreshPlan){
+      planResult=await generateOpenAIPlan({apiKey:env.OPENAI_API_KEY,profile,strategy,schedules,recentTopics:recent.map(r=>r.topic).filter(Boolean)});
+      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_PLANNER",model:"gpt-5.6-terra",inputTokens:planResult.usage.inputTokens,outputTokens:planResult.usage.outputTokens,responseId:planResult.responseId,requestId:planResult.requestId,metadata:{agent:"PLANNER",refresh:true,horizon_days:planResult.output.horizonDays,items:planResult.output.items.length}});
+    }
+    const now=new Date().toISOString();const persisted={...existing,aiStrategy:strategy,aiStrategyGeneratedAt:strategyResult?now:existing.aiStrategyGeneratedAt,aiEditorialPlan:planResult?.output??existing.aiEditorialPlan,aiEditorialPlanGeneratedAt:planResult?now:existing.aiEditorialPlanGeneratedAt,aiAgentsVersion:2,aiAgentsModel:"gpt-5.6-terra"};
+    await sql`insert into public.content_strategies (profile_id,objectives,platform_strategy,updated_at) values (${profileId}::uuid,${JSON.stringify([strategy.primaryObjective])}::jsonb,${JSON.stringify(persisted)}::jsonb,${now}::timestamptz) on conflict (profile_id) do update set objectives=excluded.objectives,platform_strategy=excluded.platform_strategy,updated_at=excluded.updated_at`;
+    const response={strategyRefreshed:Boolean(strategyResult),planRefreshed:Boolean(planResult)};await meter.storeResult(eventId,{response});await meter.commit(eventId);logicalCommitted=true;return response;
+  }catch(reason){if(!logicalCommitted)await meter.release(eventId,reason instanceof Error?reason.message:"STRATEGY_GENERATION_FAILED").catch(()=>undefined);throw reason;}
 }

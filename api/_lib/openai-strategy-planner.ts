@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import type { SocialProvider } from "./openai-text.js";
 import type { ContentType, EditorialIntent, FunnelStage } from "./content-agents.js";
+import { StrategyPlannerMetering } from "./strategy-planner-metering.js";
 
 export type StrategyPlannerEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string };
 
@@ -46,6 +47,7 @@ export type PlanItem = {
 };
 
 export type OpenAIEditorialPlan = { horizonDays: number; planningSummary: string; items: PlanItem[] };
+export type OpenAIStrategyPlannerResponse = { strategy: OpenAIStrategy; plan: OpenAIEditorialPlan; generatedAt: string; model: string };
 
 const MODEL = "gpt-5.6-terra";
 const STRATEGY_SCHEMA = {
@@ -155,19 +157,46 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   const schedules = await sql`select provider,posts_per_week,preferred_slots,timezone,enabled from public.schedules where profile_id=${profileId}::uuid and enabled=true order by provider` as unknown as ScheduleRow[];
   const recent = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
 
-  const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, fetcher });
-  const mixTotal = Object.values(strategyResult.output.contentMix).reduce((sum, value) => sum + value, 0);
-  if (mixTotal !== 100) throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
-  const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), fetcher });
+  const meter = new StrategyPlannerMetering(env.DATABASE_URL);
+  const reservation = await meter.reserve({ profileId, cycle: "STRATEGY_PLAN" });
+  if (reservation.status === "DENIED") throw new Error(reservation.code);
+  if (reservation.status === "COMPLETED") return reservation.cached.response as OpenAIStrategyPlannerResponse;
+  if (reservation.status === "IN_PROGRESS") throw new Error("STRATEGY_GENERATION_IN_PROGRESS");
+  if (reservation.status === "RELEASED") throw new Error("METERING_FAILED");
+  const eventId = reservation.eventId;
+  let logicalCommitted = false;
+  try {
+    await meter.markProviderStarted(eventId);
+    const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, fetcher });
+    await meter.persistTechnicalUsage(profileId, eventId, {
+      operation: "AGENT_STRATEGIST", model: MODEL,
+      inputTokens: strategyResult.usage.inputTokens, outputTokens: strategyResult.usage.outputTokens,
+      responseId: strategyResult.responseId, requestId: strategyResult.requestId,
+      metadata: { agent: "STRATEGIST", refresh: false },
+    });
+    const mixTotal = Object.values(strategyResult.output.contentMix).reduce((sum, value) => sum + value, 0);
+    if (mixTotal !== 100) throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
+    const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), fetcher });
+    await meter.persistTechnicalUsage(profileId, eventId, {
+      operation: "AGENT_PLANNER", model: MODEL,
+      inputTokens: plannerResult.usage.inputTokens, outputTokens: plannerResult.usage.outputTokens,
+      responseId: plannerResult.responseId, requestId: plannerResult.requestId,
+      metadata: { agent: "PLANNER", refresh: false, horizon_days: plannerResult.output.horizonDays, items: plannerResult.output.items.length },
+    });
 
-  const existing = object(current[0]?.platform_strategy);
-  const now = new Date().toISOString();
-  const persisted = { ...existing, aiStrategy: strategyResult.output, aiStrategyGeneratedAt: now, aiEditorialPlan: plannerResult.output, aiEditorialPlanGeneratedAt: now, aiAgentsVersion: 1, aiAgentsModel: MODEL };
-  await sql`insert into public.content_strategies (profile_id,objectives,platform_strategy,updated_at)
-            values (${profileId}::uuid,${JSON.stringify([strategyResult.output.primaryObjective])}::jsonb,${JSON.stringify(persisted)}::jsonb,now())
-            on conflict (profile_id) do update set objectives=excluded.objectives,platform_strategy=excluded.platform_strategy,updated_at=now()`;
-  await sql`insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
-            values (${profileId}::uuid,'AGENT_STRATEGIST',${MODEL},${strategyResult.usage.inputTokens},${strategyResult.usage.outputTokens},null,${JSON.stringify({ openai_response_id: strategyResult.responseId, openai_request_id: strategyResult.requestId, agent: "STRATEGIST" })}::jsonb),
-                   (${profileId}::uuid,'AGENT_PLANNER',${MODEL},${plannerResult.usage.inputTokens},${plannerResult.usage.outputTokens},null,${JSON.stringify({ openai_response_id: plannerResult.responseId, openai_request_id: plannerResult.requestId, agent: "PLANNER", horizon_days: plannerResult.output.horizonDays, items: plannerResult.output.items.length })}::jsonb)`;
-  return { strategy: strategyResult.output, plan: plannerResult.output, generatedAt: now, model: MODEL };
+    const existing = object(current[0]?.platform_strategy);
+    const now = new Date().toISOString();
+    const persisted = { ...existing, aiStrategy: strategyResult.output, aiStrategyGeneratedAt: now, aiEditorialPlan: plannerResult.output, aiEditorialPlanGeneratedAt: now, aiAgentsVersion: 2, aiAgentsModel: MODEL };
+    const responseBody: OpenAIStrategyPlannerResponse = { strategy: strategyResult.output, plan: plannerResult.output, generatedAt: now, model: MODEL };
+    await sql`insert into public.content_strategies (profile_id,objectives,platform_strategy,updated_at)
+              values (${profileId}::uuid,${JSON.stringify([strategyResult.output.primaryObjective])}::jsonb,${JSON.stringify(persisted)}::jsonb,${now}::timestamptz)
+              on conflict (profile_id) do update set objectives=excluded.objectives,platform_strategy=excluded.platform_strategy,updated_at=excluded.updated_at`;
+    await meter.storeResult(eventId, { response: responseBody });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return responseBody;
+  } catch (reason) {
+    if (!logicalCommitted) await meter.release(eventId, reason instanceof Error ? reason.message : "STRATEGY_GENERATION_FAILED").catch(() => undefined);
+    throw reason;
+  }
 }

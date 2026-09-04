@@ -31,6 +31,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "EDITORIAL_AGENTS_FAILED";
     console.error("vercel.editorial-agents", { profileId, detail });
-    return res.status(500).json({ error: "EDITORIAL_AGENTS_FAILED", detail });
+    if (detail === "CAPABILITY_DISABLED" || detail === "CAPABILITY_LIMIT_REACHED") return res.status(429).json({ error: detail });
+    if (detail === "STRATEGY_GENERATION_IN_PROGRESS") return res.status(409).json({ error: detail });
+    if (detail.startsWith("METERING_FAILED")) return res.status(503).json({ error: "METERING_FAILED" });
+    return res.status(detail.startsWith("OPENAI_") ? 502 : 500).json({ error: "EDITORIAL_AGENTS_FAILED" });
   }
 }
