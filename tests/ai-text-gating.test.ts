@@ -22,9 +22,9 @@ for (const source of [manual, worker, autopilot]) {
   assert.match(source, /TextGenerationMetering/);
   assert.match(source, /AI_BUDGET_EXCEEDED|AUTOPILOT_TEXT_BUDGET_REACHED/);
 }
-assert.ok(manual.indexOf("meter.reserve") < manual.indexOf("generateSocialText"), "manual provider callable before entitlement reserve");
-assert.ok(worker.indexOf("meter.reserve") < worker.indexOf("generateSocialText"), "worker provider callable before entitlement reserve");
-assert.ok(autopilot.indexOf("meter.reserve") < autopilot.indexOf("generateSocialText"), "autopilot provider callable before entitlement reserve");
+assert.ok(manual.indexOf("meter.reserve") < manual.indexOf("await generateSocialText"), "manual provider callable before entitlement reserve");
+assert.ok(worker.indexOf("meter.reserve") < worker.indexOf("await generateSocialText"), "worker provider callable before entitlement reserve");
+assert.ok(autopilot.indexOf("meter.reserve") < autopilot.indexOf("await generateSocialText"), "autopilot provider callable before entitlement reserve");
 assert.match(manual, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
 assert.match(worker, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
 assert.match(autopilot, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
