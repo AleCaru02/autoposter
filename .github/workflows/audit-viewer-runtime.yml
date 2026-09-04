@@ -171,11 +171,7 @@ jobs:
               -H "x-ai-text-qa-marker: $AI_TEXT_QA_MARKER" \
               --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AI_TEXT_QA_MARKER\"}" \
               "$AI_TEXT_PREVIEW_URL/__qa/control")
-            CLEANUP_STATUS="$cleanup_status" node - <<'NODE'
-            const fs=require('node:fs');
-            const body=JSON.parse(fs.readFileSync('ai-text-stale-cleanup.json','utf8'));
-            if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true||body.recognizedQaUsers!==0) throw new Error('stale QA cleanup failed');
-            NODE
+            CLEANUP_STATUS="$cleanup_status" node -e 'const fs=require("node:fs");const body=JSON.parse(fs.readFileSync("ai-text-stale-cleanup.json","utf8"));if(process.env.CLEANUP_STATUS!=="200"||body.cleaned!==true||body.recognizedQaUsers!==0)throw new Error("stale QA cleanup failed");'
             status=$(read_preflight)
           fi
 
