@@ -44,7 +44,7 @@ jobs:
           while IFS= read -r path; do
             [ -z "$path" ] && continue
             case "$path" in
-              .github/workflows/audit-viewer-runtime.yml|.github/workflows/gate.yml|tests/ai-content-text-*|tests/wrangler.ai-content-text-runtime.jsonc) ;;
+              .github/workflows/audit-viewer-runtime.yml|.github/workflows/gate.yml|tests/ai-content-text-*|tests/audit-viewer-runtime-static.test.mjs|tests/wrangler.ai-content-text-runtime.jsonc) ;;
               *)
                 echo "RUNTIME_VERIFIER_NOT_CERTIFIED: product diff detected: $path" >&2
                 exit 1
