@@ -57,6 +57,13 @@ export type OpenAITextTechnicalEvent = {
   metadata: Record<string, unknown>;
 };
 
+export class OpenAITextPipelineError extends Error {
+  constructor(message: string, public readonly technicalEvents: OpenAITextTechnicalEvent[]) {
+    super(message);
+    this.name = "OpenAITextPipelineError";
+  }
+}
+
 export type OpenAITextResult = {
   content: GeneratedSocialContent;
   responseId: string;
@@ -267,7 +274,23 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       freshnessDays: research.freshnessDays,
       fetcher,
     });
-    if (dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) throw new Error("OPENAI_RESEARCH_BLOCKED");
+    if (dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) {
+      const researchCostUsd = agentCost(dedicatedResearch);
+      throw new OpenAITextPipelineError("OPENAI_RESEARCH_BLOCKED", [{
+        operation: "AGENT_RESEARCH",
+        model: dedicatedResearch.model,
+        inputTokens: dedicatedResearch.usage.inputTokens,
+        outputTokens: dedicatedResearch.usage.outputTokens,
+        costUsd: researchCostUsd,
+        metadata: {
+          openai_response_id: dedicatedResearch.responseId,
+          openai_request_id: dedicatedResearch.requestId,
+          web_search_calls: dedicatedResearch.usage.webSearchCalls,
+          sources: dedicatedResearch.sources,
+          status: dedicatedResearch.status,
+        },
+      }]);
+    }
   }
 
   const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
@@ -357,7 +380,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       allowWebSearch: research.useWebSearch && combinedSources.length === 0,
       fetcher,
     });
-    if (factCheck.verdict !== "PASS") throw new Error(`OPENAI_FACTCHECK_${factCheck.verdict}`);
+    // Persist technical cost before surfacing a blocking fact-check verdict.
   }
 
   const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
@@ -413,6 +436,10 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       },
     }] : []),
   ];
+
+  if (factCheck && factCheck.verdict !== "PASS") {
+    throw new OpenAITextPipelineError(`OPENAI_FACTCHECK_${factCheck.verdict}`, technicalEvents);
+  }
 
   return {
     content,
