@@ -26,7 +26,10 @@ for (const source of [manual, worker]) {
 }
 assert.match(autopilot, /source:"AUTOPILOT"/);
 assert.match(autopilot, /autopilot:\$\{profile\.id\}:\$\{provider\}:\$\{scheduledAt\}:\$\{variantId\}/);
+assert.match(autopilot, /currentImageCount\(sql,profile\.id\)/);
+assert.match(autopilot, /where profile_id=\$\{profileId\}::uuid and created_at/);
 assert.doesNotMatch(autopilot, /insert into public\.ai_usage_events/);
+for (const source of [manual, worker]) assert.match(source, /ai_usage_events\?profile_id=eq\.\$\{encodeURIComponent\(profileId\)\}/);
 assert.match(meter, /quantity:\s*1/);
 assert.match(meter, /CAPABILITY_DISABLED/);
 assert.match(meter, /CAPABILITY_LIMIT_REACHED/);
