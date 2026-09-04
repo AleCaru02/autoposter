@@ -64,8 +64,8 @@ jobs:
           npm run test:tenant-security
           npm run test:tenant-cross-security
           npm run build
-          npx wrangler deploy --dry-run
-          npx wrangler deploy --dry-run --config tests/wrangler.ai-content-text-runtime.jsonc
+          npx wrangler versions upload --dry-run
+          npx wrangler versions upload --dry-run --config tests/wrangler.ai-content-text-runtime.jsonc
 
       - name: Generate ephemeral AI text QA material
         shell: bash
