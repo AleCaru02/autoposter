@@ -171,7 +171,7 @@ jobs:
               -H "x-brand-analyze-qa-marker: $BRAND_ANALYZE_QA_MARKER" \
               --data "{\"action\":\"cleanup-residue\",\"marker\":\"$BRAND_ANALYZE_QA_MARKER\"}" \
               "$BRAND_ANALYZE_PREVIEW_URL/__qa/control")
-            CLEANUP_STATUS="$cleanup_status" node -e 'const fs=require("node:fs");const body=JSON.parse(fs.readFileSync("brand-analyze-stale-cleanup.json","utf8"));if(process.env.CLEANUP_STATUS!=="200"||body.cleaned!==true||body.recognizedQaUsers!==0)throw new Error("stale QA cleanup failed");'
+            CLEANUP_STATUS="$cleanup_status" node -e 'const fs=require("node:fs");const body=JSON.parse(fs.readFileSync("brand-analyze-stale-cleanup.json","utf8"));if(process.env.CLEANUP_STATUS!=="200"||body.cleaned!==true||body.recognizedQaUsers!==0){const safe=String(body.detail||body.error||"unknown").replace(/[^A-Za-z0-9_. -]/g," ").slice(0,240);throw new Error(`stale QA cleanup failed HTTP ${process.env.CLEANUP_STATUS}: ${safe}`);}'
             status=$(read_preflight)
           fi
 
@@ -240,7 +240,7 @@ jobs:
           CLEANUP_STATUS="$status" node - <<'NODE'
           const fs=require('node:fs');
           const body=JSON.parse(fs.readFileSync('brand-analyze-cleanup.json','utf8'));
-          if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true) throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}`);
+          if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true){const safe=String(body.detail||body.error||'unknown').replace(/[^A-Za-z0-9_. -]/g,' ').slice(0,240);throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}: ${safe}`);}
           for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaEntitlements','qaUsageEvents','qaUsageBuckets','qaAiEvents','qaTechnicalOutbox','qaContent','qaVariants','qaJobs','qaProviderCalls']) if(body[key]!==0) throw new Error(`cleanup residue ${key}=${body[key]}`);
           if(body.superAdmins!==1) throw new Error(`SUPER_ADMIN post-cleanup ${body.superAdmins}`);
           if(String(body.profilesTotal)!==String(process.env.BRAND_ANALYZE_BASELINE_PROFILES)) throw new Error(`profile baseline mismatch ${body.profilesTotal} != ${process.env.BRAND_ANALYZE_BASELINE_PROFILES}`);
