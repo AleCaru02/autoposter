@@ -18,7 +18,7 @@ assert.doesNotMatch(workflow, /\bwrangler\s+versions\s+deploy\b/i, "version prom
 assert.doesNotMatch(workflow, /\bwrangler\s+triggers\s+deploy\b/i, "route mutation is forbidden");
 assert.match(workflow, /workers\/scripts\/autoposter\/deployments/, "read-only deployment isolation check missing");
 assert.match(workflow, /EPHEMERAL_CONTROLLER_VERSION_ID/, "ephemeral version ID comparison missing");
-assert.match(workflow, /AUDIT_PREVIEW_ISOLATION:\s*PASS/, "preview isolation assertion missing");
+assert.match(workflow, /(?:AUDIT_PREVIEW_ISOLATION|AI_TEXT_PREVIEW_ISOLATION):\s*PASS/, "preview isolation assertion missing");
 assert.match(workflow, /production deployment set changed during Audit runtime/, "deployment immutability comparison missing");
 assert.match(workflow, /if:\s*always\(\)/, "always cleanup missing");
 assert.match(workflow, /shred -u \.audit-runtime-secrets\.env/, "local token material cleanup missing");
