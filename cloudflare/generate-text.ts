@@ -1,6 +1,6 @@
 import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
-import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
+import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -171,6 +171,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     logicalCommitted = true;
     return json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && reason instanceof OpenAITextPipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
