@@ -4,6 +4,7 @@ import { BRAND_ANALYZE_CAPABILITY, BRAND_ANALYZE_TECHNICAL_OPERATION, deriveBran
 
 const api = fs.readFileSync("api/onboarding-analyze.ts", "utf8");
 const worker = fs.readFileSync("cloudflare/onboarding-analyze.ts", "utf8");
+const metering = fs.readFileSync("api/_lib/brand-analysis-metering.ts", "utf8");
 const entry = fs.readFileSync("cloudflare/entry.ts", "utf8");
 const wrangler = fs.readFileSync("wrangler.jsonc", "utf8");
 const ui = fs.readFileSync("src/pages/onboarding-page.tsx", "utf8");
@@ -28,12 +29,12 @@ for (const source of [api, worker]) {
   assert.ok(source.indexOf("await meter.persistTechnicalUsage") < source.indexOf("const write = existingRows[0]"), "technical usage must be durable before product persistence");
   assert.ok(source.indexOf("await meter.storeResult") < source.indexOf("await meter.commit"), "result must be cached before logical commit");
   assert.match(source, /activeMeter\.release/);
-  assert.match(source, /CAPABILITY_DISABLED/);
-  assert.match(source, /CAPABILITY_LIMIT_REACHED/);
   assert.match(source, /BRAND_ANALYSIS_IN_PROGRESS/);
   assert.doesNotMatch(source, /dataApi\("ai_usage_events"/);
 }
 
+assert.match(metering, /CAPABILITY_DISABLED/);
+assert.match(metering, /CAPABILITY_LIMIT_REACHED/);
 assert.match(ui, /fetch\("\/api\/onboarding-analyze"/);
 assert.match(entry, /path === "\/api\/onboarding-analyze"\) return handleWorkerOnboardingAnalyze/);
 assert.match(wrangler, /"main": "\.\/cloudflare\/entry\.ts"/);
