@@ -1,4 +1,4 @@
-import { QA_ACTION_PROVIDER, QA_ACTION_BARRIER, QA_ACTION_BACKGROUND, QA_EMAIL } from "./ai-content-text-qa-common.mjs";
+import { QA_ACTION_PROVIDER, QA_ACTION_BARRIER, QA_ACTION_BACKGROUND, QA_EMAIL } from "./brand-analyze-qa-common.mjs";
 
 async function qaUsers(sql, marker = null) {
   const rows = await sql`
