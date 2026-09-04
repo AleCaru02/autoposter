@@ -36,7 +36,7 @@ assert.match(gate, /wrangler\.ai-content-text-runtime\.jsonc/);
 
 assert.match(controller, /import productWorker from "\.\.\/cloudflare\/entry\.ts"/);
 assert.match(controller, /import \{ currentSpend \} from "\.\.\/api\/_lib\/autopilot\.ts"/);
-assert.match(controller, /AI_TEXT_QA_PROVIDER_CALL/);
+assert.match(common, /AI_TEXT_QA_PROVIDER_CALL/);
 assert.match(controller, /AI_TEXT_QA_BARRIER_RELEASE/);
 assert.match(controller, /AI_TEXT_QA_BACKGROUND_DONE/);
 assert.match(controller, /x-ai-text-qa-token/);
