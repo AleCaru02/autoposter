@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "./_lib/brand-analysis.js";
+import { BrandAnalysisMetering } from "./_lib/brand-analysis-metering.js";
 
 export const config = { maxDuration: 60 };
 
@@ -74,10 +75,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = bearer(req);
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
   if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   if (!profileId) return res.status(400).json({ error: "PROFILE_REQUIRED" });
   const visualHints = sanitizeVisualHints(req.body?.visualHints);
 
+  let activeMeter: BrandAnalysisMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
@@ -87,7 +92,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pages = pageRows.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" }));
     if (!pages.length) return res.status(409).json({ error: "NO_ANALYZED_WEBSITE_PAGES" });
 
+    const meter = new BrandAnalysisMetering(process.env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({ profileId, scanId: scan.id });
+    if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
+    if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
+    if (reservation.status === "IN_PROGRESS") return res.status(409).json({ error: "BRAND_ANALYSIS_IN_PROGRESS" });
+    if (reservation.status === "RELEASED") return res.status(409).json({ error: "METERING_FAILED" });
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
+
+    await meter.markProviderStarted(eventId);
     const result = await analyzeBrandFromWebsite({ apiKey: process.env.OPENAI_API_KEY, profileName: profile.name, websiteUrl: profile.website_url, industry: profile.industry, pages, visualHints });
+    await meter.persistTechnicalUsage(profileId, eventId, result, { scan_id: scan.id, pages_analyzed: pages.length });
     const existingRows = await rows<ExistingBrand>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links&limit=1`, token);
     const existingSocials = existingRows[0]?.social_links && typeof existingRows[0].social_links === "object" ? existingRows[0].social_links as Record<string, unknown> : {};
     const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, item]) => typeof item === "string" && item)) };
@@ -133,13 +150,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
     if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
 
-    const usageWrite = await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "ANALYZE_BRAND_ONBOARDING", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, pages_analyzed: pages.length, page_insights: result.analysis.pageInsights.length, content_pillars: result.analysis.contentPillars.length, observed_fonts: (visualHints.fontFamilies ?? []).length, observed_images: (visualHints.imageUrls ?? []).length } }) });
-    if (!usageWrite.ok) console.error("onboarding-usage-write", { profileId, status: usageWrite.status });
-
-    return res.status(200).json({ analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model });
+    const responseBody = { analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model };
+    await meter.storeResult(eventId, { response: responseBody });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return res.status(200).json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "BRAND_ANALYSIS_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_ONBOARDING_ANALYSIS_ERROR";
     console.error("onboarding-analyze", { profileId, detail });
-    return res.status(detail.startsWith("OPENAI_") ? 502 : 500).json({ error: "ONBOARDING_ANALYSIS_FAILED", detail });
+    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "ONBOARDING_ANALYSIS_FAILED" });
   }
 }
