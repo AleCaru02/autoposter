@@ -19,7 +19,7 @@ assert.doesNotMatch(workflow, /\bwrangler\s+triggers\s+deploy\b/i, "route mutati
 assert.match(workflow, /workers\/scripts\/autoposter\/deployments/, "read-only deployment isolation check missing");
 assert.match(workflow, /EPHEMERAL_CONTROLLER_VERSION_ID/, "ephemeral version ID comparison missing");
 assert.match(workflow, /(?:AUDIT_PREVIEW_ISOLATION|AI_TEXT_PREVIEW_ISOLATION):\s*PASS/, "preview isolation assertion missing");
-assert.match(workflow, /production deployment set changed during Audit runtime/, "deployment immutability comparison missing");
+assert.match(workflow, /(?:production deployment set changed during Audit runtime|production deployment changed during verifier)/, "deployment immutability comparison missing");
 assert.match(workflow, /if:\s*always\(\)/, "always cleanup missing");
 assert.match(workflow, /shred -u \.audit-runtime-secrets\.env/, "local token material cleanup missing");
 assert.doesNotMatch(workflow, /actions\/upload-artifact/i, "ephemeral runtime material must not become an artifact");
