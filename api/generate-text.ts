@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
-import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
+import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 
 export const config = { maxDuration: 60 };
@@ -181,6 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     logicalCommitted = true;
     return res.status(200).json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && reason instanceof OpenAITextPipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("generate-text", { profileId, detail });
