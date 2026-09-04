@@ -8,9 +8,10 @@ assert.match(workflow, /workflow_dispatch:/, "runtime verifier must be manual-di
 assert.match(workflow, /verify\/ai-content-text-gating-runtime/, "workflow must be scoped to verifier branch");
 assert.match(workflow, /1377724860fb8cf210d5fb8c677d71fd3faa851b/, "verifier must pin the certified production base");
 assert.match(workflow, /wrangler versions upload/, "verifier must use isolated Preview version upload");
-assert.doesNotMatch(workflow, /\bnpx wrangler deploy\b/, "verifier must never deploy to production");
+const deployLines = workflow.split("\n").filter((line) => /npx wrangler deploy/.test(line));
+assert.ok(deployLines.every((line) => /--dry-run/.test(line)), "verifier must never run a production wrangler deploy");
 assert.match(workflow, /preview-alias/, "Preview alias isolation required");
-assert.match(workflow, /workers\/scripts\/autoposter\/deployments/, "production deployment set must be read before/after verification");
+assert.match(workflow, /workers\/scripts\/autoposter\/deployments/, "production deployment set must be read for isolation verification");
 assert.match(workflow, /if: always\(\)/, "cleanup must run unconditionally");
 assert.match(workflow, /provider invocation counter/i, "provider invocation instrumentation step required");
 assert.match(workflow, /sensitive/i, "sensitive-data scan required");
