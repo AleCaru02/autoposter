@@ -329,7 +329,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     const eventId = reservation.eventId;
     activeEventId = eventId;
     const limit = monthlyImageLimit(env);
-    const used = await rows<UsageRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
+    const used = await rows<UsageRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
     if (used.length >= limit) {
       await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
       return json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } }, 429);
