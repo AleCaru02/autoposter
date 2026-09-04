@@ -35,6 +35,7 @@ jobs:
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
+      - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
       - { name: Site intelligence UI regression, run: "npm run test:site-intelligence-ui" }
