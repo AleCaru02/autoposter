@@ -103,6 +103,7 @@ jobs:
             exit 1
           fi
           echo "AI_TEXT_PREVIEW_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
           chmod 600 .ai-text-runtime-secrets.env || true
           shred -u .ai-text-runtime-secrets.env 2>/dev/null || rm -f .ai-text-runtime-secrets.env
 
