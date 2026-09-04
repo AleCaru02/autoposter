@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { allowedProviderCallType, fakeOpenAiPlan, makeQaProviderKey, openAiCallType, parseQaProviderKey, technicalPersistenceFailureBody } from "./brand-analyze-provider-harness.mjs";
+const c={marker:"33870000000",profileId:"11111111-1111-1111-1111-111111111111",scenario:"success-and-duplicate",operationId:"brand-success-and-duplicate"};
+assert.deepEqual(parseQaProviderKey(makeQaProviderKey(c)),{...c,mode:"fake"});
+assert.equal(openAiCallType("https://api.openai.com/v1/responses",{body:JSON.stringify({text:{format:{name:"post_automatici_brand_analysis"}}})}),"BRAND");
+assert.equal(allowedProviderCallType("BRAND"),true);assert.equal(allowedProviderCallType("MAIN"),false);
+const plan=fakeOpenAiPlan({callType:"BRAND",correlation:c});assert.equal(plan.status,200);assert.equal(plan.body.output[0].content[0].type,"output_text");
+assert.equal(technicalPersistenceFailureBody("insert into public.ai_usage_events technical-persistence-failure BRAND_QA_"),true);
+assert.equal(technicalPersistenceFailureBody("insert into public.ai_usage_events success BRAND_QA_"),false);
+console.log("Brand analyze provider harness: PASS");
