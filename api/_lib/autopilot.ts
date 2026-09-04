@@ -4,7 +4,7 @@ import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./editorial-research.js";
 import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan.js";
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
-import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
+import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAiEvent } from "./text-generation-metering.js";
 
@@ -124,7 +124,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const canAutoApprove=approvalMode==="AUTOMATIC"&&variant.eligible&&Boolean(imageAssetId);if(imageAssetId)await sql`update public.content_variants set image_asset_id=${imageAssetId}::uuid,approval_status=${canAutoApprove?"APPROVED":"PENDING"},updated_at=now() where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;else if(canAutoApprove)throw new Error("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL");
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
   if(variant.eligible){const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
-  }catch(reason){if(!logicalCommitted)await meter.release(logicalEventId,reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED").catch(()=>undefined);throw reason;}
+  }catch(reason){if(reason instanceof OpenAITextPipelineError)await meter.persistTechnicalEvents(profile.id,logicalEventId,reason.technicalEvents).catch(()=>undefined);if(!logicalCommitted)await meter.release(logicalEventId,reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED").catch(()=>undefined);throw reason;}
 }
 
 export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}):Promise<RunResult>{
