@@ -1,6 +1,7 @@
 import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
+import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -8,6 +9,7 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 type Env = {
+  DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 };
@@ -54,8 +56,8 @@ function currentMonthStartIso() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 }
 
-async function currentOwnerTextSpendUsd(token: string) {
-  const costRows = await rows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
+async function currentOwnerTextSpendUsd(profileId: string, token: string) {
+  const costRows = await rows<CostRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=in.(GENERATE_SOCIAL_TEXT,AGENT_RESEARCH,AGENT_FACTCHECK,AGENT_EDITORIAL_QA)&select=cost_usd&limit=5000`, token);
   return costRows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
 }
 
@@ -76,17 +78,23 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   const token = bearer(request);
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
   if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED", message: "Configura OPENAI_API_KEY nel deployment Cloudflare." }, 503);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
 
   let body: Record<string, unknown> = {};
   try { body = await request.json() as Record<string, unknown>; } catch { /* validated below */ }
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const topic = typeof body.topic === "string" ? body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof body.objective === "string" ? body.objective.trim().slice(0, 500) : null;
+  const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
   const providers = Array.isArray(body.providers) ? body.providers.filter((value): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
   const formats = Array.isArray(body.formats) ? body.formats.filter((value): value is SocialFormat => typeof value === "string" && VALID_FORMATS.has(value as SocialFormat)) : [];
   if (!profileId || !topic) return json({ error: "PROFILE_AND_TOPIC_REQUIRED" }, 400);
   if (!providers.length || !formats.length) return json({ error: "PROVIDERS_AND_FORMATS_REQUIRED" }, 400);
 
+  let activeMeter: TextGenerationMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
@@ -108,18 +116,41 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     };
     const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
 
-    const budgetUsd = monthlyBudgetUsd(env);
-    const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
-    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
-    if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) return json({ error: "OPENAI_TEXT_BUDGET_REACHED", message: "Budget mensile testi raggiunto. Nessuna chiamata OpenAI è stata eseguita.", budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentBeforeUsd.toFixed(6)), estimatedNextMaxUsd: Number(requestUpperBoundUsd.toFixed(6)) } }, 429);
+    const meter = new TextGenerationMetering(env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({
+      profileId,
+      source: "MANUAL",
+      operationIdentity,
+      requestFingerprint: { topic, objective, providers, formats },
+    });
+    if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
+    if (reservation.status === "COMPLETED") return json(reservation.cached.response, 200);
+    if (reservation.status === "IN_PROGRESS") return json({ error: "GENERATION_IN_PROGRESS" }, 409);
+    if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
 
+    const budgetUsd = monthlyBudgetUsd(env);
+    const spentBeforeUsd = await currentOwnerTextSpendUsd(profileId, token);
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
+    if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
+      await meter.release(eventId, "AI_BUDGET_EXCEEDED");
+      return json({ error: "AI_BUDGET_EXCEEDED" }, 429);
+    }
+
+    await meter.markProviderStarted(eventId);
     const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
-    await dataApi("ai_usage_events", token, {
-      method: "POST",
-      headers: { prefer: "return=minimal" },
-      body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_TEXT", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: actualCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, cached_input_tokens: result.usage.cachedInputTokens, cache_write_tokens: result.usage.cacheWriteTokens, requested_topic: topic, editorial_pillars_used: enriched.pillarCount, editorial_topic: result.content.editorialTopic, editorial_angle: result.content.editorialAngle } }),
-    });
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
+      source: "MANUAL",
+      requested_topic: topic,
+      editorial_pillars_used: enriched.pillarCount,
+      editorial_topic: result.content.editorialTopic,
+      editorial_angle: result.content.editorialAngle,
+      external_sources: result.externalSources,
+      verification: result.verification,
+    }));
 
     const recent = await recentContentForDedupe(profileId, token);
     let bestDuplicate: ReturnType<typeof findNearDuplicate> = null;
@@ -129,12 +160,20 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     }
 
     const spentAfterUsd = spentBeforeUsd + (actualCostUsd ?? 0);
-    if (bestDuplicate) return json({ error: "DUPLICATE_CONTENT", message: "Il contenuto generato è troppo simile a un contenuto recente dello stesso profilo e non viene restituito come nuovo contenuto.", duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null }, budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) } }, 409);
+    if (bestDuplicate) {
+      await meter.release(eventId, "DUPLICATE_CONTENT");
+      return json({ error: "DUPLICATE_CONTENT", duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null } }, 409);
+    }
 
-    return json({ content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) } });
+    const responseBody = { content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) } };
+    await meter.storeResult(eventId, { response: responseBody });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
-    return json({ error: "GENERATION_FAILED", detail }, detail.startsWith("OPENAI_") ? 502 : 500);
+    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500);
   }
 }
