@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Checkout
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - name: Setup Node
         uses: actions/setup-node@v4
         with: { node-version: 22 }
@@ -36,7 +38,42 @@ jobs:
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
-      - { name: AI content text runtime verifier static safety, run: "node tests/ai-content-text-runtime-static.test.mjs" }
+
+      - name: AI content text provider instrumentation contract
+        if: github.event_name == 'pull_request' && github.head_ref == 'verify/ai-content-text-gating-runtime'
+        run: node tests/ai-content-text-provider-harness.test.mjs
+
+      - name: AI content text runtime verifier static safety
+        if: github.event_name == 'pull_request' && github.head_ref == 'verify/ai-content-text-gating-runtime'
+        run: node tests/ai-content-text-runtime-static.test.mjs
+
+      - name: AI content text verifier scope
+        if: github.event_name == 'pull_request' && github.head_ref == 'verify/ai-content-text-gating-runtime'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="1377724860fb8cf210d5fb8c677d71fd3faa851b"
+          if [ "$(git merge-base HEAD "$expected")" != "$expected" ]; then
+            echo "verifier production base mismatch" >&2
+            exit 1
+          fi
+          changed=$(git diff --name-only "$expected"...HEAD)
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            case "$path" in
+              .github/workflows/audit-viewer-runtime.yml|.github/workflows/gate.yml|tests/ai-content-text-*|tests/wrangler.ai-content-text-runtime.jsonc) ;;
+              *)
+                echo "product diff is forbidden in verifier: $path" >&2
+                exit 1
+                ;;
+            esac
+          done <<< "$changed"
+          echo "AI content text verifier scope: PASS"
+
+      - name: AI content text Preview bundle dry run
+        if: github.event_name == 'pull_request' && github.head_ref == 'verify/ai-content-text-gating-runtime'
+        run: npx wrangler deploy --dry-run --config tests/wrangler.ai-content-text-runtime.jsonc
+
       - { name: Worker deploy trigger regression, run: "npm run test:worker-deploy-trigger" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
