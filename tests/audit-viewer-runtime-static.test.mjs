@@ -21,7 +21,7 @@ assert.match(workflow, /EPHEMERAL_CONTROLLER_VERSION_ID/, "ephemeral version ID 
 assert.match(workflow, /(?:AUDIT_PREVIEW_ISOLATION|AI_TEXT_PREVIEW_ISOLATION):\s*PASS/, "preview isolation assertion missing");
 assert.match(workflow, /(?:production deployment set changed during Audit runtime|production deployment changed during verifier)/, "deployment immutability comparison missing");
 assert.match(workflow, /if:\s*always\(\)/, "always cleanup missing");
-assert.match(workflow, /shred -u \.audit-runtime-secrets\.env/, "local token material cleanup missing");
+assert.match(workflow, /shred -u \.(?:audit|ai-text)-runtime-secrets\.env/, "local token material cleanup missing");
 assert.doesNotMatch(workflow, /actions\/upload-artifact/i, "ephemeral runtime material must not become an artifact");
 assert.doesNotMatch(workflow, /ADMIN_SMOKE_(EMAIL|PASSWORD)|CUSTOMER_SMOKE_(EMAIL|PASSWORD)/, "permanent smoke credentials are forbidden");
 
