@@ -109,15 +109,26 @@ export class TextGenerationMetering {
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        for (const event of events) {
-          await this.sql`
-            insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
-            values (
-              ${profileId}::uuid,${event.operation},${event.model},${event.inputTokens},${event.outputTokens},${event.costUsd},
-              ${JSON.stringify({ ...event.metadata, logical_usage_event_id: eventId, logical_capability: AI_CONTENT_TEXT_CAPABILITY })}::jsonb
-            )
-          `;
-        }
+        const payload = events.map((event) => ({
+          operation: event.operation,
+          model: event.model,
+          input_tokens: event.inputTokens,
+          output_tokens: event.outputTokens,
+          cost_usd: event.costUsd,
+          metadata: { ...event.metadata, logical_usage_event_id: eventId, logical_capability: AI_CONTENT_TEXT_CAPABILITY },
+        }));
+        await this.sql`
+          insert into public.ai_usage_events (profile_id,operation,model,input_tokens,output_tokens,cost_usd,metadata)
+          select
+            ${profileId}::uuid,
+            item->>'operation',
+            item->>'model',
+            nullif(item->>'input_tokens','')::integer,
+            nullif(item->>'output_tokens','')::integer,
+            nullif(item->>'cost_usd','')::numeric,
+            coalesce(item->'metadata','{}'::jsonb)
+          from jsonb_array_elements(${JSON.stringify(payload)}::jsonb) item
+        `;
         await this.usage.mergeUsageEventMetadata(eventId, {
           technical_usage_state: "PERSISTED",
           technical_usage_persisted_at: new Date().toISOString(),
