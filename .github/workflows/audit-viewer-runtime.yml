@@ -231,6 +231,20 @@ jobs:
             echo "BRAND_ANALYZE_CLEANUP_NOT_ARMED: no QA fixtures authorized"
             exit 0
           fi
+          for suffix in a b; do
+            status=$(curl -sS -o "brand-analyze-cleanup-$suffix.json" -w "%{http_code}" -X POST \
+              -H 'content-type: application/json' \
+              -H "x-brand-analyze-qa-token: $BRAND_ANALYZE_QA_TOKEN_VALUE" \
+              -H "x-brand-analyze-qa-marker: $BRAND_ANALYZE_QA_MARKER" \
+              --data "{\"action\":\"cleanup-user\",\"marker\":\"$BRAND_ANALYZE_QA_MARKER\",\"suffix\":\"$suffix\"}" \
+              "$BRAND_ANALYZE_PREVIEW_URL/__qa/control" || true)
+            CLEANUP_STATUS="$status" CLEANUP_SUFFIX="$suffix" node - <<'NODE'
+          const fs=require('node:fs');
+          const suffix=process.env.CLEANUP_SUFFIX;
+          const body=JSON.parse(fs.readFileSync(`brand-analyze-cleanup-${suffix}.json`,'utf8'));
+          if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true||body.cleanedUsers!==1){const safe=String(body.detail||body.error||'unknown').replace(/[^A-Za-z0-9_. -]/g,' ').slice(0,240);throw new Error(`cleanup user ${suffix} failed HTTP ${process.env.CLEANUP_STATUS}: ${safe}`);}
+          NODE
+          done
           status=$(curl -sS -o brand-analyze-cleanup.json -w "%{http_code}" -X POST \
             -H 'content-type: application/json' \
             -H "x-brand-analyze-qa-token: $BRAND_ANALYZE_QA_TOKEN_VALUE" \
@@ -292,5 +306,5 @@ jobs:
             chmod 600 .brand-analyze-runtime-secrets.env || true
             shred -u .brand-analyze-runtime-secrets.env 2>/dev/null || rm -f .brand-analyze-runtime-secrets.env
           fi
-          rm -f brand-analyze-verifier-diff.txt brand-analyze-upload.log brand-analyze-preflight.json brand-analyze-instrumentation.json brand-analyze-stale-cleanup.json brand-analyze-cleanup.json brand-analyze-runtime-output.log brand-analyze-sensitive-findings.txt brand-analyze-tenant-audit.json brand-analyze-auth-audit.json brand-analyze-deployments-before.json brand-analyze-deployments-after.json
+          rm -f brand-analyze-verifier-diff.txt brand-analyze-upload.log brand-analyze-preflight.json brand-analyze-instrumentation.json brand-analyze-stale-cleanup.json brand-analyze-cleanup.json brand-analyze-cleanup-a.json brand-analyze-cleanup-b.json brand-analyze-runtime-output.log brand-analyze-sensitive-findings.txt brand-analyze-tenant-audit.json brand-analyze-auth-audit.json brand-analyze-deployments-before.json brand-analyze-deployments-after.json
           echo "BRAND_ANALYZE_EPHEMERAL_SECRET_CLEANUP: PASS"

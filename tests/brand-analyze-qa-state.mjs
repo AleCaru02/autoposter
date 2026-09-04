@@ -123,6 +123,16 @@ async function cleanupUser(sql, user) {
   await sql`delete from neon_auth.user where id::text=${user.id}`;
 }
 
+export async function cleanupMarkerUser(sql, marker, suffix) {
+  const normalized = String(suffix || "").toLowerCase();
+  if (normalized !== "a" && normalized !== "b") throw new Error("INVALID_QA_USER_SUFFIX");
+  const expected = `brand-qa-${marker}-${normalized}@example.invalid`;
+  const users = (await qaUsers(sql, marker)).filter((user) => user.email === expected);
+  if (users.length !== 1) throw new Error(`QA_USER_COUNT_${normalized.toUpperCase()}_${users.length}`);
+  await cleanupUser(sql, users[0]);
+  return { cleaned: true, cleanedUsers: 1, suffix: normalized };
+}
+
 export async function cleanup(sql, marker, allRecognized = false) {
   const users = allRecognized ? await qaUsers(sql) : await qaUsers(sql, marker);
   for (const user of users) await cleanupUser(sql, user);
