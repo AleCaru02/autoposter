@@ -17,6 +17,22 @@ export type OpenAIImageUsage = {
   mediaManagerCostUsd: number;
 };
 
+export type OpenAIImageTechnicalEvent = {
+  operation: "AGENT_MEDIA_MANAGER" | "GENERATE_SOCIAL_IMAGE";
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  metadata: Record<string, unknown>;
+};
+
+export class OpenAIImagePipelineError extends Error {
+  constructor(message: string, readonly technicalEvents: OpenAIImageTechnicalEvent[]) {
+    super(message);
+    this.name = "OpenAIImagePipelineError";
+  }
+}
+
 export type OpenAIImageResult = {
   model: "gpt-image-2";
   mimeType: "image/png";
@@ -34,6 +50,7 @@ export type OpenAIImageResult = {
     altText: string;
   };
   usage: OpenAIImageUsage;
+  technicalEvents: OpenAIImageTechnicalEvent[];
 };
 
 export type GenerateImageOptions = {
@@ -100,6 +117,14 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     additionalDirection: options.additionalDirection,
     fetcher,
   });
+  const mediaManagerEvent: OpenAIImageTechnicalEvent = {
+    operation: "AGENT_MEDIA_MANAGER",
+    model: mediaManager.model,
+    inputTokens: mediaManager.usage.inputTokens,
+    outputTokens: mediaManager.usage.outputTokens,
+    costUsd: mediaManager.usage.estimatedCostUsd,
+    metadata: { openai_response_id: mediaManager.responseId, openai_request_id: mediaManager.requestId },
+  };
   const fallbackPrompt = buildImagePrompt(options);
   const prompt = mediaManager.imagePrompt.trim() || fallbackPrompt;
   const response = await fetcher("https://api.openai.com/v1/images/generations", {
@@ -125,18 +150,26 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
       const body = JSON.parse(raw) as { error?: { code?: string; message?: string } };
       message = body.error?.code || body.error?.message || message;
     } catch { /* keep generic status */ }
-    throw new Error(message);
+    throw new OpenAIImagePipelineError(message, [mediaManagerEvent]);
   }
   const body = JSON.parse(raw) as Record<string, unknown>;
   const data = Array.isArray(body.data) ? body.data : [];
   const first = data[0] && typeof data[0] === "object" ? data[0] as Record<string, unknown> : null;
   const base64 = first && typeof first.b64_json === "string" ? first.b64_json : "";
-  if (!base64) throw new Error("OPENAI_IMAGE_EMPTY_OUTPUT");
+  if (!base64) throw new OpenAIImagePipelineError("OPENAI_IMAGE_EMPTY_OUTPUT", [mediaManagerEvent]);
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const imageInputTokens = numberOrNull(usage.input_tokens);
   const imageOutputTokens = numberOrNull(usage.output_tokens);
   const imageCost = imageInputTokens !== null && imageOutputTokens !== null ? estimateImageCostUsd(imageInputTokens, imageOutputTokens) : null;
   const totalCost = imageCost === null ? null : imageCost + mediaManager.usage.estimatedCostUsd;
+  const imageEvent: OpenAIImageTechnicalEvent = {
+    operation: "GENERATE_SOCIAL_IMAGE",
+    model: "gpt-image-2",
+    inputTokens: imageInputTokens,
+    outputTokens: imageOutputTokens,
+    costUsd: imageCost,
+    metadata: { openai_request_id: requestId, quality: "high", size },
+  };
   return {
     model: "gpt-image-2",
     mimeType: "image/png",
@@ -162,5 +195,6 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
       mediaManagerOutputTokens: mediaManager.usage.outputTokens,
       mediaManagerCostUsd: mediaManager.usage.estimatedCostUsd,
     },
+    technicalEvents: [mediaManagerEvent, imageEvent],
   };
 }
