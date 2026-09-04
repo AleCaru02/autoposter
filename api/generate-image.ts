@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
+import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
+import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 
 export const config = { maxDuration: 60 };
 
@@ -70,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = bearer(req);
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
   if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
 
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   const requestedProvider = typeof req.body?.provider === "string" && VALID_PROVIDERS.has(req.body.provider as ImageSocialProvider) ? req.body.provider as ImageSocialProvider : null;
@@ -78,8 +80,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const visualBrief = typeof req.body?.visualBrief === "string" ? req.body.visualBrief.trim().slice(0, 2_000) : "";
   const caption = typeof req.body?.caption === "string" ? req.body.caption.trim().slice(0, 1_500) : null;
   const additionalDirection = typeof req.body?.additionalDirection === "string" ? req.body.additionalDirection.trim().slice(0, 700) : null;
+  const operationIdentityHeader = req.headers["x-post-automatici-operation-id"];
+  const operationIdentity = (Array.isArray(operationIdentityHeader) ? operationIdentityHeader[0] : operationIdentityHeader || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return res.status(400).json({ error: "OPERATION_ID_REQUIRED" });
   if (!profileId || !requestedProvider || !requestedFormat || !visualBrief) return res.status(400).json({ error: "IMAGE_INPUT_REQUIRED" });
 
+  let activeMeter: ImageGenerationMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profiles = await readRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
     const profile = profiles[0];
@@ -94,29 +102,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (savedVariant.provider !== requestedProvider || savedVariant.format !== requestedFormat) return res.status(409).json({ error: "CONTENT_VARIANT_MISMATCH" });
     }
 
+    const meter = new ImageGenerationMetering(process.env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({
+      profileId,
+      source: "MANUAL",
+      operationIdentity,
+      referenceId: savedVariant?.id ?? null,
+      requestFingerprint: { contentVariantId, provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection },
+    });
+    if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
+    if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
+    if (reservation.status === "IN_PROGRESS") return res.status(409).json({ error: "IMAGE_GENERATION_IN_PROGRESS" });
+    if (reservation.status === "RELEASED") return res.status(409).json({ error: "METERING_FAILED" });
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
+
     const limit = monthlyImageLimit();
     const used = await readRows<UsageRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(monthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
     if (used.length >= limit) {
+      await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
       return res.status(429).json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } });
     }
 
+    await meter.markProviderStarted(eventId);
     const result = await generateOpenAIImage({ apiKey: process.env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summary(brands[0]?.tone_of_voice), provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
-
-    const usageWrite = await dataApi("ai_usage_events", token, {
-      method: "POST",
-      headers: { prefer: "return=minimal" },
-      body: JSON.stringify({
-        profile_id: profileId,
-        operation: "GENERATE_SOCIAL_IMAGE",
-        model: result.model,
-        input_tokens: result.usage.inputTokens,
-        output_tokens: result.usage.outputTokens,
-        cost_usd: result.usage.estimatedCostUsd,
-        metadata: { openai_request_id: result.requestId, quality: result.quality, size: result.size, provider: requestedProvider, format: requestedFormat, cost_status: result.usage.estimatedCostUsd == null ? "usage_not_returned" : "estimated_from_openai_usage" },
-      }),
-    });
-    if (!usageWrite.ok) console.error("ai-image-usage-write", { profileId, status: usageWrite.status });
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, {
+      source: "MANUAL", provider: requestedProvider, format: requestedFormat,
+    }));
 
     let asset: AssetRow | null = null;
     if (savedVariant) {
@@ -160,11 +174,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res.status(200).json({ image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } });
+    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } };
+    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: responseBody.quota, duplicate: true };
+    await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return res.status(200).json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && reason instanceof OpenAIImagePipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("generate-image", { profileId, detail });
-    const status = detail.startsWith("OPENAI_IMAGE_") ? 502 : 500;
-    return res.status(status).json({ error: "IMAGE_GENERATION_FAILED", detail });
+    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED", detail });
   }
 }

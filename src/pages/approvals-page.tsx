@@ -192,7 +192,7 @@ export function ApprovalsPage() {
       if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
       const response = await fetch("/api/generate-image", {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },
         body: JSON.stringify({
           profileId: selectedProfile.id,
           contentVariantId: variant.id,

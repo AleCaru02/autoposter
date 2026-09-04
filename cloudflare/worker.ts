@@ -2,7 +2,8 @@ import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
 import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "../api/_lib/brand-analysis.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
-import { generateOpenAIImage, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -284,6 +285,7 @@ async function handleGenerateImage(request: Request, env: Env) {
   const token = bearer(request);
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
   if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const provider = typeof body.provider === "string" && VALID_IMAGE_PROVIDERS.has(body.provider as ImageSocialProvider) ? body.provider as ImageSocialProvider : null;
@@ -292,8 +294,13 @@ async function handleGenerateImage(request: Request, env: Env) {
   const visualBrief = typeof body.visualBrief === "string" ? body.visualBrief.trim().slice(0, 2_000) : "";
   const caption = typeof body.caption === "string" ? body.caption.trim().slice(0, 1_500) : null;
   const additionalDirection = typeof body.additionalDirection === "string" ? body.additionalDirection.trim().slice(0, 700) : null;
+  const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
   if (!profileId || !provider || !format || !visualBrief) return json({ error: "IMAGE_INPUT_REQUIRED" }, 400);
 
+  let activeMeter: ImageGenerationMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
     const profile = profiles[0];
@@ -306,12 +313,31 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
+    const meter = new ImageGenerationMetering(env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({
+      profileId,
+      source: "MANUAL",
+      operationIdentity,
+      referenceId: savedVariant?.id ?? null,
+      requestFingerprint: { contentVariantId, provider, format, visualBrief, caption, additionalDirection },
+    });
+    if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
+    if (reservation.status === "COMPLETED") return json(reservation.cached.response);
+    if (reservation.status === "IN_PROGRESS") return json({ error: "IMAGE_GENERATION_IN_PROGRESS" }, 409);
+    if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
     const limit = monthlyImageLimit(env);
     const used = await rows<UsageRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
-    if (used.length >= limit) return json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } }, 429);
+    if (used.length >= limit) {
+      await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
+      return json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } }, 429);
+    }
+    await meter.markProviderStarted(eventId);
     const result = await generateOpenAIImage({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summaryField(brands[0]?.tone_of_voice), provider, format, visualBrief, caption, additionalDirection });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
-    await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_IMAGE", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_request_id: result.requestId, quality: result.quality, size: result.size, provider, format, cost_status: result.usage.estimatedCostUsd == null ? "usage_not_returned" : "estimated_from_openai_usage" } }) });
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
       const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: "OPENAI_GPT_IMAGE_2", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { model: result.model, quality: result.quality, size: result.size, openai_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
@@ -327,11 +353,19 @@ async function handleGenerateImage(request: Request, env: Env) {
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
     }
-    return json({ image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } });
+    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } };
+    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: responseBody.quota, duplicate: true };
+    await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && reason instanceof OpenAIImagePipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("cloudflare-generate-image", { profileId, detail });
-    return json({ error: "IMAGE_GENERATION_FAILED", detail }, detail.startsWith("OPENAI_IMAGE_") ? 502 : 500);
+    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED", detail }, status);
   }
 }
 
