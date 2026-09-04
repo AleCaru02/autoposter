@@ -119,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     activeEventId = eventId;
 
     const limit = monthlyImageLimit();
-    const used = await readRows<UsageRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(monthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
+    const used = await readRows<UsageRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(monthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
     if (used.length >= limit) {
       await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
       return res.status(429).json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } });
