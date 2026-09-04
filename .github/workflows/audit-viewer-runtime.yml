@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ai-content-text-gating-runtime
+  group: audit-viewer-authenticated-runtime
   cancel-in-progress: false
 
 jobs:
