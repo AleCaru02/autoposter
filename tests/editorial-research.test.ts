@@ -25,7 +25,11 @@ const autopilot = readFileSync(new URL("../api/_lib/autopilot.ts", import.meta.u
 assert.match(autopilot, /normalizeEditorialResearchMode\(asObject\(strategy\?\.platform_strategy\)\.researchMode\)/, "Autopilot must read researchMode from the current profile strategy");
 assert.match(autopilot, /generateSocialText\(\{[^}]*researchMode[^}]*cacheKey:/s, "Autopilot must pass researchMode into OpenAI generation regardless of source formatting");
 assert.match(autopilot, /external_sources\s*:\s*generated\.externalSources/, "Autopilot must retain external source telemetry");
-assert.match(autopilot, /web_search_calls\s*:\s*generated\.usage\.webSearchCalls/, "Autopilot must retain web search cost telemetry");
+assert.match(autopilot, /technicalEventsFromTextResult\(generated,[\s\S]*external_sources\s*:\s*generated\.externalSources/, "Autopilot must persist generated technical telemetry through the shared metering boundary");
+const openaiText = readFileSync(new URL("../api/_lib/openai-text.ts", import.meta.url), "utf8");
+assert.match(openaiText, /web_search_calls\s*:\s*mainWebSearchCalls/, "Main generation technical event must retain web-search call telemetry");
+assert.match(openaiText, /web_search_calls\s*:\s*dedicatedResearch\.usage\.webSearchCalls/, "Research technical event must retain web-search call telemetry");
+assert.match(openaiText, /web_search_calls\s*:\s*factCheck\.usage\.webSearchCalls/, "Fact-check technical event must retain web-search call telemetry");
 assert.match(autopilot, /planItem\?\.intent==="NEWS"\?"NEWS":configuredResearch/, "Planner NEWS intent must force the verified NEWS research path");
 assert.doesNotMatch(autopilot, /Usa esclusivamente i fatti confermati dal sito e dal brand/);
 

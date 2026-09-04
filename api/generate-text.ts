@@ -2,7 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
-import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
+import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
+import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 
 export const config = { maxDuration: 60 };
 
@@ -51,8 +52,8 @@ function currentMonthStartIso() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 }
 
-async function currentOwnerTextSpendUsd(token: string) {
-  const rows = await readJsonRows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
+async function currentOwnerTextSpendUsd(profileId: string, token: string) {
+  const rows = await readJsonRows<CostRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=in.(GENERATE_SOCIAL_TEXT,AGENT_RESEARCH,AGENT_FACTCHECK,AGENT_EDITORIAL_QA)&select=cost_usd&limit=5000`, token);
   return rows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
 }
 
@@ -73,16 +74,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = bearer(req);
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
   if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED", message: "Configura OPENAI_API_KEY nel deployment server-side." });
+  if (!process.env.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
 
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   const topic = typeof req.body?.topic === "string" ? req.body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof req.body?.objective === "string" ? req.body.objective.trim().slice(0, 500) : null;
   const researchMode = normalizeEditorialResearchMode(req.body?.researchMode);
+  const operationIdentityHeader = req.headers["x-post-automatici-operation-id"];
+  const operationIdentity = (Array.isArray(operationIdentityHeader) ? operationIdentityHeader[0] : operationIdentityHeader || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return res.status(400).json({ error: "OPERATION_ID_REQUIRED" });
   const providers = Array.isArray(req.body?.providers) ? req.body.providers.filter((value: unknown): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
   const formats = Array.isArray(req.body?.formats) ? req.body.formats.filter((value: unknown): value is SocialFormat => typeof value === "string" && VALID_FORMATS.has(value as SocialFormat)) : [];
   if (!profileId || !topic) return res.status(400).json({ error: "PROFILE_AND_TOPIC_REQUIRED" });
   if (!providers.length || !formats.length) return res.status(400).json({ error: "PROVIDERS_AND_FORMATS_REQUIRED" });
 
+  let activeMeter: TextGenerationMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profiles = await readJsonRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
     const profile = profiles[0];
@@ -107,45 +115,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
 
+    const meter = new TextGenerationMetering(process.env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({
+      profileId,
+      source: "MANUAL",
+      operationIdentity,
+      requestFingerprint: { topic, objective, providers, formats, researchMode },
+    });
+    if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
+    if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
+    if (reservation.status === "IN_PROGRESS") return res.status(409).json({ error: "GENERATION_IN_PROGRESS" });
+    if (reservation.status === "RELEASED") return res.status(409).json({ error: "METERING_FAILED" });
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
+
     const budgetUsd = monthlyBudgetUsd();
-    const spentBeforeUsd = await currentOwnerTextSpendUsd(token);
+    const spentBeforeUsd = await currentOwnerTextSpendUsd(profileId, token);
     const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
     if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
-      return res.status(429).json({
-        error: "OPENAI_TEXT_BUDGET_REACHED",
-        message: "Budget mensile testi raggiunto. Nessuna chiamata OpenAI è stata eseguita.",
-        budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentBeforeUsd.toFixed(6)), estimatedNextMaxUsd: Number(requestUpperBoundUsd.toFixed(6)) },
-      });
+      await meter.release(eventId, "AI_BUDGET_EXCEEDED");
+      return res.status(429).json({ error: "AI_BUDGET_EXCEEDED" });
     }
 
+    await meter.markProviderStarted(eventId);
     const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
-    const usageWrite = await dataApi("ai_usage_events", token, {
-      method: "POST",
-      headers: { prefer: "return=minimal" },
-      body: JSON.stringify({
-        profile_id: profileId,
-        operation: "GENERATE_SOCIAL_TEXT",
-        model: result.model,
-        input_tokens: result.usage.inputTokens,
-        output_tokens: result.usage.outputTokens,
-        cost_usd: actualCostUsd,
-        metadata: {
-          openai_response_id: result.responseId,
-          openai_request_id: result.requestId,
-          cached_input_tokens: result.usage.cachedInputTokens,
-          cache_write_tokens: result.usage.cacheWriteTokens,
-          web_search_calls: result.usage.webSearchCalls,
-          research_mode: result.researchMode,
-          external_sources: result.externalSources,
-          requested_topic: topic,
-          editorial_pillars_used: enriched.pillarCount,
-          editorial_topic: result.content.editorialTopic,
-          editorial_angle: result.content.editorialAngle,
-        },
-      }),
-    });
-    if (!usageWrite.ok) console.error("ai-usage-write", { profileId, status: usageWrite.status });
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
+      source: "MANUAL",
+      requested_topic: topic,
+      editorial_pillars_used: enriched.pillarCount,
+      editorial_topic: result.content.editorialTopic,
+      editorial_angle: result.content.editorialAngle,
+      external_sources: result.externalSources,
+      verification: result.verification,
+    }));
 
     const recent = await recentContentForDedupe(profileId, token);
     let bestDuplicate: ReturnType<typeof findNearDuplicate> = null;
@@ -156,27 +160,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const spentAfterUsd = spentBeforeUsd + (actualCostUsd ?? 0);
     if (bestDuplicate) {
+      await meter.release(eventId, "DUPLICATE_CONTENT");
       return res.status(409).json({
         error: "DUPLICATE_CONTENT",
         message: "Il contenuto generato è troppo simile a un contenuto recente dello stesso profilo e non viene restituito come nuovo contenuto.",
         duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null },
-        research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
-        budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
       });
     }
 
-    return res.status(200).json({
+    const responseBody = {
       content: result.content,
       model: result.model,
       responseId: result.responseId,
       research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
       budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
-    });
+    };
+    await meter.storeResult(eventId, { response: responseBody });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return res.status(200).json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && reason instanceof OpenAITextPipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("generate-text", { profileId, detail });
-    const status = detail.startsWith("OPENAI_") ? 502 : 500;
-    return res.status(status).json({ error: "GENERATION_FAILED", detail });
+    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" });
   }
 }

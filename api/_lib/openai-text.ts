@@ -48,6 +48,22 @@ export type OpenAITextUsage = {
   estimatedCostUsd: number | null;
 };
 
+export type OpenAITextTechnicalEvent = {
+  operation: "GENERATE_SOCIAL_TEXT" | "AGENT_RESEARCH" | "AGENT_FACTCHECK";
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  metadata: Record<string, unknown>;
+};
+
+export class OpenAITextPipelineError extends Error {
+  constructor(message: string, public readonly technicalEvents: OpenAITextTechnicalEvent[]) {
+    super(message);
+    this.name = "OpenAITextPipelineError";
+  }
+}
+
 export type OpenAITextResult = {
   content: GeneratedSocialContent;
   responseId: string;
@@ -61,6 +77,7 @@ export type OpenAITextResult = {
     factCheckVerdict: "PASS" | null;
   };
   usage: OpenAITextUsage;
+  technicalEvents: OpenAITextTechnicalEvent[];
 };
 
 export type GenerateOptions = {
@@ -257,7 +274,23 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       freshnessDays: research.freshnessDays,
       fetcher,
     });
-    if (dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) throw new Error("OPENAI_RESEARCH_BLOCKED");
+    if (dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) {
+      const researchCostUsd = agentCost(dedicatedResearch);
+      throw new OpenAITextPipelineError("OPENAI_RESEARCH_BLOCKED", [{
+        operation: "AGENT_RESEARCH",
+        model: dedicatedResearch.model,
+        inputTokens: dedicatedResearch.usage.inputTokens,
+        outputTokens: dedicatedResearch.usage.outputTokens,
+        costUsd: researchCostUsd,
+        metadata: {
+          openai_response_id: dedicatedResearch.responseId,
+          openai_request_id: dedicatedResearch.requestId,
+          web_search_calls: dedicatedResearch.usage.webSearchCalls,
+          sources: dedicatedResearch.sources,
+          status: dedicatedResearch.status,
+        },
+      }]);
+    }
   }
 
   const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
@@ -347,15 +380,66 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       allowWebSearch: research.useWebSearch && combinedSources.length === 0,
       fetcher,
     });
-    if (factCheck.verdict !== "PASS") throw new Error(`OPENAI_FACTCHECK_${factCheck.verdict}`);
+    // Persist technical cost before surfacing a blocking fact-check verdict.
   }
 
   const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
   const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + (factCheck?.usage.outputTokens ?? 0);
   const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + (factCheck?.usage.webSearchCalls ?? 0);
   const mainTokenCost = mainInputTokens !== null && mainOutputTokens !== null ? estimateTerraCostUsd(mainInputTokens, mainOutputTokens, cachedInputTokens, cacheWriteTokens) : null;
-  const estimatedCostUsd = mainTokenCost === null ? null : mainTokenCost + agentCost(dedicatedResearch) + agentCost(factCheck) + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
+  const mainCostUsd = mainTokenCost === null ? null : mainTokenCost + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
+  const researchCostUsd = dedicatedResearch ? agentCost(dedicatedResearch) : null;
+  const factCheckCostUsd = factCheck ? agentCost(factCheck) : null;
+  const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + (factCheckCostUsd ?? 0);
   const externalSources = [...new Set([...combinedSources, ...(factCheck?.sources ?? [])])].slice(0, 20);
+  const technicalEvents: OpenAITextTechnicalEvent[] = [
+    {
+      operation: "GENERATE_SOCIAL_TEXT",
+      model: typeof body.model === "string" ? body.model : model,
+      inputTokens: mainInputTokens,
+      outputTokens: mainOutputTokens,
+      costUsd: mainCostUsd,
+      metadata: {
+        openai_response_id: typeof body.id === "string" ? body.id : "",
+        openai_request_id: requestId,
+        cached_input_tokens: cachedInputTokens,
+        cache_write_tokens: cacheWriteTokens,
+        web_search_calls: mainWebSearchCalls,
+        research_mode: research.mode,
+      },
+    },
+    ...(dedicatedResearch ? [{
+      operation: "AGENT_RESEARCH" as const,
+      model: dedicatedResearch.model,
+      inputTokens: dedicatedResearch.usage.inputTokens,
+      outputTokens: dedicatedResearch.usage.outputTokens,
+      costUsd: researchCostUsd,
+      metadata: {
+        openai_response_id: dedicatedResearch.responseId,
+        openai_request_id: dedicatedResearch.requestId,
+        web_search_calls: dedicatedResearch.usage.webSearchCalls,
+        sources: dedicatedResearch.sources,
+      },
+    }] : []),
+    ...(factCheck ? [{
+      operation: "AGENT_FACTCHECK" as const,
+      model: factCheck.model,
+      inputTokens: factCheck.usage.inputTokens,
+      outputTokens: factCheck.usage.outputTokens,
+      costUsd: factCheckCostUsd,
+      metadata: {
+        openai_response_id: factCheck.responseId,
+        openai_request_id: factCheck.requestId,
+        web_search_calls: factCheck.usage.webSearchCalls,
+        verdict: factCheck.verdict,
+        sources: factCheck.sources,
+      },
+    }] : []),
+  ];
+
+  if (factCheck && factCheck.verdict !== "PASS") {
+    throw new OpenAITextPipelineError(`OPENAI_FACTCHECK_${factCheck.verdict}`, technicalEvents);
+  }
 
   return {
     content,
@@ -378,5 +462,6 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       webSearchCalls,
       estimatedCostUsd,
     },
+    technicalEvents,
   };
 }

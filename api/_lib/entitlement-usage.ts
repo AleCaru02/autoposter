@@ -262,6 +262,26 @@ export class EntitlementUsageService {
     const rows = await this.sql`select (public.release_capability_usage(${eventId}::uuid)).*`;
     return rows[0] ?? null;
   }
+
+  async getUsageEvent(eventId: string) {
+    const rows = await this.sql`
+      select id, profile_id, capability_key, state, idempotency_key, metadata
+      from public.capability_usage_events
+      where id=${eventId}::uuid
+      limit 1
+    ` as unknown as Array<{ id: string; profile_id: string; capability_key: string; state: "RESERVED"|"COMMITTED"|"RELEASED"; idempotency_key: string; metadata: unknown }>;
+    return rows[0] ?? null;
+  }
+
+  async mergeUsageEventMetadata(eventId: string, patch: Record<string, unknown>) {
+    const rows = await this.sql`
+      update public.capability_usage_events
+      set metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb
+      where id=${eventId}::uuid
+      returning id, state, metadata
+    ` as unknown as Array<{ id: string; state: "RESERVED"|"COMMITTED"|"RELEASED"; metadata: unknown }>;
+    return rows[0] ?? null;
+  }
 }
 
 export function defaultEntitlementFor(key: CapabilityKey) {
