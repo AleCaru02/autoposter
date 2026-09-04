@@ -37,6 +37,7 @@ jobs:
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
+      - { name: Brand analyze runtime static safety, run: "node tests/brand-analyze-runtime-static.test.mjs" }
       - { name: Worker deploy trigger regression, run: "npm run test:worker-deploy-trigger" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
