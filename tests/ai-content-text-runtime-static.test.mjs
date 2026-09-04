@@ -38,7 +38,7 @@ assert.match(controller, /import productWorker from "\.\.\/cloudflare\/entry\.ts
 assert.match(controller, /import \{ currentSpend \} from "\.\.\/api\/_lib\/autopilot\.ts"/);
 assert.match(common, /AI_TEXT_QA_PROVIDER_CALL/);
 assert.match(common, /AI_TEXT_QA_BARRIER_RELEASE/);
-assert.match(controller, /AI_TEXT_QA_BACKGROUND_DONE/);
+assert.match(common, /AI_TEXT_QA_BACKGROUND_DONE/);
 assert.match(controller, /x-ai-text-qa-token/);
 assert.match(controller, /x-ai-text-qa-marker/);
 assert.match(common, /PREVIEW_HOST/);
