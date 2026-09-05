@@ -155,6 +155,17 @@ type ReserveRow = {
   remaining: number | string | null;
 };
 
+type ProviderCostAttemptRow = {
+  allowed: boolean;
+  managed: boolean;
+  duplicate: boolean;
+  attempt_id: string | null;
+  cap_usd: number | string | null;
+  accounted_usd: number | string | null;
+  remaining_usd: number | string | null;
+  reserve_usd: number | string | null;
+};
+
 export class EntitlementUsageService {
   private readonly sql: Sql;
 
@@ -261,6 +272,38 @@ export class EntitlementUsageService {
   async releaseUsage(eventId: string) {
     const rows = await this.sql`select (public.release_capability_usage(${eventId}::uuid)).*`;
     return rows[0] ?? null;
+  }
+
+  async beginProviderCostAttempt(eventId: string) {
+    const rows = await this.sql`select * from public.begin_provider_cost_attempt(${eventId}::uuid)` as unknown as ProviderCostAttemptRow[];
+    const row = rows[0];
+    if (!row) throw new Error("PROVIDER_COST_BUDGET_FAILED");
+    return {
+      allowed: row.allowed,
+      managed: row.managed,
+      duplicate: row.duplicate,
+      attemptId: row.attempt_id,
+      capUsd: finiteOrNull(row.cap_usd),
+      accountedUsd: finiteOrNull(row.accounted_usd),
+      remainingUsd: finiteOrNull(row.remaining_usd),
+      reserveUsd: finiteOrNull(row.reserve_usd),
+    };
+  }
+
+  async reconcileProviderCostAttempt(eventId: string) {
+    const rows = await this.sql`select (public.reconcile_provider_cost_attempt(${eventId}::uuid)).*`;
+    return rows[0] ?? null;
+  }
+
+  async markProviderStarted(eventId: string) {
+    const budget = await this.beginProviderCostAttempt(eventId);
+    if (!budget.allowed) throw new Error("PROVIDER_COST_BUDGET_REACHED");
+    await this.mergeUsageEventMetadata(eventId, {
+      execution_state: "PROVIDER_STARTED",
+      provider_started_at: new Date().toISOString(),
+      provider_cost_budget: budget,
+    });
+    return budget;
   }
 
   async getUsageEvent(eventId: string) {

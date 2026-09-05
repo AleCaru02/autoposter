@@ -164,6 +164,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "BRAND_ANALYSIS_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_ONBOARDING_ANALYSIS_ERROR";
     console.error("cloudflare-onboarding-analyze-v2", { profileId, detail });
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "ONBOARDING_ANALYSIS_FAILED" }, status);
   }

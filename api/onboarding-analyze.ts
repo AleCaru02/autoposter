@@ -159,6 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "BRAND_ANALYSIS_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_ONBOARDING_ANALYSIS_ERROR";
     console.error("onboarding-analyze", { profileId, detail });
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "ONBOARDING_ANALYSIS_FAILED" });
   }
