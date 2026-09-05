@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "autoposter",
+  "main": "./provider-cost-budget-qa-controller.ts",
+  "compatibility_date": "2026-08-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
+  "preview_urls": true,
+  // Verification-only preview version. Never attach it to a production deployment.
+  "secrets": {
+    "required": ["DATABASE_URL", "PROVIDER_COST_QA_TOKEN"]
+  }
+}
