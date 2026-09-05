@@ -1,6 +1,7 @@
 import worker from "./worker.js";
 import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
+import { handleWorkerOnboardingProvision } from "./onboarding-provision.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
 import { handleManagedAuthCapabilities } from "./managed-auth-capabilities.js";
@@ -135,6 +136,7 @@ export default {
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
+    if (path === "/api/onboarding-provision") return handleWorkerOnboardingProvision(request, env);
     if (path === "/api/onboarding-analyze") return handleWorkerOnboardingAnalyze(request, env);
     if (path.startsWith("/api/social/")) {
       const response = await handleSocialApi(request, env);
