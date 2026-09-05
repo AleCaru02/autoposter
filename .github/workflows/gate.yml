@@ -42,6 +42,8 @@ jobs:
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
       - { name: Strategy planner server-side gating regression, run: "npm run test:strategy-planner-gating" }
       - { name: AI image generation server-side gating regression, run: "npm run test:image-generation-gating" }
+      - { name: Image generate provider harness, run: "node tests/image-generate-provider-harness.test.mjs" }
+      - { name: Image generate runtime static safety, run: "node tests/image-generate-runtime-static.test.mjs" }
       - { name: Worker deploy trigger regression, run: "npm run test:worker-deploy-trigger" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }

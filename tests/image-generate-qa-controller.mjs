@@ -1,0 +1,37 @@
+import { neonConfig } from "@neondatabase/serverless";
+import productWorker from "../cloudflare/entry.ts";
+import { makeQaProviderKey, parseQaProviderKey, openAiCallType, allowedProviderCallType, fakeOpenAiPlan, safeProviderRecord, technicalPersistenceFailureBody } from "./image-generate-provider-harness.mjs";
+import { QA_ACTION_PROVIDER, QA_ACTION_BARRIER, QA_ACTION_BACKGROUND, json, sameSecret, validMarker, validScenario, previewRequest, sqlFor, currentSql, requestBodyText } from "./image-generate-qa-common.mjs";
+import { assertQaProfile, state, cleanup, cleanupMarkerUser } from "./image-generate-qa-state.mjs";
+import { setupProfile, configureEntitlement, resetProfile, prepareVariant, prepareAutopilot, usage, providerCalls, releaseBarrier, backgroundStatus } from "./image-generate-qa-fixtures.mjs";
+const nativeFetch=globalThis.fetch.bind(globalThis);
+async function waitForBarrier(sql,c){const deadline=Date.now()+20_000;while(Date.now()<deadline){const rows=await sql`select 1 from public.platform_admin_audit where action=${QA_ACTION_BARRIER} and metadata->>'marker'=${c.marker} and metadata->>'profileId'=${c.profileId} and metadata->>'scenario'=${c.scenario} and metadata->>'operationId'=${c.operationId} limit 1`;if(rows.length)return;await new Promise(r=>setTimeout(r,100));}throw new Error("BARRIER_TIMEOUT");}
+async function interceptedFetch(input,init={}){
+  let url;try{url=new URL(typeof input==="string"?input:input.url);}catch{return nativeFetch(input,init);}
+  if(url.hostname==="api.openai.com"){
+    const headers=new Headers(init.headers||(input instanceof Request?input.headers:undefined));const auth=headers.get("authorization")||"";const c=parseQaProviderKey(auth.startsWith("Bearer ")?auth.slice(7).trim():"");const sql=currentSql();if(!c||!sql)return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},503);
+    const callType=openAiCallType(url.toString(),init);await sql`insert into public.platform_admin_audit(actor_auth_user_id,action,target_type,target_id,metadata) values (${`IMAGE_GENERATE_QA_${c.marker}`},${QA_ACTION_PROVIDER},'QA_PROVIDER',${c.operationId},${JSON.stringify(safeProviderRecord(c,callType||"UNKNOWN"))}::jsonb)`;
+    const plan=fakeOpenAiPlan({callType:callType||"UNKNOWN",correlation:c});if(!allowedProviderCallType(callType))return new Response(JSON.stringify(plan.body),{status:plan.status,headers:plan.headers});
+    if(plan.barrier){try{await waitForBarrier(sql,c);}catch{return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED",detail:"BARRIER_TIMEOUT"},504);}}
+    return new Response(JSON.stringify(plan.body),{status:plan.status,headers:plan.headers});
+  }
+  const raw=await requestBodyText(input,init);if(technicalPersistenceFailureBody(raw))return json({error:"IMAGE_GENERATE_QA_TECHNICAL_LEDGER_FAILURE"},503);if(url.pathname.endsWith("/assets")&&raw.includes("asset-persistence-failure")&&raw.includes("IMAGE_QA_"))return json({error:"IMAGE_GENERATE_QA_ASSET_FAILURE"},503);return nativeFetch(input,init);
+}
+globalThis.fetch=interceptedFetch;neonConfig.fetchFunction=interceptedFetch;
+async function control(request,env){
+  if(request.method!=="POST")return json({error:"METHOD_NOT_ALLOWED"},405);if(!previewRequest(request))return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},403);
+  if(!sameSecret(request.headers.get("x-image-generate-qa-token")||"",env.IMAGE_GENERATE_QA_TOKEN||""))return json({error:"FORBIDDEN"},403);
+  let body;try{body=await request.json();}catch{return json({error:"INVALID_JSON"},400);}const marker=body?.marker;if(!validMarker(marker)||request.headers.get("x-image-generate-qa-marker")!==marker)return json({error:"INVALID_MARKER"},400);const sql=sqlFor(env.DATABASE_URL);
+  try{switch(body.action){
+    case"preflight":case"state":return json(await state(sql,marker));
+    case"instrumentation-status":return json({armed:true,previewOnly:true,persistedCounter:"platform_admin_audit",promptLogging:false,supports:["MEDIA_MANAGER","IMAGE","TEXT","PROVIDER_FAILURE","LATENCY","BARRIER","TECHNICAL_LEDGER_FAILURE","ASSET_FAILURE"]});
+    case"setup-profile":return json(await setupProfile(sql,marker,body.profileId));case"configure-entitlement":return json(await configureEntitlement(sql,marker,body.profileId,body.mode,body.limitValue));case"reset-profile":return json(await resetProfile(sql,marker,body.profileId));case"prepare-variant":return json(await prepareVariant(sql,marker,body.profileId));case"prepare-autopilot":return json(await prepareAutopilot(sql,marker,body.profileId));case"usage":return json(await usage(sql,marker,body.profileId));case"provider-calls":return json(await providerCalls(sql,marker,body.profileId||null,body.scenario||null));case"background-status":return json(await backgroundStatus(sql,marker,body.profileId,body.scenario));case"release-barrier":return json(await releaseBarrier(sql,marker,body.profileId,body.scenario,body.operationId));case"cleanup-user":return json(await cleanupMarkerUser(sql,marker,body.suffix));case"cleanup":return json(await cleanup(sql,marker,false));case"cleanup-residue":return json(await cleanup(sql,marker,true));default:return json({error:"INVALID_ACTION"},400);
+  }}catch(reason){console.error("image-generate-qa-controller",reason instanceof Error?reason.message:"unknown");return json({error:"CONTROLLER_FAILED",detail:reason instanceof Error?reason.message:"unknown"},500);}
+}
+async function productRoute(request,env,ctx){
+  if(!previewRequest(request))return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},403);const marker=request.headers.get("x-image-generate-qa-marker")||"";const scenario=request.headers.get("x-image-generate-qa-scenario")||"";
+  if(!sameSecret(request.headers.get("x-image-generate-qa-token")||"",env.IMAGE_GENERATE_QA_TOKEN||"")||!validMarker(marker)||!validScenario(scenario))return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},403);
+  let body={};try{body=await request.clone().json();}catch{return json({error:"INVALID_JSON"},400);}const profileId=typeof body.profileId==="string"?body.profileId:"";const sql=sqlFor(env.DATABASE_URL);if(!await assertQaProfile(sql,marker,profileId))return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},403);
+  const operationId=request.headers.get("x-post-automatici-operation-id")||`image-${scenario}`;const fakeKey=makeQaProviderKey({marker,profileId,scenario,operationId});const observedCtx={waitUntil(promise){ctx.waitUntil(Promise.resolve(promise).then(()=>sql`insert into public.platform_admin_audit(actor_auth_user_id,action,target_type,target_id,metadata) values (${`IMAGE_GENERATE_QA_${marker}`},${QA_ACTION_BACKGROUND},'QA_BACKGROUND',${operationId},${JSON.stringify({marker,profileId,scenario,status:"COMPLETED"})}::jsonb)`));}};return productWorker.fetch(request,{...env,OPENAI_API_KEY:fakeKey,OPENAI_IMAGE_MONTHLY_LIMIT:"500",OPENAI_TEXT_MONTHLY_BUDGET_USD:"100"},observedCtx);
+}
+export default{async fetch(request,env,ctx){if(!env.DATABASE_URL||!env.IMAGE_GENERATE_QA_TOKEN)return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},503);sqlFor(env.DATABASE_URL);const path=new URL(request.url).pathname;if(path==="/__qa/control")return control(request,env);if(path==="/api/generate-image"||path==="/api/autopilot/run")return productRoute(request,env,ctx);return json({error:"RUNTIME_VERIFIER_NOT_CERTIFIED"},404);}};
