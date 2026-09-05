@@ -56,7 +56,7 @@ async function state(sql: ReturnType<typeof neon>, marker: string) {
       has_table_privilege('authenticated','public.provider_cost_attempts','select') as authenticated_attempt_select,
       has_function_privilege('authenticated','public.begin_provider_cost_attempt(uuid)','execute') as authenticated_budget_execute,
       (select relrowsecurity and relforcerowsecurity from pg_class where oid='public.provider_cost_attempts'::regclass) as attempt_rls_forced,
-      (select count(*)::int from neon_auth.user where lower(coalesce(to_jsonb(neon_auth.user)->>'email','')) like ${ownerPattern}) as marker_users
+      (select count(*)::int from neon_auth.user marker_user where lower(coalesce(to_jsonb(marker_user)->>'email','')) like ${ownerPattern}) as marker_users
   `;
   const row = rows[0] as Record<string, unknown>;
   return {
