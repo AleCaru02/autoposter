@@ -30,6 +30,7 @@ jobs:
       - { name: Admin Impersonation API regression, run: "npm run test:admin-impersonation-api" }
       - { name: Admin Impersonation UI regression, run: "npm run test:admin-impersonation-ui" }
       - { name: Audit Viewer ephemeral runtime static safety, run: "npm run test:audit-runtime-static" }
+      - { name: FASE 5A onboarding runtime static safety, run: "node tests/onboarding-runtime-static.test.mjs" }
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
