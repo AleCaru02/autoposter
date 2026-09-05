@@ -97,7 +97,7 @@ export class TextGenerationMetering {
   }
 
   async markProviderStarted(eventId: string) {
-    await this.usage.mergeUsageEventMetadata(eventId, { execution_state: "PROVIDER_STARTED", provider_started_at: new Date().toISOString() });
+    return this.usage.markProviderStarted(eventId);
   }
 
   async persistTechnicalEvents(profileId: string, eventId: string, events: TechnicalAiEvent[]) {
@@ -128,7 +128,14 @@ export class TextGenerationMetering {
             nullif(item->>'cost_usd','')::numeric,
             coalesce(item->'metadata','{}'::jsonb)
           from jsonb_array_elements(${JSON.stringify(payload)}::jsonb) item
+          where not exists (
+            select 1 from public.ai_usage_events
+            where profile_id=${profileId}::uuid
+              and operation=item->>'operation'
+              and metadata->>'logical_usage_event_id'=${eventId}
+          )
         `;
+        await this.usage.reconcileProviderCostAttempt(eventId);
         await this.usage.mergeUsageEventMetadata(eventId, {
           technical_usage_state: "PERSISTED",
           technical_usage_persisted_at: new Date().toISOString(),

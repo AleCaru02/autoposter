@@ -185,6 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("generate-text", { profileId, detail });
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" });
   }

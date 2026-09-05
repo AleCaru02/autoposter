@@ -175,6 +175,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500);
   }
 }

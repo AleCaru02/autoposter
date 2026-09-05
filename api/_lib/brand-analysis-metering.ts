@@ -61,10 +61,7 @@ export class BrandAnalysisMetering {
   }
 
   async markProviderStarted(eventId: string) {
-    await this.usage.mergeUsageEventMetadata(eventId, {
-      execution_state: "PROVIDER_STARTED",
-      provider_started_at: new Date().toISOString(),
-    });
+    return this.usage.markProviderStarted(eventId);
   }
 
   async persistTechnicalUsage(
@@ -117,6 +114,7 @@ export class BrandAnalysisMetering {
               and metadata->>'logical_usage_event_id'=${eventId}
           )
         `;
+        await this.usage.reconcileProviderCostAttempt(eventId);
         await this.usage.mergeUsageEventMetadata(eventId, {
           technical_usage_state: "PERSISTED",
           technical_usage_persisted_at: new Date().toISOString(),

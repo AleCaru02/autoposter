@@ -37,7 +37,7 @@ export async function handleWorkerStrategyPlanner(request: Request, env: Strateg
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "EDITORIAL_AGENTS_FAILED";
     console.error("worker.editorial-agents", { profileId, detail });
-    if (detail === "CAPABILITY_DISABLED" || detail === "CAPABILITY_LIMIT_REACHED") return json({ error: detail }, 429);
+    if (detail === "CAPABILITY_DISABLED" || detail === "CAPABILITY_LIMIT_REACHED" || detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     if (detail === "STRATEGY_GENERATION_IN_PROGRESS") return json({ error: detail }, 409);
     if (detail.startsWith("METERING_FAILED")) return json({ error: "METERING_FAILED" }, 503);
     return json({ error: "EDITORIAL_AGENTS_FAILED" }, detail.startsWith("OPENAI_") ? 502 : 500);

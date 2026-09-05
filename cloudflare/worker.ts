@@ -364,6 +364,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("cloudflare-generate-image", { profileId, detail });
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED", detail }, status);
   }
