@@ -15,6 +15,7 @@ assert.match(workflow, /wrangler\s+versions\s+upload\b/);
 assert.doesNotMatch(workflow, /\bwrangler\s+(deploy|delete)\b/i);
 assert.doesNotMatch(workflow, /\bwrangler\s+versions\s+deploy\b/i);
 assert.match(workflow, /if:\s*always\(\)/);
+assert.match(workflow, /set -euo pipefail[\s\S]+node tests\/provider-cost-budget-runtime\.mjs \| tee/);
 assert.match(workflow, /production deployment set changed during provider-cost runtime/);
 assert.doesNotMatch(workflow, /actions\/upload-artifact/i);
 

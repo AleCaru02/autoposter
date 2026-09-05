@@ -103,7 +103,7 @@ async function provision(sql: ReturnType<typeof neon>, marker: string) {
   return { profileId, mapped: Number(rows[0].mapped), enabled: Number(rows[0].enabled) };
 }
 
-async function exercise(sql: ReturnType<typeof neon>, databaseUrl: string, marker: string) {
+async function exerciseFill(sql: ReturnType<typeof neon>, databaseUrl: string, marker: string) {
   const profileId = await profileFor(sql, marker, "primary");
   const text = new TextGenerationMetering(databaseUrl);
   const brand = new BrandAnalysisMetering(databaseUrl);
@@ -130,21 +130,6 @@ async function exercise(sql: ReturnType<typeof neon>, databaseUrl: string, marke
   await allowed(image, await image.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-image-1`, requestFingerprint: { marker, n: 1 } }));
   await allowed(text, await text.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-text-3`, requestFingerprint: { marker, n: 3 } }));
 
-  async function denied(meter: { markProviderStarted(id: string): Promise<unknown>; release(id: string, reason: string): Promise<void> }, reservation: { status: string; eventId?: string }) {
-    if (reservation.status !== "RESERVED" || !reservation.eventId) throw new Error("DENIAL_RESERVATION_FAILED");
-    let code = "";
-    try { await meter.markProviderStarted(reservation.eventId); providerStarts += 1; } catch (reason) { code = reason instanceof Error ? reason.message : "UNKNOWN"; }
-    if (code !== "PROVIDER_COST_BUDGET_REACHED") throw new Error(`BUDGET_DENIAL_FAILED:${code}`);
-    await meter.release(reservation.eventId, code);
-    return code;
-  }
-  const denialCodes = [
-    await denied(text, await text.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-text-denied`, requestFingerprint: { marker, denied: "text" } })),
-    await denied(brand, await brand.reserve({ profileId, scanId: `${marker}-brand-denied` })),
-    await denied(strategy, await strategy.reserve({ profileId, cycle: "PLAN" })),
-    await denied(image, await image.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-image-denied`, requestFingerprint: { marker, denied: "image" } })),
-  ];
-
   const rows = await sql`
     select count(*)::int as attempts,
       sum(greatest(reserved_usd,coalesce(actual_usd,0)))::float8 as accounted,
@@ -157,8 +142,6 @@ async function exercise(sql: ReturnType<typeof neon>, databaseUrl: string, marke
   return {
     profileId,
     providerStarts,
-    providerStartsAfterDenial: 0,
-    denialCodes,
     attempts: Number(rows[0].attempts),
     accountedUsd: Number(rows[0].accounted),
     reconciled: Number(rows[0].reconciled),
@@ -167,6 +150,31 @@ async function exercise(sql: ReturnType<typeof neon>, databaseUrl: string, marke
     releasedLogicalState: logical[0]?.state,
     duplicateAttempt: duplicate.duplicate,
   };
+}
+
+async function exerciseDenials(sql: ReturnType<typeof neon>, databaseUrl: string, marker: string) {
+  const profileId = await profileFor(sql, marker, "primary");
+  const text = new TextGenerationMetering(databaseUrl);
+  const brand = new BrandAnalysisMetering(databaseUrl);
+  const strategy = new StrategyPlannerMetering(databaseUrl);
+  const image = new ImageGenerationMetering(databaseUrl);
+  let providerStartsAfterDenial = 0;
+  async function denied(meter: { markProviderStarted(id: string): Promise<unknown>; release(id: string, reason: string): Promise<void> }, reservation: { status: string; eventId?: string }) {
+    if (reservation.status !== "RESERVED" || !reservation.eventId) throw new Error("DENIAL_RESERVATION_FAILED");
+    let code = "";
+    try { await meter.markProviderStarted(reservation.eventId); providerStartsAfterDenial += 1; } catch (reason) { code = reason instanceof Error ? reason.message : "UNKNOWN"; }
+    if (code !== "PROVIDER_COST_BUDGET_REACHED") throw new Error(`BUDGET_DENIAL_FAILED:${code}`);
+    await meter.release(reservation.eventId, code);
+    return code;
+  }
+  const denialCodes = [
+    await denied(text, await text.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-text-denied`, requestFingerprint: { marker, denied: "text" } })),
+    await denied(brand, await brand.reserve({ profileId, scanId: `${marker}-brand-denied` })),
+    await denied(strategy, await strategy.reserve({ profileId, cycle: "PLAN" })),
+    await denied(image, await image.reserve({ profileId, source: "MANUAL", operationIdentity: `${marker}-image-denied`, requestFingerprint: { marker, denied: "image" } })),
+  ];
+  const rows = await sql`select count(*)::int as attempts, sum(greatest(reserved_usd,coalesce(actual_usd,0)))::float8 as accounted from public.provider_cost_attempts where profile_id=${profileId}::uuid`;
+  return { profileId, denialCodes, providerStartsAfterDenial, attempts: Number(rows[0].attempts), accountedUsd: Number(rows[0].accounted) };
 }
 
 async function cleanup(sql: ReturnType<typeof neon>, marker: string) {
@@ -209,7 +217,8 @@ export default {
     try {
       if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
       if (body.action === "provision") return json(await provision(sql, body.marker));
-      if (body.action === "exercise") return json(await exercise(sql, env.DATABASE_URL, body.marker));
+      if (body.action === "exercise-fill") return json(await exerciseFill(sql, env.DATABASE_URL, body.marker));
+      if (body.action === "exercise-denials") return json(await exerciseDenials(sql, env.DATABASE_URL, body.marker));
       if (body.action === "cleanup") return json(await cleanup(sql, body.marker));
       if (body.action === "cleanup-residue") return json(await cleanupResidue(sql, body.marker));
       return json({ error: "INVALID_ACTION" }, 400);

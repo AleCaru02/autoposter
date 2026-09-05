@@ -129,7 +129,10 @@ jobs:
           NODE
 
       - name: FASE 4F authenticated runtime
-        run: node tests/provider-cost-budget-runtime.mjs | tee provider-cost-runtime-output.log
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/provider-cost-budget-runtime.mjs | tee provider-cost-runtime-output.log
 
       - name: Sensitive output scan
         if: always()

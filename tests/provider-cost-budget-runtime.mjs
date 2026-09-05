@@ -129,18 +129,21 @@ assert.deepEqual(await readJson(isolatedResponse), [], "other tenant saw package
 const directAttempts = await dataApi(`/provider_cost_attempts?profile_id=eq.${primaryProfile}&select=id`, primary.token);
 assert.equal(directAttempts.ok, false, "customer read provider cost ledger");
 
-const result = await controller("exercise");
-assert.equal(result.profileId, primaryProfile);
-assert.equal(result.accountedUsd, 5);
-assert.equal(result.attempts, 6);
-assert.equal(result.reconciled, 1);
-assert.equal(result.reserveExceeded, 1);
-assert.equal(result.releasedAttemptRetained, 1);
-assert.equal(result.releasedLogicalState, "RELEASED");
-assert.equal(result.duplicateAttempt, true);
-assert.equal(result.providerStarts, 6);
-assert.equal(result.providerStartsAfterDenial, 0);
-assert.deepEqual(result.denialCodes, Array(4).fill("PROVIDER_COST_BUDGET_REACHED"));
+const fill = await controller("exercise-fill");
+assert.equal(fill.profileId, primaryProfile);
+assert.equal(fill.accountedUsd, 5);
+assert.equal(fill.attempts, 6);
+assert.equal(fill.reconciled, 1);
+assert.equal(fill.reserveExceeded, 1);
+assert.equal(fill.releasedAttemptRetained, 1);
+assert.equal(fill.releasedLogicalState, "RELEASED");
+assert.equal(fill.duplicateAttempt, true);
+assert.equal(fill.providerStarts, 6);
+const denials = await controller("exercise-denials");
+assert.equal(denials.accountedUsd, 5);
+assert.equal(denials.attempts, 6);
+assert.equal(denials.providerStartsAfterDenial, 0);
+assert.deepEqual(denials.denialCodes, Array(4).fill("PROVIDER_COST_BUDGET_REACHED"));
 
 const ownEventsResponse = await dataApi(`/capability_usage_events?profile_id=eq.${primaryProfile}&select=id,state,capability_key`, primary.token);
 const ownEvents = await readJson(ownEventsResponse);
@@ -162,13 +165,13 @@ console.log("FASE_4F_PROVIDER_COST_RUNTIME: PASS", JSON.stringify({
   packageCapUsd: initial.packageCap,
   mappedEntitlements: provisioned.mapped,
   enabledEntitlements: provisioned.enabled,
-  exactCapAccountedUsd: result.accountedUsd,
-  providerAttempts: result.attempts,
-  idempotency: result.duplicateAttempt,
-  technicalReconciliation: result.reconciled === 1,
-  releaseConservative: result.releasedAttemptRetained === 1,
-  denials: result.denialCodes.length,
-  providerStartsOnDenial: result.providerStartsAfterDenial,
+  exactCapAccountedUsd: fill.accountedUsd,
+  providerAttempts: fill.attempts,
+  idempotency: fill.duplicateAttempt,
+  technicalReconciliation: fill.reconciled === 1,
+  releaseConservative: fill.releasedAttemptRetained === 1,
+  denials: denials.denialCodes.length,
+  providerStartsOnDenial: denials.providerStartsAfterDenial,
   tenantIsolation: true,
   directCustomerLedgerAccess: false,
 }));
