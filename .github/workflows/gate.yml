@@ -35,6 +35,7 @@ jobs:
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
+      - { name: FASE 4E plan packaging regression, run: "npm run test:plan-packages" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
       - { name: Strategy planner server-side gating regression, run: "npm run test:strategy-planner-gating" }
