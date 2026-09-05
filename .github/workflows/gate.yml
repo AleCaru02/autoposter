@@ -37,6 +37,7 @@ jobs:
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
       - { name: FASE 4E plan packaging regression, run: "npm run test:plan-packages" }
       - { name: FASE 4F provider cost budget regression, run: "npm run test:provider-cost-budget" }
+      - { name: FASE 5A onboarding provisioning regression, run: "npm run test:onboarding-provisioning" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
       - { name: Strategy planner server-side gating regression, run: "npm run test:strategy-planner-gating" }

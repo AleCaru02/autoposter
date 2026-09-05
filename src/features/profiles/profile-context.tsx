@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { neonClient } from "../../lib/neon-client";
+import { authClient, neonClient } from "../../lib/neon-client";
 
 export type Profile = {
   id: string;
@@ -42,11 +42,19 @@ type ProfileContextValue = {
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 const ACTIVE_PROFILE_KEY = "post-automatici.active-profile";
+const ONBOARDING_OPERATION_KEY = "post-automatici.onboarding-operation";
 const PROFILE_COLUMNS = "id,name,slug,website_url,industry,timezone,locale,onboarding_completed,created_at";
 
-function slugify(value: string) {
-  const base = value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 58) || "attivita";
-  return `${base}-${crypto.randomUUID().slice(0, 7)}`;
+type PendingOnboardingOperation = { operationId: string; fingerprint: string };
+
+function provisioningOperation(fingerprint: string) {
+  try {
+    const existing = JSON.parse(sessionStorage.getItem(ONBOARDING_OPERATION_KEY) || "null") as PendingOnboardingOperation | null;
+    if (existing?.fingerprint === fingerprint && /^[0-9a-f-]{36}$/i.test(existing.operationId)) return existing.operationId;
+  } catch { /* replace invalid local state below */ }
+  const operationId = crypto.randomUUID();
+  sessionStorage.setItem(ONBOARDING_OPERATION_KEY, JSON.stringify({ operationId, fingerprint } satisfies PendingOnboardingOperation));
+  return operationId;
 }
 
 function profileIdFromUrl() {
@@ -95,14 +103,23 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const createProfile = useCallback(async (input: CreateProfileInput) => {
     const name = input.name.trim();
     if (!name) throw new Error("Il nome dell’attività è obbligatorio.");
-    const result = await neonClient.from("profiles").insert({
-      name,
-      slug: slugify(name),
-      website_url: input.websiteUrl?.trim() || null,
-      industry: input.industry?.trim() || null,
-    }).select(PROFILE_COLUMNS).single();
-    if (result.error || !result.data) throw new Error(result.error?.message ?? "Impossibile creare il profilo.");
-    const created = result.data as Profile;
+    const normalized = { name, websiteUrl: input.websiteUrl?.trim() || null, industry: input.industry?.trim() || null };
+    const fingerprint = JSON.stringify(normalized);
+    const operationId = provisioningOperation(fingerprint);
+    const token = await (authClient as typeof authClient & { getJWTToken?: () => Promise<string | null> }).getJWTToken?.();
+    if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
+    const response = await fetch("/api/onboarding-provision", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ operationId, ...normalized }),
+    });
+    const result = await response.json() as { profile?: Profile; error?: string };
+    if (!response.ok || !result.profile) {
+      if (result.error === "ONBOARDING_IDEMPOTENCY_CONFLICT") sessionStorage.removeItem(ONBOARDING_OPERATION_KEY);
+      throw new Error(result.error === "ONBOARDING_WEBSITE_INVALID" ? "Inserisci un indirizzo web valido." : "Impossibile creare il profilo.");
+    }
+    sessionStorage.removeItem(ONBOARDING_OPERATION_KEY);
+    const created = result.profile;
     setProfiles((rows) => [...rows, created]);
     setSelectedProfileId(created.id);
     return created;
