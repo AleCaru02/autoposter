@@ -9,6 +9,7 @@ concurrency:
 
 jobs:
   runtime:
+    if: github.ref != 'refs/heads/verify/same-origin-auth-boundary-runtime'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -232,3 +233,222 @@ jobs:
           fi
           rm -f audit-preflight.json audit-stale-cleanup.json audit-cleanup.json tenant-audit.json auth-audit.json audit-upload.log audit-deployments-before.json audit-deployments-after.json
           echo "AUDIT_EPHEMERAL_SECRET_CLEANUP: PASS"
+
+  same-origin-auth-boundary-runtime:
+    if: github.ref == 'refs/heads/verify/same-origin-auth-boundary-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+
+      - name: Static and security safety gate
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/audit-viewer-runtime.yml"); puts "workflow yaml parse: PASS"'
+          npm run typecheck
+          npm run test:auth-security
+          npm run test:auth-proxy
+          npm run test:auth-boundary-static
+          npm run test:platform-rbac
+          npm run test:fase3-core
+          npm run test:admin-audit-viewer
+          npm run test:admin-session-management
+          npm run test:admin-session-ui
+          npm run test:admin-ban-unban
+          npm run test:admin-ban-unban-ui
+          npm run test:audit-runtime-static
+          npm run test:banned-user-rls
+          npm run test:tenant-security
+          npm run test:tenant-cross-security
+          node tests/same-origin-auth-boundary-runtime-static.test.mjs
+          node --check tests/same-origin-auth-boundary-runtime.mjs
+          node --check tests/same-origin-auth-boundary-runtime-runner.mjs
+          node --check tests/audit-viewer-qa-controller.mjs
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+
+      - name: Generate ephemeral same-origin Auth material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          next_password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="auditqa-${GITHUB_RUN_ID}"
+          customer_email="audit-smoke-${marker}-customer@example.invalid"
+          customer_b_email="audit-smoke-${marker}-customer-b@example.invalid"
+          admin_email="audit-smoke-${marker}-admin@example.invalid"
+          echo "::add-mask::$password"
+          echo "::add-mask::$next_password"
+          echo "::add-mask::$token"
+          echo "::add-mask::$customer_email"
+          echo "::add-mask::$customer_b_email"
+          echo "::add-mask::$admin_email"
+          echo "AUDIT_SMOKE_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "AUDIT_SMOKE_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "AUDIT_SMOKE_NEXT_PASSWORD=$next_password" >> "$GITHUB_ENV"
+          echo "AUDIT_SMOKE_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "AUDIT_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "AUDIT_SMOKE_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'AUDIT_SMOKE_TOKEN=%s\nAUDIT_SMOKE_NEXT_PASSWORD=%s\n' "$token" "$next_password" > .audit-runtime-secrets.env
+          chmod 600 .audit-runtime-secrets.env
+
+      - name: Upload same-origin controller as isolated Preview version
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload \
+            --config tests/wrangler.audit-runtime.jsonc \
+            --keep-vars \
+            --preview-alias "$AUDIT_PREVIEW_ALIAS" \
+            --secrets-file .audit-runtime-secrets.env | tee audit-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' audit-upload.log | tail -n 1)
+          if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
+            echo "preview version id not captured" >&2
+            exit 1
+          fi
+          echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+
+      - name: Verify same-origin Preview isolation and capture production baseline
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
+            -o audit-deployments-before.json
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const body=JSON.parse(fs.readFileSync('audit-deployments-before.json','utf8'));
+          if(body?.success!==true) throw new Error('Cloudflare deployment read failed');
+          const result=body.result;
+          const deployments=Array.isArray(result?.deployments)?result.deployments:Array.isArray(result)?result:[];
+          if(!deployments.length) throw new Error('no production deployments returned');
+          const deploymentIds=deployments.map(i=>String(i.id||'')).filter(Boolean).sort();
+          const versionIds=[...new Set(deployments.flatMap(i=>Array.isArray(i.versions)?i.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
+          const ephemeral=process.env.EPHEMERAL_CONTROLLER_VERSION_ID||'';
+          if(!ephemeral) throw new Error('ephemeral controller version missing');
+          if(versionIds.includes(ephemeral)) throw new Error('ephemeral controller attached to production');
+          fs.appendFileSync(process.env.GITHUB_ENV,`AUDIT_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nAUDIT_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
+          console.log('SAME_ORIGIN_AUTH_BOUNDARY_PREVIEW_ISOLATION: PASS',JSON.stringify({attachedToProduction:false}));
+          NODE
+
+      - name: Same-origin controller preflight and stale QA recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H 'x-audit-smoke-token: wrong' \
+            --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          if [ "$wrong" != "403" ]; then echo "preview token gate failed HTTP $wrong" >&2; exit 1; fi
+          read_preflight(){ curl -sS -o audit-preflight.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+            --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL"; }
+          status=$(read_preflight)
+          if [ "$status" != "200" ]; then echo "preview preflight failed HTTP $status" >&2; exit 1; fi
+          stale=$(node -e "const b=require('./audit-preflight.json');process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
+          if [ "$stale" -gt 0 ]; then
+            cleanup_status=$(curl -sS -o audit-stale-cleanup.json -w "%{http_code}" -X POST \
+              -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+              --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL")
+            CLEANUP_STATUS="$cleanup_status" node -e "const b=require('./audit-stale-cleanup.json');if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true||b.recognizedQaUsers!==0||b.recognizedQaAdmins!==0)throw new Error('stale QA cleanup failed')"
+            status=$(read_preflight)
+          fi
+          PREFLIGHT_STATUS="$status" node - <<'NODE'
+          const fs=require('node:fs');
+          const b=JSON.parse(fs.readFileSync('audit-preflight.json','utf8'));
+          if(process.env.PREFLIGHT_STATUS!=='200') throw new Error('preflight HTTP '+process.env.PREFLIGHT_STATUS);
+          for(const k of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaImpersonationSessions','qaAccounts','qaAuditRows','qaAdmins','qaBanned','recognizedQaUsers','recognizedQaAdmins']) if(b[k]!==0) throw new Error(`preflight residue ${k}=${b[k]}`);
+          if(b.superAdmins!==1) throw new Error(`real SUPER_ADMIN baseline ${b.superAdmins}`);
+          if(b.profilesWithoutOwner!==0) throw new Error(`profilesWithoutOwner baseline ${b.profilesWithoutOwner}`);
+          fs.appendFileSync(process.env.GITHUB_ENV,`AUDIT_BASELINE_PROFILES=${b.profilesTotal}\nCONTROLLER_READY=true\n`);
+          console.log('SAME_ORIGIN_AUTH_BOUNDARY_PREFLIGHT: PASS',JSON.stringify({superAdmins:b.superAdmins,profilesTotal:b.profilesTotal,profilesWithoutOwner:b.profilesWithoutOwner}));
+          NODE
+
+      - name: Same-origin Auth boundary authenticated runtime
+        run: node tests/same-origin-auth-boundary-runtime-runner.mjs
+
+      - name: Cleanup same-origin Auth smoke identities and data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then echo "SAME_ORIGIN_AUTH_BOUNDARY_CLEANUP_CONTROLLER_NOT_READY"; exit 0; fi
+          status=$(curl -sS -o audit-cleanup.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+            --data "{\"action\":\"cleanup\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          reset_status=$(curl -sS -o audit-reset-after.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+            --data "{\"action\":\"password-reset-state\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          imp_status=$(curl -sS -o audit-impersonation-after.json -w "%{http_code}" -X POST \
+            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
+            --data "{\"action\":\"impersonation-state\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" RESET_STATUS="$reset_status" IMP_STATUS="$imp_status" node - <<'NODE'
+          const fs=require('node:fs');
+          const b=JSON.parse(fs.readFileSync('audit-cleanup.json','utf8'));
+          const reset=JSON.parse(fs.readFileSync('audit-reset-after.json','utf8'));
+          const imp=JSON.parse(fs.readFileSync('audit-impersonation-after.json','utf8'));
+          if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true) throw new Error('cleanup failed');
+          for(const k of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaImpersonationSessions','qaAccounts','qaAuditRows','qaAdmins','qaBanned','recognizedQaUsers','recognizedQaAdmins']) if(b[k]!==0) throw new Error(`cleanup residue ${k}=${b[k]}`);
+          if(process.env.RESET_STATUS!=='200'||reset.present!==false||reset.count!==0) throw new Error('password reset QA artifact remains');
+          if(process.env.IMP_STATUS!=='200'||Number(imp?.summary?.impersonated||0)!==0) throw new Error('QA impersonation session remains');
+          if(b.superAdmins!==1) throw new Error(`post-cleanup SUPER_ADMIN ${b.superAdmins}`);
+          if(b.profilesWithoutOwner!==0) throw new Error(`post-cleanup profilesWithoutOwner ${b.profilesWithoutOwner}`);
+          if(String(b.profilesTotal)!==String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error('profiles baseline mismatch');
+          console.log('SAME_ORIGIN_AUTH_BOUNDARY_CLEANUP: PASS',JSON.stringify({qaUsers:0,qaProfiles:0,qaOwners:0,qaSessions:0,qaAdmins:0,qaImpersonationSessions:0,passwordResetArtifacts:0,qaBanned:0,superAdmins:b.superAdmins,profilesTotal:b.profilesTotal,profilesWithoutOwner:b.profilesWithoutOwner}));
+          NODE
+
+      - name: Same-origin post-cleanup production and deployment invariants
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o tenant-audit.json
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities -o auth-audit.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
+            -o audit-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const tenant=JSON.parse(fs.readFileSync('tenant-audit.json','utf8'));
+          const auth=JSON.parse(fs.readFileSync('auth-audit.json','utf8'));
+          const cf=JSON.parse(fs.readFileSync('audit-deployments-after.json','utf8'));
+          if(tenant?.ready!==true||tenant?.ownerContract?.ready!==true||tenant.ownerContract.profilesWithoutOwner!==0) throw new Error('production tenant invariant failed');
+          if(auth?.managedAuth?.ready!==true||auth.managedAuth.nativeAdminUsers!==1||auth.managedAuth.sessionImpersonatedByField!==true) throw new Error('production Managed Auth invariant failed');
+          if(process.env.AUDIT_BASELINE_PROFILES&&String(tenant.ownerContract.profilesTotal)!==String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error('production profile baseline mismatch');
+          if(cf?.success!==true) throw new Error('Cloudflare deployment read failed');
+          const result=cf.result;
+          const deployments=Array.isArray(result?.deployments)?result.deployments:Array.isArray(result)?result:[];
+          const deploymentIds=deployments.map(i=>String(i.id||'')).filter(Boolean).sort();
+          const versionIds=[...new Set(deployments.flatMap(i=>Array.isArray(i.versions)?i.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
+          const beforeDeployments=String(process.env.AUDIT_PRODUCTION_DEPLOYMENT_IDS||'').split(',').filter(Boolean).sort();
+          const beforeVersions=String(process.env.AUDIT_PRODUCTION_VERSION_IDS||'').split(',').filter(Boolean).sort();
+          if(JSON.stringify(deploymentIds)!==JSON.stringify(beforeDeployments)||JSON.stringify(versionIds)!==JSON.stringify(beforeVersions)) throw new Error('production deployment set changed during same-origin runtime');
+          if(versionIds.includes(process.env.EPHEMERAL_CONTROLLER_VERSION_ID||'')) throw new Error('ephemeral controller attached to production');
+          console.log('SAME_ORIGIN_AUTH_BOUNDARY_POST_CLEANUP: PASS',JSON.stringify({nativeAdminUsers:auth.managedAuth.nativeAdminUsers,sessionImpersonatedByField:true,profilesTotal:tenant.ownerContract.profilesTotal,profilesWithoutOwner:tenant.ownerContract.profilesWithoutOwner,attachedToProduction:false}));
+          NODE
+
+      - name: Remove local same-origin ephemeral credential material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f .audit-runtime-secrets.env ]; then chmod 600 .audit-runtime-secrets.env || true; shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env; fi
+          rm -f audit-preflight.json audit-stale-cleanup.json audit-cleanup.json audit-reset-after.json audit-impersonation-after.json tenant-audit.json auth-audit.json audit-upload.log audit-deployments-before.json audit-deployments-after.json
+          echo "SAME_ORIGIN_AUTH_BOUNDARY_EPHEMERAL_SECRET_CLEANUP: PASS"
