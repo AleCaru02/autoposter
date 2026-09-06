@@ -22,6 +22,7 @@ import {
   type SocialProvider,
 } from "../features/calendar/calendar-workflow";
 import "../calendar.css";
+import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 
 type ScheduleDraft = {
   provider: SocialProvider;
@@ -289,6 +290,7 @@ export function CalendarPage() {
     <header className="page-header calendar-page-header">
       <div><p className="eyebrow">Calendario · {selectedProfile.name}</p><h1>Calendario contenuti</h1><p>Qui vedi cosa è previsto giorno per giorno. Sabato e domenica sono evidenziati, ma restano giorni pubblicabili.</p></div>
     </header>
+    <CustomerWorkflowJourney current="PLAN" />
 
     {error && <p className="form-error" role="alert">{error}</p>}
 

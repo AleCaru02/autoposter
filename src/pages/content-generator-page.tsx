@@ -5,6 +5,7 @@ import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
+import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
@@ -165,6 +166,7 @@ export function ContentGeneratorPage() {
 
   return <div className="page-content content-autopilot-page">
     <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa il sito per capire brand, servizi e tono, poi può ampliare i temi con ricerca online pertinente al settore.</p></div></header>
+    <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
@@ -200,7 +202,7 @@ export function ContentGeneratorPage() {
     <section className="autopilot-flow">
       <article><span>1</span><div><strong>Capisce l'attività</strong><p>Analizza le pagine del sito per servizi, identità, tono e segnali visivi del brand.</p></div></article>
       <article><span>2</span><div><strong>Sceglie cosa creare</strong><p>Usa settore, filtro editoriale e, quando attiva, ricerca online verificata per trovare temi pertinenti senza ripetizioni.</p></div></article>
-      <article><span>3</span><div><strong>Crea testo e immagine</strong><p>Usa OpenAI per il copy e GPT-Image-2 per le immagini.</p></div></article>
+      <article><span>3</span><div><strong>Crea testo e immagine</strong><p>I modelli AI preparano copy e visual coerenti con il brand.</p></div></article>
       <article><span>4</span><div><strong>Organizza il calendario</strong><p>Rispetta le frequenze dell'attività e prepara i contenuti nei giorni previsti.</p></div></article>
     </section>
 

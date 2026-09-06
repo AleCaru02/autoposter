@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Image as ImageIcon, LoaderCircle, RefreshCcw, Trash2, Undo2, X } from "lucide-react";
+import { Check, CheckCircle2, Image as ImageIcon, LoaderCircle, RefreshCcw, Trash2, Undo2, X } from "lucide-react";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import {
@@ -12,6 +12,8 @@ import {
   type ContentVariantRow,
 } from "../features/content/content-store";
 import "../approvals.css";
+import { NavLink } from "react-router-dom";
+import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type DraftFields = {
@@ -51,6 +53,11 @@ function statusLabel(status: string) {
   if (status === "APPROVED") return "Approvato";
   if (status === "CHANGES_REQUESTED") return "Da correggere";
   return "In revisione";
+}
+
+function providerLabel(provider: string) {
+  const labels: Record<string, string> = { INSTAGRAM: "Instagram", FACEBOOK: "Facebook", LINKEDIN: "LinkedIn", GBP: "Google Business Profile" };
+  return labels[provider.toUpperCase()] ?? provider;
 }
 
 export function ApprovalsPage() {
@@ -224,8 +231,9 @@ export function ApprovalsPage() {
       <div><p className="eyebrow">Revisioni · {selectedProfile.name}</p><h1>Revisione contenuti</h1><p>Ogni modifica al testo viene salvata automaticamente. Approva solo quando il contenuto è pronto.</p></div>
       <button className="compact-action" type="button" onClick={() => void reload()}><RefreshCcw size={15} /> Aggiorna</button>
     </header>
+    <CustomerWorkflowJourney current="REVIEW" />
     {error && <p className="form-error" role="alert">{error}</p>}
-    {items.length === 0 ? <section className="panel empty-approval"><h2>Nessun contenuto in revisione</h2><p>Genera un contenuto dalla sezione Contenuti.</p></section> : null}
+    {items.length === 0 ? <section className="panel empty-approval"><CheckCircle2 size={24} /><h2>Nessun contenuto da controllare</h2><p>Se l’Autopilot è attivo, i prossimi contenuti compariranno qui. Puoi controllare le impostazioni o il calendario.</p><div className="empty-approval-actions"><NavLink className="primary-button" to="/app/contenuti">Apri Contenuti</NavLink><NavLink className="secondary-button" to="/app/calendario">Vedi calendario</NavLink></div></section> : null}
     <div className="approval-list">
       {items.map((item) => {
         const itemVariants = variantsByContent.get(item.id) ?? [];
@@ -240,7 +248,7 @@ export function ApprovalsPage() {
               const asset = variant.image_asset_id ? assetMap.get(variant.image_asset_id) : undefined;
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
-                <header><div><strong>{variant.provider}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
+                <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
                 <div className="approval-grid" onBlurCapture={() => void persistVariant(variant).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."))}>
                   <label>Hook<input value={draft.hook} onChange={(event) => setDraftField(variant, "hook", event.target.value)} /></label>
                   <label>CTA<input value={draft.cta} onChange={(event) => setDraftField(variant, "cta", event.target.value)} /></label>
