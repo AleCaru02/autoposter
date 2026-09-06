@@ -14,6 +14,7 @@ import "./mobile-a11y.css";
 import "./impersonation.css";
 import "./design-system.css";
 import "./dashboard.css";
+import "./workflow-journey.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
