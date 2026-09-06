@@ -48,13 +48,15 @@ try {
   const editable = page.locator("details.editable-details");
   await editable.locator("summary").click();
   assert.equal(await editable.getAttribute("open"), "", "brand edit details did not open");
+  assert.ok(await editable.locator("textarea").count() >= 10, "brand edit fields missing");
+  const field = (root, label) => root.locator("label").filter({ hasText: label }).locator("textarea");
 
   const description = `Brand verificato nel browser ${marker}`;
   const services = `Consulenza strategica ${marker}\nGestione contenuti`;
-  await page.getByLabel("Descrizione", { exact: true }).fill(description);
-  await page.getByLabel(/Servizi/).fill(services);
-  await page.getByLabel(/Segmenti del pubblico/).fill("Retail\nProfessionisti");
-  await page.getByLabel(/Caratteristiche del tono/).fill("Chiaro\nAffidabile");
+  await field(editable, "Descrizione").fill(description);
+  await field(editable, "Servizi").fill(services);
+  await field(editable, "Segmenti del pubblico").fill("Retail\nProfessionisti");
+  await field(editable, "Caratteristiche del tono").fill("Chiaro\nAffidabile");
   await page.getByRole("button", { name: "Salva modifiche", exact: true }).click();
   await page.getByText("Modifiche salvate", { exact: true }).waitFor({ timeout: 20000 });
   assert.ok(writes.some((item) => item.status >= 200 && item.status < 300), "brand persistence write not observed");
@@ -64,10 +66,10 @@ try {
   const reloadedEditable = page.locator("details.editable-details");
   await reloadedEditable.locator("summary").click();
   assert.equal(await reloadedEditable.getAttribute("open"), "", "reloaded brand edit details did not open");
-  assert.equal(await page.getByLabel("Descrizione", { exact: true }).inputValue(), description);
-  assert.equal(await page.getByLabel(/Servizi/).inputValue(), services);
-  assert.equal(await page.getByLabel(/Segmenti del pubblico/).inputValue(), "Retail\nProfessionisti");
-  assert.equal(await page.getByLabel(/Caratteristiche del tono/).inputValue(), "Chiaro\nAffidabile");
+  assert.equal(await field(reloadedEditable, "Descrizione").inputValue(), description);
+  assert.equal(await field(reloadedEditable, "Servizi").inputValue(), services);
+  assert.equal(await field(reloadedEditable, "Segmenti del pubblico").inputValue(), "Retail\nProfessionisti");
+  assert.equal(await field(reloadedEditable, "Caratteristiche del tono").inputValue(), "Chiaro\nAffidabile");
 
   const layout = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
   assert.ok(layout.scrollWidth <= layout.viewportWidth + 2, `mobile overflow ${layout.scrollWidth} > ${layout.viewportWidth}`);
