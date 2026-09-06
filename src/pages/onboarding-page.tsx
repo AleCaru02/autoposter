@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Globe2, LoaderCircle, RefreshCw, Sparkles, WandSparkles } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { authClient, neonClient } from "../lib/neon-client";
+import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
@@ -100,8 +100,13 @@ export function OnboardingPage() {
       // workspace exists so a refresh/retry cannot reopen creation accidentally.
       if (creatingAnother) navigate("/onboarding", { replace: true });
       if (!website.trim()) {
-        const done = await neonClient.from("profiles").update({ onboarding_completed: true, updated_at: new Date().toISOString() }).eq("id", created.id).select("id");
-        if (done.error) throw new Error(done.error.message);
+        const token = await jwt();
+        const response = await fetch("/api/onboarding-complete", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ profileId: created.id }),
+        });
+        if (!response.ok) throw new Error("Non sono riuscito a completare la configurazione.");
         await reload();
         setStage("DONE");
         return;

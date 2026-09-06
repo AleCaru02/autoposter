@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "./_lib/brand-analysis.js";
 import { BrandAnalysisMetering } from "./_lib/brand-analysis-metering.js";
+import { completeOnboardingProfile } from "./_lib/onboarding-completion.js";
+import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 
 export const config = { maxDuration: 60 };
 
@@ -76,6 +78,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
   if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
+  const authUserId = await verifiedCustomerAuthUserId(token, process.env.DATABASE_URL);
+  if (!authUserId) return res.status(401).json({ error: "AUTH_REQUIRED" });
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   if (!profileId) return res.status(400).json({ error: "PROFILE_REQUIRED" });
   const visualHints = sanitizeVisualHints(req.body?.visualHints);
@@ -96,7 +100,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     activeMeter = meter;
     const reservation = await meter.reserve({ profileId, scanId: scan.id });
     if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
-    if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
+    if (reservation.status === "COMPLETED") {
+      await completeOnboardingProfile(process.env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
+      return res.status(200).json(reservation.cached.response);
+    }
     if (reservation.status === "IN_PROGRESS") return res.status(409).json({ error: "BRAND_ANALYSIS_IN_PROGRESS" });
     if (reservation.status === "RELEASED") return res.status(409).json({ error: "METERING_FAILED" });
     const eventId = reservation.eventId;
@@ -145,15 +152,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : await dataApi("brand_profiles", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) });
     if (!write.ok) throw new Error(`BRAND_PROFILE_WRITE_${write.status}`);
 
-    const profilePatch: Record<string, unknown> = { onboarding_completed: true, updated_at: now };
-    if (!profile.industry && result.analysis.industry) profilePatch.industry = result.analysis.industry;
-    const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
-    if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
+    if (!profile.industry && result.analysis.industry) {
+      const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ industry: result.analysis.industry, updated_at: now }) });
+      if (!profileWrite.ok) throw new Error(`PROFILE_INDUSTRY_WRITE_${profileWrite.status}`);
+    }
 
     const responseBody = { analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
     logicalCommitted = true;
+    await completeOnboardingProfile(process.env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
     return res.status(200).json(responseBody);
   } catch (reason) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "BRAND_ANALYSIS_FAILED").catch(() => undefined);
