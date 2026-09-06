@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Sparkles } from "lucide-react";
-import { authClient, neonClient } from "../lib/neon-client";
+import { neonClient } from "../lib/neon-client";
+import { authenticatedApiToken } from "../lib/auth-token";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type BrandRow = {
   profile_id: string;
   description: string | null;
@@ -124,9 +124,7 @@ export function BrandPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function jwt() {
-    const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-    if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
-    return token;
+    return authenticatedApiToken();
   }
 
   async function analyzeWebsite() {
