@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
+import { ProductBrand } from "../components/product-brand";
 
 const AUTH_TIMEOUT_MS = 12_000;
 
@@ -39,7 +40,7 @@ function PasswordField({ label, value, onChange, autoComplete, minLength = 8, ma
 }
 
 function AuthLayout({ children, title, subtitle }: { children: ReactNode; title?: string; subtitle?: string }) {
-  return <main className="auth-page"><section className="auth-card">{title && <h1>{title}</h1>}{subtitle && <p className="auth-subtitle">{subtitle}</p>}{children}</section></main>;
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><ProductBrand /><p>Gestisci contenuti, calendario e risultati social con l’AI, in un unico posto.</p></div>{title && <h1>{title}</h1>}{subtitle && <p className="auth-subtitle">{subtitle}</p>}{children}</section></main>;
 }
 
 function GoogleMark() {
@@ -90,7 +91,7 @@ export function LoginPage() {
     }
   }
 
-  return <AuthLayout><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button><div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
+  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button><div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
 }
 
 export function ForgotPasswordPage() {
