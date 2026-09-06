@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, Globe2, ImageIcon, Palette, RefreshCw, Tags, Type } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { authClient, neonClient } from "../lib/neon-client";
+import { neonClient } from "../lib/neon-client";
+import { authenticatedApiToken } from "../lib/auth-token";
 import { siteIntelligenceView, type SiteIntelligenceView } from "../lib/site-intelligence-view";
 import { useProfiles } from "../features/profiles/profile-context";
 
@@ -37,7 +38,6 @@ type BrandRow = {
   differentiators: unknown;
 };
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type VisualHints = {
   colors?: string[];
   fontFamilies?: string[];
@@ -118,8 +118,7 @@ export function WebsiteScanPage() {
     if (automatic) sessionStorage.setItem(automaticKey, "running");
     setRunning(true); setError(null);
     try {
-      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-      if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
+      const token = await authenticatedApiToken();
       const response = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id, pageLimit: 500 }) });
       const body = await response.json() as ScanResponse;
       if (!response.ok) throw new Error(readableApiError(body, "Scansione non riuscita."));
