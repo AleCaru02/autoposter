@@ -43,6 +43,7 @@ jobs:
       - { name: FASE 4E plan packaging regression, run: "npm run test:plan-packages" }
       - { name: FASE 4F provider cost budget regression, run: "npm run test:provider-cost-budget" }
       - { name: FASE 5A onboarding provisioning regression, run: "npm run test:onboarding-provisioning" }
+      - { name: Onboarding authenticated dashboard path regression, run: "npm run test:onboarding-dashboard-path" }
       - { name: FASE 5B onboarding completion regression, run: "npm run test:onboarding-completion" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }

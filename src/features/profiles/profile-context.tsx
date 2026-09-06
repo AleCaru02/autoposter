@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { authClient, neonClient } from "../../lib/neon-client";
+import { neonClient } from "../../lib/neon-client";
+import { authenticatedApiToken } from "../../lib/auth-token";
 
 export type Profile = {
   id: string;
@@ -106,8 +107,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     const normalized = { name, websiteUrl: input.websiteUrl?.trim() || null, industry: input.industry?.trim() || null };
     const fingerprint = JSON.stringify(normalized);
     const operationId = provisioningOperation(fingerprint);
-    const token = await (authClient as typeof authClient & { getJWTToken?: () => Promise<string | null> }).getJWTToken?.();
-    if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
+    const token = await authenticatedApiToken();
     const response = await fetch("/api/onboarding-provision", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
