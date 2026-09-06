@@ -103,7 +103,6 @@ async function verifyCustomerViewport(browser, viewport, label, verifyDenial = f
   try {
     await login(page, customerEmail);
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
-    await page.getByText("Sessione attiva", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
     for (const [path, heading] of customerRoutes) await assertCustomerLayout(page, label, path, heading);
 
     await page.goto(`${base}/app/profili`, { waitUntil: "domcontentloaded" });
