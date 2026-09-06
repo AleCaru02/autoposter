@@ -1,5 +1,7 @@
 import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "../api/_lib/brand-analysis.js";
 import { BrandAnalysisMetering } from "../api/_lib/brand-analysis-metering.js";
+import { completeOnboardingProfile } from "../api/_lib/onboarding-completion.js";
+import { verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -78,6 +80,8 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
   if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
   if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
+  const authUserId = await verifiedCustomerAuthUserId(token, env.DATABASE_URL);
+  if (!authUserId) return json({ error: "AUTH_REQUIRED" }, 401);
 
   let body: Record<string, unknown> = {};
   try { body = await request.json() as Record<string, unknown>; } catch { /* validated below */ }
@@ -101,7 +105,10 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
     activeMeter = meter;
     const reservation = await meter.reserve({ profileId, scanId: scan.id });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
-    if (reservation.status === "COMPLETED") return json(reservation.cached.response, 200);
+    if (reservation.status === "COMPLETED") {
+      await completeOnboardingProfile(env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
+      return json(reservation.cached.response, 200);
+    }
     if (reservation.status === "IN_PROGRESS") return json({ error: "BRAND_ANALYSIS_IN_PROGRESS" }, 409);
     if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
     const eventId = reservation.eventId;
@@ -150,15 +157,16 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
       : await dataApi("brand_profiles", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify(payload) });
     if (!write.ok) throw new Error(`BRAND_PROFILE_WRITE_${write.status}`);
 
-    const profilePatch: Record<string, unknown> = { onboarding_completed: true, updated_at: now };
-    if (!profile.industry && result.analysis.industry) profilePatch.industry = result.analysis.industry;
-    const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify(profilePatch) });
-    if (!profileWrite.ok) throw new Error(`PROFILE_ONBOARDING_WRITE_${profileWrite.status}`);
+    if (!profile.industry && result.analysis.industry) {
+      const profileWrite = await dataApi(`profiles?id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ industry: result.analysis.industry, updated_at: now }) });
+      if (!profileWrite.ok) throw new Error(`PROFILE_INDUSTRY_WRITE_${profileWrite.status}`);
+    }
 
     const responseBody = { analysis: result.analysis, visualHints, pagesAnalyzed: pages.length, model: result.model };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
     logicalCommitted = true;
+    await completeOnboardingProfile(env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
     return json(responseBody);
   } catch (reason) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "BRAND_ANALYSIS_FAILED").catch(() => undefined);
