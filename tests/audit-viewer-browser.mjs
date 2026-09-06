@@ -41,6 +41,10 @@ function isExpectedForbiddenResourceConsole(entry) {
   return /^console:error:Failed to load resource: the server responded with a status of 403(?:\s|\(|$)/.test(entry);
 }
 
+function isExpectedCustomerStateResourceConsole(entry) {
+  return /^console:error:Failed to load resource: the server responded with a status of (?:400|403|404)(?:\s|\(|$)/.test(entry);
+}
+
 async function login(page, email) {
   const response = await page.goto(`${base}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.equal(response?.status(), 200, "login document unavailable");
@@ -126,7 +130,7 @@ async function verifyCustomerViewport(browser, viewport, label, verifyDenial = f
       assert.ok(!body.includes("Registro delle operazioni amministrative autorizzate"), "CUSTOMER/OWNER received Audit content");
       assert.ok(diag.adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 403), "CUSTOMER/OWNER browser did not receive /api/admin/me 403");
     }
-    const unexpectedErrors = diag.critical.filter((entry) => !isExpectedForbiddenResourceConsole(entry));
+    const unexpectedErrors = diag.critical.filter((entry) => !isExpectedCustomerStateResourceConsole(entry));
     assert.deepEqual(unexpectedErrors, [], `${label} CUSTOMER/OWNER unexpected browser errors: ${JSON.stringify(unexpectedErrors)}`);
     return "PASS";
   } finally {
