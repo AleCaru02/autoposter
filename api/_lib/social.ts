@@ -89,7 +89,61 @@ type JobRecord = {
 
 type PublishResult = { externalId: string; metadata?: Record<string, unknown> | undefined };
 
+type GoogleRequestRuntime = {
+  fetch?: typeof fetch;
+  sleep?: (milliseconds: number) => Promise<void>;
+  random?: () => number;
+  maxAttempts?: number;
+};
+
+type GoogleApiResult<T> = { body: T; attempts: number };
+
+type OAuthCallbackClaim = {
+  claimed: boolean;
+  status: "PROCESSING" | "COMPLETED" | "FAILED";
+  result: Record<string, string>;
+};
+
 type Sql = ReturnType<typeof neon>;
+
+const GOOGLE_MAX_ATTEMPTS = 3;
+const GOOGLE_RETRY_BASE_MS = 250;
+const GOOGLE_MAX_RETRY_DELAY_MS = 2_000;
+
+function sleep(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function googlePublicError(status: number) {
+  if (status === 429) return "GBP_RATE_LIMITED";
+  if (status === 401 || status === 403) return "GBP_ACCESS_DENIED";
+  return `GBP_PROVIDER_${status}`;
+}
+
+export async function googleApiJson<T>(url: string | URL, headers: HeadersInit, runtime: GoogleRequestRuntime = {}): Promise<GoogleApiResult<T>> {
+  const request = runtime.fetch ?? fetch;
+  const pause = runtime.sleep ?? sleep;
+  const random = runtime.random ?? Math.random;
+  const maxAttempts = Math.max(1, Math.min(runtime.maxAttempts ?? GOOGLE_MAX_ATTEMPTS, GOOGLE_MAX_ATTEMPTS));
+  let lastStatus = 502;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await request(url, { headers });
+    lastStatus = response.status;
+    const body = await response.json().catch(() => ({})) as T;
+    if (response.ok) return { body, attempts: attempt };
+
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === maxAttempts) throw new Error(googlePublicError(response.status));
+    const retryAfterSeconds = Number(response.headers.get("retry-after"));
+    const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0 ? retryAfterSeconds * 1_000 : 0;
+    const exponentialMs = GOOGLE_RETRY_BASE_MS * (2 ** (attempt - 1));
+    const jitterMs = Math.floor(random() * GOOGLE_RETRY_BASE_MS);
+    await pause(Math.min(Math.max(retryAfterMs, exponentialMs + jitterMs), GOOGLE_MAX_RETRY_DELAY_MS));
+  }
+
+  throw new Error(googlePublicError(lastStatus));
+}
 
 function socialJson(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -297,6 +351,35 @@ async function upsertConnection(sql: Sql, input: {
   `;
 }
 
+async function claimOAuthCallback(sql: Sql, state: OAuthState): Promise<OAuthCallbackClaim> {
+  const inserted = await sql`
+    insert into public.social_oauth_callbacks (nonce, profile_id, provider, status, expires_at)
+    values (${state.nonce}, ${state.profileId}::uuid, ${state.provider}, 'PROCESSING', to_timestamp(${Math.floor(state.exp / 1000)}))
+    on conflict (nonce) do nothing
+    returning status
+  ` as unknown as Array<{ status: OAuthCallbackClaim["status"] }>;
+  if (inserted[0]) return { claimed: true, status: "PROCESSING", result: {} };
+
+  const existing = await sql`
+    select status, result
+    from public.social_oauth_callbacks
+    where nonce=${state.nonce} and profile_id=${state.profileId}::uuid and provider=${state.provider}
+    limit 1
+  ` as unknown as Array<{ status: OAuthCallbackClaim["status"]; result: unknown }>;
+  const row = existing[0];
+  if (!row) return { claimed: false, status: "FAILED", result: {} };
+  const result = row.result && typeof row.result === "object" ? row.result as Record<string, string> : {};
+  return { claimed: false, status: row.status, result };
+}
+
+async function finishOAuthCallback(sql: Sql, state: OAuthState, status: "COMPLETED" | "FAILED", result: Record<string, string>, errorCode?: string) {
+  await sql`
+    update public.social_oauth_callbacks
+    set status=${status}, result=${JSON.stringify(result)}::jsonb, error_code=${errorCode ?? null}, updated_at=now()
+    where nonce=${state.nonce} and profile_id=${state.profileId}::uuid and provider=${state.provider}
+  `;
+}
+
 async function storedConnection(sql: Sql, profileId: string, provider: SocialProvider): Promise<StoredConnection | null> {
   const rows = await sql`
     select provider, status, provider_account_id, account_name, token_reference, permissions, expires_at, metadata, last_validated_at, updated_at
@@ -473,22 +556,40 @@ async function googleExchange(code: string, callbackUri: string, env: SocialEnv)
 
 async function googleLocations(accessToken: string): Promise<Candidate[]> {
   const headers = { authorization: `Bearer ${accessToken}` };
-  const accountsResponse = await fetch("https://mybusinessaccountmanagement.googleapis.com/v1/accounts?pageSize=100", { headers });
-  const accountsBody = await accountsResponse.json() as { accounts?: Array<{ name?: string; accountName?: string }>; error?: { message?: string } };
-  if (!accountsResponse.ok) throw new Error(accountsBody.error?.message || `GBP_ACCOUNTS_${accountsResponse.status}`);
+  const accounts: Array<{ name?: string; accountName?: string }> = [];
+  let accountPageToken: string | undefined;
+  for (let page = 0; page < 3 && accounts.length < 50; page += 1) {
+    const accountUrl = new URL("https://mybusinessaccountmanagement.googleapis.com/v1/accounts");
+    accountUrl.searchParams.set("pageSize", "20");
+    if (accountPageToken) accountUrl.searchParams.set("pageToken", accountPageToken);
+    const { body } = await googleApiJson<{ accounts?: Array<{ name?: string; accountName?: string }>; nextPageToken?: string }>(accountUrl, headers);
+    accounts.push(...(body.accounts ?? []));
+    accountPageToken = body.nextPageToken;
+    if (!accountPageToken) break;
+  }
   const candidates: Candidate[] = [];
-  for (const account of (accountsBody.accounts ?? []).slice(0, 50)) {
+  for (const account of accounts.slice(0, 50)) {
     if (!account.name) continue;
-    const locationUrl = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations`);
-    locationUrl.searchParams.set("readMask", "name,title,storefrontAddress,metadata");
-    locationUrl.searchParams.set("pageSize", "100");
-    const response = await fetch(locationUrl, { headers });
-    if (!response.ok) continue;
-    const body = await response.json() as { locations?: Array<{ name?: string; title?: string; storefrontAddress?: { locality?: string; administrativeArea?: string } }> };
-    for (const location of body.locations ?? []) {
-      if (!location.name) continue;
-      const locality = [location.storefrontAddress?.locality, location.storefrontAddress?.administrativeArea].filter(Boolean).join(", ");
-      candidates.push({ id: location.name, accountId: account.name, name: locality ? `${location.title || location.name} · ${locality}` : location.title || location.name, kind: "LOCATION" });
+    let locationPageToken: string | undefined;
+    for (let page = 0; page < 2 && candidates.length < 100; page += 1) {
+      const locationUrl = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations`);
+      locationUrl.searchParams.set("readMask", "name,title,storefrontAddress,metadata");
+      locationUrl.searchParams.set("pageSize", "100");
+      if (locationPageToken) locationUrl.searchParams.set("pageToken", locationPageToken);
+      try {
+        const { body } = await googleApiJson<{ locations?: Array<{ name?: string; title?: string; storefrontAddress?: { locality?: string; administrativeArea?: string } }>; nextPageToken?: string }>(locationUrl, headers);
+        for (const location of body.locations ?? []) {
+          if (!location.name) continue;
+          const locality = [location.storefrontAddress?.locality, location.storefrontAddress?.administrativeArea].filter(Boolean).join(", ");
+          candidates.push({ id: location.name, accountId: account.name, name: locality ? `${location.title || location.name} · ${locality}` : location.title || location.name, kind: "LOCATION" });
+          if (candidates.length >= 100) break;
+        }
+        locationPageToken = body.nextPageToken;
+        if (!locationPageToken) break;
+      } catch (reason) {
+        if (reason instanceof Error && reason.message === "GBP_RATE_LIMITED") throw reason;
+        break;
+      }
     }
   }
   return candidates;
@@ -524,8 +625,13 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
   if (url.searchParams.get("error")) return oauthRedirect(state, { social_error: url.searchParams.get("error_description") || url.searchParams.get("error") || "AUTH_DENIED" });
   const code = url.searchParams.get("code");
   if (!code) return oauthRedirect(state, { social_error: "AUTH_CODE_MISSING" });
+  const sql = neon(env.DATABASE_URL!);
+  const claim = await claimOAuthCallback(sql, state);
+  if (!claim.claimed) {
+    if (claim.status === "COMPLETED" && Object.keys(claim.result).length) return oauthRedirect(state, claim.result);
+    return oauthRedirect(state, { social_error: claim.status === "PROCESSING" ? "OAUTH_CALLBACK_IN_PROGRESS" : "OAUTH_CALLBACK_ALREADY_USED" });
+  }
   try {
-    const sql = neon(env.DATABASE_URL!);
     if (provider === "FACEBOOK" || provider === "INSTAGRAM") {
       const token = await metaLongUserToken(code, state.callbackUri, env);
       const pages = await metaPages(token.accessToken, env);
@@ -533,7 +639,9 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
       if (!candidates.length) throw new Error(provider === "INSTAGRAM" ? "NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA" : "NESSUNA_PAGINA_FACEBOOK_GESTIBILE");
       const tokenReference = await encryptTokenBundle({ accessToken: token.accessToken, expiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null, kind: "meta_user_pending" }, env.SOCIAL_TOKEN_KEY!);
       await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), metadata: { candidates } });
-      return oauthRedirect(state, { selection: provider });
+      const result = { selection: provider };
+      await finishOAuthCallback(sql, state, "COMPLETED", result);
+      return oauthRedirect(state, result);
     }
 
     if (provider === "LINKEDIN") {
@@ -544,11 +652,15 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
         const candidates = await linkedinOrganizations(token.access_token!, env);
         if (!candidates.length) throw new Error("NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO");
         await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { candidates, accountType: "ORGANIZATION" } });
-        return oauthRedirect(state, { selection: provider });
+        const result = { selection: provider };
+        await finishOAuthCallback(sql, state, "COMPLETED", result);
+        return oauthRedirect(state, result);
       }
       const member = await linkedinUserInfo(token.access_token!);
       await upsertConnection(sql, { profileId: state.profileId, provider, status: "ACTIVE", providerAccountId: member.id, accountName: member.name, tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { accountType: "MEMBER" } });
-      return oauthRedirect(state, { connected: provider });
+      const result = { connected: provider };
+      await finishOAuthCallback(sql, state, "COMPLETED", result);
+      return oauthRedirect(state, result);
     }
 
     const token = await googleExchange(code, state.callbackUri, env);
@@ -557,10 +669,14 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     const candidates = await googleLocations(token.access_token!);
     if (!candidates.length) throw new Error("NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA");
     await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: [GOOGLE_SCOPE], expiresAt, metadata: { candidates } });
-    return oauthRedirect(state, { selection: provider });
+    const result = { selection: provider };
+    await finishOAuthCallback(sql, state, "COMPLETED", result);
+    return oauthRedirect(state, result);
   } catch (reason) {
-    console.error("social-oauth-callback", { provider, detail: reason instanceof Error ? reason.message : "unknown" });
-    return oauthRedirect(state, { social_error: reason instanceof Error ? reason.message : "SOCIAL_OAUTH_FAILED" });
+    const errorCode = reason instanceof Error ? reason.message : "SOCIAL_OAUTH_FAILED";
+    await finishOAuthCallback(sql, state, "FAILED", {}, errorCode).catch(() => undefined);
+    console.error("social-oauth-callback", { provider, errorCode });
+    return oauthRedirect(state, { social_error: errorCode });
   }
 }
 
