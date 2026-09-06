@@ -70,6 +70,9 @@ async function assertCustomerLayout(page, label, path, expectedHeading) {
   const heading = page.locator("main h1").first();
   await heading.waitFor({ state: "visible", timeout: 20000 });
   if (expectedHeading) assert.equal((await heading.innerText()).trim(), expectedHeading, `${label} ${path} heading`);
+  if (path === "/app/profili") {
+    await page.getByText(`Audit Smoke ${marker}`, { exact: true }).first().waitFor({ state: "visible", timeout: 20000 });
+  }
   const result = await page.evaluate(() => {
     const root = document.documentElement;
     const body = document.body.innerText;
@@ -104,10 +107,6 @@ async function verifyCustomerViewport(browser, viewport, label, verifyDenial = f
     await login(page, customerEmail);
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
     for (const [path, heading] of customerRoutes) await assertCustomerLayout(page, label, path, heading);
-
-    await page.goto(`${base}/app/profili`, { waitUntil: "domcontentloaded" });
-    const profilesBody = await page.locator("body").innerText();
-    assert.ok(profilesBody.includes(`Audit Smoke ${marker}`), "OWNER cannot see own profile");
 
     if (viewport.width <= 375) {
       const more = page.getByRole("button", { name: "Apri altre sezioni", exact: true });
