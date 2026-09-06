@@ -45,7 +45,9 @@ try {
   await login(page);
   await page.goto(`${base}/app/brand`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.getByRole("heading", { name: "Identità dell’attività", exact: true }).waitFor({ timeout: 30000 });
-  await page.getByText("Modifica dati attività e brand", { exact: true }).click();
+  const editable = page.locator("details.editable-details");
+  await editable.locator("summary").click();
+  assert.equal(await editable.getAttribute("open"), "", "brand edit details did not open");
 
   const description = `Brand verificato nel browser ${marker}`;
   const services = `Consulenza strategica ${marker}\nGestione contenuti`;
@@ -59,7 +61,9 @@ try {
 
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
   await page.getByRole("heading", { name: "Identità dell’attività", exact: true }).waitFor({ timeout: 30000 });
-  await page.getByText("Modifica dati attività e brand", { exact: true }).click();
+  const reloadedEditable = page.locator("details.editable-details");
+  await reloadedEditable.locator("summary").click();
+  assert.equal(await reloadedEditable.getAttribute("open"), "", "reloaded brand edit details did not open");
   assert.equal(await page.getByLabel("Descrizione", { exact: true }).inputValue(), description);
   assert.equal(await page.getByLabel(/Servizi/).inputValue(), services);
   assert.equal(await page.getByLabel(/Segmenti del pubblico/).inputValue(), "Retail\nProfessionisti");
