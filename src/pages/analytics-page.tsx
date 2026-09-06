@@ -67,9 +67,9 @@ export function AnalyticsPage() {
 
   if (!selectedProfile) return null;
   return <div className="page-content">
-    <header className="page-header"><div><p className="eyebrow">Analytics</p><h1>Metriche reali</h1><p>Mostriamo soltanto dati ricevuti e salvati dalle API social collegate per {selectedProfile.name}.</p></div><button className="compact-action" type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna"}</button></header>
+    <header className="page-header"><div><p className="eyebrow">Analytics</p><h1>Risultati dei tuoi social</h1><p>Qui trovi soltanto dati reali degli account collegati per {selectedProfile.name}.</p></div><button className="compact-action" type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna"}</button></header>
     {error && <p className="form-error" role="alert">Impossibile leggere le metriche: {error}</p>}
-    {!loading && !error && latest.length === 0 && <section className="panel empty-state"><BarChart3 size={28} /><h2>Nessuna metrica disponibile</h2><p>Non vengono creati numeri demo. Le metriche compariranno qui solo dopo il collegamento di un provider e una raccolta API riuscita.</p></section>}
+    {!loading && !error && latest.length === 0 && <section className="panel empty-state"><BarChart3 size={28} /><h2>Nessun risultato disponibile</h2><p>I risultati compariranno qui dopo aver collegato almeno un social e pubblicato i primi contenuti.</p></section>}
     {latest.length > 0 && <section className="stat-grid">{latest.map((row, index) => <article className="stat-card" key={String(row.id ?? `${provider(row)}-${metricName(row)}-${index}`)}><span>{provider(row)} · {metricName(row)}</span><strong>{metricValue(row)}</strong>{capturedAt(row) && <small>{capturedAt(row)}</small>}</article>)}</section>}
   </div>;
 }

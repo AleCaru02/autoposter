@@ -37,10 +37,10 @@ const PROVIDER_LABELS: Record<Provider, string> = {
 };
 
 const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
-  INSTAGRAM: "Account professionale collegato a Meta. Pubblicazione tramite API ufficiale.",
-  FACEBOOK: "Pagina Facebook che amministri. Pubblicazione tramite API ufficiale Meta.",
+  INSTAGRAM: "Account professionale Instagram collegato a Meta.",
+  FACEBOOK: "Pagina Facebook che amministri.",
   LINKEDIN: "Profilo LinkedIn oppure Pagina aziendale quando l’accesso Community Management è abilitato.",
-  GBP: "Sede Google Business Profile che gestisci con il tuo account Google.",
+  GBP: "Sede Google Business Profile che gestisci.",
 };
 
 const PROVIDER_CAPABILITIES: Record<Provider, ProviderStatus["capabilities"]> = {
@@ -67,15 +67,15 @@ const UNAVAILABLE_PROVIDERS: ProviderStatus[] = (Object.keys(PROVIDER_LABELS) as
 function readableError(value: string) {
   const normalized = value.replace(/_/g, " ").trim();
   const map: Record<string, string> = {
-    PROVIDER_NOT_CONFIGURED: "Questo provider non è ancora configurato lato server.",
-    PROFILE_NOT_FOUND: "Il server non riesce a verificare l’attività selezionata. Ricarica la sessione e riprova.",
-    PROFILE_ACCESS_CHECK_FAILED: "Il server non riesce a verificare la sessione con il database. Riprova tra poco.",
-    SOCIAL_SECURITY_NOT_CONFIGURED: "Manca la configurazione sicura delle credenziali social sul server.",
+    PROVIDER_NOT_CONFIGURED: "Questo collegamento non è ancora disponibile. Contatta l’assistenza.",
+    PROFILE_NOT_FOUND: "Non riesco a trovare l’attività selezionata. Ricarica la pagina e riprova.",
+    PROFILE_ACCESS_CHECK_FAILED: "Non riesco a verificare l’attività in questo momento. Riprova tra poco.",
+    SOCIAL_SECURITY_NOT_CONFIGURED: "Questo collegamento non è ancora disponibile. Contatta l’assistenza.",
     NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA: "Non trovo un account Instagram professionale collegato a una Pagina Facebook gestibile.",
     NESSUNA_PAGINA_FACEBOOK_GESTIBILE: "Non trovo Pagine Facebook gestibili con questo account.",
     NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO: "Non trovo una Pagina LinkedIn amministrata oppure l’app non ha ancora l’accesso Community Management.",
-    NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA: "Non trovo sedi Google Business Profile accessibili oppure l’API GBP non è ancora abilitata per il progetto Google.",
-    access_denied: "Autorizzazione annullata dal provider.",
+    NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA: "Non trovo sedi Google Business Profile accessibili con questo account.",
+    access_denied: "Autorizzazione annullata.",
   };
   return map[value] ?? (normalized || "Collegamento non riuscito.");
 }
@@ -225,12 +225,12 @@ export function SocialPage() {
 
   if (!selectedProfile) return null;
   return <div className="page-content social-page">
-    <header className="page-header"><div><p className="eyebrow">Social · {selectedProfile.name}</p><h1>Collegamenti social</h1><p>Collega solo gli account che appartengono a questa attività. I token restano sul server e non vengono mostrati nel browser.</p></div><button className="compact-action" type="button" disabled={loading} onClick={() => void load()}><RefreshCw size={15} className={loading ? "spin" : ""} /> Aggiorna</button></header>
+    <header className="page-header"><div><p className="eyebrow">Social · {selectedProfile.name}</p><h1>Collegamenti social</h1><p>Collega gli account che appartengono a questa attività. Le credenziali restano protette e non vengono mai mostrate.</p></div><button className="compact-action" type="button" disabled={loading} onClick={() => void load()}><RefreshCw size={15} className={loading ? "spin" : ""} /> Aggiorna</button></header>
 
     {notice && <p className="form-success social-message" role="status"><CheckCircle2 size={17} /> {notice}</p>}
     {error && <p className="form-error social-message" role="alert"><AlertTriangle size={17} /> {error}</p>}
 
-    <section className="social-summary"><div><Share2 size={20} /><span>Account collegati</span><strong>{connectedCount}/4</strong></div><p>La pubblicazione automatica parte soltanto per provider realmente collegati e contenuti approvati.</p></section>
+    <section className="social-summary"><div><Share2 size={20} /><span>Account collegati</span><strong>{connectedCount}/4</strong></div><p>La pubblicazione automatica parte soltanto sui social collegati e per contenuti approvati.</p></section>
 
     {loading && !status ? <section className="panel social-loading"><LoaderCircle className="spin" size={22} /> Caricamento collegamenti…</section> : <div className="social-grid">
       {providers.map((provider) => {
@@ -245,7 +245,7 @@ export function SocialPage() {
 
           {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
 
-          {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Il server non ha restituito lo stato di questo collegamento. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Le credenziali sviluppatore di questo provider non sono ancora configurate sul server.</p>}
+          {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Stato temporaneamente non disponibile. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Questo collegamento non è ancora disponibile. Contatta l’assistenza.</p>}
 
           <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
         </article>;
