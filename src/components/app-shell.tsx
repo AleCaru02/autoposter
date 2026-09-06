@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, LayoutDashboard, LogOut, Menu, Settings2, Share2, Sparkles, X } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
@@ -34,6 +34,24 @@ export function AppShell() {
   const navigate = useNavigate();
   const { profiles, selectedProfileId, setSelectedProfileId, loading } = useProfiles();
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileMoreCloseRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    mobileMoreCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+      mobileMoreButtonRef.current?.focus();
+    };
+  }, [mobileMoreOpen]);
 
   async function signOut() {
     setMobileMoreOpen(false);
@@ -61,11 +79,11 @@ export function AppShell() {
     </div>
 
     {mobileMoreOpen && <div className="mobile-more-backdrop" role="presentation" onClick={closeMobileMore}><section className="mobile-more-menu" role="dialog" aria-modal="true" aria-label="Altre sezioni" onClick={(event) => event.stopPropagation()}>
-      <div className="mobile-more-head"><div><small>Attività attiva</small><label className="profile-switcher mobile-profile-switcher"><span className="sr-only">Seleziona attività</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div><button type="button" className="mobile-more-close" aria-label="Chiudi menu" onClick={closeMobileMore}><X size={20} /></button></div>
+      <div className="mobile-more-head"><div><small>Attività attiva</small><label className="profile-switcher mobile-profile-switcher"><span className="sr-only">Seleziona attività</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div><button ref={mobileMoreCloseRef} type="button" className="mobile-more-close" aria-label="Chiudi menu" onClick={closeMobileMore}><X size={20} /></button></div>
       <nav className="mobile-more-links">{mobileMoreLinks.map(([label, href, Icon]) => <NavLink key={href} to={href} onClick={closeMobileMore} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Icon size={18} /><span>{label}</span></NavLink>)}</nav>
       <button type="button" className="nav-link mobile-signout" onClick={() => void signOut()}><LogOut size={18} /><span>Esci</span></button>
     </section></div>}
 
-    <nav className="mobile-nav" aria-label="Navigazione principale mobile">{mobilePrimaryLinks.map(([label, href, Icon]) => <NavLink key={href} to={href} onClick={closeMobileMore} className={({ isActive }) => `mobile-nav-link ${isActive ? "active" : ""}`}><Icon size={18} /><span>{label}</span></NavLink>)}<button type="button" className={`mobile-nav-link mobile-more-trigger ${mobileMoreOpen ? "active" : ""}`} aria-expanded={mobileMoreOpen} aria-label={mobileMoreOpen ? "Chiudi altre sezioni" : "Apri altre sezioni"} onClick={() => setMobileMoreOpen((value) => !value)}>{mobileMoreOpen ? <X size={18} /> : <Menu size={18} />}<span>Altro</span></button></nav>
+    <nav className="mobile-nav" aria-label="Navigazione principale mobile">{mobilePrimaryLinks.map(([label, href, Icon]) => <NavLink key={href} to={href} onClick={closeMobileMore} className={({ isActive }) => `mobile-nav-link ${isActive ? "active" : ""}`}><Icon size={18} /><span>{label}</span></NavLink>)}<button ref={mobileMoreButtonRef} type="button" className={`mobile-nav-link mobile-more-trigger ${mobileMoreOpen ? "active" : ""}`} aria-expanded={mobileMoreOpen} aria-haspopup="dialog" aria-label={mobileMoreOpen ? "Chiudi altre sezioni" : "Apri altre sezioni"} onClick={() => setMobileMoreOpen((value) => !value)}>{mobileMoreOpen ? <X size={18} /> : <Menu size={18} />}<span>Altro</span></button></nav>
   </div>;
 }
