@@ -4,7 +4,9 @@ import { Building2, LayoutDashboard, ScrollText, ShieldCheck, Users } from "luci
 import { adminRequest } from "../lib/admin-api";
 import { AdminAuditPage } from "./admin-audit-page";
 import { AdminBanPanel } from "./admin-ban-panel";
+import { ProductBrand } from "../components/product-brand";
 import "../admin.css";
+import "../admin-rebrand.css";
 
 type AdminMe = { platformRole: "SUPER_ADMIN" };
 type Overview = {
@@ -91,7 +93,7 @@ function sessionState(expiresAt: string | null) {
 function AdminShell({ children }: { children: ReactNode }) {
   return <div className="admin-shell">
     <aside className="admin-sidebar">
-      <div className="admin-brand"><ShieldCheck size={21} /><div><strong>Post Automatici</strong><span>Backoffice</span></div></div>
+      <div className="admin-brand"><ProductBrand compact /><span className="admin-role"><ShieldCheck size={12} /> Super admin</span></div>
       <nav aria-label="Navigazione amministrazione">
         <NavLink end to="/admin"><LayoutDashboard size={18} />Overview</NavLink>
         <NavLink to="/admin/clienti"><Users size={18} />Clienti</NavLink>
@@ -138,9 +140,17 @@ function OverviewPage() {
 
 function CustomersPage() {
   const { data, error, loading } = useAdminData<{ customers: Customer[] }>("/api/admin/customers");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<"ALL" | "ACTIVE" | "BANNED" | "INCOMPLETE">("ALL");
   if (loading) return <Loading />;
   if (error || !data) return <ErrorState message={error || "Clienti non disponibili."} />;
-  return <><header className="admin-page-header"><div><span>Amministrazione</span><h1>Clienti</h1><p>{data.customers.length} account reali.</p></div></header><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Utente</th><th>Ruolo</th><th>Attività</th><th>Onboarding</th><th>Creato</th><th /></tr></thead><tbody>{data.customers.map((customer) => <tr key={customer.auth_user_id}><td><strong>{customer.name || "Senza nome"}</strong><span>{customer.email || "Email non disponibile"}</span></td><td><span className={`admin-badge ${customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{customer.platform_role}</span>{customer.banned ? <span className="admin-badge danger">Sospeso</span> : null}</td><td>{customer.profile_count}</td><td>{customer.onboarding_completed} completati{customer.onboarding_incomplete ? ` · ${customer.onboarding_incomplete} incompleti` : ""}</td><td>{formatDate(customer.created_at)}</td><td><NavLink className="admin-row-link" to={`/admin/clienti/${encodeURIComponent(customer.auth_user_id)}`}>Apri</NavLink></td></tr>)}</tbody></table></div></>;
+  const normalized = query.trim().toLowerCase();
+  const customers = data.customers.filter((customer) => {
+    const matchesQuery = !normalized || `${customer.name ?? ""} ${customer.email ?? ""}`.toLowerCase().includes(normalized);
+    const matchesStatus = status === "ALL" || status === "BANNED" && customer.banned === true || status === "INCOMPLETE" && customer.onboarding_incomplete > 0 || status === "ACTIVE" && customer.banned !== true && customer.onboarding_incomplete === 0;
+    return matchesQuery && matchesStatus;
+  });
+  return <><header className="admin-page-header"><div><span>Amministrazione</span><h1>Clienti</h1><p>{data.customers.length} account reali. Filtra senza modificare i dati.</p></div></header><section className="admin-list-toolbar" aria-label="Filtri clienti"><label><span>Cerca cliente</span><input type="search" placeholder="Nome o email" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label><span>Stato</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}><option value="ALL">Tutti</option><option value="ACTIVE">Operativi</option><option value="INCOMPLETE">Onboarding incompleto</option><option value="BANNED">Sospesi</option></select></label><strong>{customers.length} risultat{customers.length === 1 ? "o" : "i"}</strong></section>{customers.length ? <div className="admin-table-wrap"><table className="admin-table admin-customers-table"><thead><tr><th>Utente</th><th>Ruolo</th><th>Attività</th><th>Onboarding</th><th>Creato</th><th><span className="sr-only">Azioni</span></th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.auth_user_id}><td data-label="Utente"><strong>{customer.name || "Senza nome"}</strong><span>{customer.email || "Email non disponibile"}</span></td><td data-label="Stato"><span className={`admin-badge ${customer.platform_role === "SUPER_ADMIN" ? "admin" : ""}`}>{customer.platform_role}</span>{customer.banned ? <span className="admin-badge danger">Sospeso</span> : null}</td><td data-label="Attività">{customer.profile_count}</td><td data-label="Onboarding">{customer.onboarding_completed} completati{customer.onboarding_incomplete ? ` · ${customer.onboarding_incomplete} incompleti` : ""}</td><td data-label="Creato">{formatDate(customer.created_at)}</td><td data-label="Azioni"><NavLink className="admin-row-link" to={`/admin/clienti/${encodeURIComponent(customer.auth_user_id)}`}>Apri cliente</NavLink></td></tr>)}</tbody></table></div> : <div className="admin-empty admin-filter-empty"><strong>Nessun cliente corrisponde ai filtri.</strong><span>Modifica ricerca o stato per vedere altri risultati.</span></div>}</>;
 }
 
 function SessionConfirmModal({ action, busy, onCancel, onConfirm }: { action: ConfirmAction; busy: boolean; onCancel(): void; onConfirm(): void }) {
@@ -258,9 +268,12 @@ function CustomerDetailPage() {
 
 function ActivitiesPage() {
   const { data, error, loading } = useAdminData<{ activities: ActivityRow[] }>("/api/admin/activities");
+  const [query, setQuery] = useState("");
   if (loading) return <Loading />;
   if (error || !data) return <ErrorState message={error || "Attività non disponibili."} />;
-  return <><header className="admin-page-header"><div><span>Amministrazione</span><h1>Attività</h1><p>{data.activities.length} profili disponibili.</p></div></header><div className="admin-card-list">{data.activities.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.owner_name || profile.owner_email || "Proprietario non disponibile"}</span></div><div><span>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{profile.social_connections ?? 0} social collegati</span></div></article>)}</div></>;
+  const normalized = query.trim().toLowerCase();
+  const activities = data.activities.filter((profile) => !normalized || `${profile.name} ${profile.owner_name ?? ""} ${profile.owner_email ?? ""}`.toLowerCase().includes(normalized));
+  return <><header className="admin-page-header"><div><span>Amministrazione</span><h1>Attività</h1><p>{data.activities.length} profili disponibili.</p></div></header><section className="admin-list-toolbar admin-activity-toolbar" aria-label="Filtri attività"><label><span>Cerca attività</span><input type="search" placeholder="Attività o proprietario" value={query} onChange={(event) => setQuery(event.target.value)} /></label><strong>{activities.length} risultat{activities.length === 1 ? "o" : "i"}</strong></section>{activities.length ? <div className="admin-card-list">{activities.map((profile) => <article key={profile.id}><div><strong>{profile.name}</strong><span>{profile.owner_name || profile.owner_email || "Proprietario non disponibile"}</span></div><div><span className={`admin-status-text ${profile.onboarding_completed ? "ready" : "warning"}`}>{profile.onboarding_completed ? "Onboarding completato" : "Onboarding incompleto"}</span><span>{profile.social_connections ?? 0} social collegati</span></div></article>)}</div> : <div className="admin-empty admin-filter-empty"><strong>Nessuna attività trovata.</strong><span>Prova con un altro nome o proprietario.</span></div>}</>;
 }
 
 export function AdminBackoffice() {
