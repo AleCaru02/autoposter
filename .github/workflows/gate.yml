@@ -45,6 +45,7 @@ jobs:
       - { name: FASE 5A onboarding provisioning regression, run: "npm run test:onboarding-provisioning" }
       - { name: Onboarding authenticated dashboard path regression, run: "npm run test:onboarding-dashboard-path" }
       - { name: FASE 7A brand reanalysis Auth regression, run: "npm run test:fase7a-brand-reanalysis-auth" }
+      - { name: FASE 7A editable brand intelligence regression, run: "npm run test:fase7a-editable-brand" }
       - { name: FASE 5B onboarding completion regression, run: "npm run test:onboarding-completion" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
