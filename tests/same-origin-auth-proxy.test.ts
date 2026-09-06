@@ -47,6 +47,29 @@ try {
   }
 
   {
+    let upstreamHeaders = new Headers();
+    setFetch(async (url, init) => {
+      assert.equal(url, `${SAME_ORIGIN_AUTH_PROXY_CONTRACT.upstream}/token`);
+      upstreamHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ token: "signed-test-jwt" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const response = await handleSameOriginAuthProxy(new Request(`${APP_ORIGIN}/api/auth/token`, {
+      headers: {
+        accept: "application/json",
+        cookie: "__Secure-neon-auth.session_token=browser-opaque",
+        "x-force-fetch": "1",
+      },
+    }), env);
+    assert.equal(response?.status, 200, "Managed Auth token endpoint must be available through the same-origin proxy");
+    assert.equal(upstreamHeaders.get("cookie"), "__Secure-neon-auth.session_token=browser-opaque");
+    assert.equal(upstreamHeaders.get("x-force-fetch"), "1");
+    assert.deepEqual(await response?.json(), { token: "signed-test-jwt" });
+  }
+
+  {
     const payload = JSON.stringify({ email: "qa@example.invalid", password: "redacted-test-value" });
     let upstreamHeaders: Headers | null = null;
     let upstreamBody = "";
