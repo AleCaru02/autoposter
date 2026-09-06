@@ -1,5 +1,6 @@
 import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
+import { normalizeEditorialResearchMode } from "../api/_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 
@@ -85,6 +86,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const topic = typeof body.topic === "string" ? body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof body.objective === "string" ? body.objective.trim().slice(0, 500) : null;
+  const researchMode = normalizeEditorialResearchMode(body.researchMode);
   const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
   const providers = Array.isArray(body.providers) ? body.providers.filter((value): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
@@ -122,7 +124,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       profileId,
       source: "MANUAL",
       operationIdentity,
-      requestFingerprint: { topic, objective, providers, formats },
+      requestFingerprint: { topic, objective, providers, formats, researchMode },
     });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
     if (reservation.status === "COMPLETED") return json(reservation.cached.response, 200);
@@ -133,14 +135,14 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
 
     const budgetUsd = monthlyBudgetUsd(env);
     const spentBeforeUsd = await currentOwnerTextSpendUsd(profileId, token);
-    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context });
+    const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
     if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
       await meter.release(eventId, "AI_BUDGET_EXCEEDED");
       return json({ error: "AI_BUDGET_EXCEEDED" }, 429);
     }
 
     await meter.markProviderStarted(eventId);
-    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     const actualCostUsd = result.usage.estimatedCostUsd;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
