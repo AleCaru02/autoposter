@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { ImpersonationBanner } from "./impersonation-banner";
+import { ProductBrand } from "./product-brand";
 
 const links = [
   ["Dashboard", "/app/dashboard", LayoutDashboard],
@@ -22,6 +23,13 @@ const links = [
 const mobilePrimaryLinks = [links[0], links[4], links[6], links[7]] as const;
 const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[8], links[9], links[10]] as const;
 
+const navigationGroups = [
+  { label: "Oggi", items: [links[0]] },
+  { label: "Crea e pubblica", items: [links[4], links[5], links[6]] },
+  { label: "Canali e risultati", items: [links[7], links[8], links[9]] },
+  { label: "La tua attività", items: [links[1], links[2], links[3], links[10]] },
+] as const;
+
 export function AppShell() {
   const navigate = useNavigate();
   const { profiles, selectedProfileId, setSelectedProfileId, loading } = useProfiles();
@@ -38,14 +46,19 @@ export function AppShell() {
   }
 
   return <div className="shell">
+    <a className="skip-link" href="#main-content">Vai al contenuto</a>
     <ImpersonationBanner />
     <aside className="sidebar">
-      <label className="profile-switcher profile-switcher-top"><span>Attività</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-      <nav>{links.map(([label, href, Icon]) => <NavLink key={href} to={href} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Icon size={17} /><span>{label}</span></NavLink>)}</nav>
+      <NavLink className="sidebar-home" to="/app/dashboard" aria-label="Post Automatici, dashboard"><ProductBrand /></NavLink>
+      <label className="profile-switcher profile-switcher-top"><span>Attività attiva</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+      <nav aria-label="Navigazione principale">{navigationGroups.map((group) => <section className="nav-group" key={group.label}><p>{group.label}</p>{group.items.map(([label, href, Icon]) => <NavLink key={href} to={href} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}><Icon size={18} /><span>{label}</span></NavLink>)}</section>)}</nav>
       <button type="button" className="nav-link logout" onClick={signOut}><LogOut size={17} /><span>Esci</span></button>
     </aside>
 
-    <main className="shell-main"><Outlet /></main>
+    <div className="shell-workspace">
+      <header className="mobile-header"><NavLink to="/app/dashboard" aria-label="Post Automatici, dashboard"><ProductBrand compact /></NavLink><label className="mobile-header-profile"><span className="sr-only">Attività attiva</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></header>
+      <main className="shell-main" id="main-content" tabIndex={-1}><Outlet /></main>
+    </div>
 
     {mobileMoreOpen && <div className="mobile-more-backdrop" role="presentation" onClick={closeMobileMore}><section className="mobile-more-menu" role="dialog" aria-modal="true" aria-label="Altre sezioni" onClick={(event) => event.stopPropagation()}>
       <div className="mobile-more-head"><div><small>Attività attiva</small><label className="profile-switcher mobile-profile-switcher"><span className="sr-only">Seleziona attività</span><select disabled={loading || profiles.length === 0} value={selectedProfileId ?? ""} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.length === 0 && <option value="">Nessuna attività</option>}{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div><button type="button" className="mobile-more-close" aria-label="Chiudi menu" onClick={closeMobileMore}><X size={20} /></button></div>
