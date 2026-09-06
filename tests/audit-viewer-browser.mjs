@@ -71,7 +71,7 @@ async function assertCustomerLayout(page, label, path, expectedHeading) {
   await heading.waitFor({ state: "visible", timeout: 20000 });
   if (expectedHeading) assert.equal((await heading.innerText()).trim(), expectedHeading, `${label} ${path} heading`);
   if (path === "/app/profili") {
-    await page.getByText(`Audit Smoke ${marker}`, { exact: true }).first().waitFor({ state: "visible", timeout: 20000 });
+    await page.getByRole("heading", { name: `Audit Smoke ${marker}`, exact: true, level: 2 }).waitFor({ state: "visible", timeout: 20000 });
   }
   const result = await page.evaluate(() => {
     const root = document.documentElement;
