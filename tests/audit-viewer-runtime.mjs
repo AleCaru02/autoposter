@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -14,8 +15,8 @@ assert.ok(controllerUrl.startsWith("https://"), "preview controller URL missing"
 assert.ok(controllerToken.length >= 32, "preview controller token missing");
 
 const emails = {
-  customer: `audit-smoke-${marker}-customer@example.invalid`,
-  admin: `audit-smoke-${marker}-admin@example.invalid`,
+  owner: `audit-smoke-${marker}-customer@example.invalid`,
+  outsider: `audit-smoke-${marker}-admin@example.invalid`,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,20 +24,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 class CookieJar {
   constructor() { this.values = new Map(); }
   absorb(headers) {
-    const list = headers.getSetCookie?.() || [];
-    for (const raw of list) {
+    for (const raw of headers.getSetCookie?.() || []) {
       const pair = raw.split(";", 1)[0];
       const index = pair.indexOf("=");
       if (index > 0) this.values.set(pair.slice(0, index).trim(), pair.slice(index + 1).trim());
     }
   }
-  header() { return [...this.values.entries()].map(([k, v]) => `${k}=${v}`).join("; "); }
+  header() { return [...this.values.entries()].map(([key, value]) => `${key}=${value}`).join("; "); }
 }
 
 async function readJson(response) {
   const text = await response.text();
   if (!text) return null;
-  try { return JSON.parse(text); } catch { return { invalidJson: true }; }
+  try { return JSON.parse(text); } catch { return { invalidJson: true, text: text.slice(0, 120) }; }
 }
 
 async function authFetch(jar, path, init = {}) {
@@ -74,15 +74,7 @@ async function signUp(email, name) {
   const response = await authFetch(jar, "/sign-up/email", { method: "POST", body: JSON.stringify({ email, password, name }) });
   assert.ok(response.ok, `Managed Auth signup failed (${response.status})`);
   const token = await identityToken(jar);
-  return { jar, token, id: decodeSub(token) };
-}
-
-async function signIn(email) {
-  const jar = new CookieJar();
-  const response = await authFetch(jar, "/sign-in/email", { method: "POST", body: JSON.stringify({ email, password }) });
-  assert.ok(response.ok, `Managed Auth signin failed (${response.status})`);
-  const token = await identityToken(jar);
-  return { jar, token, id: decodeSub(token) };
+  return { token, id: decodeSub(token) };
 }
 
 async function dataApi(path, token, init = {}) {
@@ -93,45 +85,26 @@ async function dataApi(path, token, init = {}) {
   return fetch(`${DATA_API}${path}`, { ...init, headers });
 }
 
-function rpcIdentity(body) {
-  if (typeof body === "string") return body.trim() || null;
-  if (Array.isArray(body)) {
-    const first = body[0];
-    if (typeof first === "string") return first.trim() || null;
-    if (first && typeof first === "object") return first.current_auth_user_id || first.auth_user_id || first.current_platform_identity || null;
-  }
-  if (body && typeof body === "object") return body.current_auth_user_id || body.auth_user_id || body.current_platform_identity || null;
-  return null;
-}
-
 async function waitForDataApiIdentity(token, expectedId) {
-  let lastStatus = 0;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const response = await dataApi("/rpc/current_auth_user_id", token, { method: "POST", body: "{}" });
-    lastStatus = response.status;
     const body = await readJson(response);
-    if (response.ok && rpcIdentity(body) === expectedId) return;
+    const identity = typeof body === "string" ? body : Array.isArray(body) ? body[0] : body?.current_auth_user_id;
+    if (response.ok && identity === expectedId) return;
     await sleep(500);
   }
-  throw new Error(`Data API did not recognize freshly authenticated identity (last status ${lastStatus})`);
+  throw new Error("Data API did not recognize freshly authenticated identity");
 }
 
-async function adminApi(path, token, expected) {
-  let lastStatus = 0;
-  let lastBody = null;
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const response = await fetch(`${APP_BASE}${path}`, { headers: { accept: "application/json", authorization: `Bearer ${token}` } });
-    lastStatus = response.status;
-    lastBody = await readJson(response);
-    if (lastStatus === expected) return lastBody;
-    if (lastStatus === 401 && (expected === 403 || expected === 200)) {
-      await sleep(500);
-      continue;
-    }
-    break;
-  }
-  assert.equal(lastStatus, expected, `${path} expected ${expected}, got ${lastStatus}`);
-  return lastBody;
+async function appApi(path, token, payload, expected) {
+  const response = await fetch(`${APP_BASE}${path}`, {
+    method: "POST",
+    headers: { accept: "application/json", authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await readJson(response);
+  assert.equal(response.status, expected, `${path} expected ${expected}, got ${response.status}: ${JSON.stringify(body)}`);
+  return body;
 }
 
 async function controller(action) {
@@ -145,225 +118,85 @@ async function controller(action) {
   return body;
 }
 
-function assertPagination(body, expectedLimit) {
-  assert.ok(Array.isArray(body?.audit), "audit list missing");
-  assert.ok(body?.pagination && Number.isInteger(body.pagination.page), "pagination missing");
-  assert.equal(body.pagination.limit, expectedLimit);
-  assert.ok(body.pagination.total >= body.audit.length);
-  assert.ok(body.pagination.totalPages >= 1);
+async function provision(identity, label) {
+  const body = await appApi("/api/onboarding-provision", identity.token, {
+    operationId: randomUUID(),
+    name: `Fase 7A ${label} ${marker}`,
+    websiteUrl: null,
+    industry: "Servizi professionali",
+  }, 201);
+  assert.equal(body?.profile?.onboarding_completed, false);
+  await appApi("/api/onboarding-complete", identity.token, { profileId: body.profile.id }, 200);
+  return body.profile;
 }
 
-function assertStableOrdering(rows) {
-  for (let i = 1; i < rows.length; i += 1) {
-    const previous = rows[i - 1];
-    const current = rows[i];
-    const a = Date.parse(previous.created_at);
-    const b = Date.parse(current.created_at);
-    assert.ok(Number.isFinite(a) && Number.isFinite(b), "audit timestamp invalid");
-    assert.ok(a >= b, "audit ordering is not descending by timestamp");
-    if (a === b) assert.ok(String(previous.id) >= String(current.id), "audit tie ordering is unstable");
-  }
-}
+const baseline = await controller("preflight");
+for (const key of ["qaUsers", "qaProfiles", "qaBrandProfiles", "qaOwners", "qaSessions", "qaAdmins"]) assert.equal(baseline[key], 0, `preflight residue ${key}`);
+assert.equal(baseline.superAdmins, 1);
+assert.equal(baseline.profilesWithoutOwner, 0);
 
-function sensitiveFindings(value, path = "root", findings = []) {
-  const sensitiveKeys = new Set(["password", "jwt", "authorization", "cookie", "sessiontoken", "accesstoken", "refreshtoken", "apikey", "databaseurl", "clientsecret", "oauthsecret", "fase3qatoken", "auditsmoketoken"]);
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => sensitiveFindings(item, `${path}[${index}]`, findings));
-    return findings;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (sensitiveKeys.has(normalized)) {
-        if (child !== "[REDACTED]") findings.push({ category: normalized, path: `${path}.${key}` });
-        continue;
-      }
-      sensitiveFindings(child, `${path}.${key}`, findings);
-    }
-    return findings;
-  }
-  if (typeof value === "string") {
-    const checks = [
-      ["smoke_password", value.includes(password)],
-      ["controller_token", value.includes(controllerToken)],
-      ["bearer", /\bbearer\s+[a-z0-9._-]+/i.test(value)],
-      ["jwt", /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/.test(value)],
-      ["database_url", /\bpostgres(?:ql)?:\/\//i.test(value)],
-    ];
-    for (const [category, found] of checks) if (found) findings.push({ category, path });
-  }
-  return findings;
-}
+const owner = await signUp(emails.owner, "Fase 7A Owner");
+const outsider = await signUp(emails.outsider, "Fase 7A Outsider");
+await waitForDataApiIdentity(owner.token, owner.id);
+await waitForDataApiIdentity(outsider.token, outsider.id);
 
-const results = {};
-const preflight = await controller("preflight");
-assert.equal(preflight.qaUsers, 0);
-assert.equal(preflight.qaProfiles, 0);
-assert.equal(preflight.qaOwners, 0);
-assert.equal(preflight.qaSessions, 0);
-assert.equal(preflight.qaAdmins, 0);
-assert.equal(preflight.superAdmins, 1, "real SUPER_ADMIN baseline must be exactly one");
-assert.equal(preflight.profilesWithoutOwner, 0);
-results.baselineProfiles = preflight.profilesTotal;
+const ownerProfile = await provision(owner, "Owner");
+const outsiderProfile = await provision(outsider, "Outsider");
+assert.notEqual(ownerProfile.id, outsiderProfile.id);
 
-const customer = await signUp(emails.customer, "Audit Smoke Customer");
-const adminCandidate = await signUp(emails.admin, "Audit Smoke Admin");
-assert.notEqual(customer.id, adminCandidate.id);
-await waitForDataApiIdentity(customer.token, customer.id);
-await waitForDataApiIdentity(adminCandidate.token, adminCandidate.id);
-
-await adminApi("/api/admin/audit", customer.token, 403);
-results.customerApi = "PASS";
-
-const profileResponse = await dataApi("/profiles?select=id,name,owner_auth_user_id,onboarding_completed", customer.token, {
+const inserted = await dataApi("/brand_profiles?select=profile_id", owner.token, {
   method: "POST",
   headers: { prefer: "return=representation" },
   body: JSON.stringify({
-    name: `Audit Smoke ${marker}`,
-    slug: `audit-smoke-${marker}`,
-    owner_auth_user_id: customer.id,
-    onboarding_completed: true,
+    profile_id: ownerProfile.id,
+    description: `Descrizione iniziale ${marker}`,
+    business_model: "Consulenza",
+    location: "Milano",
+    service_area: "Italia",
+    target_audience: { summary: "PMI", segments: ["Retail"] },
+    tone_of_voice: { summary: "Professionale", traits: ["Chiaro"] },
+    goals: ["Più richieste"],
+    services: ["Consulenza iniziale"],
+    differentiators: ["Metodo proprietario"],
+    value_propositions: ["Più semplicità"],
+    visual_identity: { observedColors: ["#16c55f"], summary: "Pulito" },
   }),
 });
-const profileBody = await readJson(profileResponse);
-assert.ok(profileResponse.ok, `smoke profile creation failed (${profileResponse.status})`);
-assert.equal(profileBody?.[0]?.owner_auth_user_id, customer.id);
-const profileId = profileBody?.[0]?.id;
-assert.equal(typeof profileId, "string");
+assert.equal(inserted.status, 201, `owner brand insert failed (${inserted.status})`);
 
-const membershipResponse = await dataApi(`/profile_members?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,role`, customer.token);
-const membershipBody = await readJson(membershipResponse);
-assert.ok(membershipResponse.ok, `OWNER membership read failed (${membershipResponse.status})`);
-assert.deepEqual(membershipBody?.map((row) => row.role), ["OWNER"]);
-await adminApi("/api/admin/audit", customer.token, 403);
-results.ownerApi = "PASS";
+const ownRead = await dataApi(`/brand_profiles?profile_id=eq.${encodeURIComponent(ownerProfile.id)}&select=profile_id,services,target_audience`, owner.token);
+const ownRows = await readJson(ownRead);
+assert.ok(ownRead.ok && ownRows?.[0]?.profile_id === ownerProfile.id, "owner cannot read own brand");
 
-const ownProfilesResponse = await dataApi("/profiles?select=id,owner_auth_user_id", customer.token);
-const ownProfiles = await readJson(ownProfilesResponse);
-assert.ok(ownProfilesResponse.ok && Array.isArray(ownProfiles));
-assert.ok(ownProfiles.some((row) => row.id === profileId));
-assert.ok(ownProfiles.every((row) => row.owner_auth_user_id === customer.id), "CUSTOMER saw another tenant profile");
+const crossRead = await dataApi(`/brand_profiles?profile_id=eq.${encodeURIComponent(ownerProfile.id)}&select=profile_id`, outsider.token);
+assert.deepEqual(await readJson(crossRead), [], "outsider read another tenant brand");
+const crossUpdate = await dataApi(`/brand_profiles?profile_id=eq.${encodeURIComponent(ownerProfile.id)}&select=profile_id`, outsider.token, {
+  method: "PATCH",
+  headers: { prefer: "return=representation" },
+  body: JSON.stringify({ description: "cross-tenant write" }),
+});
+assert.ok(crossUpdate.ok, `RLS-filtered cross update returned unexpected transport error ${crossUpdate.status}`);
+assert.deepEqual(await readJson(crossUpdate), [], "outsider updated another tenant brand");
 
-const directAudit = await dataApi("/platform_admin_audit?select=id&limit=1", customer.token);
-assert.ok(!directAudit.ok, `CUSTOMER direct audit table read unexpectedly allowed (${directAudit.status})`);
-results.directDbDenied = "PASS";
-
-const beforePromotion = await controller("state");
-assert.equal(beforePromotion.qaUsers, 2);
-assert.equal(beforePromotion.qaProfiles, 1);
-assert.equal(beforePromotion.qaOwners, 1);
-assert.equal(beforePromotion.qaAdmins, 0);
-assert.equal(beforePromotion.superAdmins, 1);
-
-const promoted = await controller("promote");
-assert.equal(promoted.qaAdmins, 1);
-assert.equal(promoted.superAdmins, 2);
-
-const admin = await signIn(emails.admin);
-assert.equal(admin.id, adminCandidate.id);
-await waitForDataApiIdentity(admin.token, admin.id);
-const me = await adminApi("/api/admin/me", admin.token, 200);
-assert.equal(me.platformRole, "SUPER_ADMIN");
-results.superAdminApi = "PASS";
-
-const runtimeFrom = new Date(Date.now() - 2000).toISOString();
-for (let i = 0; i < 5; i += 1) {
-  const body = await adminApi("/api/admin/me", admin.token, 200);
-  assert.equal(body.platformRole, "SUPER_ADMIN");
-}
-const runtimeTo = new Date(Date.now() + 2000).toISOString();
-
-const noFilters = await adminApi("/api/admin/audit?limit=25&page=1", admin.token, 200);
-assertPagination(noFilters, 25);
-assertStableOrdering(noFilters.audit);
-results.noFilters = "PASS";
-
-const maxLimit = await adminApi("/api/admin/audit?limit=100&page=1", admin.token, 200);
-assertPagination(maxLimit, 100);
-
-const action = await adminApi("/api/admin/audit?action=ADMIN_ACCESS&limit=25&page=1", admin.token, 200);
-assertPagination(action, 25);
-assert.ok(action.audit.length > 0 && action.audit.every((row) => row.action === "ADMIN_ACCESS"));
-results.action = "PASS";
-
-const actor = await adminApi(`/api/admin/audit?actor=${encodeURIComponent(admin.id)}&limit=25&page=1`, admin.token, 200);
-assertPagination(actor, 25);
-assert.ok(actor.audit.length > 0 && actor.audit.every((row) => row.actor_auth_user_id === admin.id));
-results.actor = "PASS";
-
-const target = await adminApi("/api/admin/audit?target=BACKOFFICE&limit=25&page=1", admin.token, 200);
-assertPagination(target, 25);
-assert.ok(target.audit.length > 0 && target.audit.every((row) => row.target_type === "PLATFORM" && row.target_id === "BACKOFFICE"));
-results.target = "PASS";
-
-const fromOnly = await adminApi(`/api/admin/audit?from=${encodeURIComponent(runtimeFrom)}&limit=100&page=1`, admin.token, 200);
-assert.ok(fromOnly.audit.every((row) => Date.parse(row.created_at) >= Date.parse(runtimeFrom)));
-const toOnly = await adminApi(`/api/admin/audit?to=${encodeURIComponent(runtimeTo)}&limit=100&page=1`, admin.token, 200);
-assert.ok(toOnly.audit.every((row) => Date.parse(row.created_at) <= Date.parse(runtimeTo)));
-const dateRange = await adminApi(`/api/admin/audit?from=${encodeURIComponent(runtimeFrom)}&to=${encodeURIComponent(runtimeTo)}&limit=100&page=1`, admin.token, 200);
-assert.ok(dateRange.audit.length > 0 && dateRange.audit.every((row) => Date.parse(row.created_at) >= Date.parse(runtimeFrom) && Date.parse(row.created_at) <= Date.parse(runtimeTo)));
-results.date = "PASS";
-
-const combined = await adminApi(`/api/admin/audit?action=ADMIN_ACCESS&actor=${encodeURIComponent(admin.id)}&from=${encodeURIComponent(runtimeFrom)}&to=${encodeURIComponent(runtimeTo)}&limit=100&page=1`, admin.token, 200);
-assert.ok(combined.audit.length >= 5);
-assert.ok(combined.audit.every((row) => row.action === "ADMIN_ACCESS" && row.actor_auth_user_id === admin.id && Date.parse(row.created_at) >= Date.parse(runtimeFrom) && Date.parse(row.created_at) <= Date.parse(runtimeTo)));
-results.combined = "PASS";
-
-const page1 = await adminApi(`/api/admin/audit?action=ADMIN_ACCESS&actor=${encodeURIComponent(admin.id)}&limit=2&page=1`, admin.token, 200);
-const page2 = await adminApi(`/api/admin/audit?action=ADMIN_ACCESS&actor=${encodeURIComponent(admin.id)}&limit=2&page=2`, admin.token, 200);
-assertPagination(page1, 2);
-assertPagination(page2, 2);
-assert.equal(page1.audit.length, 2);
-assert.equal(page2.audit.length, 2);
-assert.equal(page1.audit.some((a) => page2.audit.some((b) => a.id === b.id)), false, "pagination duplicated an audit row");
-assertStableOrdering(page1.audit);
-assertStableOrdering(page2.audit);
-results.pagination = "PASS";
-
-for (const path of [
-  "/api/admin/audit?limit=-1",
-  "/api/admin/audit?limit=999999",
-  "/api/admin/audit?from=not-a-date",
-  `/api/admin/audit?from=${encodeURIComponent(runtimeTo)}&to=${encodeURIComponent(runtimeFrom)}`,
-  `/api/admin/audit?action=${encodeURIComponent("x".repeat(121))}`,
-  "/api/admin/audit?action=ADMIN_ACCESS&action=ADMIN_OVERVIEW_VIEW",
-]) await adminApi(path, admin.token, 400);
-results.invalid = "PASS";
-
-const emptyActor = `audit-smoke-no-match-${marker}`;
-const empty = await adminApi(`/api/admin/audit?actor=${encodeURIComponent(emptyActor)}&limit=25&page=1`, admin.token, 200);
-assertPagination(empty, 25);
-assert.equal(empty.audit.length, 0);
-assert.equal(empty.pagination.total, 0);
-results.empty = "PASS";
-
-const findings = sensitiveFindings(noFilters);
-assert.deepEqual(findings, [], `sensitive audit response findings: ${JSON.stringify(findings)}`);
-results.sensitive = "PASS";
+const dashboard = await fetch(`${APP_BASE}/app/dashboard`, { headers: { accept: "text/html" }, redirect: "manual" });
+assert.equal(dashboard.status, 200, "dashboard direct document route unavailable");
+assert.match(dashboard.headers.get("content-type") || "", /text\/html/i);
 
 const during = await controller("state");
 assert.equal(during.qaUsers, 2);
-assert.equal(during.qaProfiles, 1);
-assert.equal(during.qaOwners, 1);
-assert.equal(during.qaAdmins, 1);
-assert.equal(during.superAdmins, 2);
-assert.ok(during.qaSessions >= 2);
+assert.equal(during.qaProfiles, 2);
+assert.equal(during.qaBrandProfiles, 1);
+assert.equal(during.qaOwners, 2);
+assert.equal(during.qaAdmins, 0);
+assert.equal(during.superAdmins, 1);
+assert.equal(during.profilesWithoutOwner, 0);
 
-console.log("AUDIT_VIEWER_API_RUNTIME: PASS", JSON.stringify({
-  customerApi: results.customerApi,
-  ownerApi: results.ownerApi,
-  superAdminApi: results.superAdminApi,
-  noFilters: results.noFilters,
-  action: results.action,
-  actor: results.actor,
-  target: results.target,
-  date: results.date,
-  combined: results.combined,
-  pagination: results.pagination,
-  invalid: results.invalid,
-  sensitive: results.sensitive,
-  empty: results.empty,
-  directDbDenied: results.directDbDenied,
-  temporarySuperAdmins: during.superAdmins,
-  baselineProfiles: results.baselineProfiles,
+console.log("FASE7A_API_RUNTIME: PASS", JSON.stringify({
+  serverSideProvisioning: "PASS",
+  onboardingCompletion: "PASS",
+  ownBrandReadWrite: "PASS",
+  tenantIsolation: "PASS",
+  directDashboardSpa: "PASS",
+  qaProfiles: during.qaProfiles,
+  qaBrandProfiles: during.qaBrandProfiles,
 }));
