@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const [workflow, controller, runtime, config] = await Promise.all([
-  readFile(".github/workflows/fase7c-runtime.yml", "utf8"),
+  readFile(".github/workflows/audit-viewer-runtime.yml", "utf8"),
   readFile("tests/fase7c-runtime-controller.mjs", "utf8"),
   readFile("tests/fase7c-runtime.mjs", "utf8"),
   readFile("tests/wrangler.fase7c-runtime.jsonc", "utf8"),

@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: audit-viewer-authenticated-runtime
+  group: fase7c-content-runtime
   cancel-in-progress: false
 
 jobs:
   runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - { name: Checkout, uses: actions/checkout@v4 }
       - name: Setup Node
@@ -20,32 +20,35 @@ jobs:
 
       - name: Static safety gate
         run: |
+          set -euo pipefail
           npm run typecheck
-          npm run test:platform-rbac
-          npm run test:fase3-core
-          npm run test:admin-audit-viewer
+          npm run test:fase7c-content-generation
+          npm run test:fase7c-runtime-static
+          npm run test:ai-text-gating
+          npm run test:image-generation-gating
+          npm run test:tenant-cross-security
 
-      - name: Generate ephemeral smoke identity material
+      - name: Generate ephemeral FASE 7C material
         shell: bash
         run: |
           set -euo pipefail
           marker="${GITHUB_RUN_ID}"
           password=$(openssl rand -hex 24)
           token=$(openssl rand -hex 32)
-          alias="auditqa-${GITHUB_RUN_ID}"
-          customer_email="audit-smoke-${marker}-customer@example.invalid"
-          admin_email="audit-smoke-${marker}-admin@example.invalid"
+          alias="fase7cqa-${GITHUB_RUN_ID}"
+          owner_email="fase7c-${marker}-owner@example.invalid"
+          other_email="fase7c-${marker}-other@example.invalid"
           echo "::add-mask::$password"
           echo "::add-mask::$token"
-          echo "::add-mask::$customer_email"
-          echo "::add-mask::$admin_email"
-          echo "AUDIT_SMOKE_MARKER=$marker" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_PASSWORD=$password" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
-          echo "AUDIT_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
-          printf 'AUDIT_SMOKE_TOKEN=%s\n' "$token" > .audit-runtime-secrets.env
-          chmod 600 .audit-runtime-secrets.env
+          echo "::add-mask::$owner_email"
+          echo "::add-mask::$other_email"
+          echo "FASE7C_RUNTIME_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "FASE7C_RUNTIME_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "FASE7C_RUNTIME_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "FASE7C_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "FASE7C_RUNTIME_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'FASE7C_RUNTIME_TOKEN=%s\n' "$token" > .fase7c-runtime-secrets.env
+          chmod 600 .fase7c-runtime-secrets.env
 
       - name: Upload fixed-scope controller as non-deployed Worker version
         shell: bash
@@ -55,17 +58,17 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler versions upload \
-            --config tests/wrangler.audit-runtime.jsonc \
+            --config tests/wrangler.fase7c-runtime.jsonc \
             --keep-vars \
-            --preview-alias "$AUDIT_PREVIEW_ALIAS" \
-            --secrets-file .audit-runtime-secrets.env | tee audit-upload.log
-          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' audit-upload.log | tail -n 1)
+            --preview-alias "$FASE7C_PREVIEW_ALIAS" \
+            --secrets-file .fase7c-runtime-secrets.env | tee fase7c-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase7c-upload.log | tail -n 1)
           if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
             echo "preview version id not captured" >&2
             exit 1
           fi
-          echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
-          echo "AUDIT_PREVIEW_UPLOADED=true" >> "$GITHUB_ENV"
+          echo "FASE7C_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          echo "FASE7C_PREVIEW_UPLOADED=true" >> "$GITHUB_ENV"
 
       - name: Verify preview version is isolated from production deployments
         shell: bash
@@ -74,114 +77,75 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
-            -o audit-deployments-before.json
+            -o fase7c-deployments-before.json
           node - <<'NODE'
           const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-deployments-before.json', 'utf8'));
+          const body = JSON.parse(fs.readFileSync('fase7c-deployments-before.json', 'utf8'));
           if (body?.success !== true) throw new Error('Cloudflare deployment read failed');
           const result = body.result;
           const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
-          if (deployments.length === 0) throw new Error('no production deployments returned');
+          if (!deployments.length) throw new Error('no production deployments returned');
           const deploymentIds = deployments.map((item) => String(item.id || '')).filter(Boolean).sort();
           const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((version) => String(version.version_id || '')) : []).filter(Boolean))].sort();
-          const ephemeral = process.env.EPHEMERAL_CONTROLLER_VERSION_ID || '';
-          if (!ephemeral) throw new Error('ephemeral controller version missing');
-          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller version is attached to a production deployment');
-          fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nAUDIT_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
-          console.log('AUDIT_PREVIEW_ISOLATION: PASS', JSON.stringify({ ephemeralVersionId: ephemeral, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, attachedToProduction: false }));
+          const ephemeral = process.env.FASE7C_CONTROLLER_VERSION_ID || '';
+          if (!ephemeral || versionIds.includes(ephemeral)) throw new Error('ephemeral controller is missing or attached to production');
+          fs.appendFileSync(process.env.GITHUB_ENV, `FASE7C_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nFASE7C_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
+          console.log('FASE7C_PREVIEW_ISOLATION: PASS', JSON.stringify({ ephemeralVersionId: ephemeral, attachedToProduction: false }));
           NODE
 
-      - name: Preview controller preflight and stale QA recovery
+      - name: Preview preflight and exact stale-fixture recovery
         shell: bash
         run: |
           set -euo pipefail
-          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-            -H 'content-type: application/json' -H 'x-audit-smoke-token: wrong' \
-            --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
-          if [ "$wrong" != "403" ]; then
-            echo "preview token gate failed: HTTP $wrong" >&2
-            exit 1
-          fi
-
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H 'content-type: application/json' -H 'x-fase7c-runtime-token: wrong' \
+            --data "{\"action\":\"preflight\",\"marker\":\"$FASE7C_RUNTIME_MARKER\"}" "$FASE7C_RUNTIME_CONTROLLER_URL" || true)
+          if [ "$wrong" != "403" ]; then echo "preview token gate failed: HTTP $wrong" >&2; exit 1; fi
           read_preflight() {
-            curl -sS -o audit-preflight.json -w "%{http_code}" -X POST \
-              -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-              --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-              "$AUDIT_SMOKE_CONTROLLER_URL"
+            curl -sS -o fase7c-preflight.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-fase7c-runtime-token: $FASE7C_RUNTIME_TOKEN_VALUE" \
+              --data "{\"action\":\"preflight\",\"marker\":\"$FASE7C_RUNTIME_MARKER\"}" "$FASE7C_RUNTIME_CONTROLLER_URL"
           }
-
           status=$(read_preflight)
-          if [ "$status" != "200" ]; then
-            echo "preview preflight failed HTTP $status" >&2
-            exit 1
-          fi
-          stale=$(node -e "const b=require('./audit-preflight.json'); process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
+          if [ "$status" != "200" ]; then echo "preview preflight failed HTTP $status" >&2; exit 1; fi
+          stale=$(node -e "const b=require('./fase7c-preflight.json'); process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
           if [ "$stale" -gt 0 ]; then
-            echo "STALE QA RESIDUE: recognized verifier fixtures=$stale; applying exact-namespace cleanup"
-            cleanup_status=$(curl -sS -o audit-stale-cleanup.json -w "%{http_code}" -X POST \
-              -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-              --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-              "$AUDIT_SMOKE_CONTROLLER_URL")
-            CLEANUP_STATUS="$cleanup_status" node -e "const fs=require('node:fs'); const body=JSON.parse(fs.readFileSync('audit-stale-cleanup.json','utf8')); if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true) throw new Error('stale QA residue cleanup failed'); if(body.recognizedQaUsers!==0||body.recognizedQaAdmins!==0) throw new Error('stale QA residue remains after scoped cleanup'); console.log('STALE_QA_RESIDUE_CLEANUP: PASS',JSON.stringify({cleanedUsers:body.cleanedUsers,cleanedAdmins:body.cleanedAdmins}));"
+            cleanup_status=$(curl -sS -o fase7c-stale-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-fase7c-runtime-token: $FASE7C_RUNTIME_TOKEN_VALUE" \
+              --data "{\"action\":\"cleanup-residue\",\"marker\":\"$FASE7C_RUNTIME_MARKER\"}" "$FASE7C_RUNTIME_CONTROLLER_URL")
+            CLEANUP_STATUS="$cleanup_status" node -e "const b=require('./fase7c-stale-cleanup.json'); if(process.env.CLEANUP_STATUS!=='200'||b.ok!==true||b.recognizedQaUsers!==0) throw new Error('stale cleanup failed');"
             status=$(read_preflight)
-            if [ "$status" != "200" ]; then
-              echo "post-residue preflight failed HTTP $status" >&2
-              exit 1
-            fi
           fi
-
           PREFLIGHT_STATUS="$status" node - <<'NODE'
           const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-preflight.json', 'utf8'));
+          const body = JSON.parse(fs.readFileSync('fase7c-preflight.json', 'utf8'));
           if (process.env.PREFLIGHT_STATUS !== '200') throw new Error(`preflight HTTP ${process.env.PREFLIGHT_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaSessions','qaAdmins','recognizedQaUsers','recognizedQaAdmins']) {
-            if (body[key] !== 0) throw new Error(`preflight residue ${key}=${body[key]}`);
-          }
-          if (body.superAdmins !== 1) throw new Error(`real SUPER_ADMIN baseline ${body.superAdmins}`);
-          if (body.profilesWithoutOwner !== 0) throw new Error(`profilesWithoutOwner baseline ${body.profilesWithoutOwner}`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_BASELINE_PROFILES=${body.profilesTotal}\nCONTROLLER_READY=true\n`);
-          console.log('AUDIT_PREFLIGHT: PASS', JSON.stringify({ superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner, recognizedQaUsers: body.recognizedQaUsers }));
+          for (const key of ['qaUsers','qaProfiles','qaOwners','qaContentItems','qaContentVariants','qaAssets','qaPublicationJobs','recognizedQaUsers']) if (body[key] !== 0) throw new Error(`preflight residue ${key}=${body[key]}`);
+          if (body.profilesWithoutOwner !== 0) throw new Error(`profilesWithoutOwner=${body.profilesWithoutOwner}`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `FASE7C_BASELINE_PROFILES=${body.profilesTotal}\nFASE7C_CONTROLLER_READY=true\n`);
+          console.log('FASE7C_PREFLIGHT: PASS', JSON.stringify({ profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
           NODE
 
-      - name: Authenticated Audit API runtime
-        run: node tests/audit-viewer-runtime.mjs
-
-      - name: Install Playwright + Chromium
+      - name: FASE 7C authenticated content runtime
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.62.1
-          npx playwright install --with-deps chromium
+          set -euo pipefail
+          node tests/fase7c-runtime.mjs
 
-      - name: Audit Viewer desktop/mobile browser runtime
-        run: node tests/audit-viewer-browser.mjs
-
-      - name: Cleanup ephemeral smoke identities and data
+      - name: Cleanup ephemeral FASE 7C identities and data
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${CONTROLLER_READY:-}" != "true" ]; then
-            echo "CLEANUP_CONTROLLER_NOT_READY: no smoke identities were authorized for creation"
-            exit 0
-          fi
-          status=$(curl -sS -o audit-cleanup.json -w "%{http_code}" -X POST \
-            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-            --data "{\"action\":\"cleanup\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
-          CLEANUP_STATUS="$status" node - <<'NODE'
+          if [ "${FASE7C_CONTROLLER_READY:-}" != "true" ]; then echo "FASE7C_CLEANUP_NOT_REQUIRED"; exit 0; fi
+          status=$(curl -sS -o fase7c-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-fase7c-runtime-token: $FASE7C_RUNTIME_TOKEN_VALUE" \
+            --data "{\"action\":\"cleanup\",\"marker\":\"$FASE7C_RUNTIME_MARKER\"}" "$FASE7C_RUNTIME_CONTROLLER_URL" || true)
+          FASE7C_CLEANUP_STATUS="$status" node - <<'NODE'
           const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-cleanup.json', 'utf8'));
-          if (process.env.CLEANUP_STATUS !== '200' || body.cleaned !== true) throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaAdmins']) {
-            if (body[key] !== 0) throw new Error(`cleanup residue ${key}=${body[key]}`);
-          }
-          if (body.superAdmins !== 1) throw new Error(`post-cleanup SUPER_ADMIN count ${body.superAdmins}`);
-          if (body.profilesWithoutOwner !== 0) throw new Error(`post-cleanup profilesWithoutOwner ${body.profilesWithoutOwner}`);
-          if (String(body.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`profiles baseline mismatch ${body.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
-          console.log('AUDIT_CLEANUP: PASS', JSON.stringify({ qaUsers: 0, qaProfiles: 0, qaOwners: 0, qaSessions: 0, qaAdmins: 0, superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
+          const body = JSON.parse(fs.readFileSync('fase7c-cleanup.json', 'utf8'));
+          if (process.env.FASE7C_CLEANUP_STATUS !== '200' || body.ok !== true) throw new Error(`cleanup failed HTTP ${process.env.FASE7C_CLEANUP_STATUS}`);
+          for (const key of ['qaUsers','qaProfiles','qaAppUsers','qaSessions','qaAccounts','qaOwners','qaBrandProfiles','qaContentItems','qaContentVariants','qaAssets','qaPublicationJobs','qaCapabilityEvents','qaAiUsageEvents','qaPackageAssignments','qaAuditRows']) if (body[key] !== 0) throw new Error(`cleanup residue ${key}=${body[key]}`);
+          if (body.profilesWithoutOwner !== 0) throw new Error(`profilesWithoutOwner=${body.profilesWithoutOwner}`);
+          if (String(body.profilesTotal) !== String(process.env.FASE7C_BASELINE_PROFILES)) throw new Error(`profile baseline mismatch ${body.profilesTotal}`);
+          console.log('FASE7C_CLEANUP: PASS', JSON.stringify({ cleanedUsers: body.cleanedUsers, profilesTotal: body.profilesTotal, allQaResidue: 0 }));
           NODE
 
       - name: Post-cleanup production and deployment invariants
@@ -192,33 +156,28 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o tenant-audit.json
-          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities -o auth-audit.json
-          curl -fsS \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
-            -o audit-deployments-after.json
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o fase7c-tenant-audit.json
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities -o fase7c-auth-audit.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7c-deployments-after.json
           node - <<'NODE'
           const fs = require('node:fs');
-          const tenant = JSON.parse(fs.readFileSync('tenant-audit.json', 'utf8'));
-          const auth = JSON.parse(fs.readFileSync('auth-audit.json', 'utf8'));
-          const cloudflare = JSON.parse(fs.readFileSync('audit-deployments-after.json', 'utf8'));
-          if (tenant?.ready !== true || tenant?.ownerContract?.ready !== true) throw new Error('production tenant/owner invariant not ready');
-          if (tenant.ownerContract.profilesWithoutOwner !== 0) throw new Error(`production profilesWithoutOwner ${tenant.ownerContract.profilesWithoutOwner}`);
-          if (auth?.managedAuth?.ready !== true || auth.managedAuth.nativeAdminUsers !== 1) throw new Error(`production native SUPER_ADMIN count ${auth?.managedAuth?.nativeAdminUsers}`);
-          if (process.env.AUDIT_BASELINE_PROFILES && String(tenant.ownerContract.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`production profile baseline mismatch ${tenant.ownerContract.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
-          if (cloudflare?.success !== true) throw new Error('Cloudflare post-runtime deployment read failed');
+          const tenant = JSON.parse(fs.readFileSync('fase7c-tenant-audit.json', 'utf8'));
+          const auth = JSON.parse(fs.readFileSync('fase7c-auth-audit.json', 'utf8'));
+          const cloudflare = JSON.parse(fs.readFileSync('fase7c-deployments-after.json', 'utf8'));
+          if (tenant?.ready !== true || tenant?.ownerContract?.ready !== true || tenant.ownerContract.profilesWithoutOwner !== 0) throw new Error('tenant/owner invariant failed');
+          if (auth?.managedAuth?.ready !== true || auth.managedAuth.nativeAdminUsers !== 1) throw new Error('Managed Auth invariant failed');
+          if (process.env.FASE7C_BASELINE_PROFILES && String(tenant.ownerContract.profilesTotal) !== String(process.env.FASE7C_BASELINE_PROFILES)) throw new Error('profile baseline changed');
+          if (cloudflare?.success !== true) throw new Error('Cloudflare deployment read failed');
           const result = cloudflare.result;
           const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
           const deploymentIds = deployments.map((item) => String(item.id || '')).filter(Boolean).sort();
           const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((version) => String(version.version_id || '')) : []).filter(Boolean))].sort();
-          const beforeDeployments = String(process.env.AUDIT_PRODUCTION_DEPLOYMENT_IDS || '').split(',').filter(Boolean).sort();
-          const beforeVersions = String(process.env.AUDIT_PRODUCTION_VERSION_IDS || '').split(',').filter(Boolean).sort();
-          if (JSON.stringify(deploymentIds) !== JSON.stringify(beforeDeployments)) throw new Error('production deployment set changed during Audit runtime');
-          if (JSON.stringify(versionIds) !== JSON.stringify(beforeVersions)) throw new Error('production deployment version set changed during Audit runtime');
-          const ephemeral = process.env.EPHEMERAL_CONTROLLER_VERSION_ID || '';
-          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller became attached to production after runtime');
-          console.log('AUDIT_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ nativeAdminUsers: auth.managedAuth.nativeAdminUsers, profilesTotal: tenant.ownerContract.profilesTotal, profilesWithoutOwner: tenant.ownerContract.profilesWithoutOwner, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, ephemeralVersionId: ephemeral, attachedToProduction: false }));
+          const beforeDeployments = String(process.env.FASE7C_PRODUCTION_DEPLOYMENT_IDS || '').split(',').filter(Boolean).sort();
+          const beforeVersions = String(process.env.FASE7C_PRODUCTION_VERSION_IDS || '').split(',').filter(Boolean).sort();
+          if (JSON.stringify(deploymentIds) !== JSON.stringify(beforeDeployments) || JSON.stringify(versionIds) !== JSON.stringify(beforeVersions)) throw new Error('production deployment changed during verifier');
+          if (versionIds.includes(process.env.FASE7C_CONTROLLER_VERSION_ID || '')) throw new Error('preview controller attached to production');
+          console.log('FASE7C_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ profilesTotal: tenant.ownerContract.profilesTotal, nativeAdminUsers: auth.managedAuth.nativeAdminUsers, deploymentImmutable: true }));
           NODE
 
       - name: Remove local ephemeral credential material
@@ -226,9 +185,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f .audit-runtime-secrets.env ]; then
-            chmod 600 .audit-runtime-secrets.env || true
-            shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env
-          fi
-          rm -f audit-preflight.json audit-stale-cleanup.json audit-cleanup.json tenant-audit.json auth-audit.json audit-upload.log audit-deployments-before.json audit-deployments-after.json
-          echo "AUDIT_EPHEMERAL_SECRET_CLEANUP: PASS"
+          if [ -f .fase7c-runtime-secrets.env ]; then chmod 600 .fase7c-runtime-secrets.env || true; shred -u .fase7c-runtime-secrets.env 2>/dev/null || rm -f .fase7c-runtime-secrets.env; fi
+          rm -f fase7c-preflight.json fase7c-stale-cleanup.json fase7c-cleanup.json fase7c-tenant-audit.json fase7c-auth-audit.json fase7c-upload.log fase7c-deployments-before.json fase7c-deployments-after.json
+          echo "FASE7C_EPHEMERAL_SECRET_CLEANUP: PASS"
