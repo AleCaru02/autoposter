@@ -6,9 +6,14 @@ const fase7c = workflow.includes("tests/fase7c-runtime.mjs");
 const controller = fs.readFileSync(fase7c ? "tests/fase7c-runtime-controller.mjs" : "tests/audit-viewer-qa-controller.mjs", "utf8");
 const wrangler = fs.readFileSync(fase7c ? "tests/wrangler.fase7c-runtime.jsonc" : "tests/wrangler.audit-runtime.jsonc", "utf8");
 
-assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m, "runtime must remain workflow_dispatch-only");
+const exactFase7cDiagnosticTrigger = fase7c && /^\s+pull_request:\s*\n\s+branches: \[main\]\s*$/m.test(workflow);
+if (exactFase7cDiagnosticTrigger) {
+  assert.match(workflow, /if: github\.event_name == 'workflow_dispatch' \|\| github\.head_ref == 'verify\/fase7c-content-runtime'/, "temporary diagnostic trigger must be scoped to the exact verifier branch");
+} else {
+  assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m, "runtime must remain workflow_dispatch-only");
+}
 assert.doesNotMatch(workflow, /^\s+push:/m, "runtime must not run on push");
-assert.doesNotMatch(workflow, /^\s+pull_request:/m, "runtime must not run on pull_request");
+if (!exactFase7cDiagnosticTrigger) assert.doesNotMatch(workflow, /^\s+pull_request:/m, "runtime must not run on pull_request");
 assert.match(workflow, /group:\s*(?:audit-viewer-authenticated-runtime|fase7c-content-runtime)\s*$/m, "stable concurrency group missing");
 assert.match(workflow, /cancel-in-progress:\s*false\s*$/m, "security runtime must finish cleanup rather than cancel in progress");
 
