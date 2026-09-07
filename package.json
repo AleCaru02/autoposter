@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:fase7c-content-generation": "tsx tests/fase7c-content-generation.test.ts",
+    "test:fase7c-runtime-static": "node tests/fase7c-runtime-static.test.mjs",
     "test:fase7a-editable-brand": "node tests/fase7a-editable-brand.test.mjs",
     "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs",
     "dev": "vite", "build": "tsc -b && vite build", "preview": "vite preview", "typecheck": "tsc -b --pretty false", "build:cloudflare": "npm run build && wrangler deploy --dry-run", "deploy:cloudflare": "npm run build && wrangler deploy", "dev:cloudflare": "npm run build && wrangler dev",
