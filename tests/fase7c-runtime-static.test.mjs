@@ -19,6 +19,7 @@ assert.match(workflow, /set -euo pipefail/g);
 assert.match(controller, /fase7c-\(\[a-z0-9\]/);
 assert.match(controller, /delete from public\.profiles where owner_auth_user_id/);
 assert.match(controller, /delete from neon_auth\.user/);
+assert.match(controller, /qaReleaseReasons/);
 assert.match(runtime, /\/api\/onboarding-provision/);
 assert.match(runtime, /\/api\/onboarding-complete/);
 assert.match(runtime, /\/api\/generate-text/);
