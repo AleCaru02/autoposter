@@ -28,6 +28,30 @@ jobs:
           npm run test:image-generation-gating
           npm run test:tenant-cross-security
 
+      - name: Verify required AI secret presence
+        shell: bash
+        env:
+          OPENAI_API_KEY_SOURCE: ${{ secrets.OPENAI_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OPENAI_API_KEY_SOURCE" ]; then
+            echo "GITHUB_OPENAI_SECRET_AVAILABLE: FAIL" >&2
+            exit 1
+          fi
+          echo "GITHUB_OPENAI_SECRET_AVAILABLE: PASS"
+          npx wrangler secret list --format json > fase7c-secret-names.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const rows = JSON.parse(fs.readFileSync('fase7c-secret-names.json', 'utf8'));
+          const names = new Set(Array.isArray(rows) ? rows.map((row) => row?.name).filter(Boolean) : []);
+          for (const required of ['DATABASE_URL', 'OPENAI_API_KEY']) {
+            if (!names.has(required)) throw new Error(`CLOUDFLARE_REQUIRED_SECRET_MISSING:${required}`);
+          }
+          console.log('CLOUDFLARE_REQUIRED_AI_SECRETS: PASS', JSON.stringify({ databaseUrl: true, openAiApiKey: true }));
+          NODE
+
       - name: Generate ephemeral FASE 7C material
         shell: bash
         run: |
@@ -186,5 +210,5 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f .fase7c-runtime-secrets.env ]; then chmod 600 .fase7c-runtime-secrets.env || true; shred -u .fase7c-runtime-secrets.env 2>/dev/null || rm -f .fase7c-runtime-secrets.env; fi
-          rm -f fase7c-preflight.json fase7c-stale-cleanup.json fase7c-cleanup.json fase7c-tenant-audit.json fase7c-auth-audit.json fase7c-upload.log fase7c-deployments-before.json fase7c-deployments-after.json
+          rm -f fase7c-secret-names.json fase7c-preflight.json fase7c-stale-cleanup.json fase7c-cleanup.json fase7c-tenant-audit.json fase7c-auth-audit.json fase7c-upload.log fase7c-deployments-before.json fase7c-deployments-after.json
           echo "FASE7C_EPHEMERAL_SECRET_CLEANUP: PASS"

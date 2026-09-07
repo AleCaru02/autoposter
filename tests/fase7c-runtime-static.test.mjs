@@ -12,6 +12,8 @@ assert.match(workflow, /workflow_dispatch:/);
 assert.match(workflow, /wrangler versions upload/);
 assert.doesNotMatch(workflow, /wrangler\s+deploy(?!ments)/, "verifier must never deploy its controller to production");
 assert.match(workflow, /Verify preview version is isolated from production deployments/);
+assert.match(workflow, /CLOUDFLARE_REQUIRED_SECRET_MISSING/);
+assert.match(workflow, /GITHUB_OPENAI_SECRET_AVAILABLE: PASS/);
 assert.match(workflow, /Cleanup ephemeral FASE 7C identities and data[\s\S]+if: always\(\)/);
 assert.match(workflow, /set -euo pipefail/g);
 assert.match(controller, /fase7c-\(\[a-z0-9\]/);

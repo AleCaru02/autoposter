@@ -193,7 +193,8 @@ const crossTenantGeneration = await appApi("/api/generate-text", other.token, {
   headers: { "x-post-automatici-operation-id": `fase7c-cross-${marker}` },
   body: JSON.stringify({ profileId, topic: `Tema cross tenant ${marker}`, providers: ["INSTAGRAM"], formats: ["POST"], researchMode: "WEBSITE_ONLY" }),
 });
-assert.equal(crossTenantGeneration.status, 404);
+const crossTenantGenerationBody = await readJson(crossTenantGeneration);
+assert.equal(crossTenantGeneration.status, 404, `cross-tenant generation expected 404, got ${crossTenantGeneration.status}:${crossTenantGenerationBody?.error || "unknown"}`);
 
 const generationOperation = `fase7c-text-${marker}`;
 const generationPayload = {
