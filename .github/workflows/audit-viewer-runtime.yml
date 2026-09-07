@@ -2,8 +2,6 @@ name: Audit Viewer Authenticated Runtime
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
 
 concurrency:
   group: fase7c-content-runtime
@@ -11,7 +9,6 @@ concurrency:
 
 jobs:
   runtime:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'verify/fase7c-content-runtime'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
