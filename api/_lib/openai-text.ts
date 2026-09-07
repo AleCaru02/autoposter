@@ -374,7 +374,22 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     factCheck = await runOpenAIFactCheckAgent({
       apiKey: options.apiKey,
       topic: options.topic,
-      content: { generated: content, confirmedWebsiteSources: websiteContext },
+      content: {
+        generated: content,
+        brandFacts: {
+          name: options.brand.profileName,
+          industry: options.brand.industry,
+          websiteUrl: options.brand.websiteUrl,
+          description: options.brand.description,
+          businessModel: options.brand.businessModel,
+          location: options.brand.location,
+          serviceArea: options.brand.serviceArea,
+          target: options.brand.target,
+          tone: options.brand.tone,
+          goals: options.brand.goals,
+        },
+        confirmedWebsiteSources: websiteContext,
+      },
       research: dedicatedResearch,
       existingSources: combinedSources,
       allowWebSearch: research.useWebSearch && combinedSources.length === 0,

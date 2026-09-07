@@ -105,6 +105,27 @@ assert.equal(websiteOnlyBody && "tools" in websiteOnlyBody, false, "la modalità
 assert.equal(websiteOnlyResult.usage.webSearchCalls, 0);
 assert.equal(websiteOnlyResult.usage.estimatedCostUsd, estimateTerraCostUsd(10, 10));
 
+let brandFactCall = 0;
+let factCheckPayload: Record<string, any> | null = null;
+const numberedBrandContent = {
+  ...generated,
+  variants: [{ ...generated.variants[0], caption: "QA Property 7 offre gestione professionale." }],
+};
+const brandFactFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+  brandFactCall += 1;
+  const request = JSON.parse(String(init?.body)) as Record<string, any>;
+  if (brandFactCall === 1) {
+    return new Response(JSON.stringify({ id: "resp_brand_fact", model: "gpt-5.6-terra", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(numberedBrandContent) }] }], usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } }), { status: 200 });
+  }
+  factCheckPayload = JSON.parse(String(request.input));
+  const checked = { verdict: "PASS", checkedClaims: [{ claim: "QA Property 7 offre gestione professionale", status: "VERIFIED", reason: "Il nome e il servizio sono presenti nei dati brand." }] };
+  return new Response(JSON.stringify({ id: "resp_brand_fact_check", model: "gpt-5.6-terra", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(checked) }] }], usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } }), { status: 200 });
+}) as typeof fetch;
+const brandFactResult = await generateSocialText({ apiKey: "sk-test-only", topic: "Presentazione attività", providers: ["INSTAGRAM"], formats: ["POST"], brand: { ...brand, profileName: "QA Property 7" }, fetcher: brandFactFetcher, researchMode: "WEBSITE_ONLY" });
+assert.equal(brandFactCall, 2, "a material numbered brand claim must still run fact-checking");
+assert.equal(factCheckPayload?.content?.brandFacts?.name, "QA Property 7", "fact-check must receive the same authoritative brand facts used for generation");
+assert.equal(brandFactResult.verification.factCheckVerdict, "PASS");
+
 const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand, researchMode: "BALANCED" });
 const websiteOnlyUpperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM"], formats: ["POST"], brand, researchMode: "WEBSITE_ONLY" });
 assert.ok(upperBound > websiteOnlyUpperBound, "il budget preventivo deve includere il costo separato della ricerca web");
