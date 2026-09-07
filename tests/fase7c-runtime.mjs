@@ -211,7 +211,10 @@ const generationResponse = await appApi("/api/generate-text", owner.token, {
   body: JSON.stringify(generationPayload),
 });
 const generationBody = await readJson(generationResponse);
-assert.equal(generationResponse.status, 200, `text generation failed (${generationResponse.status}:${generationBody?.error || "unknown"})`);
+if (generationResponse.status !== 200) {
+  const failedState = await controller("state");
+  assert.equal(generationResponse.status, 200, `text generation failed (${generationResponse.status}:${generationBody?.error || "unknown"}:${JSON.stringify(failedState.qaReleaseReasons || [])})`);
+}
 assert.ok(Array.isArray(generationBody?.content?.variants) && generationBody.content.variants.length >= 3);
 const generatedVariants = generationBody.content.variants;
 assert.ok(generatedVariants.some((variant) => variant.format === "POST"));
