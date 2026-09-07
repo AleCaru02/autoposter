@@ -6,6 +6,7 @@ import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
+import { ManualContentComposer } from "../components/manual-content-composer";
 
 type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
@@ -168,6 +169,8 @@ export function ContentGeneratorPage() {
     <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa il sito per capire brand, servizi e tono, poi può ampliare i temi con ricerca online pertinente al settore.</p></div></header>
     <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
+
+    <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} researchMode={overview.settings.researchMode} />
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
       <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
