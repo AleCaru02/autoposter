@@ -168,7 +168,7 @@ export function shouldRunResearchAgent(mode: EditorialResearchMode) {
 
 export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchMode) {
   if (mode === "NEWS") return true;
-  const text = JSON.stringify(content ?? "");
+  const text = JSON.stringify(content ?? "").replace(/\b\d+\s+(?:consigli|passi|idee|errori|modi|motivi|strategie|azioni|domande|suggerimenti|slide)\b/gi, "");
   return /\b\d+(?:[.,]\d+)?\s*(?:%|€|eur|euro|usd|km|kg|ore|giorni|anni)?\b|\b(?:legge|norma|regolamento|obbligo|scadenza|dal\s+\d|entro\s+il|202\d)\b/i.test(text);
 }
 
