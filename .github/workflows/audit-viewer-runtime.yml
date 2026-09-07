@@ -59,10 +59,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          marker="${GITHUB_RUN_ID}"
+          marker="${GITHUB_RUN_ID}${GITHUB_RUN_ATTEMPT}"
           password=$(openssl rand -hex 24)
           token=$(openssl rand -hex 32)
-          alias="fase7cqa-${GITHUB_RUN_ID}"
+          alias="fase7cqa-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           owner_email="fase7c-${marker}-owner@example.invalid"
           other_email="fase7c-${marker}-other@example.invalid"
           echo "::add-mask::$password"
