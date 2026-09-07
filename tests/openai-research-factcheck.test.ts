@@ -4,7 +4,11 @@ import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent,
 assert.equal(shouldRunResearchAgent("NEWS"), true);
 assert.equal(shouldRunResearchAgent("BALANCED"), false);
 assert.equal(contentNeedsFactCheck({ caption: "Contenuto editoriale senza dati numerici sensibili." }, "BALANCED"), false);
+assert.equal(contentNeedsFactCheck({ caption: "3 consigli pratici per gestire meglio un immobile." }, "WEBSITE_ONLY"), false, "structural list counts must not trigger external fact-checking");
+assert.equal(contentNeedsFactCheck({ caption: "Abbiamo seguito 100 clienti." }, "WEBSITE_ONLY"), true, "material bare-number claims must still require fact-checking");
 assert.equal(contentNeedsFactCheck({ caption: "Il valore è aumentato del 12%." }, "BALANCED"), true);
+assert.equal(contentNeedsFactCheck({ caption: "Il servizio costa 100 €." }, "WEBSITE_ONLY"), true);
+assert.equal(contentNeedsFactCheck({ caption: "La regola cambia nel 2026." }, "WEBSITE_ONLY"), true);
 assert.equal(contentNeedsFactCheck({ caption: "Aggiornamento di settore" }, "NEWS"), true);
 
 let researchCalls = 0;
