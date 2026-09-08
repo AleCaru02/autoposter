@@ -1,6 +1,6 @@
-import { neonClient } from "../../lib/neon-client";
+import { authClient, neonClient } from "../../lib/neon-client";
 import type { GeneratedSocialContent } from "../../../api/_lib/openai-text";
-import { deriveContentStatus, normalizeHashtags, variantKey, type ApprovalStatus } from "./content-workflow";
+import { normalizeHashtags, variantKey, type ApprovalStatus } from "./content-workflow";
 
 export type { ApprovalStatus, ContentStatus } from "./content-workflow";
 
@@ -49,6 +49,16 @@ export type AssetRow = {
 export type SavedGeneration = {
   contentId: string;
   variantIds: Record<string, string>;
+};
+
+type JwtAuth = { getJWTToken?: () => Promise<string | null> };
+
+type ReviewResponse = {
+  variantId?: string;
+  approvalStatus?: ApprovalStatus;
+  contentStatus?: "IN_REVIEW" | "APPROVED" | "CHANGES_REQUESTED";
+  updatedAt?: string;
+  error?: string;
 };
 
 export async function saveGeneratedContent(input: {
@@ -135,49 +145,33 @@ export async function loadContentWorkflow(profileId: string) {
   return { items, variants, assets };
 }
 
-export async function updateVariant(input: {
+export async function reviewVariant(input: {
   profileId: string;
   variantId: string;
   contentId: string;
+  expectedUpdatedAt: string;
   hook: string;
   caption: string;
   cta: string;
   hashtags: string[];
   visualBrief: string;
   altText: string;
-}) {
-  const now = new Date().toISOString();
-  const result = await neonClient.from("content_variants").update({
-    hook: input.hook.trim() || null,
-    caption: input.caption.trim(),
-    cta: input.cta.trim() || null,
-    hashtags: normalizeHashtags(input.hashtags),
-    visual_brief: input.visualBrief.trim() || null,
-    alt_text: input.altText.trim() || null,
-    approval_status: "PENDING",
-    updated_at: now,
-  }).eq("id", input.variantId).eq("profile_id", input.profileId).select("id").single();
-  if (result.error) throw new Error(result.error.message);
-  const parent = await neonClient.from("content_items").update({ status: "IN_REVIEW", updated_at: now }).eq("id", input.contentId).eq("profile_id", input.profileId).select("id").single();
-  if (parent.error) throw new Error(parent.error.message);
-}
-
-export async function setVariantApproval(input: {
-  profileId: string;
-  variantId: string;
-  contentId: string;
   approvalStatus: ApprovalStatus;
 }) {
-  const now = new Date().toISOString();
-  const result = await neonClient.from("content_variants").update({ approval_status: input.approvalStatus, updated_at: now }).eq("id", input.variantId).eq("profile_id", input.profileId).select("id").single();
-  if (result.error) throw new Error(result.error.message);
-  const statusesResult = await neonClient.from("content_variants").select("approval_status").eq("content_id", input.contentId).eq("profile_id", input.profileId);
-  if (statusesResult.error) throw new Error(statusesResult.error.message);
-  const statuses = (statusesResult.data ?? []).map((row) => row.approval_status as ApprovalStatus);
-  const status = deriveContentStatus(statuses);
-  const parent = await neonClient.from("content_items").update({ status, updated_at: now }).eq("id", input.contentId).eq("profile_id", input.profileId).select("id").single();
-  if (parent.error) throw new Error(parent.error.message);
-  return status;
+  const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
+  if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
+  const response = await fetch("/api/content-review", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ ...input, hashtags: normalizeHashtags(input.hashtags) }),
+  });
+  const body = await response.json() as ReviewResponse;
+  if (!response.ok || !body.variantId || !body.approvalStatus || !body.contentStatus || !body.updatedAt) {
+    if (response.status === 409) throw new Error("Il contenuto è stato modificato in un’altra sessione. Aggiorna la pagina prima di continuare.");
+    if (response.status === 403 || response.status === 404) throw new Error("Non puoi modificare questo contenuto.");
+    throw new Error("Revisione non salvata. Riprova.");
+  }
+  return { approvalStatus: body.approvalStatus, contentStatus: body.contentStatus, updatedAt: body.updatedAt };
 }
 
 export async function deleteContent(profileId: string, contentId: string) {
