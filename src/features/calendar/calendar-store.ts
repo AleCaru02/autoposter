@@ -1,7 +1,7 @@
 import { neonClient } from "../../lib/neon-client";
+import { authenticatedApiToken } from "../../lib/auth-token";
 import {
   clampPostsPerWeek,
-  createCalendarIdempotencyKey,
   normalizePreferredSlots,
   type PreferredSlot,
   type SocialProvider,
@@ -58,6 +58,38 @@ export type CalendarState = {
   contentTitles: Record<string, string>;
 };
 
+type CalendarMutationResponse = {
+  action?: string;
+  scheduleId?: string;
+  jobId?: string;
+  state?: string;
+  scheduledAt?: string;
+  updatedAt?: string;
+  removed?: boolean;
+  error?: string;
+};
+
+async function calendarMutation(body: Record<string, unknown>) {
+  const token = await authenticatedApiToken();
+  const response = await fetch("/api/calendar", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json() as CalendarMutationResponse;
+  if (!response.ok) {
+    if (response.status === 409) throw new Error(result.error === "GENERATION_IN_PROGRESS" ? "La programmazione è già in corso. Attendi qualche secondo." : "Il calendario è stato modificato in un’altra sessione. Aggiorna la pagina.");
+    if (result.error === "CAPABILITY_LIMIT_REACHED") throw new Error("Hai raggiunto il limite mensile di programmazioni.");
+    if (result.error === "CAPABILITY_DISABLED") throw new Error("La programmazione non è disponibile per questa attività.");
+    if (result.error === "CALENDAR_SOCIAL_NOT_CONNECTED") throw new Error("Collega prima questo social nella sezione Social.");
+    if (result.error === "CALENDAR_DUPLICATE_VARIANT") throw new Error("Questa variante è già presente nel calendario.");
+    if (response.status === 401) throw new Error("Sessione non valida. Accedi di nuovo.");
+    if (response.status === 403 || response.status === 404) throw new Error("Non puoi modificare questo calendario.");
+    throw new Error("Operazione calendario non riuscita. Riprova.");
+  }
+  return result;
+}
+
 export async function loadCalendarState(profileId: string): Promise<CalendarState> {
   const [scheduleResult, variantsResult, jobsResult] = await Promise.all([
     neonClient.from("schedules")
@@ -104,30 +136,18 @@ export async function saveProviderSchedule(input: {
   autoChoose: boolean;
   enabled: boolean;
 }) {
-  const rowsResult = await neonClient.from("schedules").select("id").eq("profile_id", input.profileId).eq("provider", input.provider).limit(5);
-  if (rowsResult.error) throw new Error(rowsResult.error.message);
-  const existing = rowsResult.data ?? [];
-  const payload = {
+  const result = await calendarMutation({
+    action: "SAVE_SCHEDULE",
+    profileId: input.profileId,
+    provider: input.provider,
     timezone: input.timezone,
-    posts_per_week: clampPostsPerWeek(input.postsPerWeek),
-    preferred_slots: normalizePreferredSlots(input.preferredSlots),
-    auto_choose: input.autoChoose,
+    postsPerWeek: clampPostsPerWeek(input.postsPerWeek),
+    preferredSlots: normalizePreferredSlots(input.preferredSlots),
+    autoChoose: input.autoChoose,
     enabled: input.enabled,
-    updated_at: new Date().toISOString(),
-  };
-  if (existing[0]?.id) {
-    const update = await neonClient.from("schedules").update(payload).eq("id", existing[0].id).eq("profile_id", input.profileId).select("id").single();
-    if (update.error) throw new Error(update.error.message);
-    if (existing.length > 1) {
-      const duplicates = existing.slice(1).map((row) => row.id);
-      const cleanup = await neonClient.from("schedules").delete().eq("profile_id", input.profileId).in("id", duplicates);
-      if (cleanup.error) throw new Error(cleanup.error.message);
-    }
-    return existing[0].id as string;
-  }
-  const insert = await neonClient.from("schedules").insert({ profile_id: input.profileId, provider: input.provider, ...payload }).select("id").single();
-  if (insert.error || !insert.data) throw new Error(insert.error?.message ?? "Impossibile salvare la frequenza.");
-  return insert.data.id as string;
+  });
+  if (!result.scheduleId) throw new Error("Frequenza non salvata. Riprova.");
+  return result.scheduleId;
 }
 
 export async function createCalendarJob(input: {
@@ -137,68 +157,23 @@ export async function createCalendarJob(input: {
 }) {
   const instant = new Date(input.scheduledAt);
   if (!Number.isFinite(instant.getTime()) || instant.getTime() <= Date.now() + 60_000) throw new Error("Scegli una data futura di almeno un minuto.");
-  const variantResult = await neonClient.from("content_variants")
-    .select("id,profile_id,provider,approval_status,eligible")
-    .eq("id", input.variantId)
-    .eq("profile_id", input.profileId)
-    .eq("approval_status", "APPROVED")
-    .eq("eligible", true)
-    .limit(1);
-  if (variantResult.error) throw new Error(variantResult.error.message);
-  const variant = variantResult.data?.[0];
-  if (!variant?.provider) throw new Error("La variante deve essere idonea e approvata prima della programmazione.");
-
-  const connection = await neonClient.from("social_connections")
-    .select("id,status")
-    .eq("profile_id", input.profileId)
-    .eq("provider", variant.provider)
-    .eq("status", "ACTIVE")
-    .limit(1);
-  if (connection.error) throw new Error(connection.error.message);
-  if (!connection.data?.length) throw new Error("Collega prima questo social nella sezione Social.");
-
-  const duplicate = await neonClient.from("publication_jobs")
-    .select("id")
-    .eq("profile_id", input.profileId)
-    .eq("variant_id", input.variantId)
-    .in("state", ["SCHEDULED", "BLOCKED_APPROVAL"])
-    .limit(1);
-  if (duplicate.error) throw new Error(duplicate.error.message);
-  if (duplicate.data?.length) throw new Error("Questa variante è già presente nel calendario. Modifica o rimuovi la programmazione esistente.");
-
-  const id = crypto.randomUUID();
-  const result = await neonClient.from("publication_jobs").insert({
-    id,
-    profile_id: input.profileId,
-    variant_id: input.variantId,
-    provider: variant.provider,
-    state: "SCHEDULED",
-    scheduled_at: instant.toISOString(),
-    idempotency_key: createCalendarIdempotencyKey(id),
-    attempt_count: 0,
-    updated_at: new Date().toISOString(),
-  }).select("id").single();
-  if (result.error || !result.data) throw new Error(result.error?.message ?? "Impossibile programmare il contenuto.");
-  return result.data.id as string;
+  const operationId = crypto.randomUUID();
+  const result = await calendarMutation({ action: "CREATE_JOB", profileId: input.profileId, variantId: input.variantId, scheduledAt: instant.toISOString(), operationId });
+  if (!result.jobId) throw new Error("Impossibile programmare il contenuto.");
+  return result.jobId;
 }
 
 export async function rescheduleCalendarJob(input: {
   profileId: string;
   jobId: string;
   scheduledAt: string;
+  expectedUpdatedAt: string;
 }) {
   const instant = new Date(input.scheduledAt);
   if (!Number.isFinite(instant.getTime()) || instant.getTime() <= Date.now() + 60_000) throw new Error("Scegli una data futura di almeno un minuto.");
-  const result = await neonClient.from("publication_jobs")
-    .update({ scheduled_at: instant.toISOString(), state: "SCHEDULED", updated_at: new Date().toISOString() })
-    .eq("id", input.jobId)
-    .eq("profile_id", input.profileId)
-    .select("id")
-    .single();
-  if (result.error) throw new Error(result.error.message);
+  await calendarMutation({ action: "RESCHEDULE_JOB", profileId: input.profileId, jobId: input.jobId, scheduledAt: instant.toISOString(), expectedUpdatedAt: input.expectedUpdatedAt });
 }
 
-export async function removeCalendarJob(profileId: string, jobId: string) {
-  const result = await neonClient.from("publication_jobs").delete().eq("id", jobId).eq("profile_id", profileId).select("id");
-  if (result.error) throw new Error(result.error.message);
+export async function removeCalendarJob(profileId: string, jobId: string, expectedUpdatedAt: string) {
+  await calendarMutation({ action: "REMOVE_JOB", profileId, jobId, expectedUpdatedAt });
 }

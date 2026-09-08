@@ -268,7 +268,7 @@ export function CalendarPage() {
     const local = jobTimes[job.id];
     if (!local) return;
     await run(`job-${job.id}`, async () => {
-      await rescheduleCalendarJob({ profileId: selectedProfile.id, jobId: job.id, scheduledAt: zonedLocalToIso(local, selectedProfile.timezone) });
+      await rescheduleCalendarJob({ profileId: selectedProfile.id, jobId: job.id, scheduledAt: zonedLocalToIso(local, selectedProfile.timezone), expectedUpdatedAt: job.updated_at });
       setSelectedJobId(null);
       await reload();
     });
@@ -277,7 +277,7 @@ export function CalendarPage() {
   async function removeJob(job: CalendarJobRow) {
     if (!selectedProfile) return;
     await run(`remove-${job.id}`, async () => {
-      await removeCalendarJob(selectedProfile.id, job.id);
+      await removeCalendarJob(selectedProfile.id, job.id, job.updated_at);
       setSelectedJobId(null);
       await reload();
     });
