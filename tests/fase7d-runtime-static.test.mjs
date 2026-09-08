@@ -23,6 +23,8 @@ assert.match(runtime, /contentStatus,\s*"CHANGES_REQUESTED"/, "changes-requested
 assert.match(runtime, /review runtime must never publish content/, "publication side-effect denial missing");
 assert.doesNotMatch(runtime, /\/api\/(?:social-publish|publication-attempt)/, "review verifier must not call publication endpoints");
 assert.match(browserRuntime, /Cosa richiede attenzione oggi/, "customer browser smoke must assert the current dashboard contract");
+assert.match(browserRuntime, /page\.goto\(`\$\{base\}\/app\/dashboard`/, "customer browser smoke must load the authenticated dashboard document directly");
+assert.match(browserRuntime, /customer dashboard document unavailable/, "customer dashboard HTTP assertion missing");
 assert.doesNotMatch(browserRuntime, /Sessione attiva/, "removed pre-6B dashboard copy must not gate the runtime");
 
 for (const metric of ["qaContentItems", "qaContentVariants", "qaPublicationJobs", "qaPublicationAttempts"]) {

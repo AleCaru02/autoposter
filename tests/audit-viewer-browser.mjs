@@ -57,6 +57,8 @@ async function verifyCustomerOwner(browser) {
   const diag = diagnostics(page);
   try {
     await login(page, customerEmail);
+    const dashboardResponse = await page.goto(`${base}/app/dashboard`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    assert.equal(dashboardResponse?.status(), 200, "customer dashboard document unavailable");
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
     await page.getByRole("heading", { name: "Cosa richiede attenzione oggi", exact: true }).waitFor({ state: "visible", timeout: 20000 });
 
