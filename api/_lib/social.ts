@@ -1,4 +1,6 @@
 import { neon } from "@neondatabase/serverless";
+import { EntitlementUsageService } from "./entitlement-usage.js";
+import type { CapabilityKey } from "./capabilities.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
@@ -85,9 +87,79 @@ type JobRecord = {
   provider: SocialProvider;
   scheduled_at: string;
   attempt_count: number;
+  claim_token: string;
+  lease_expires_at: string;
 };
 
 type PublishResult = { externalId: string; metadata?: Record<string, unknown> | undefined };
+type PublishBoundary = () => Promise<void>;
+
+export class SocialPublishError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly retryable: boolean,
+    public readonly outcomeUnknown: boolean,
+    public readonly customerMessage: string,
+  ) { super(code); this.name = "SocialPublishError"; }
+}
+
+function publishError(code: string, options: { retryable?: boolean; outcomeUnknown?: boolean; customerMessage?: string } = {}) {
+  return new SocialPublishError(
+    code,
+    options.retryable === true,
+    options.outcomeUnknown === true,
+    options.customerMessage || "La pubblicazione non è riuscita.",
+  );
+}
+
+export function classifyProviderFailure(provider: SocialProvider, stage: string, status: number | null, visibleWriteStarted: boolean) {
+  const prefix = provider === "INSTAGRAM" ? "INSTAGRAM" : provider === "FACEBOOK" ? "FACEBOOK" : provider === "LINKEDIN" ? "LINKEDIN" : "GBP";
+  if (status === 429) return publishError(`${prefix}_RATE_LIMITED`, { retryable: true, customerMessage: "Il social ha chiesto di riprovare più tardi." });
+  if (status === 401 || status === 403) return publishError(`${prefix}_RECONNECT_REQUIRED`, { customerMessage: "Ricollega il social prima di riprovare." });
+  if (status === 400 || status === 404 || status === 409 || status === 422) return publishError(`${prefix}_CONTENT_REJECTED`, { customerMessage: "Il social ha rifiutato contenuto o formato." });
+  if (visibleWriteStarted) return publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true, customerMessage: "La pubblicazione potrebbe essere avvenuta: verifica il social prima di riprovare." });
+  return publishError(`${prefix}_${stage}_TEMPORARY`, { retryable: true, customerMessage: "Il social non è disponibile. Il sistema riproverà automaticamente." });
+}
+
+export function retryDelaySeconds(jobId: string, attemptNo: number) {
+  const base = Math.min(300 * (2 ** Math.max(attemptNo - 1, 0)), 3600);
+  let hash = 0;
+  for (const char of jobId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return base + (hash % 91);
+}
+
+async function providerRequest(input: string | URL, init: RequestInit, options: {
+  provider: SocialProvider; stage: string; visibleWrite?: boolean; beforeVisibleWrite?: PublishBoundary; timeoutMs?: number;
+}) {
+  const visibleWrite = options.visibleWrite === true;
+  if (visibleWrite && options.beforeVisibleWrite) await options.beforeVisibleWrite();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25_000);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    if (!response.ok) throw classifyProviderFailure(options.provider, options.stage, response.status, visibleWrite);
+    return response;
+  } catch (reason) {
+    if (reason instanceof SocialPublishError) throw reason;
+    throw classifyProviderFailure(options.provider, options.stage, null, visibleWrite);
+  } finally { clearTimeout(timeout); }
+}
+
+async function providerJson<T>(response: Response, provider: SocialProvider, stage: string, visibleWriteStarted: boolean): Promise<T> {
+  try {
+    return await response.json() as T;
+  } catch {
+    throw classifyProviderFailure(provider, `${stage}_RESPONSE`, null, visibleWriteStarted);
+  }
+}
+
+function terminalPublishError(code: string) {
+  if (code === "CONTENT_NOT_APPROVED") return publishError(code, { customerMessage: "Il contenuto deve essere approvato prima della pubblicazione." });
+  if (code === "SOCIAL_NOT_CONNECTED" || code.includes("RECONNECT_REQUIRED") || code === "TOKEN_REFERENCE_INVALID") return publishError("SOCIAL_RECONNECT_REQUIRED", { customerMessage: "Ricollega il social prima di riprovare." });
+  if (code.includes("FORMAT") || code.includes("MEDIA") || code.includes("ASSET")) return publishError("CONTENT_MEDIA_INVALID", { customerMessage: "Controlla formato e immagine del contenuto." });
+  if (code.includes("CAPABILITY") || code.includes("ENTITLEMENT")) return publishError("PUBLISHING_NOT_AVAILABLE", { customerMessage: "La pubblicazione automatica non è disponibile per questa attività." });
+  return publishError("SOCIAL_PUBLISH_FAILED");
+}
 
 type GoogleRequestRuntime = {
   fetch?: typeof fetch;
@@ -805,26 +877,27 @@ function bytesBody(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function mediaSignature(assetId: string, exp: number, secret: string) {
-  return hmac(`media:${assetId}:${exp}`, secret);
+async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string) {
+  return hmac(`media:${profileId}:${assetId}:${exp}`, secret);
 }
 
-async function publicMediaUrl(assetId: string, env: SocialEnv) {
+async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv) {
   const root = baseUrl(env);
   if (!root) throw new Error("APP_BASE_URL_NOT_CONFIGURED");
   const exp = Date.now() + 20 * 60_000;
-  const sig = await mediaSignature(assetId, exp, env.SOCIAL_TOKEN_KEY!);
-  return `${root}/api/social/media/${encodeURIComponent(assetId)}?exp=${exp}&sig=${encodeURIComponent(sig)}`;
+  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!);
+  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
 }
 
 async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
   const url = new URL(request.url);
+  const profileId = url.searchParams.get("profile") || "";
   const exp = Number(url.searchParams.get("exp"));
   const sig = url.searchParams.get("sig") || "";
-  if (!Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(assetId, exp, env.SOCIAL_TOKEN_KEY)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
+  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
   const sql = neon(env.DATABASE_URL);
-  const rows = await sql`select storage_url, mime_type from public.assets where id=${assetId}::uuid limit 1` as unknown as Array<{ storage_url: string; mime_type: string | null }>;
+  const rows = await sql`select storage_url, mime_type from public.assets where id=${assetId}::uuid and profile_id=${profileId}::uuid limit 1` as unknown as Array<{ storage_url: string; mime_type: string | null }>;
   const asset = rows[0];
   if (!asset?.storage_url) return socialJson({ error: "ASSET_NOT_FOUND" }, 404);
   try {
@@ -835,24 +908,24 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   }
 }
 
-async function publishInstagram(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv): Promise<PublishResult> {
+async function publishInstagram(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (!variant.image_asset_id) throw new Error("INSTAGRAM_REQUIRES_MEDIA");
   if (variant.format === "CAROUSEL") throw new Error("CAROUSEL_REQUIRES_MULTIPLE_MEDIA_ASSETS");
   if (variant.format !== "POST" && variant.format !== "STORY") throw new Error("FORMAT_NOT_SUPPORTED");
-  const mediaUrl = await publicMediaUrl(variant.image_asset_id, env);
+  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env);
   const form = new URLSearchParams({ image_url: mediaUrl, access_token: bundle.accessToken });
   if (variant.format === "POST") form.set("caption", composeCaption(variant));
   if (variant.format === "STORY") form.set("media_type", "STORIES");
-  const create = await fetch(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media`, { method: "POST", body: form });
-  const createBody = await create.json() as { id?: string; error?: { message?: string } };
-  if (!create.ok || !createBody.id) throw new Error(createBody.error?.message || `INSTAGRAM_MEDIA_${create.status}`);
-  const publish = await fetch(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: createBody.id, access_token: bundle.accessToken }) });
-  const publishBody = await publish.json() as { id?: string; error?: { message?: string } };
-  if (!publish.ok || !publishBody.id) throw new Error(publishBody.error?.message || `INSTAGRAM_PUBLISH_${publish.status}`);
+  const create = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media`, { method: "POST", body: form }, { provider: "INSTAGRAM", stage: "MEDIA_CREATE" });
+  const createBody = await providerJson<{ id?: string }>(create, "INSTAGRAM", "MEDIA_CREATE", false);
+  if (!createBody.id) throw classifyProviderFailure("INSTAGRAM", "MEDIA_CREATE", null, false);
+  const publish = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: createBody.id, access_token: bundle.accessToken }) }, { provider: "INSTAGRAM", stage: "PUBLISH", visibleWrite: true, beforeVisibleWrite });
+  const publishBody = await providerJson<{ id?: string }>(publish, "INSTAGRAM", "PUBLISH", true);
+  if (!publishBody.id) throw classifyProviderFailure("INSTAGRAM", "PUBLISH", null, true);
   return { externalId: publishBody.id, metadata: { containerId: createBody.id } };
 }
 
-async function publishFacebook(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv): Promise<PublishResult> {
+async function publishFacebook(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (variant.format !== "POST") throw new Error("FACEBOOK_FORMAT_REQUIRES_ADDITIONAL_MEDIA_ASSETS");
   const pageId = connection.provider_account_id;
   if (!pageId) throw new Error("FACEBOOK_PAGE_MISSING");
@@ -860,17 +933,17 @@ async function publishFacebook(variant: VariantRecord, connection: StoredConnect
   const endpoint = variant.image_asset_id ? "photos" : "feed";
   const form = new URLSearchParams({ access_token: bundle.accessToken });
   if (variant.image_asset_id) {
-    form.set("url", await publicMediaUrl(variant.image_asset_id, env));
+    form.set("url", await publicMediaUrl(variant.profile_id, variant.image_asset_id, env));
     form.set("caption", caption);
   } else form.set("message", caption);
-  const response = await fetch(`https://graph.facebook.com/${metaVersion(env)}/${pageId}/${endpoint}`, { method: "POST", body: form });
-  const body = await response.json() as { id?: string; post_id?: string; error?: { message?: string } };
+  const response = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${pageId}/${endpoint}`, { method: "POST", body: form }, { provider: "FACEBOOK", stage: "PUBLISH", visibleWrite: true, beforeVisibleWrite });
+  const body = await providerJson<{ id?: string; post_id?: string }>(response, "FACEBOOK", "PUBLISH", true);
   const externalId = body.post_id || body.id;
-  if (!response.ok || !externalId) throw new Error(body.error?.message || `FACEBOOK_PUBLISH_${response.status}`);
+  if (!externalId) throw classifyProviderFailure("FACEBOOK", "PUBLISH", null, true);
   return { externalId };
 }
 
-async function publishLinkedIn(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv): Promise<PublishResult> {
+async function publishLinkedIn(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (variant.format !== "POST") throw new Error("LINKEDIN_FORMAT_NOT_SUPPORTED");
   if (connection.expires_at && new Date(connection.expires_at).getTime() <= Date.now()) throw new Error("LINKEDIN_RECONNECT_REQUIRED");
   const accountType = connectionMetadata(connection.metadata).accountType === "ORGANIZATION" ? "organization" : "person";
@@ -878,12 +951,11 @@ async function publishLinkedIn(variant: VariantRecord, connection: StoredConnect
   const headers = { authorization: `Bearer ${bundle.accessToken}`, "Linkedin-Version": linkedinVersion(env), "X-Restli-Protocol-Version": "2.0.0", "content-type": "application/json" };
   let content: Record<string, unknown> | undefined;
   if (variant.image_asset_id && variant.storage_url) {
-    const initialize = await fetch("https://api.linkedin.com/rest/images?action=initializeUpload", { method: "POST", headers, body: JSON.stringify({ initializeUploadRequest: { owner: author } }) });
-    const initBody = await initialize.json() as { value?: { uploadUrl?: string; image?: string }; message?: string };
-    if (!initialize.ok || !initBody.value?.uploadUrl || !initBody.value.image) throw new Error(initBody.message || `LINKEDIN_IMAGE_INIT_${initialize.status}`);
+    const initialize = await providerRequest("https://api.linkedin.com/rest/images?action=initializeUpload", { method: "POST", headers, body: JSON.stringify({ initializeUploadRequest: { owner: author } }) }, { provider: "LINKEDIN", stage: "IMAGE_INIT" });
+    const initBody = await providerJson<{ value?: { uploadUrl?: string; image?: string } }>(initialize, "LINKEDIN", "IMAGE_INIT", false);
+    if (!initBody.value?.uploadUrl || !initBody.value.image) throw classifyProviderFailure("LINKEDIN", "IMAGE_INIT", null, false);
     const media = await assetBytes(variant.storage_url, variant.mime_type || "image/png");
-    const upload = await fetch(initBody.value.uploadUrl, { method: "PUT", headers: { "content-type": media.mimeType }, body: bytesBody(media.bytes) });
-    if (!upload.ok) throw new Error(`LINKEDIN_IMAGE_UPLOAD_${upload.status}`);
+    await providerRequest(initBody.value.uploadUrl, { method: "PUT", headers: { "content-type": media.mimeType }, body: bytesBody(media.bytes) }, { provider: "LINKEDIN", stage: "IMAGE_UPLOAD" });
     content = { media: { id: initBody.value.image, altText: variant.alt_text || "" } };
   }
   const postBody: Record<string, unknown> = {
@@ -895,16 +967,15 @@ async function publishLinkedIn(variant: VariantRecord, connection: StoredConnect
     isReshareDisabledByAuthor: false,
   };
   if (content) postBody.content = content;
-  const response = await fetch("https://api.linkedin.com/rest/posts", { method: "POST", headers, body: JSON.stringify(postBody) });
+  const response = await providerRequest("https://api.linkedin.com/rest/posts", { method: "POST", headers, body: JSON.stringify(postBody) }, { provider: "LINKEDIN", stage: "PUBLISH", visibleWrite: true, beforeVisibleWrite });
   const externalId = response.headers.get("x-restli-id");
   if (!response.ok || !externalId) {
-    const body = await response.json().catch(() => ({})) as { message?: string };
-    throw new Error(body.message || `LINKEDIN_PUBLISH_${response.status}`);
+    throw classifyProviderFailure("LINKEDIN", "PUBLISH", null, true);
   }
   return { externalId };
 }
 
-async function publishGoogle(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, sql: Sql): Promise<PublishResult> {
+async function publishGoogle(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, sql: Sql, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (variant.format !== "POST") throw new Error("GBP_ONLY_SUPPORTS_LOCAL_POSTS");
   const refreshed = await refreshGoogleToken(bundle, env);
   if (refreshed.accessToken !== bundle.accessToken) {
@@ -917,10 +988,10 @@ async function publishGoogle(variant: VariantRecord, connection: StoredConnectio
   const locationId = locationName.replace(/^locations\//, "");
   if (!accountId || !locationId) throw new Error("GBP_LOCATION_MISSING");
   const payload: Record<string, unknown> = { languageCode: "it-IT", summary: composeCaption(variant).slice(0, 1500), topicType: "STANDARD" };
-  if (variant.image_asset_id) payload.media = [{ mediaFormat: "PHOTO", sourceUrl: await publicMediaUrl(variant.image_asset_id, env) }];
-  const response = await fetch(`https://mybusiness.googleapis.com/v4/accounts/${encodeURIComponent(accountId)}/locations/${encodeURIComponent(locationId)}/localPosts`, { method: "POST", headers: { authorization: `Bearer ${refreshed.accessToken}`, "content-type": "application/json" }, body: JSON.stringify(payload) });
-  const body = await response.json() as { name?: string; error?: { message?: string } };
-  if (!response.ok || !body.name) throw new Error(body.error?.message || `GBP_PUBLISH_${response.status}`);
+  if (variant.image_asset_id) payload.media = [{ mediaFormat: "PHOTO", sourceUrl: await publicMediaUrl(variant.profile_id, variant.image_asset_id, env) }];
+  const response = await providerRequest(`https://mybusiness.googleapis.com/v4/accounts/${encodeURIComponent(accountId)}/locations/${encodeURIComponent(locationId)}/localPosts`, { method: "POST", headers: { authorization: `Bearer ${refreshed.accessToken}`, "content-type": "application/json" }, body: JSON.stringify(payload) }, { provider: "GBP", stage: "PUBLISH", visibleWrite: true, beforeVisibleWrite });
+  const body = await providerJson<{ name?: string }>(response, "GBP", "PUBLISH", true);
+  if (!body.name) throw classifyProviderFailure("GBP", "PUBLISH", null, true);
   return { externalId: body.name };
 }
 
@@ -936,38 +1007,15 @@ async function loadVariant(sql: Sql, variantId: string, profileId: string): Prom
   return rows[0] ?? null;
 }
 
-async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv): Promise<PublishResult> {
+async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (variant.approval_status !== "APPROVED" || !variant.eligible) throw new Error("CONTENT_NOT_APPROVED");
   const connection = await storedConnection(sql, variant.profile_id, variant.provider);
   if (!connection || connection.status !== "ACTIVE" || !connection.token_reference || !connection.provider_account_id) throw new Error("SOCIAL_NOT_CONNECTED");
   const bundle = await decryptTokenBundle(connection.token_reference, env.SOCIAL_TOKEN_KEY!);
-  if (variant.provider === "INSTAGRAM") return publishInstagram(variant, connection, bundle, env);
-  if (variant.provider === "FACEBOOK") return publishFacebook(variant, connection, bundle, env);
-  if (variant.provider === "LINKEDIN") return publishLinkedIn(variant, connection, bundle, env);
-  return publishGoogle(variant, connection, bundle, env, sql);
-}
-
-async function handlePublishNow(request: Request, env: SocialEnv) {
-  if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
-  const auth = bearer(request);
-  if (!auth) return socialJson({ error: "AUTH_REQUIRED" }, 401);
-  const body = await readBody(request);
-  const profileId = typeof body.profileId === "string" ? body.profileId : "";
-  const variantId = typeof body.variantId === "string" ? body.variantId : "";
-  if (!profileId || !variantId) return socialJson({ error: "PROFILE_AND_VARIANT_REQUIRED" }, 400);
-  if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
-  if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
-  const sql = neon(env.DATABASE_URL);
-  const variant = await loadVariant(sql, variantId, profileId);
-  if (!variant) return socialJson({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
-  try {
-    const result = await publishVariant(sql, variant, env);
-    const now = new Date().toISOString();
-    await sql`update public.content_variants set external_post_id=${result.externalId}, published_at=${now}::timestamptz, updated_at=${now}::timestamptz where id=${variant.id}::uuid and profile_id=${profileId}::uuid`;
-    return socialJson({ published: true, externalId: result.externalId });
-  } catch (reason) {
-    return socialJson({ error: "SOCIAL_PUBLISH_FAILED", detail: reason instanceof Error ? reason.message : "unknown" }, 502);
-  }
+  if (variant.provider === "INSTAGRAM") return publishInstagram(variant, connection, bundle, env, beforeVisibleWrite);
+  if (variant.provider === "FACEBOOK") return publishFacebook(variant, connection, bundle, env, beforeVisibleWrite);
+  if (variant.provider === "LINKEDIN") return publishLinkedIn(variant, connection, bundle, env, beforeVisibleWrite);
+  return publishGoogle(variant, connection, bundle, env, sql, beforeVisibleWrite);
 }
 
 export async function handleSocialApi(request: Request, env: SocialEnv): Promise<Response | null> {
@@ -976,7 +1024,7 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   if (path === "/api/social/connect") return handleConnect(request, env);
   if (path === "/api/social/select") return handleSelect(request, env);
   if (path === "/api/social/disconnect") return handleDisconnect(request, env);
-  if (path === "/api/social/publish-now") return handlePublishNow(request, env);
+  if (path === "/api/social/publish-now") return socialJson({ error: "PUBLISH_VIA_CALENDAR_REQUIRED" }, 410);
   const callback = /^\/api\/social\/callback\/([a-z]+)$/.exec(path);
   if (callback) return handleCallback(request, env, callback[1]);
   const media = /^\/api\/social\/media\/([0-9a-f-]{36})$/i.exec(path);
@@ -984,42 +1032,76 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   return null;
 }
 
-async function recordAttempt(sql: Sql, job: JobRecord, attemptNo: number, state: string, input: { externalId?: string | undefined; error?: string | undefined; metadata?: Record<string, unknown> | undefined }) {
-  const metadata = JSON.stringify(input.metadata ?? {});
-  await sql`
-    insert into public.publication_attempts
-      (job_id, profile_id, provider, attempt_no, state, provider_request_id, error_code, error_message, response_metadata, started_at, finished_at)
-    values
-      (${job.id}::uuid, ${job.profile_id}::uuid, ${job.provider}, ${attemptNo}, ${state}, ${input.externalId ?? null}, ${input.error ? "PROVIDER_ERROR" : null}, ${input.error ?? null}, ${metadata}::jsonb, now(), now())
-  `;
+function providerPublishCapability(provider: SocialProvider): CapabilityKey {
+  return `social.${provider.toLowerCase()}.publish` as CapabilityKey;
+}
+
+async function failClaim(sql: Sql, job: JobRecord, error: SocialPublishError, usageEventId: string | null) {
+  const retryAfter = retryDelaySeconds(job.id, job.attempt_count);
+  const rows = await sql`
+    select public.fail_publication_job(
+      ${job.id}::uuid, ${job.claim_token}::uuid, ${error.code}, ${error.customerMessage},
+      ${error.retryable}, ${error.outcomeUnknown}, ${retryAfter}, ${usageEventId}::uuid
+    ) result
+  ` as unknown as Array<{ result: "RETRY_SCHEDULED" | "BLOCKED_APPROVAL" | "OUTCOME_UNKNOWN" | "FAILED" | "STALE_CLAIM" }>;
+  return rows[0]?.result ?? "STALE_CLAIM";
 }
 
 async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
-  const locked = await sql`
-    update public.publication_jobs
-    set state='PROCESSING', locked_at=now(), updated_at=now()
-    where id=${job.id}::uuid and state='SCHEDULED' and scheduled_at <= now()
-    returning id
-  ` as unknown as Array<{ id: string }>;
-  if (!locked[0]) return { skipped: true };
-  const attemptNo = job.attempt_count + 1;
+  let usageEventId: string | null = null;
   try {
+    const meter = new EntitlementUsageService(env.DATABASE_URL!);
+    const scheduled = await meter.canUseCapability(job.profile_id, "social.publish.scheduled");
+    if (!scheduled.allowed) throw terminalPublishError("CAPABILITY_SCHEDULED_DISABLED");
+    const capabilityKey = providerPublishCapability(job.provider);
+    const reservation = await meter.reserveUsage({
+      profileId: job.profile_id,
+      capabilityKey,
+      quantity: 1,
+      idempotencyKey: `publication:v1:${job.id}`,
+      source: "SCHEDULED_PUBLICATION",
+      referenceId: job.id,
+      metadata: { logical_unit: 1, execution_state: "JOB_CLAIMED", job_id: job.id, provider: job.provider },
+    });
+    if (!reservation.allowed || !reservation.result?.event_id) throw terminalPublishError(reservation.reason || "CAPABILITY_PROVIDER_DISABLED");
+    usageEventId = reservation.result.event_id;
+    if (reservation.result.duplicate) {
+      const event = await meter.getUsageEvent(usageEventId);
+      if (!event || event.state !== "RESERVED") throw terminalPublishError("PUBLICATION_METERING_INVALID");
+    }
+    const attached = await sql`
+      select public.attach_publication_usage_event(${job.id}::uuid,${job.claim_token}::uuid,${usageEventId}::uuid) attached
+    ` as unknown as Array<{ attached: boolean }>;
+    if (attached[0]?.attached !== true) {
+      await meter.releaseUsage(usageEventId).catch(() => undefined);
+      return { skipped: true };
+    }
+
     const variant = await loadVariant(sql, job.variant_id, job.profile_id);
-    if (!variant) throw new Error("CONTENT_VARIANT_NOT_FOUND");
-    const result = await publishVariant(sql, variant, env);
-    await recordAttempt(sql, job, attemptNo, "SUCCESS", { externalId: result.externalId, metadata: result.metadata });
-    await sql`update public.publication_jobs set state='PUBLISHED', attempt_count=${attemptNo}, locked_at=null, last_error=null, updated_at=now() where id=${job.id}::uuid`;
-    await sql`update public.content_variants set external_post_id=${result.externalId}, published_at=now(), updated_at=now() where id=${job.variant_id}::uuid and profile_id=${job.profile_id}::uuid`;
+    if (!variant) throw terminalPublishError("CONTENT_VARIANT_NOT_FOUND");
+    const beforeVisibleWrite = async () => {
+      const rows = await sql`select public.mark_publication_request_started(${job.id}::uuid,${job.claim_token}::uuid) started` as unknown as Array<{ started: boolean }>;
+      if (rows[0]?.started !== true) {
+        const current = await loadVariant(sql, job.variant_id, job.profile_id);
+        if (!current || current.approval_status !== "APPROVED" || !current.eligible) throw terminalPublishError("CONTENT_NOT_APPROVED");
+        throw publishError("STALE_PUBLICATION_CLAIM", { outcomeUnknown: false, customerMessage: "La pubblicazione è stata presa in carico da un altro processo." });
+      }
+    };
+    const result = await publishVariant(sql, variant, env, beforeVisibleWrite);
+    const completed = await sql`
+      select public.complete_publication_job(
+        ${job.id}::uuid,${job.claim_token}::uuid,${result.externalId},${JSON.stringify(result.metadata ?? {})}::jsonb,${usageEventId}::uuid
+      ) completed
+    ` as unknown as Array<{ completed: boolean }>;
+    if (completed[0]?.completed !== true) return { published: false, reviewRequired: true, error: "PROVIDER_OUTCOME_UNKNOWN" };
     return { published: true, externalId: result.externalId };
   } catch (reason) {
-    const error = (reason instanceof Error ? reason.message : "SOCIAL_PUBLISH_FAILED").slice(0, 1000);
-    await recordAttempt(sql, job, attemptNo, "FAILED", { error });
-    if (attemptNo >= 3 || error.includes("RECONNECT_REQUIRED") || error === "SOCIAL_NOT_CONNECTED" || error.includes("FORMAT_")) {
-      await sql`update public.publication_jobs set state='FAILED', attempt_count=${attemptNo}, locked_at=null, last_error=${error}, updated_at=now() where id=${job.id}::uuid`;
-    } else {
-      await sql`update public.publication_jobs set state='SCHEDULED', scheduled_at=now() + interval '15 minutes', attempt_count=${attemptNo}, locked_at=null, last_error=${error}, updated_at=now() where id=${job.id}::uuid`;
-    }
-    return { published: false, error };
+    const error = reason instanceof SocialPublishError
+      ? reason
+      : terminalPublishError(reason instanceof Error ? reason.message : "SOCIAL_PUBLISH_FAILED");
+    if (error.code === "STALE_PUBLICATION_CLAIM") return { skipped: true };
+    const outcome = await failClaim(sql, job, error, usageEventId);
+    return { published: false, reviewRequired: outcome === "OUTCOME_UNKNOWN", retryScheduled: outcome === "RETRY_SCHEDULED", error: error.code };
   }
 }
 
@@ -1027,18 +1109,22 @@ export async function processDuePublications(env: SocialEnv, limit = 20) {
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return { ready: false, reason: "SOCIAL_SECURITY_NOT_CONFIGURED", checked: 0, published: 0, failed: 0 };
   const sql = neon(env.DATABASE_URL);
   const jobs = await sql`
-    select id, profile_id, variant_id, provider, scheduled_at, attempt_count
-    from public.publication_jobs
-    where state='SCHEDULED' and scheduled_at <= now()
-    order by scheduled_at asc
-    limit ${Math.min(Math.max(limit, 1), 50)}
+    select job_id::text id, profile_id::text, variant_id::text, provider, scheduled_at::text,
+      attempt_no attempt_count, claim_token::text, lease_expires_at::text
+    from public.claim_due_publication_jobs(${Math.min(Math.max(limit, 1), 50)},600)
   ` as unknown as JobRecord[];
   let published = 0;
   let failed = 0;
+  let retryScheduled = 0;
+  let reviewRequired = 0;
   for (const job of jobs) {
     const result = await processJob(sql, job, env);
     if ("published" in result && result.published) published += 1;
-    else if ("published" in result && result.published === false) failed += 1;
+    else if ("published" in result && result.published === false) {
+      failed += 1;
+      if (result.retryScheduled) retryScheduled += 1;
+      if (result.reviewRequired) reviewRequired += 1;
+    }
   }
-  return { ready: true, checked: jobs.length, published, failed };
+  return { ready: true, checked: jobs.length, published, failed, retryScheduled, reviewRequired };
 }

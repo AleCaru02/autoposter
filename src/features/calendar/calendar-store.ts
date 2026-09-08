@@ -40,6 +40,11 @@ export type CalendarJobRow = {
   scheduled_at: string;
   idempotency_key: string;
   attempt_count: number;
+  next_attempt_at: string | null;
+  failure_code: string | null;
+  outcome_unknown: boolean;
+  remote_post_id: string | null;
+  published_at: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -104,9 +109,8 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
       .order("updated_at", { ascending: false })
       .limit(200),
     neonClient.from("publication_jobs")
-      .select("id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,last_error,created_at,updated_at")
+      .select("id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,next_attempt_at,failure_code,outcome_unknown,remote_post_id,published_at,last_error,created_at,updated_at")
       .eq("profile_id", profileId)
-      .in("state", ["SCHEDULED", "BLOCKED_APPROVAL"])
       .order("scheduled_at", { ascending: true })
       .limit(200),
   ]);
