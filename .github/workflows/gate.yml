@@ -49,6 +49,7 @@ jobs:
       - { name: FASE 7C manual content generation regression, run: "npm run test:fase7c-content-generation" }
       - { name: FASE 7D atomic content review regression, run: "npm run test:fase7d-content-review" }
       - { name: FASE 7E server calendar regression, run: "npm run test:fase7e-calendar-mutations" }
+      - { name: FASE 7F safe publication engine regression, run: "npm run test:fase7f-publication-engine" }
       - { name: FASE 5B onboarding completion regression, run: "npm run test:onboarding-completion" }
       - { name: AI content text server-side gating regression, run: "npm run test:ai-text-gating" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
