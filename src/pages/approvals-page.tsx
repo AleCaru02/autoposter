@@ -5,8 +5,7 @@ import { useProfiles } from "../features/profiles/profile-context";
 import {
   deleteContent,
   loadContentWorkflow,
-  setVariantApproval,
-  updateVariant,
+  reviewVariant,
   type AssetRow,
   type ContentItemRow,
   type ContentVariantRow,
@@ -108,30 +107,33 @@ export function ApprovalsPage() {
 
   async function persistVariant(variant: ContentVariantRow, draft = draftsRef.current[variant.id] ?? draftFromVariant(variant), profileId = selectedProfile?.id) {
     if (!profileId) return;
+    const currentVariant = variantsRef.current.find((row) => row.id === variant.id) ?? variant;
     const existingTimer = saveTimersRef.current[variant.id];
     if (existingTimer) clearTimeout(existingTimer);
     delete saveTimersRef.current[variant.id];
     setSaveStatus((current) => ({ ...current, [variant.id]: "SAVING" }));
     try {
-      await updateVariant({
+      const result = await reviewVariant({
         profileId,
         variantId: variant.id,
         contentId: variant.content_id,
+        expectedUpdatedAt: currentVariant.updated_at,
         hook: draft.hook,
         caption: draft.caption,
         cta: draft.cta,
         hashtags: parseHashtags(draft.hashtags),
         visualBrief: draft.visualBrief,
         altText: draft.altText,
+        approvalStatus: "PENDING",
       });
       dirtyVariantIdsRef.current.delete(variant.id);
       setSaveStatus((current) => ({ ...current, [variant.id]: "SAVED" }));
       setVariants((current) => {
-        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: "PENDING" as const } : row);
+        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: result.approvalStatus, updated_at: result.updatedAt } : row);
         variantsRef.current = next;
         return next;
       });
-      setItems((current) => current.map((item) => item.id === variant.content_id ? { ...item, status: "IN_REVIEW" } : item));
+      setItems((current) => current.map((item) => item.id === variant.content_id ? { ...item, status: result.contentStatus, updated_at: result.updatedAt } : item));
     } catch (reason) {
       setSaveStatus((current) => ({ ...current, [variant.id]: "ERROR" }));
       throw reason;
@@ -180,8 +182,25 @@ export function ApprovalsPage() {
   async function approve(variant: ContentVariantRow, approvalStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED") {
     if (!selectedProfile) return;
     await run(`approval-${variant.id}`, async () => {
-      await persistVariant(variant);
-      await setVariantApproval({ profileId: selectedProfile.id, variantId: variant.id, contentId: variant.content_id, approvalStatus });
+      const timer = saveTimersRef.current[variant.id];
+      if (timer) clearTimeout(timer);
+      delete saveTimersRef.current[variant.id];
+      const draft = draftsRef.current[variant.id] ?? draftFromVariant(variant);
+      const currentVariant = variantsRef.current.find((row) => row.id === variant.id) ?? variant;
+      await reviewVariant({
+        profileId: selectedProfile.id,
+        variantId: variant.id,
+        contentId: variant.content_id,
+        expectedUpdatedAt: currentVariant.updated_at,
+        hook: draft.hook,
+        caption: draft.caption,
+        cta: draft.cta,
+        hashtags: parseHashtags(draft.hashtags),
+        visualBrief: draft.visualBrief,
+        altText: draft.altText,
+        approvalStatus,
+      });
+      dirtyVariantIdsRef.current.delete(variant.id);
       await reload();
     });
   }
@@ -260,9 +279,9 @@ export function ApprovalsPage() {
                 {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
                 <div className="approval-actions">
                   <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>
-                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
-                  <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
-                  {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`]} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
+                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
+                  <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
+                  {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
                 </div>
               </article>;
             })}

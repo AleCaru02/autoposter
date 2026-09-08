@@ -80,6 +80,7 @@ assert.match(workerText, /brand: context, researchMode, cacheKey/, "Cloudflare m
 assert.ok(entry.indexOf('path === "/api/generate-text"') < entry.indexOf("return worker.fetch(request, env)"), "canonical Worker entry must route generation before asset fallback");
 assert.match(approvals, /fetch\("\/api\/generate-image"/);
 assert.match(approvals, /contentVariantId: variant\.id/);
-assert.match(approvals, /setVariantApproval/);
+assert.match(approvals, /reviewVariant/);
+assert.match(approvals, /approvalStatus/);
 
 console.log("FASE 7C manual content generation regression: PASS");

@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:fase7d-content-review": "tsx tests/fase7d-content-review.test.ts",
     "test:fase7c-content-generation": "tsx tests/fase7c-content-generation.test.ts",
     "test:fase7a-editable-brand": "node tests/fase7a-editable-brand.test.mjs",
     "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs",
