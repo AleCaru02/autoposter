@@ -6,7 +6,7 @@ import { useProfiles } from "../features/profiles/profile-context";
 
 type DashboardJob = { id: string; provider: string; state: string; scheduled_at: string; updated_at: string; last_error: string | null };
 type MetricSnapshot = { id: string; provider: string; metrics: Record<string, unknown> | null; captured_at: string };
-type LearningInsight = { id: string; recommendation: string; confidence: string; generated_at: string };
+type LearningInsight = { id: string; insight: string; confidence: number | string | null; recommended_action: Record<string, unknown>; created_at: string };
 type DashboardData = { content: number; approvals: number; connected: number; jobs: DashboardJob[]; metrics: MetricSnapshot[]; insights: LearningInsight[] };
 
 const emptyData: DashboardData = { content: 0, approvals: 0, connected: 0, jobs: [], metrics: [], insights: [] };
@@ -46,7 +46,7 @@ export function DashboardPage() {
         neonClient.from("publication_jobs").select("id,provider,state,scheduled_at,updated_at,last_error").eq("profile_id", profileId).order("scheduled_at", { ascending: false }).limit(100),
         neonClient.from("social_connections").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "ACTIVE"),
         neonClient.from("metric_snapshots").select("id,provider,metrics,captured_at").eq("profile_id", profileId).order("captured_at", { ascending: false }).limit(6),
-        neonClient.from("learning_insights").select("id,recommendation,confidence,generated_at").eq("profile_id", profileId).eq("active", true).order("generated_at", { ascending: false }).limit(1),
+        neonClient.from("learning_insights").select("id,insight,confidence,recommended_action,created_at").eq("profile_id", profileId).is("applied_at", null).order("created_at", { ascending: false }).limit(1),
       ]);
       const firstError = [content.error, approvals.error, jobs.error, connections.error, metrics.error, insights.error].find(Boolean);
       if (!active) return;
@@ -81,7 +81,7 @@ export function DashboardPage() {
         ? { icon: CalendarClock, eyebrow: "Prossimo passo", title: "Prepara la prossima pubblicazione", body: "Crea un contenuto e scegli quando deve uscire.", label: "Crea contenuto", to: "/app/contenuti" }
         : { icon: CheckCircle2, eyebrow: "Tutto sotto controllo", title: "Il piano editoriale è in movimento", body: `La prossima pubblicazione è prevista ${formatMoment(view.upcoming[0].scheduled_at)}.`, label: "Apri calendario", to: "/app/calendario" };
   const PriorityIcon = priority.icon;
-  const advice = data.insights[0]?.recommendation;
+  const advice = data.insights[0]?.insight;
 
   return <div className="page-content dashboard-page">
     <header className="dashboard-hero"><div><p className="eyebrow">La giornata di {selectedProfile.name}</p><h1>Cosa richiede attenzione oggi</h1><p>Contenuti, pubblicazioni e risultati in una sola panoramica.</p></div><NavLink className="primary-button dashboard-create" to="/app/contenuti"><Sparkles size={17} /> Crea contenuto</NavLink></header>

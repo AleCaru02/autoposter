@@ -15,6 +15,10 @@ for (const table of ["content_items", "content_variants", "publication_jobs", "s
   assert.ok(page.includes(`from(\"${table}\")`), `real dashboard source missing: ${table}`);
 }
 assert.ok((page.match(/\.eq\(\"profile_id\", profileId\)/g) ?? []).length >= 6, "every dashboard read must remain profile-scoped");
+assert.match(page, /select\(\"id,insight,confidence,recommended_action,created_at\"\).*\.is\(\"applied_at\", null\)\.order\(\"created_at\"/, "learning insight query must match the production schema");
+for (const removedColumn of ["recommendation", "generated_at", 'eq(\"active\", true)']) {
+  assert.equal(page.includes(removedColumn), false, `dashboard queries removed learning_insights column: ${removedColumn}`);
+}
 assert.equal(page.includes("/api/health"), false, "customer dashboard must not present runtime health");
 for (const forbidden of ["PostgreSQL", "RLS", "OpenAI", "entitlement", "Worker", "technical usage"]) {
   assert.equal(page.includes(forbidden), false, `customer dashboard exposes technical term: ${forbidden}`);
