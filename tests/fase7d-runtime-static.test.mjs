@@ -4,6 +4,7 @@ import fs from "node:fs";
 const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
 const runtime = fs.readFileSync("tests/audit-viewer-runtime.mjs", "utf8");
 const controller = fs.readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
+const browserRuntime = fs.readFileSync("tests/audit-viewer-browser.mjs", "utf8");
 
 assert.match(workflow, /^on:\s*\n\s+workflow_dispatch:\s*$/m, "7D runtime must remain manual-only");
 assert.doesNotMatch(workflow, /^\s+(push|pull_request):/m, "7D runtime must never run automatically");
@@ -21,6 +22,8 @@ assert.match(runtime, /contentStatus,\s*"APPROVED"/, "complete approval state as
 assert.match(runtime, /contentStatus,\s*"CHANGES_REQUESTED"/, "changes-requested state assertion missing");
 assert.match(runtime, /review runtime must never publish content/, "publication side-effect denial missing");
 assert.doesNotMatch(runtime, /\/api\/(?:social-publish|publication-attempt)/, "review verifier must not call publication endpoints");
+assert.match(browserRuntime, /Cosa richiede attenzione oggi/, "customer browser smoke must assert the current dashboard contract");
+assert.doesNotMatch(browserRuntime, /Sessione attiva/, "removed pre-6B dashboard copy must not gate the runtime");
 
 for (const metric of ["qaContentItems", "qaContentVariants", "qaPublicationJobs", "qaPublicationAttempts"]) {
   assert.match(controller, new RegExp(metric), `controller cleanup metric ${metric} missing`);

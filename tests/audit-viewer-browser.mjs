@@ -58,7 +58,7 @@ async function verifyCustomerOwner(browser) {
   try {
     await login(page, customerEmail);
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
-    await page.getByText("Sessione attiva", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
+    await page.getByRole("heading", { name: "Cosa richiede attenzione oggi", exact: true }).waitFor({ state: "visible", timeout: 20000 });
 
     await page.goto(`${base}/app/profili`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Le tue attività", exact: true }).waitFor({ timeout: 20000 });
