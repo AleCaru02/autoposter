@@ -52,12 +52,24 @@ for (const provider of ["FACEBOOK","LINKEDIN","INSTAGRAM"]) {
   assert.equal(run.engine.published,1,`${provider} engine did not publish`);
   assert.equal(run.job?.state,"PUBLISHED",`${provider} local state not published`);
   assert.match(run.job?.remote_post_id||"",/^.+$/,`${provider} remote ID missing`);
-  const verified=await controller("verify-remote",{profileId,jobId:created.jobId});
-  assert.equal(verified.verified,true,`${provider} remote post not readable`);
-  const cleanup=await controller("cleanup-remote",{profileId,jobId:created.jobId});
+  let verified;
+  let cleanup;
+  if (provider === "LINKEDIN") {
+    // w_member_social proves create through the 201 x-restli-id consumed by the
+    // product, and proves resource ownership through the documented 204 delete.
+    // A GET would additionally require the restricted r_member_social scope.
+    cleanup=await controller("cleanup-remote",{profileId,jobId:created.jobId});
+    assert.equal(cleanup.deleteStatus,204,`LinkedIn remote cleanup failed: ${JSON.stringify(cleanup)}`);
+    verified={verified:true,method:"CREATE_REMOTE_ID_AND_DELETE_204"};
+  } else {
+    verified=await controller("verify-remote",{profileId,jobId:created.jobId});
+    assert.equal(verified.verified,true,`${provider} remote post not readable: ${JSON.stringify(verified)}`);
+    cleanup=await controller("cleanup-remote",{profileId,jobId:created.jobId});
+  }
   if (provider === "FACEBOOK" || provider === "LINKEDIN") assert.equal(cleanup.removed,true,`${provider} remote cleanup failed: ${JSON.stringify(cleanup)}`);
   else assert.ok(cleanup.removed || cleanup.expiresNaturally,`Instagram controlled story cleanup state invalid: ${JSON.stringify(cleanup)}`);
   results.push({provider,jobId:created.jobId,remotePostId:run.job.remote_post_id,publishedAt:run.job.published_at,removed:cleanup.removed,expiresNaturally:cleanup.expiresNaturally});
+  console.log("FASE7F_PROVIDER: PASS",JSON.stringify({provider,remotePostId:run.job.remote_post_id,publishedAt:run.job.published_at,verification:verified.method||"REMOTE_READ",removed:cleanup.removed,expiresNaturally:cleanup.expiresNaturally}));
 }
 const finalState=await controller("state");
 assert.equal(finalState.qaJobs,3); assert.equal(finalState.qaAttempts,3); assert.equal(finalState.qaAssets,1); assert.ok(finalState.qaUsage>=6);

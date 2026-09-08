@@ -81,19 +81,23 @@ async function remote(sql, marker, profileId, jobId, env, remove) {
   const rows = await sql`select j.provider,j.remote_post_id,c.token_reference from public.publication_jobs j join public.social_connections c on c.profile_id=j.profile_id and c.provider=j.provider where j.id=${jobId}::uuid and j.profile_id=${profileId}::uuid and j.state='PUBLISHED'`;
   const row = rows[0]; if (!row?.remote_post_id || !row?.token_reference) throw new Error("QA_REMOTE_POST_MISSING");
   const bundle = await decryptTokenBundle(row.token_reference, env.SOCIAL_TOKEN_KEY);
-  let verifyResponse; let deleteResponse = null;
+  let verifyResponse = null; let deleteResponse = null;
   if (row.provider === "LINKEDIN") {
     const headers = { authorization: `Bearer ${bundle.accessToken}`, "Linkedin-Version": env.LINKEDIN_API_VERSION || "202601", "X-Restli-Protocol-Version": "2.0.0" };
-    verifyResponse = await fetch(`https://api.linkedin.com/rest/posts/${encodeURIComponent(row.remote_post_id)}`, { headers });
-    if (remove) deleteResponse = await fetch(`https://api.linkedin.com/rest/posts/${encodeURIComponent(row.remote_post_id)}`, { method: "DELETE", headers });
+    const endpoint = `https://api.linkedin.com/rest/posts/${encodeURIComponent(row.remote_post_id)}`;
+    if (remove) {
+      deleteResponse = await fetch(endpoint, { method: "DELETE", headers: { ...headers, "X-RestLi-Method": "DELETE" } });
+    } else {
+      verifyResponse = await fetch(`${endpoint}?viewContext=AUTHOR`, { headers });
+    }
   } else {
     const version = /^v\d+\.\d+$/.test(env.META_GRAPH_VERSION || "") ? env.META_GRAPH_VERSION : "v26.0";
     verifyResponse = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(row.remote_post_id)}?fields=id&access_token=${encodeURIComponent(bundle.accessToken)}`);
     if (remove) deleteResponse = await fetch(`https://graph.facebook.com/${version}/${encodeURIComponent(row.remote_post_id)}?access_token=${encodeURIComponent(bundle.accessToken)}`, { method: "DELETE" });
   }
-  const verified = verifyResponse.ok;
+  const verified = verifyResponse ? verifyResponse.ok : null;
   const removed = remove ? Boolean(deleteResponse?.ok) : false;
-  return { provider: row.provider, verified, verifyStatus: verifyResponse.status, removalAttempted: remove, removed, deleteStatus: deleteResponse?.status ?? null, expiresNaturally: row.provider === "INSTAGRAM" && !removed };
+  return { provider: row.provider, verified, verifyStatus: verifyResponse?.status ?? null, removalAttempted: remove, removed, deleteStatus: deleteResponse?.status ?? null, expiresNaturally: row.provider === "INSTAGRAM" && !removed };
 }
 async function cleanupUsers(sql, users) {
   for (const user of users) {
