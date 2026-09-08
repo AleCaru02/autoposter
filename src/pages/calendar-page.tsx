@@ -118,6 +118,16 @@ function timeLabel(value: string, timezone: string) {
   return `${parts.hour}:${parts.minute}`;
 }
 
+function jobStatus(job: CalendarJobRow, timezone: string) {
+  if (job.state === "PROCESSING") return "In pubblicazione";
+  if (job.state === "PUBLISHED") return job.published_at ? `Pubblicato · ${timeLabel(job.published_at, timezone)}` : "Pubblicato";
+  if (job.state === "BLOCKED_APPROVAL") return "In attesa di approvazione";
+  if (job.state === "FAILED" && job.outcome_unknown) return "Da verificare sul social";
+  if (job.state === "FAILED") return "Pubblicazione fallita";
+  if (job.next_attempt_at) return `Da riprovare · ${timeLabel(job.next_attempt_at, timezone)}`;
+  return "Programmato";
+}
+
 export function CalendarPage() {
   const { selectedProfile } = useProfiles();
   const [state, setState] = useState<CalendarState>({ schedules: [], variants: [], jobs: [], contentTitles: {} });
@@ -314,6 +324,7 @@ export function CalendarPage() {
                 return <button type="button" className={`calendar-event provider-${job.provider.toLowerCase()} ${blocked ? "blocked" : ""}`} key={job.id} onClick={() => setSelectedJobId(job.id)}>
                   <span>{timeLabel(job.scheduled_at, selectedProfile.timezone)} · {providerLabel(job.provider)}</span>
                   <strong>{variant ? variantTitle(variant, state) : "Contenuto"}</strong>
+                  <small>{jobStatus(job, selectedProfile.timezone)}</small>
                 </button>;
               })}</div>
             </div>;
@@ -323,8 +334,8 @@ export function CalendarPage() {
     </section>
 
     {selectedJob && <section className="panel selected-calendar-item">
-      <div><small>{providerLabel(selectedJob.provider)}</small><h2>{variantMap.get(selectedJob.variant_id) ? variantTitle(variantMap.get(selectedJob.variant_id)!, state) : "Contenuto programmato"}</h2><p>{selectedJob.state === "BLOCKED_APPROVAL" ? "Questo contenuto richiede una nuova approvazione." : "Puoi spostarlo o rimuoverlo dal calendario."}</p></div>
-      <div className="selected-calendar-actions"><input type="datetime-local" value={jobTimes[selectedJob.id] ?? ""} onChange={(event) => setJobTimes((current) => ({ ...current, [selectedJob.id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={selectedJob.state === "BLOCKED_APPROVAL" || busy[`job-${selectedJob.id}`]} onClick={() => void reschedule(selectedJob)}>Sposta</button><button type="button" className="danger-outline-button" disabled={busy[`remove-${selectedJob.id}`]} onClick={() => void removeJob(selectedJob)}><Trash2 size={15} /> Rimuovi</button><button type="button" className="calendar-icon-button" onClick={() => setSelectedJobId(null)} aria-label="Chiudi"><X size={17} /></button></div>
+      <div><small>{providerLabel(selectedJob.provider)} · {jobStatus(selectedJob, selectedProfile.timezone)}</small><h2>{variantMap.get(selectedJob.variant_id) ? variantTitle(variantMap.get(selectedJob.variant_id)!, state) : "Contenuto programmato"}</h2><p>{selectedJob.state === "BLOCKED_APPROVAL" ? "Questo contenuto richiede una nuova approvazione." : selectedJob.state === "FAILED" ? (selectedJob.last_error || "Controlla il collegamento social prima di riprovare.") : selectedJob.state === "PROCESSING" ? "La pubblicazione è in corso." : selectedJob.state === "PUBLISHED" ? "La pubblicazione è stata completata." : "Puoi spostarlo o rimuoverlo dal calendario."}</p></div>
+      <div className="selected-calendar-actions"><input type="datetime-local" value={jobTimes[selectedJob.id] ?? ""} disabled={selectedJob.state !== "SCHEDULED" && selectedJob.state !== "BLOCKED_APPROVAL"} onChange={(event) => setJobTimes((current) => ({ ...current, [selectedJob.id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={selectedJob.state !== "SCHEDULED" || busy[`job-${selectedJob.id}`]} onClick={() => void reschedule(selectedJob)}>Sposta</button><button type="button" className="danger-outline-button" disabled={!(["SCHEDULED", "BLOCKED_APPROVAL"].includes(selectedJob.state)) || busy[`remove-${selectedJob.id}`]} onClick={() => void removeJob(selectedJob)}><Trash2 size={15} /> Rimuovi</button><button type="button" className="calendar-icon-button" onClick={() => setSelectedJobId(null)} aria-label="Chiudi"><X size={17} /></button></div>
     </section>}
 
     <details className="panel calendar-settings">
