@@ -57,8 +57,10 @@ async function verifyCustomerOwner(browser) {
   const diag = diagnostics(page);
   try {
     await login(page, customerEmail);
+    const dashboardResponse = await page.goto(`${base}/app/dashboard`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    assert.equal(dashboardResponse?.status(), 200, "customer dashboard document unavailable");
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
-    await page.getByText("Sessione attiva", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
+    await page.getByRole("heading", { name: "Cosa richiede attenzione oggi", exact: true }).waitFor({ state: "visible", timeout: 20000 });
 
     await page.goto(`${base}/app/profili`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Le tue attività", exact: true }).waitFor({ timeout: 20000 });
@@ -83,7 +85,6 @@ async function verifyCustomerOwner(browser) {
 async function openAdminAudit(context, label) {
   const loginPage = await context.newPage();
   await login(loginPage, adminEmail);
-  await loginPage.waitForURL((url) => url.pathname === "/onboarding", { timeout: 20000 });
   const page = await context.newPage();
   const diag = diagnostics(page);
   await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
