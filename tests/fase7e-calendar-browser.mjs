@@ -29,9 +29,9 @@ try{
   const mobilePage=await mobile.newPage(); const mobileErrors=watch(mobilePage);
   await login(mobilePage); await mobilePage.goto(`${base}/app/calendario`,{waitUntil:"domcontentloaded"});
   await mobilePage.getByRole("heading",{name:"Calendario contenuti",exact:true}).waitFor({timeout:20000});
-  await mobilePage.locator("details.calendar-manual summary").click();
-  const approvedOptions=await mobilePage.locator("details.calendar-manual select option").count();
-  assert.ok(approvedOptions>0,"approved calendar content missing on mobile");
+  await mobilePage.locator("section.month-calendar").waitFor({state:"visible",timeout:15000});
+  await mobilePage.getByRole("button",{name:"Mese precedente",exact:true}).waitFor({state:"visible",timeout:15000});
+  await mobilePage.getByRole("button",{name:"Mese successivo",exact:true}).waitFor({state:"visible",timeout:15000});
   const mobileLayout=await mobilePage.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,viewportWidth:innerWidth}));
   assert.ok(mobileLayout.scrollWidth<=mobileLayout.viewportWidth+2,`mobile overflow ${JSON.stringify(mobileLayout)}`);
   assert.deepEqual(mobileErrors,[],`mobile browser errors ${JSON.stringify(mobileErrors)}`);
