@@ -908,6 +908,31 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   }
 }
 
+export function instagramContainerDecision(status: unknown) {
+  const normalized = typeof status === "string" ? status.toUpperCase() : "";
+  if (normalized === "FINISHED") return "READY" as const;
+  if (normalized === "ERROR" || normalized === "EXPIRED") return "TERMINAL" as const;
+  return "PENDING" as const;
+}
+
+async function waitForInstagramContainer(containerId: string, accessToken: string, env: SocialEnv) {
+  const attempts = 15;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const statusUrl = new URL(`https://graph.facebook.com/${metaVersion(env)}/${encodeURIComponent(containerId)}`);
+    statusUrl.searchParams.set("fields", "status_code");
+    statusUrl.searchParams.set("access_token", accessToken);
+    const response = await providerRequest(statusUrl, { method: "GET" }, { provider: "INSTAGRAM", stage: "MEDIA_STATUS" });
+    const body = await providerJson<{ status_code?: string }>(response, "INSTAGRAM", "MEDIA_STATUS", false);
+    const decision = instagramContainerDecision(body.status_code);
+    if (decision === "READY") return;
+    if (decision === "TERMINAL") {
+      throw publishError("INSTAGRAM_MEDIA_PROCESSING_FAILED", { customerMessage: "Instagram non ha potuto elaborare il contenuto multimediale." });
+    }
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw publishError("INSTAGRAM_MEDIA_PROCESSING_DELAYED", { retryable: true, customerMessage: "Instagram sta ancora elaborando il contenuto. Il sistema riproverà automaticamente." });
+}
+
 async function publishInstagram(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   if (!variant.image_asset_id) throw new Error("INSTAGRAM_REQUIRES_MEDIA");
   if (variant.format === "CAROUSEL") throw new Error("CAROUSEL_REQUIRES_MULTIPLE_MEDIA_ASSETS");
@@ -919,6 +944,7 @@ async function publishInstagram(variant: VariantRecord, connection: StoredConnec
   const create = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media`, { method: "POST", body: form }, { provider: "INSTAGRAM", stage: "MEDIA_CREATE" });
   const createBody = await providerJson<{ id?: string }>(create, "INSTAGRAM", "MEDIA_CREATE", false);
   if (!createBody.id) throw classifyProviderFailure("INSTAGRAM", "MEDIA_CREATE", null, false);
+  await waitForInstagramContainer(createBody.id, bundle.accessToken, env);
   const publish = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media_publish`, { method: "POST", body: new URLSearchParams({ creation_id: createBody.id, access_token: bundle.accessToken }) }, { provider: "INSTAGRAM", stage: "PUBLISH", visibleWrite: true, beforeVisibleWrite });
   const publishBody = await providerJson<{ id?: string }>(publish, "INSTAGRAM", "PUBLISH", true);
   if (!publishBody.id) throw classifyProviderFailure("INSTAGRAM", "PUBLISH", null, true);
