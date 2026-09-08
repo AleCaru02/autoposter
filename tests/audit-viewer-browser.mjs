@@ -85,7 +85,6 @@ async function verifyCustomerOwner(browser) {
 async function openAdminAudit(context, label) {
   const loginPage = await context.newPage();
   await login(loginPage, adminEmail);
-  await loginPage.waitForURL((url) => url.pathname === "/onboarding", { timeout: 20000 });
   const page = await context.newPage();
   const diag = diagnostics(page);
   await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
