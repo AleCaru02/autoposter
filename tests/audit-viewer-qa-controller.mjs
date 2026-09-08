@@ -85,6 +85,26 @@ async function state(sql, marker) {
       (select count(*)::int from public.platform_admin_audit a where a.actor_auth_user_id in (
         select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
       )) as qa_audit_rows,
+      (select count(*)::int from public.content_items where profile_id in (
+        select p.id from public.profiles p where p.owner_auth_user_id in (
+          select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+        )
+      )) as qa_content_items,
+      (select count(*)::int from public.content_variants where profile_id in (
+        select p.id from public.profiles p where p.owner_auth_user_id in (
+          select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+        )
+      )) as qa_content_variants,
+      (select count(*)::int from public.publication_jobs where profile_id in (
+        select p.id from public.profiles p where p.owner_auth_user_id in (
+          select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+        )
+      )) as qa_publication_jobs,
+      (select count(*)::int from public.publication_attempts where profile_id in (
+        select p.id from public.profiles p where p.owner_auth_user_id in (
+          select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+        )
+      )) as qa_publication_attempts,
       (select count(*)::int from (
         select p.id
         from public.profiles p
@@ -103,6 +123,10 @@ async function state(sql, marker) {
     qaSessions: Number(row.qa_sessions || 0),
     qaAccounts: Number(row.qa_accounts || 0),
     qaAuditRows: Number(row.qa_audit_rows || 0),
+    qaContentItems: Number(row.qa_content_items || 0),
+    qaContentVariants: Number(row.qa_content_variants || 0),
+    qaPublicationJobs: Number(row.qa_publication_jobs || 0),
+    qaPublicationAttempts: Number(row.qa_publication_attempts || 0),
     recognizedQaUsers: recognized.length,
     recognizedQaAdmins: recognized.filter((user) => user.role === "admin").length,
     recognizedQaMarkers: [...new Set(recognized.map((user) => user.marker))].length,

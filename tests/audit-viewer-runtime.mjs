@@ -93,6 +93,15 @@ async function dataApi(path, token, init = {}) {
   return fetch(`${DATA_API}${path}`, { ...init, headers });
 }
 
+async function appApi(path, token, init = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("accept", "application/json");
+  if (token) headers.set("authorization", `Bearer ${token}`);
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  const response = await fetch(`${APP_BASE}${path}`, { ...init, headers });
+  return { response, body: await readJson(response) };
+}
+
 function rpcIdentity(body) {
   if (typeof body === "string") return body.trim() || null;
   if (Array.isArray(body)) {
@@ -244,6 +253,89 @@ assert.ok(ownProfilesResponse.ok && Array.isArray(ownProfiles));
 assert.ok(ownProfiles.some((row) => row.id === profileId));
 assert.ok(ownProfiles.every((row) => row.owner_auth_user_id === customer.id), "CUSTOMER saw another tenant profile");
 
+const contentId = crypto.randomUUID();
+const firstVariantId = crypto.randomUUID();
+const secondVariantId = crypto.randomUUID();
+const initialUpdatedAt = new Date().toISOString();
+const contentCreate = await dataApi("/content_items?select=id,status", customer.token, {
+  method: "POST", headers: { prefer: "return=representation" },
+  body: JSON.stringify({ id: contentId, profile_id: profileId, topic: `FASE 7D ${marker}`, title: "Revisione atomica", status: "IN_REVIEW", updated_at: initialUpdatedAt }),
+});
+assert.ok(contentCreate.ok, `content fixture creation failed (${contentCreate.status})`);
+const variantCreate = await dataApi("/content_variants?select=id,updated_at", customer.token, {
+  method: "POST", headers: { prefer: "return=representation" },
+  body: JSON.stringify([
+    { id: firstVariantId, content_id: contentId, profile_id: profileId, provider: "INSTAGRAM", format: "POST", eligible: true, caption: "Prima variante QA", hashtags: ["#qa"], approval_status: "PENDING", updated_at: initialUpdatedAt },
+    { id: secondVariantId, content_id: contentId, profile_id: profileId, provider: "LINKEDIN", format: "POST", eligible: true, caption: "Seconda variante QA", hashtags: ["#qa"], approval_status: "PENDING", updated_at: initialUpdatedAt },
+  ]),
+});
+assert.ok(variantCreate.ok, `variant fixture creation failed (${variantCreate.status})`);
+const createdVariants = await readJson(variantCreate);
+assert.equal(createdVariants.length, 2);
+const updatedAtById = new Map(createdVariants.map((row) => [row.id, row.updated_at]));
+const jobCreate = await dataApi("/publication_jobs?select=id,state", customer.token, {
+  method: "POST", headers: { prefer: "return=representation" },
+  body: JSON.stringify([
+    { profile_id: profileId, variant_id: firstVariantId, provider: "INSTAGRAM", state: "BLOCKED_APPROVAL", scheduled_at: new Date(Date.now() + 86_400_000).toISOString(), idempotency_key: `fase7d-${marker}-one` },
+    { profile_id: profileId, variant_id: secondVariantId, provider: "LINKEDIN", state: "BLOCKED_APPROVAL", scheduled_at: new Date(Date.now() + 172_800_000).toISOString(), idempotency_key: `fase7d-${marker}-two` },
+  ]),
+});
+assert.ok(jobCreate.ok, `publication job fixture creation failed (${jobCreate.status})`);
+
+const anonymousReview = await appApi("/api/content-review", null, { method: "POST", body: "{}" });
+assert.equal(anonymousReview.response.status, 401);
+
+const directApproval = await dataApi(`/content_variants?id=eq.${encodeURIComponent(firstVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}`, customer.token, {
+  method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ approval_status: "APPROVED" }),
+});
+assert.equal(directApproval.ok, false, "direct customer approval unexpectedly succeeded");
+
+function reviewPayload(variantId, expectedUpdatedAt, caption, approvalStatus) {
+  return { profileId, contentId, variantId, expectedUpdatedAt, hook: "Hook QA", caption, cta: "Scopri di più", hashtags: ["#qa"], visualBrief: "Visual professionale QA", altText: "Visual QA", approvalStatus };
+}
+
+const crossTenantReview = await appApi("/api/content-review", adminCandidate.token, {
+  method: "POST", body: JSON.stringify(reviewPayload(firstVariantId, updatedAtById.get(firstVariantId), "Tentativo cross tenant", "APPROVED")),
+});
+assert.equal(crossTenantReview.response.status, 403, `cross-tenant review expected 403, got ${crossTenantReview.response.status}`);
+
+const firstApprovalPayload = reviewPayload(firstVariantId, updatedAtById.get(firstVariantId), "Prima variante approvata", "APPROVED");
+const firstApproval = await appApi("/api/content-review", customer.token, { method: "POST", body: JSON.stringify(firstApprovalPayload) });
+assert.equal(firstApproval.response.status, 200, `first approval failed (${firstApproval.response.status})`);
+assert.equal(firstApproval.body?.approvalStatus, "APPROVED");
+assert.equal(firstApproval.body?.contentStatus, "IN_REVIEW");
+
+const staleReplay = await appApi("/api/content-review", customer.token, { method: "POST", body: JSON.stringify(firstApprovalPayload) });
+assert.equal(staleReplay.response.status, 409, `stale approval replay expected 409, got ${staleReplay.response.status}`);
+
+const secondApproval = await appApi("/api/content-review", customer.token, {
+  method: "POST", body: JSON.stringify(reviewPayload(secondVariantId, updatedAtById.get(secondVariantId), "Seconda variante approvata", "APPROVED")),
+});
+assert.equal(secondApproval.response.status, 200, `second approval failed (${secondApproval.response.status})`);
+assert.equal(secondApproval.body?.contentStatus, "APPROVED");
+
+const changesRequested = await appApi("/api/content-review", customer.token, {
+  method: "POST", body: JSON.stringify(reviewPayload(firstVariantId, firstApproval.body?.updatedAt, "Prima variante da correggere", "CHANGES_REQUESTED")),
+});
+assert.equal(changesRequested.response.status, 200, `changes request failed (${changesRequested.response.status})`);
+assert.equal(changesRequested.body?.contentStatus, "CHANGES_REQUESTED");
+
+const persistedContentResponse = await dataApi(`/content_items?id=eq.${encodeURIComponent(contentId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,status`, customer.token);
+const persistedContent = await readJson(persistedContentResponse);
+assert.deepEqual(persistedContent?.map((row) => row.status), ["CHANGES_REQUESTED"]);
+const persistedVariantsResponse = await dataApi(`/content_variants?content_id=eq.${encodeURIComponent(contentId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,approval_status,caption&order=id.asc`, customer.token);
+const persistedVariants = await readJson(persistedVariantsResponse);
+assert.equal(persistedVariants.length, 2);
+assert.deepEqual(new Set(persistedVariants.map((row) => row.approval_status)), new Set(["APPROVED", "CHANGES_REQUESTED"]));
+assert.ok(persistedVariants.some((row) => row.caption === "Prima variante da correggere"));
+const jobsResponse = await dataApi(`/publication_jobs?profile_id=eq.${encodeURIComponent(profileId)}&select=variant_id,state`, customer.token);
+const jobs = await readJson(jobsResponse);
+assert.equal(jobs.find((row) => row.variant_id === firstVariantId)?.state, "BLOCKED_APPROVAL");
+assert.equal(jobs.find((row) => row.variant_id === secondVariantId)?.state, "SCHEDULED");
+const attemptsResponse = await dataApi(`/publication_attempts?profile_id=eq.${encodeURIComponent(profileId)}&select=id`, customer.token);
+assert.deepEqual(await readJson(attemptsResponse), [], "review runtime must never publish content");
+results.contentReview = "PASS";
+
 const directAudit = await dataApi("/platform_admin_audit?select=id&limit=1", customer.token);
 assert.ok(!directAudit.ok, `CUSTOMER direct audit table read unexpectedly allowed (${directAudit.status})`);
 results.directDbDenied = "PASS";
@@ -348,6 +440,10 @@ assert.equal(during.qaOwners, 1);
 assert.equal(during.qaAdmins, 1);
 assert.equal(during.superAdmins, 2);
 assert.ok(during.qaSessions >= 2);
+assert.equal(during.qaContentItems, 1);
+assert.equal(during.qaContentVariants, 2);
+assert.equal(during.qaPublicationJobs, 2);
+assert.equal(during.qaPublicationAttempts, 0);
 
 console.log("AUDIT_VIEWER_API_RUNTIME: PASS", JSON.stringify({
   customerApi: results.customerApi,
@@ -364,6 +460,11 @@ console.log("AUDIT_VIEWER_API_RUNTIME: PASS", JSON.stringify({
   sensitive: results.sensitive,
   empty: results.empty,
   directDbDenied: results.directDbDenied,
+  contentReview: results.contentReview,
+  directApprovalBlocked: "PASS",
+  staleReplay: "PASS",
+  crossTenantReview: "PASS",
+  publicationAttempts: 0,
   temporarySuperAdmins: during.superAdmins,
   baselineProfiles: results.baselineProfiles,
 }));

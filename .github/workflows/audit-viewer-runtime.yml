@@ -24,6 +24,8 @@ jobs:
           npm run test:platform-rbac
           npm run test:fase3-core
           npm run test:admin-audit-viewer
+          npm run test:fase7d-content-review
+          npm run test:fase7d-runtime-static
 
       - name: Generate ephemeral smoke identity material
         shell: bash
@@ -138,7 +140,7 @@ jobs:
           const fs = require('node:fs');
           const body = JSON.parse(fs.readFileSync('audit-preflight.json', 'utf8'));
           if (process.env.PREFLIGHT_STATUS !== '200') throw new Error(`preflight HTTP ${process.env.PREFLIGHT_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaSessions','qaAdmins','recognizedQaUsers','recognizedQaAdmins']) {
+          for (const key of ['qaUsers','qaProfiles','qaOwners','qaSessions','qaAdmins','qaContentItems','qaContentVariants','qaPublicationJobs','qaPublicationAttempts','recognizedQaUsers','recognizedQaAdmins']) {
             if (body[key] !== 0) throw new Error(`preflight residue ${key}=${body[key]}`);
           }
           if (body.superAdmins !== 1) throw new Error(`real SUPER_ADMIN baseline ${body.superAdmins}`);
@@ -175,7 +177,7 @@ jobs:
           const fs = require('node:fs');
           const body = JSON.parse(fs.readFileSync('audit-cleanup.json', 'utf8'));
           if (process.env.CLEANUP_STATUS !== '200' || body.cleaned !== true) throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaAdmins']) {
+          for (const key of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaAdmins','qaContentItems','qaContentVariants','qaPublicationJobs','qaPublicationAttempts']) {
             if (body[key] !== 0) throw new Error(`cleanup residue ${key}=${body[key]}`);
           }
           if (body.superAdmins !== 1) throw new Error(`post-cleanup SUPER_ADMIN count ${body.superAdmins}`);
