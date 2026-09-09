@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import handler from "../api/autopilot.js";
-import { AUTOPILOT_PUBLISH_FORMATS, chooseAutopilotPublishFormat } from "../api/_lib/autopilot.js";
+import { AUTOPILOT_PUBLISH_FORMATS, chooseAutopilotContentType, chooseAutopilotPublishFormat } from "../api/_lib/autopilot.js";
 import { providerCapabilities } from "../api/_lib/social.js";
 
 type Captured = { status: number; body: unknown };
@@ -68,6 +68,9 @@ async function run() {
     assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 1, "CAROUSEL"), "STORY", "Instagram fallback keeps its supported rotation");
     assert.equal(chooseAutopilotPublishFormat("FACEBOOK", 2, "STORY"), "POST");
     assert.equal(chooseAutopilotPublishFormat("LINKEDIN", 3, "CAROUSEL"), "POST");
+    assert.equal(chooseAutopilotContentType("POST"), "SINGLE_POST", "normalized single-post publishers must not retain a carousel brief");
+    assert.equal(chooseAutopilotContentType("STORY"), "SINGLE_STORY");
+    assert.equal(chooseAutopilotContentType("CAROUSEL"), "CAROUSEL");
 
     const plannerSource = await readFile(new URL("../api/_lib/openai-strategy-planner.ts", import.meta.url), "utf8");
     assert.match(plannerSource, /Facebook, LinkedIn e GBP usa SINGLE_POST/);
