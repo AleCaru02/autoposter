@@ -101,18 +101,20 @@ async function canAccessProfile(request: Request, profileId: string) {
   return rows.some((row) => row.id === profileId);
 }
 
-async function handleAutopilotRun(request: Request, env: Env, ctx: WorkerContext) {
+async function handleAutopilotRun(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   let profileId = "";
   try { const body = await request.json() as Record<string, unknown>; profileId = typeof body.profileId === "string" ? body.profileId : ""; } catch { /* handled below */ }
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-  ctx.waitUntil(runContentAutopilotSerialized(env, { profileId, maxGenerations: 6 }).then((result) => {
+  try {
+    const result = await runContentAutopilotSerialized(env, { profileId, maxGenerations: 6 });
     console.log("content-autopilot-profile", { profileId, ...result });
-  }).catch((reason) => {
-    console.error("autopilot-profile-failed", { profileId, detail: reason instanceof Error ? reason.message : "unknown" });
-  }));
-  return json({ accepted: true }, 202);
+    return json(result);
+  } catch (reason) {
+    console.error("autopilot-profile-failed", { profileId, code: reason instanceof Error ? reason.message.split(":")[0] : "unknown" });
+    return json({ error: "AUTOPILOT_RUN_FAILED" }, 500);
+  }
 }
 
 export default {
@@ -136,7 +138,7 @@ export default {
       const response = await handleAdminApi(request, env);
       if (response) return response;
     }
-    if (path === "/api/autopilot/run") return handleAutopilotRun(request, env, ctx);
+    if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
     if (path === "/api/onboarding-provision") return handleWorkerOnboardingProvision(request, env);
