@@ -77,6 +77,8 @@ assert.equal(rejection.outcomeUnknown, false);
 assert.equal(rejection.code, "LINKEDIN_PUBLISH_REJECTED");
 assert.equal(classifyProviderFailure("INSTAGRAM", "MEDIA_CREATE", 400, false).code, "INSTAGRAM_MEDIA_CREATE_REJECTED");
 assert.equal(classifyProviderFailure("INSTAGRAM", "MEDIA_STATUS", 404, false).code, "INSTAGRAM_MEDIA_STATUS_REJECTED");
+assert.equal(classifyProviderFailure("INSTAGRAM", "MEDIA_CREATE", 400, false, { providerCode: 100, providerSubcode: 2207052 }).code, "INSTAGRAM_MEDIA_CREATE_REJECTED_C100_S2207052");
+assert.equal(classifyProviderFailure("INSTAGRAM", "MEDIA_CREATE", 400, false, { providerCode: Number.NaN, providerSubcode: -1 }).code, "INSTAGRAM_MEDIA_CREATE_REJECTED");
 const preWriteNetwork = classifyProviderFailure("LINKEDIN", "IMAGE_UPLOAD", null, false);
 assert.equal(preWriteNetwork.retryable, true);
 const visibleTimeout = classifyProviderFailure("FACEBOOK", "PUBLISH", null, true);
