@@ -1,0 +1,110 @@
+name: FASE 7G Autopilot Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/fase7g-autopilot-runtime.yml"
+      - "tests/fase7g-autopilot-*"
+      - "tests/wrangler.fase7g-runtime.jsonc"
+
+concurrency:
+  group: fase7g-autopilot-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/fase7g-autopilot-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Product regression
+        run: |
+          npm run typecheck
+          npm run test:autopilot-route
+          npm run build
+      - name: Generate ephemeral verifier material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="autopilot7g-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "AUTOPILOT7G_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "AUTOPILOT7G_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "AUTOPILOT7G_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "AUTOPILOT7G_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'AUTOPILOT7G_TOKEN=%s\n' "$token" > .fase7g-runtime-secrets.env
+          chmod 600 .fase7g-runtime-secrets.env
+      - name: Upload isolated preview controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.fase7g-runtime.jsonc --keep-vars --preview-alias "autopilot7g-${GITHUB_RUN_ID}" --secrets-file .fase7g-runtime-secrets.env | tee fase7g-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase7g-upload.log | tail -n 1)
+          test -n "$version_id"
+          echo "AUTOPILOT7G_CONTROLLER_VERSION=$version_id" >> "$GITHUB_ENV"
+      - name: Verify isolation and preflight
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-before.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7g-deployments-before.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort();const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(versions.includes(process.env.AUTOPILOT7G_CONTROLLER_VERSION))throw new Error('preview attached to production');fs.appendFileSync(process.env.GITHUB_ENV,`AUTOPILOT7G_PROD_DEPLOYMENTS=${ids.join(',')}\nAUTOPILOT7G_PROD_VERSIONS=${versions.join(',')}\n`);console.log('FASE7G_PREVIEW_ISOLATION: PASS');
+          NODE
+          call_controller(){ curl -fsS -X POST -H 'content-type: application/json' -H "x-autopilot7g-token: $AUTOPILOT7G_TOKEN_VALUE" --data "{\"action\":\"$1\",\"marker\":\"$AUTOPILOT7G_MARKER\"}" "$AUTOPILOT7G_CONTROLLER_URL"; }
+          call_controller preflight > fase7g-preflight.json
+          stale=$(node -e "const b=require('./fase7g-preflight.json');process.stdout.write(String(b.recognizedQaUsers||0))")
+          if [ "$stale" -gt 0 ]; then call_controller cleanup-residue >/dev/null; call_controller preflight > fase7g-preflight.json; fi
+          node - <<'NODE'
+          const fs=require('node:fs');const b=require('./fase7g-preflight.json');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaAssets','qaJobs','qaUsage'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);if(b.jobsTotal!==0)throw new Error(`production publication baseline not empty: ${b.jobsTotal}`);fs.appendFileSync(process.env.GITHUB_ENV,`AUTOPILOT7G_BASELINE_PROFILES=${b.profilesTotal}\nAUTOPILOT7G_BASELINE_JOBS=${b.jobsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7G_PREFLIGHT: PASS',JSON.stringify({profiles:b.profilesTotal,jobs:b.jobsTotal}));
+          NODE
+      - name: Authenticated Autopilot runtime
+        run: node tests/fase7g-autopilot-runtime.mjs
+      - name: Install browser
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Desktop and mobile customer runtime
+        run: node tests/fase7g-autopilot-browser.mjs
+      - name: Cleanup QA artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then exit 0; fi
+          status=$(curl -sS -o fase7g-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-autopilot7g-token: $AUTOPILOT7G_TOKEN_VALUE" --data "{\"action\":\"cleanup\",\"marker\":\"$AUTOPILOT7G_MARKER\"}" "$AUTOPILOT7G_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const b=require('./fase7g-cleanup.json');if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true)throw new Error('cleanup request failed');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaAssets','qaJobs','qaUsage'])if(b[key]!==0)throw new Error(`cleanup residue ${key}=${b[key]}`);if(String(b.profilesTotal)!==process.env.AUTOPILOT7G_BASELINE_PROFILES||String(b.jobsTotal)!==process.env.AUTOPILOT7G_BASELINE_JOBS)throw new Error(`baseline mismatch ${JSON.stringify(b)}`);console.log('FASE7G_CLEANUP: PASS',JSON.stringify({profiles:b.profilesTotal,jobs:b.jobsTotal,residue:0}));
+          NODE
+      - name: Post-cleanup deployment invariant
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7g-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(ids!==process.env.AUTOPILOT7G_PROD_DEPLOYMENTS||versions.join(',')!==process.env.AUTOPILOT7G_PROD_VERSIONS||versions.includes(process.env.AUTOPILOT7G_CONTROLLER_VERSION))throw new Error('production deployment changed');console.log('FASE7G_PRODUCTION_INVARIANT: PASS');
+          NODE
+      - name: Remove ephemeral local material
+        if: always()
+        run: |
+          shred -u .fase7g-runtime-secrets.env 2>/dev/null || rm -f .fase7g-runtime-secrets.env
+          rm -f fase7g-*.json fase7g-upload.log fase7g-profile-id.txt
