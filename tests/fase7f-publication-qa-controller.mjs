@@ -40,7 +40,7 @@ async function ownedProfile(sql, marker, profileId) {
   const rows = await sql`select p.id from public.profiles p join neon_auth.user u on u.id::text=p.owner_auth_user_id where p.id=${profileId}::uuid and lower(coalesce(to_jsonb(u)->>'email',''))=${email}`;
   return Boolean(rows[0]);
 }
-async function fixture(sql, marker, profileId, origin) {
+async function fixture(sql, marker, profileId) {
   if (!await ownedProfile(sql, marker, profileId)) throw new Error("QA_PROFILE_SCOPE_MISMATCH");
   for (const capability of ["schedule.job.create", "social.publish.scheduled", "social.facebook.publish", "social.linkedin.publish", "social.instagram.publish"]) {
     await sql`insert into public.profile_entitlements(profile_id,capability_key,enabled,limit_type,limit_value,period_type,source,metadata)
@@ -57,7 +57,7 @@ async function fixture(sql, marker, profileId, origin) {
     returning provider`;
   if (cloned.length !== 3) throw new Error("READY_PROVIDER_CONNECTIONS_MISSING");
   const content = await sql`insert into public.content_items(profile_id,topic,title,status) values (${profileId}::uuid,'QA 7F controlled publication',${`QA 7F ${marker}`},'APPROVED') returning id::text`;
-  const asset = await sql`insert into public.assets(profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${profileId}::uuid,'FASE7F_QA','IMAGE','qa-story.jpg',${`${origin}/qa-story.jpg?marker=${marker}`},'image/jpeg','["qa","fase7f"]','{"width":1080,"height":1920,"qa":true}'::jsonb) returning id::text`;
+  const asset = await sql`insert into public.assets(profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${profileId}::uuid,'FASE7F_QA','IMAGE','qa-story.jpg',${`data:image/jpeg;base64,${STORY_JPEG_BASE64}`} ,'image/jpeg','["qa","fase7f"]','{"width":1080,"height":1920,"qa":true}'::jsonb) returning id::text`;
   const variants = await sql`insert into public.content_variants(content_id,profile_id,provider,format,eligible,hook,caption,image_asset_id,alt_text,approval_status)
     values
       (${content[0].id}::uuid,${profileId}::uuid,'FACEBOOK','POST',true,'QA 7F','QA 7F — verifica tecnica temporanea, nessun contenuto commerciale.',NULL,NULL,'APPROVED'),
