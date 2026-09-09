@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import handler from "../api/autopilot.js";
+import { AUTOPILOT_PUBLISH_FORMATS, chooseAutopilotPublishFormat } from "../api/_lib/autopilot.js";
+import { providerCapabilities } from "../api/_lib/social.js";
 
 type Captured = { status: number; body: unknown };
 
@@ -59,6 +61,17 @@ async function run() {
     const canonicalAutopilotSource = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
     assert.match(canonicalAutopilotSource, /Math\.min\(Math\.max\(Math\.floor\(parsed\),0\),500\)/, "a scoped zero image allowance must stay zero; manual review must not silently spend one image");
     assert.match(canonicalAutopilotSource, /budget\.imagesUsed<budget\.imageLimit/, "image generation must remain gated by the scoped image allowance");
+    for (const provider of ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const) {
+      assert.deepEqual(AUTOPILOT_PUBLISH_FORMATS[provider], providerCapabilities(provider).publish, `${provider} autopilot formats must match the real publisher`);
+    }
+    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 0, "CAROUSEL"), "POST", "single-asset Instagram carousel plans must fall back safely");
+    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 1, "CAROUSEL"), "STORY", "Instagram fallback keeps its supported rotation");
+    assert.equal(chooseAutopilotPublishFormat("FACEBOOK", 2, "STORY"), "POST");
+    assert.equal(chooseAutopilotPublishFormat("LINKEDIN", 3, "CAROUSEL"), "POST");
+
+    const plannerSource = await readFile(new URL("../api/_lib/openai-strategy-planner.ts", import.meta.url), "utf8");
+    assert.match(plannerSource, /Facebook, LinkedIn e GBP usa SINGLE_POST/);
+    assert.match(plannerSource, /Non pianificare caroselli finché non esiste un bundle reale di più asset/);
 
     const vercelAutopilotSource = await readFile(new URL("../api/autopilot.ts", import.meta.url), "utf8");
     assert.match(vercelAutopilotSource, /runContentAutopilotSerialized/, "Vercel manual autopilot must use the serialized runner");

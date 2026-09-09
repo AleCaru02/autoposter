@@ -134,8 +134,8 @@ export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow;
     instructions: [
       "Sei il Planner Agent di Post Automatici e lavori esclusivamente tramite API OpenAI.",
       "Crea un piano editoriale di 14-28 giorni basato sulla strategia approvata, senza scrivere il copy finale.",
-      "Distribuisci post singoli, caroselli, storytelling e storie singole solo dove il social li supporta realmente.",
-      "Per GBP usa SINGLE_POST. Per LinkedIn non usare SINGLE_STORY. Instagram e Facebook possono usare tutti i tipi previsti.",
+      "Usa soltanto formati che il publisher reale può consegnare con il singolo asset generato dal piano.",
+      "Per Facebook, LinkedIn e GBP usa SINGLE_POST. Per Instagram usa SINGLE_POST o SINGLE_STORY. Non pianificare caroselli finché non esiste un bundle reale di più asset.",
       "Evita i temi recenti e distribuisci intenti e funnel senza sequenze ripetitive.",
       "Rispetta la frequenza dei schedule abilitati; se un provider ha posts_per_week=0 o disabled non pianificarlo.",
       "Non inventare eventi, news o fatti: NEWS indica soltanto una direzione da affidare successivamente al Research Agent.",
