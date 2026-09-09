@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Image as ImageIcon, LoaderCircle, RefreshCcw, Trash2, Undo2, X } from "lucide-react";
-import { authClient } from "../lib/neon-client";
+import { authenticatedApiToken } from "../lib/auth-token";
 import { useProfiles } from "../features/profiles/profile-context";
 import {
   deleteContent,
@@ -14,7 +14,6 @@ import "../approvals.css";
 import { NavLink } from "react-router-dom";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 type DraftFields = {
   hook: string;
   caption: string;
@@ -214,8 +213,7 @@ export function ApprovalsPage() {
     }
     await run(`image-${variant.id}`, async () => {
       await persistVariant(variant, draft);
-      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-      if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
+      const token = await authenticatedApiToken();
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },

@@ -1,4 +1,5 @@
-import { authClient, neonClient } from "../../lib/neon-client";
+import { neonClient } from "../../lib/neon-client";
+import { authenticatedApiToken } from "../../lib/auth-token";
 import type { GeneratedSocialContent } from "../../../api/_lib/openai-text";
 import { normalizeHashtags, variantKey, type ApprovalStatus } from "./content-workflow";
 
@@ -50,8 +51,6 @@ export type SavedGeneration = {
   contentId: string;
   variantIds: Record<string, string>;
 };
-
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
 
 type ReviewResponse = {
   variantId?: string;
@@ -158,8 +157,7 @@ export async function reviewVariant(input: {
   altText: string;
   approvalStatus: ApprovalStatus;
 }) {
-  const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-  if (!token) throw new Error("Sessione non valida: effettua nuovamente l’accesso.");
+  const token = await authenticatedApiToken();
   const response = await fetch("/api/content-review", {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },

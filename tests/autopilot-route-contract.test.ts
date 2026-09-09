@@ -87,6 +87,12 @@ async function run() {
     assert.match(workerEntrySource, /path === "\/api\/generate-text"/, "Worker /api/generate-text must be intercepted before the legacy worker handler");
     assert.match(workerEntrySource, /handleWorkerGenerateText\(request,\s*env\)/, "Worker text generation must use the dedupe-aware handler");
 
+    for (const sourcePath of ["../src/pages/content-generator-page.tsx", "../src/components/manual-content-composer.tsx", "../src/pages/approvals-page.tsx", "../src/features/content/content-store.ts"]) {
+      const source = await readFile(new URL(sourcePath, import.meta.url), "utf8");
+      assert.match(source, /authenticatedApiToken\(\)/, `${sourcePath} must use the canonical Managed Auth token boundary`);
+      assert.doesNotMatch(source, /getJWTToken/, `${sourcePath} must not call the unsupported /api/auth/get-jwt-token route`);
+    }
+
     console.log("autopilot route contract: PASS — per-profile economics, zero-image manual review, AI-plan refresh and Worker routes guarded.");
   } finally {
     globalThis.fetch = previousFetch;
