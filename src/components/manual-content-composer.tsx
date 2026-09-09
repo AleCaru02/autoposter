@@ -5,9 +5,7 @@ import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import type { GeneratedSocialContent, GeneratedVariant, SocialFormat, SocialProvider } from "../../api/_lib/openai-text";
 import { saveGeneratedContent } from "../features/content/content-store";
 import { manualGenerationFingerprint, requestManualContent, type ManualGenerationRequest } from "../features/content/manual-content-generation";
-import { authClient } from "../lib/neon-client";
-
-type JwtAuth = { getJWTToken?: () => Promise<string | null> };
+import { authenticatedApiToken } from "../lib/auth-token";
 type ComposerStatus = "IDLE" | "GENERATING" | "READY" | "SAVING" | "SAVED";
 
 const PROVIDERS: Array<{ value: SocialProvider; label: string }> = [
@@ -46,8 +44,7 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     setStatus("GENERATING");
     setError(null);
     try {
-      const token = await (authClient as typeof authClient & JwtAuth).getJWTToken?.();
-      if (!token) throw new Error("Sessione non valida. Accedi di nuovo.");
+      const token = await authenticatedApiToken();
       setContent(await requestManualContent(request, token, operation.current.id));
       setStatus("READY");
       operation.current = null;
