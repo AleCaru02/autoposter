@@ -6,7 +6,7 @@ const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
 const META_SCOPES = {
   FACEBOOK: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
-  INSTAGRAM: ["pages_show_list", "pages_read_engagement", "instagram_basic", "instagram_content_publish"],
+  INSTAGRAM: ["pages_show_list", "pages_read_engagement", "instagram_basic", "instagram_content_publish", "instagram_manage_insights"],
 } as const;
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/business.manage";
 
@@ -493,7 +493,7 @@ function providerScopes(provider: SocialProvider, env: SocialEnv) {
   if (provider === "GBP") return [GOOGLE_SCOPE];
   return linkedinOrganizationMode(env)
     ? ["openid", "profile", "r_organization_admin", "w_organization_social"]
-    : ["openid", "profile", "w_member_social"];
+    : ["openid", "profile", "w_member_social", "r_member_postAnalytics"];
 }
 
 function buildAuthorizationUrl(provider: SocialProvider, env: SocialEnv, state: string, callbackUri: string) {

@@ -75,6 +75,7 @@ jobs:
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
       - { name: Social integration contract, run: "npm run test:social" }
       - { name: Social metrics contract, run: "npm run test:social-metrics" }
+      - { name: FASE 7H analytics engine regression, run: "npm run test:fase7h-analytics-engine" }
       - { name: Autopilot route contract, run: "npm run test:autopilot-route" }
       - { name: OpenAI text contract, run: "npm run test:openai" }
       - name: OpenAI text live probe

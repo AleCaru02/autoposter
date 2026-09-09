@@ -81,9 +81,11 @@ export function normalizeInstagramMediaMetrics(input: {
   const result: MetricPoint[] = [];
   pushMetric(result, "INSTAGRAM", "likes", input.basic?.like_count, input.capturedAt, input.externalPostId);
   pushMetric(result, "INSTAGRAM", "comments", input.basic?.comments_count, input.capturedAt, input.externalPostId);
+  const aliases: Record<string, string> = { saved: "saves", total_interactions: "engagement" };
   for (const insight of input.insights ?? []) {
     if (typeof insight.name !== "string") continue;
-    pushMetric(result, "INSTAGRAM", insight.name.toLowerCase(), insight.values?.[0]?.value, input.capturedAt, input.externalPostId);
+    const name = insight.name.toLowerCase();
+    pushMetric(result, "INSTAGRAM", aliases[name] ?? name, insight.values?.[0]?.value, input.capturedAt, input.externalPostId);
   }
   return result;
 }
@@ -98,9 +100,11 @@ export function normalizeFacebookPostMetrics(input: {
   pushMetric(result, "FACEBOOK", "reactions", input.counters?.reactions, input.capturedAt, input.externalPostId);
   pushMetric(result, "FACEBOOK", "comments", input.counters?.comments, input.capturedAt, input.externalPostId);
   pushMetric(result, "FACEBOOK", "shares", input.counters?.shares, input.capturedAt, input.externalPostId);
+  const aliases: Record<string, string> = { post_impressions: "impressions", post_impressions_unique: "reach", post_engaged_users: "engagement", post_clicks: "clicks" };
   for (const insight of input.insights ?? []) {
     if (typeof insight.name !== "string") continue;
-    pushMetric(result, "FACEBOOK", insight.name.toLowerCase(), insight.values?.[0]?.value, input.capturedAt, input.externalPostId);
+    const name = insight.name.toLowerCase();
+    pushMetric(result, "FACEBOOK", aliases[name] ?? name, insight.values?.[0]?.value, input.capturedAt, input.externalPostId);
   }
   return result;
 }
