@@ -44,12 +44,13 @@ assert.equal(unsafe.status,410,"direct publish bypass must remain closed");
 await calendar(other.token,{action:"CREATE_JOB",profileId,variantId:variants.FACEBOOK,scheduledAt:new Date(Date.now()+180000).toISOString(),operationId:`cross_${marker}`},403);
 
 const results=[];
-for (const provider of ["FACEBOOK","LINKEDIN","INSTAGRAM"]) {
+for (const provider of ["INSTAGRAM","FACEBOOK","LINKEDIN"]) {
   const created=await calendar(owner.token,{action:"CREATE_JOB",profileId,variantId:variants[provider],scheduledAt:new Date(Date.now()+180000).toISOString(),operationId:`${provider.toLowerCase()}_${marker}`});
   assert.equal(created.state,"SCHEDULED");
   const before=await controller("state"); assert.equal(before.qaJobs,results.length+1);
   const run=await controller("run-job",{profileId,jobId:created.jobId});
-  assert.equal(run.engine.published,1,`${provider} engine did not publish`);
+  if (run.engine?.published !== 1) console.error("FASE7F_PROVIDER_FAILURE:",JSON.stringify({provider,engine:run.engine,job:run.job}));
+  assert.equal(run.engine.published,1,`${provider} engine did not publish: ${JSON.stringify({engine:run.engine,job:run.job})}`);
   assert.equal(run.job?.state,"PUBLISHED",`${provider} local state not published`);
   assert.match(run.job?.remote_post_id||"",/^.+$/,`${provider} remote ID missing`);
   let verified;
