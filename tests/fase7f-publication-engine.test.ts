@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { classifyProviderFailure, retryDelaySeconds } from "../api/_lib/social.js";
+import { classifyProviderFailure, instagramContainerDecision, retryDelaySeconds } from "../api/_lib/social.js";
 
 const [migration, social, store, calendar, dashboard, wrangler, entry] = await Promise.all([
   readFile("db/migrations/20260908_fase7f_safe_publication_engine.sql", "utf8"),
@@ -56,6 +56,13 @@ assert.match(social, /media:\$\{profileId\}:\$\{assetId\}:\$\{exp\}/);
 assert.match(social, /a\.profile_id = v\.profile_id/);
 assert.match(social, /where id=\$\{assetId\}::uuid and profile_id=\$\{profileId\}::uuid/);
 assert.doesNotMatch(publisher, /error\?\.message/);
+assert.match(publisher, /waitForInstagramContainer/);
+assert.match(social, /const attempts = 15/);
+assert.match(social, /setTimeout\(resolve, 2_000\)/);
+assert.equal(instagramContainerDecision("FINISHED"), "READY");
+assert.equal(instagramContainerDecision("IN_PROGRESS"), "PENDING");
+assert.equal(instagramContainerDecision("ERROR"), "TERMINAL");
+assert.equal(instagramContainerDecision("EXPIRED"), "TERMINAL");
 
 const rateLimit = classifyProviderFailure("FACEBOOK", "PUBLISH", 429, true);
 assert.equal(rateLimit.retryable, true);
