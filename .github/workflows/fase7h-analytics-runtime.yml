@@ -1,0 +1,118 @@
+name: FASE 7H Real Provider Analytics Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/fase7h-analytics-runtime.yml"
+      - "tests/fase7h-analytics-*"
+      - "tests/wrangler.fase7h-runtime.jsonc"
+
+concurrency:
+  group: fase7h-analytics-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/fase7h-analytics-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Product and error-contract regression
+        run: |
+          npm run typecheck
+          npm run test:fase7h-analytics-engine
+          node --import tsx tests/fase7h-analytics-runtime-contract.test.ts
+          npm run build
+
+      - name: Generate ephemeral verifier material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="analytics7h-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "ANALYTICS7H_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "ANALYTICS7H_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "ANALYTICS7H_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "ANALYTICS7H_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'ANALYTICS7H_TOKEN=%s\n' "$token" > .fase7h-runtime-secrets.env
+          chmod 600 .fase7h-runtime-secrets.env
+
+      - name: Upload isolated preview controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.fase7h-runtime.jsonc --keep-vars --preview-alias "analytics7h-${GITHUB_RUN_ID}" --secrets-file .fase7h-runtime-secrets.env | tee fase7h-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase7h-upload.log | tail -n 1)
+          test -n "$version_id"
+          echo "ANALYTICS7H_CONTROLLER_VERSION=$version_id" >> "$GITHUB_ENV"
+
+      - name: Verify isolation and clean preflight
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7h-deployments-before.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7h-deployments-before.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort();const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(versions.includes(process.env.ANALYTICS7H_CONTROLLER_VERSION))throw new Error('preview attached to production');fs.appendFileSync(process.env.GITHUB_ENV,`ANALYTICS7H_PROD_DEPLOYMENTS=${ids.join(',')}\nANALYTICS7H_PROD_VERSIONS=${versions.join(',')}\n`);console.log('FASE7H_PREVIEW_ISOLATION: PASS');
+          NODE
+          call_controller(){ curl -fsS -X POST -H 'content-type: application/json' -H "x-analytics7h-token: $ANALYTICS7H_TOKEN_VALUE" --data "{\"action\":\"$1\",\"marker\":\"$ANALYTICS7H_MARKER\"}" "$ANALYTICS7H_CONTROLLER_URL"; }
+          call_controller preflight > fase7h-preflight.json
+          stale=$(node -e "const b=require('./fase7h-preflight.json');process.stdout.write(String(b.recognizedQaUsers||0))")
+          if [ "$stale" -gt 0 ]; then call_controller cleanup-residue > fase7h-stale-cleanup.json; call_controller preflight > fase7h-preflight.json; fi
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7h-preflight.json','utf8'));for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaConnections','qaJobs','qaSnapshots','qaTargets'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);if(b.jobsTotal!==0||b.snapshotsTotal!==0||b.targetsTotal!==0)throw new Error(`production analytics baseline not empty ${JSON.stringify(b)}`);fs.appendFileSync(process.env.GITHUB_ENV,`ANALYTICS7H_BASELINE_PROFILES=${b.profilesTotal}\nANALYTICS7H_BASELINE_JOBS=${b.jobsTotal}\nANALYTICS7H_BASELINE_SNAPSHOTS=${b.snapshotsTotal}\nANALYTICS7H_BASELINE_TARGETS=${b.targetsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7H_PREFLIGHT: PASS',JSON.stringify(b));
+          NODE
+
+      - name: Authenticated real-provider runtime
+        run: node tests/fase7h-analytics-runtime.mjs
+
+      - name: Install browser
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Analytics UI desktop and mobile
+        run: node tests/fase7h-analytics-browser.mjs
+
+      - name: Cleanup local QA artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then exit 0; fi
+          status=$(curl -sS -o fase7h-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-analytics7h-token: $ANALYTICS7H_TOKEN_VALUE" --data "{\"action\":\"cleanup\",\"marker\":\"$ANALYTICS7H_MARKER\"}" "$ANALYTICS7H_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const b=require('./fase7h-cleanup.json');if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true)throw new Error('cleanup request failed');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaConnections','qaJobs','qaSnapshots','qaTargets'])if(b[key]!==0)throw new Error(`cleanup residue ${key}=${b[key]}`);for(const [key,env] of [['profilesTotal','ANALYTICS7H_BASELINE_PROFILES'],['jobsTotal','ANALYTICS7H_BASELINE_JOBS'],['snapshotsTotal','ANALYTICS7H_BASELINE_SNAPSHOTS'],['targetsTotal','ANALYTICS7H_BASELINE_TARGETS']])if(String(b[key])!==String(process.env[env]))throw new Error(`baseline mismatch ${key}`);console.log('FASE7H_CLEANUP: PASS',JSON.stringify({profiles:b.profilesTotal,jobs:b.jobsTotal,snapshots:b.snapshotsTotal,targets:b.targetsTotal,residue:0}));
+          NODE
+
+      - name: Post-cleanup deployment invariant
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7h-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7h-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(ids!==process.env.ANALYTICS7H_PROD_DEPLOYMENTS||versions.join(',')!==process.env.ANALYTICS7H_PROD_VERSIONS||versions.includes(process.env.ANALYTICS7H_CONTROLLER_VERSION))throw new Error('production deployment changed');console.log('FASE7H_PRODUCTION_INVARIANT: PASS');
+          NODE
+      - name: Remove ephemeral material
+        if: always()
+        run: |
+          shred -u .fase7h-runtime-secrets.env 2>/dev/null || rm -f .fase7h-runtime-secrets.env
+          rm -f fase7h-*.json fase7h-upload.log fase7h-profile-id.txt
