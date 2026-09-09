@@ -12,11 +12,11 @@ assert.equal(metricsCapability({ provider: "GBP", connectionStatus: "ACTIVE", pr
 
 const capturedAt = "2026-08-29T00:00:00.000Z";
 const instagram = normalizeInstagramMediaMetrics({ externalPostId: "ig-post", capturedAt, basic: { like_count: 12, comments_count: "3" }, insights: [{ name: "reach", values: [{ value: 120 }] }, { name: "saved", values: [{ value: 4 }] }] });
-assert.deepEqual(instagram.map((item) => [item.metric, item.value]), [["likes", 12], ["comments", 3], ["reach", 120], ["saved", 4]]);
+assert.deepEqual(instagram.map((item) => [item.metric, item.value]), [["likes", 12], ["comments", 3], ["reach", 120], ["saves", 4]]);
 assert.ok(instagram.every((item) => item.externalPostId === "ig-post"));
 
 const facebook = normalizeFacebookPostMetrics({ externalPostId: "fb-post", capturedAt, counters: { reactions: 8, comments: 2, shares: 1 }, insights: [{ name: "post_impressions_unique", values: [{ value: 90 }] }] });
-assert.deepEqual(facebook.map((item) => [item.metric, item.value]), [["reactions", 8], ["comments", 2], ["shares", 1], ["post_impressions_unique", 90]]);
+assert.deepEqual(facebook.map((item) => [item.metric, item.value]), [["reactions", 8], ["comments", 2], ["shares", 1], ["reach", 90]]);
 
 const linkedin = normalizeLinkedInMetrics({ externalPostId: "urn:li:share:1", capturedAt, statistics: { impressionCount: 1000, uniqueImpressionsCount: 700, clickCount: 25, engagement: 0.034, POST_SAVE: 9 } });
 assert.deepEqual(linkedin.map((item) => item.metric), ["impressions", "reach", "clicks", "engagement_rate", "saves"]);

@@ -23,6 +23,22 @@ Personal post analytics requires `r_member_postAnalytics`. Organization reportin
 ### Google Business Profile
 Uses the Business Profile Performance API v1. The existing `business.manage` OAuth scope is necessary but the Performance API must also be enabled in the Google Cloud project. Legacy reportInsights endpoints are not treated as the current source.
 
-## Persistence status
+## Runtime pipeline
 
-The runtime collector/persistence step remains blocked until the production `metric_snapshots` schema can be introspected reliably. The Neon connector currently exposes incompatible argument names between its client schema and backend validator, so no database column contract is guessed.
+- The hourly Cloudflare cron claims eligible published posts with `FOR UPDATE SKIP LOCKED`.
+- Posts younger than seven days are refreshed at most every six hours; older posts are refreshed daily and stop after thirty days.
+- Each post/hour has one snapshot. Concurrent cron executions and retries update that bucket instead of duplicating it.
+- Provider 429 and temporary failures use bounded exponential backoff. Revoked/expired access and deleted remote posts enter terminal states without deleting older snapshots.
+- Provider tokens stay in encrypted server storage and are sent in authorization headers, never query strings or customer responses.
+
+## Normalized metric matrix
+
+| Provider | Provider source | Normalized metrics |
+|---|---|---|
+| Instagram | Graph media fields + media insights | `likes`, `comments`, `views`, `reach`, `saves`, `shares`, `engagement` |
+| Facebook | Graph post fields + post insights | `reactions`, `comments`, `shares`, `impressions`, `reach`, `engagement`, `clicks` |
+| LinkedIn member | Member Creator Post Analytics; owned-post social actions as a partial fallback | `impressions`, `reach`, `clicks`, `engagement_rate`, `likes`, `comments`, `shares`, `reactions`, `saves` when returned |
+| LinkedIn organization | Organizational Entity Share Statistics | `impressions`, `reach`, `clicks`, `engagement_rate`, `likes`, `comments`, `shares`, `reactions` when returned |
+| Google Business Profile | Performance API v1 | Blocked externally until API access/quota is enabled |
+
+`impressions`, `reach`, `views`, clicks and interactions remain separate fields. Unknown numeric provider metrics are preserved under their provider key instead of being coerced into a different meaning.

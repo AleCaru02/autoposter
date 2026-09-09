@@ -44,8 +44,8 @@ test("PLAN_GATED and USAGE_LIMITED fail closed when missing", () => {
 });
 
 test("NOT_READY cannot be commercially assigned", () => {
-  assert.equal(capabilityCanBeCommerciallyAssigned("analytics.sync"), false);
-  assert.throws(() => requireCommercialAssignableCapability("analytics.sync"), /CAPABILITY_NOT_READY/);
+  assert.equal(capabilityCanBeCommerciallyAssigned("analytics.gbp.normalize"), false);
+  assert.throws(() => requireCommercialAssignableCapability("analytics.gbp.normalize"), /CAPABILITY_NOT_READY/);
 });
 
 test("ADMIN_ONLY and INTERNAL do not become customer entitlements", () => {

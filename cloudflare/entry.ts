@@ -17,6 +17,7 @@ import { handleSameOriginAuthProxy } from "./auth-proxy.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
+import { processDueAnalytics } from "../api/_lib/analytics.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -165,6 +166,11 @@ export default {
       }));
       return;
     }
+    ctx.waitUntil(processDueAnalytics(env).then((result) => {
+      console.log("social-analytics-run", result);
+    }).catch((reason) => {
+      console.error("social-analytics-failed", reason instanceof Error ? reason.message : "unknown");
+    }));
     ctx.waitUntil(runContentAutopilotSerialized(env).then((result) => {
       console.log("content-autopilot", result);
     }).catch((reason) => {
