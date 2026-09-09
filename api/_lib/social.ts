@@ -112,11 +112,31 @@ function publishError(code: string, options: { retryable?: boolean; outcomeUnkno
   );
 }
 
-export function classifyProviderFailure(provider: SocialProvider, stage: string, status: number | null, visibleWriteStarted: boolean) {
+type ProviderErrorNumbers = { providerCode?: number | undefined; providerSubcode?: number | undefined };
+
+function safeProviderErrorNumber(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+async function providerErrorNumbers(response: Response): Promise<ProviderErrorNumbers> {
+  try {
+    const body = await response.clone().json() as { error?: { code?: unknown; error_subcode?: unknown } };
+    return { providerCode: safeProviderErrorNumber(body.error?.code), providerSubcode: safeProviderErrorNumber(body.error?.error_subcode) };
+  } catch {
+    return {};
+  }
+}
+
+export function classifyProviderFailure(provider: SocialProvider, stage: string, status: number | null, visibleWriteStarted: boolean, details: ProviderErrorNumbers = {}) {
   const prefix = provider === "INSTAGRAM" ? "INSTAGRAM" : provider === "FACEBOOK" ? "FACEBOOK" : provider === "LINKEDIN" ? "LINKEDIN" : "GBP";
   if (status === 429) return publishError(`${prefix}_RATE_LIMITED`, { retryable: true, customerMessage: "Il social ha chiesto di riprovare più tardi." });
   if (status === 401 || status === 403) return publishError(`${prefix}_RECONNECT_REQUIRED`, { customerMessage: "Ricollega il social prima di riprovare." });
-  if (status === 400 || status === 404 || status === 409 || status === 422) return publishError(`${prefix}_${stage}_REJECTED`, { customerMessage: "Il social ha rifiutato contenuto o formato." });
+  if (status === 400 || status === 404 || status === 409 || status === 422) {
+    const providerCode = safeProviderErrorNumber(details.providerCode);
+    const providerSubcode = safeProviderErrorNumber(details.providerSubcode);
+    const diagnostic = `${providerCode === undefined ? "" : `_C${providerCode}`}${providerSubcode === undefined ? "" : `_S${providerSubcode}`}`;
+    return publishError(`${prefix}_${stage}_REJECTED${diagnostic}`, { customerMessage: "Il social ha rifiutato contenuto o formato." });
+  }
   if (visibleWriteStarted) return publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true, customerMessage: "La pubblicazione potrebbe essere avvenuta: verifica il social prima di riprovare." });
   return publishError(`${prefix}_${stage}_TEMPORARY`, { retryable: true, customerMessage: "Il social non è disponibile. Il sistema riproverà automaticamente." });
 }
@@ -137,7 +157,7 @@ async function providerRequest(input: string | URL, init: RequestInit, options: 
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25_000);
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
-    if (!response.ok) throw classifyProviderFailure(options.provider, options.stage, response.status, visibleWrite);
+    if (!response.ok) throw classifyProviderFailure(options.provider, options.stage, response.status, visibleWrite, await providerErrorNumbers(response));
     return response;
   } catch (reason) {
     if (reason instanceof SocialPublishError) throw reason;
