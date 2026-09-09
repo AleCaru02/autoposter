@@ -77,7 +77,9 @@ async function run() {
     assert.match(vercelAutopilotSource, /runContentAutopilotSerialized/, "Vercel manual autopilot must use the serialized runner");
 
     const workerEntrySource = await readFile(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
-    assert.match(workerEntrySource, /runContentAutopilotSerialized\(env,\s*\{\s*profileId,\s*maxGenerations:\s*6\s*\}\)/, "Worker manual autopilot must use the serialized runner");
+    assert.match(workerEntrySource, /const result = await runContentAutopilotSerialized\(env,\s*\{\s*profileId,\s*maxGenerations:\s*6\s*\}\)/, "Worker manual autopilot must remain attached to the authenticated request until generation completes");
+    assert.doesNotMatch(workerEntrySource, /ctx\.waitUntil\(runContentAutopilotSerialized\(env,\s*\{\s*profileId/, "manual Autopilot must not be truncated in the post-response waitUntil window");
+    assert.match(workerEntrySource, /return json\(result\)/, "manual Autopilot must return its durable result instead of an early 202");
     assert.match(workerEntrySource, /runContentAutopilotSerialized\(env\)/, "Worker scheduled autopilot must use the serialized runner");
     assert.match(workerEntrySource, /path === "\/api\/generate-text"/, "Worker /api/generate-text must be intercepted before the legacy worker handler");
     assert.match(workerEntrySource, /handleWorkerGenerateText\(request,\s*env\)/, "Worker text generation must use the dedupe-aware handler");
