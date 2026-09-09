@@ -116,7 +116,7 @@ export function classifyProviderFailure(provider: SocialProvider, stage: string,
   const prefix = provider === "INSTAGRAM" ? "INSTAGRAM" : provider === "FACEBOOK" ? "FACEBOOK" : provider === "LINKEDIN" ? "LINKEDIN" : "GBP";
   if (status === 429) return publishError(`${prefix}_RATE_LIMITED`, { retryable: true, customerMessage: "Il social ha chiesto di riprovare più tardi." });
   if (status === 401 || status === 403) return publishError(`${prefix}_RECONNECT_REQUIRED`, { customerMessage: "Ricollega il social prima di riprovare." });
-  if (status === 400 || status === 404 || status === 409 || status === 422) return publishError(`${prefix}_CONTENT_REJECTED`, { customerMessage: "Il social ha rifiutato contenuto o formato." });
+  if (status === 400 || status === 404 || status === 409 || status === 422) return publishError(`${prefix}_${stage}_REJECTED`, { customerMessage: "Il social ha rifiutato contenuto o formato." });
   if (visibleWriteStarted) return publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true, customerMessage: "La pubblicazione potrebbe essere avvenuta: verifica il social prima di riprovare." });
   return publishError(`${prefix}_${stage}_TEMPORARY`, { retryable: true, customerMessage: "Il social non è disponibile. Il sistema riproverà automaticamente." });
 }
