@@ -62,7 +62,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-before.json
+          curl --retry 3 --retry-all-errors --retry-delay 2 -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-before.json
           node - <<'NODE'
           const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7g-deployments-before.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort();const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(versions.includes(process.env.AUTOPILOT7G_CONTROLLER_VERSION))throw new Error('preview attached to production');fs.appendFileSync(process.env.GITHUB_ENV,`AUTOPILOT7G_PROD_DEPLOYMENTS=${ids.join(',')}\nAUTOPILOT7G_PROD_VERSIONS=${versions.join(',')}\n`);console.log('FASE7G_PREVIEW_ISOLATION: PASS');
           NODE
@@ -99,7 +99,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-after.json
+          curl --retry 3 --retry-all-errors --retry-delay 2 -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7g-deployments-after.json
           node - <<'NODE'
           const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7g-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(ids!==process.env.AUTOPILOT7G_PROD_DEPLOYMENTS||versions.join(',')!==process.env.AUTOPILOT7G_PROD_VERSIONS||versions.includes(process.env.AUTOPILOT7G_CONTROLLER_VERSION))throw new Error('production deployment changed');console.log('FASE7G_PRODUCTION_INVARIANT: PASS');
           NODE
