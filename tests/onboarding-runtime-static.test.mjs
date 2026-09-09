@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const workflow=fs.readFileSync(".github/workflows/audit-viewer-runtime.yml","utf8");
+const runtime=fs.readFileSync("tests/onboarding-runtime.mjs","utf8");
+const controller=fs.readFileSync("tests/onboarding-runtime-qa-controller.ts","utf8");
+const wrangler=fs.readFileSync("tests/wrangler.onboarding-runtime.jsonc","utf8");
+assert.match(workflow,/^on:\s*\n\s+workflow_dispatch:\s*$/m); assert.doesNotMatch(workflow,/^\s+(push|pull_request):/m);
+assert.match(workflow,/verify\/fase5b-onboarding-completion-runtime/); assert.match(workflow,/e4adf95273f00388cb24184e7787591d5d15975f/);
+assert.match(workflow,/77548a0c-4eaa-4e8d-90f5-798ca2a5aefa/);
+assert.match(workflow,/wrangler versions upload/); assert.doesNotMatch(workflow,/\bwrangler (deploy|delete)\b/i); assert.match(workflow,/set -euo pipefail[\s\S]+node tests\/onboarding-runtime\.mjs \| tee/);
+assert.match(workflow,/if: always\(\)/); assert.doesNotMatch(workflow,/actions\/upload-artifact/);
+assert.match(runtime,/FASE_5B_ONBOARDING_COMPLETION_RUNTIME: PASS/); assert.match(runtime,/directCompletionBlocked:true/); assert.match(runtime,/tenantIsolation:true/); assert.match(runtime,/bannedDenied:true/);
+assert.match(controller,/cleanup-residue/); assert.match(controller,/onboarding-completion-smoke-/); assert.match(controller,/metadata->>'phase' in \('FASE_5A','FASE_5B'\)/);
+assert.match(wrangler,/"preview_urls"\s*:\s*true/); assert.doesNotMatch(wrangler,/"routes"\s*:/);
+console.log("FASE 5B onboarding completion runtime static safety: PASS");
