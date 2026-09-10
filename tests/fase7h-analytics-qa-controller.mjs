@@ -51,8 +51,10 @@ async function facebookPreflight(sql, marker, profileId, env) {
   if(!await ownedProfile(sql,marker,profileId)) throw new Error("QA_PROFILE_SCOPE_MISMATCH"); const row=await connection(sql,profileId,"FACEBOOK",env); const version=/^v\d+\.\d+$/.test(env.META_GRAPH_VERSION||"")?env.META_GRAPH_VERSION:"v23.0";
   const url=new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(row.provider_account_id)}/published_posts`); url.searchParams.set("fields","id,created_time"); url.searchParams.set("limit","25");
   const response=await fetch(url,{headers:{authorization:`Bearer ${row.accessToken}`,accept:"application/json"}}); const body=await response.json().catch(()=>({}));
-  if(!response.ok) return {ready:false,status:response.status,error:"FACEBOOK_PREFLIGHT_REJECTED"}; const post=(Array.isArray(body.data)?body.data:[]).find((item)=>typeof item?.id==="string");
-  return post?{ready:true,remotePostId:post.id,source:"PAGE_PUBLISHED_POSTS",pagination:Boolean(body.paging?.next)}:{ready:false,status:404,error:"FACEBOOK_NO_EXISTING_POST"};
+  if(!response.ok) return {ready:false,status:response.status,error:"FACEBOOK_PREFLIGHT_REJECTED"};
+  const candidates=(Array.isArray(body.data)?body.data:[]).filter((item)=>typeof item?.id==="string"); const rejected=[];
+  for(const post of candidates){const probe=new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(post.id)}`);probe.searchParams.set("fields","id,reactions.limit(0).summary(true),comments.limit(0).summary(true),shares");const checked=await fetch(probe,{headers:{authorization:`Bearer ${row.accessToken}`,accept:"application/json"}});if(checked.ok)return {ready:true,remotePostId:post.id,source:"PAGE_PUBLISHED_POSTS_EXACT_FIELD_PROBE",pagination:Boolean(body.paging?.next),candidatesChecked:rejected.length+1};rejected.push(checked.status);}
+  return {ready:false,status:rejected.at(-1)||404,error:"FACEBOOK_NO_COMPATIBLE_EXISTING_POST",candidatesChecked:candidates.length};
 }
 async function linkedInPreflight(sql, marker, profileId, env) {
   if(!await ownedProfile(sql,marker,profileId)) throw new Error("QA_PROFILE_SCOPE_MISMATCH"); const row=await connection(sql,profileId,"LINKEDIN",env); const headers={authorization:`Bearer ${row.accessToken}`,accept:"application/json","Linkedin-Version":env.LINKEDIN_API_VERSION||"202601","X-Restli-Protocol-Version":"2.0.0"};
