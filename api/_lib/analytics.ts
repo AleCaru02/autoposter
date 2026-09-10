@@ -93,10 +93,18 @@ async function fetchInstagram(claim: Claim, connection: Connection, token: strin
 
 async function fetchFacebook(claim: Claim, connection: Connection, token: string, env: SocialEnv, runtime: FetchRuntime) {
   const capturedAt = new Date().toISOString();
-  const basicUrl = new URL(`https://graph.facebook.com/${env.META_GRAPH_VERSION || "v23.0"}/${encodeURIComponent(claim.external_post_id)}`);
-  basicUrl.searchParams.set("fields", "id,reactions.limit(0).summary(true),comments.limit(0).summary(true),shares");
-  const basic = await request(basicUrl, "FACEBOOK", token, runtime);
-  const reactions = metadata(basic?.reactions); const comments = metadata(basic?.comments); const shares = metadata(basic?.shares);
+  const postUrl = (fields: string) => { const url = new URL(`https://graph.facebook.com/${env.META_GRAPH_VERSION || "v23.0"}/${encodeURIComponent(claim.external_post_id)}`); url.searchParams.set("fields", fields); return url; };
+  // Prove that the remote object still exists, then read optional counters
+  // independently. Meta can reject reactions/comments for a valid owned Page
+  // post while still allowing shares and insights; one unavailable counter must
+  // not discard every metric returned by the provider.
+  await request(postUrl("id"), "FACEBOOK", token, runtime);
+  const [reactionBody, commentBody, shareBody] = await Promise.all([
+    request(postUrl("reactions.limit(0).summary(true)"), "FACEBOOK", token, runtime, true),
+    request(postUrl("comments.limit(0).summary(true)"), "FACEBOOK", token, runtime, true),
+    request(postUrl("shares"), "FACEBOOK", token, runtime, true),
+  ]);
+  const reactions = metadata(reactionBody?.reactions); const comments = metadata(commentBody?.comments); const shares = metadata(shareBody?.shares);
   const points = normalizeFacebookPostMetrics({ externalPostId: claim.external_post_id, capturedAt, counters: {
     reactions: numeric(metadata(reactions.summary).total_count), comments: numeric(metadata(comments.summary).total_count), shares: numeric(shares.count),
   } });

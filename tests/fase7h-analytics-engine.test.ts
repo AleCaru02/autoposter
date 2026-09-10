@@ -41,6 +41,15 @@ assert.deepEqual(metrics, { reactions: 8, comments: 2, shares: 1, impressions: 1
 assert.ok(seen.every((item) => item.authorization === "Bearer provider-secret-token"));
 assert.ok(seen.every((item) => !item.url.includes("provider-secret-token")), "provider token must never enter URLs/logs");
 
+const partialFacebook = await fetchProviderMetrics(claim, connection, { SOCIAL_TOKEN_KEY: secret, META_GRAPH_VERSION: "v23.0" }, { fetch: async (input) => {
+  const url = new URL(String(input)); const fields = url.searchParams.get("fields") || "";
+  if (fields === "id") return Response.json({ id: "page_post" });
+  if (fields.startsWith("reactions") || fields.startsWith("comments")) return new Response("{}", { status: 400 });
+  if (fields === "shares") return Response.json({ shares: { count: 2 } });
+  return new Response("{}", { status: 400 });
+} });
+assert.deepEqual(partialFacebook, { shares: 2 }, "unsupported optional counters must not discard valid real metrics");
+
 for (const [status, expectedCode, retryable, terminal] of [[401, "FACEBOOK_ANALYTICS_RECONNECT_REQUIRED", false, "BLOCKED"], [429, "FACEBOOK_ANALYTICS_RATE_LIMITED", true, null]] as const) {
   await assert.rejects(
     fetchProviderMetrics(claim, connection, { SOCIAL_TOKEN_KEY: secret }, { fetch: async () => new Response("{}", { status, headers: status === 429 ? { "retry-after": "120" } : {} }) }),
