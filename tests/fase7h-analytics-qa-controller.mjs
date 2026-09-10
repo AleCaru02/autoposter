@@ -54,7 +54,9 @@ async function facebookPreflight(sql, marker, profileId, env) {
   if(!response.ok) return {ready:false,status:response.status,error:"FACEBOOK_PREFLIGHT_REJECTED"};
   const candidates=(Array.isArray(body.data)?body.data:[]).filter((item)=>typeof item?.id==="string"); const rejected=[];
   for(const post of candidates){const probe=new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(post.id)}`);probe.searchParams.set("fields","id,reactions.limit(0).summary(true),comments.limit(0).summary(true),shares");const checked=await fetch(probe,{headers:{authorization:`Bearer ${row.accessToken}`,accept:"application/json"}});if(checked.ok)return {ready:true,remotePostId:post.id,source:"PAGE_PUBLISHED_POSTS_EXACT_FIELD_PROBE",pagination:Boolean(body.paging?.next),candidatesChecked:rejected.length+1};rejected.push(checked.status);}
-  return {ready:false,status:rejected.at(-1)||404,error:"FACEBOOK_NO_COMPATIBLE_EXISTING_POST",candidatesChecked:candidates.length};
+  const diagnostics={};
+  if(candidates[0])for(const fields of ["id","id,reactions.limit(0).summary(true)","id,comments.limit(0).summary(true)","id,shares"]){const probe=new URL(`https://graph.facebook.com/${version}/${encodeURIComponent(candidates[0].id)}`);probe.searchParams.set("fields",fields);const checked=await fetch(probe,{headers:{authorization:`Bearer ${row.accessToken}`,accept:"application/json"}});diagnostics[fields]=checked.status;}
+  return {ready:false,status:rejected.at(-1)||404,error:"FACEBOOK_NO_COMPATIBLE_EXISTING_POST",candidatesChecked:candidates.length,diagnostics};
 }
 async function linkedInPreflight(sql, marker, profileId, env) {
   if(!await ownedProfile(sql,marker,profileId)) throw new Error("QA_PROFILE_SCOPE_MISMATCH"); const row=await connection(sql,profileId,"LINKEDIN",env); const headers={authorization:`Bearer ${row.accessToken}`,accept:"application/json","Linkedin-Version":env.LINKEDIN_API_VERSION||"202601","X-Restli-Protocol-Version":"2.0.0"};
