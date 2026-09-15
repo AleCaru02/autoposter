@@ -97,7 +97,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7j-deployments-after.json
+          curl --retry 4 --retry-all-errors --retry-delay 1 -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7j-deployments-after.json
           node - <<'NODE'
           const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7j-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(ids!==process.env.SETTINGS7J_PROD_DEPLOYMENTS||versions.join(',')!==process.env.SETTINGS7J_PROD_VERSIONS||versions.includes(process.env.SETTINGS7J_CONTROLLER_VERSION))throw new Error('production deployment changed');console.log('FASE7J_PRODUCTION_INVARIANT: PASS');
           NODE
