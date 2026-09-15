@@ -29,13 +29,16 @@ const preflight = await controller("preflight"); assert.equal(preflight.recogniz
 const owner = await signup(emails.owner, "Settings 7J Owner"); const other = await signup(emails.other, "Settings 7J Other"); await waitIdentity(owner); await waitIdentity(other);
 const profileId = await createProfile(owner, "owner"); const otherProfileId = await createProfile(other, "other"); await controller("fixture", { profileId });
 const crossTenant = await dataApi(`/profiles?id=eq.${otherProfileId}&select=id`, owner.token); assert.equal(crossTenant.status, 200); assert.deepEqual(await readJson(crossTenant), [], "tenant A read tenant B profile");
+const usageRead = await dataApi(`/capability_usage_buckets?profile_id=eq.${profileId}&capability_key=eq.ai.content.generate_text&select=committed_quantity,reserved_quantity,period_start,period_end`, owner.token); const usageRows = await readJson(usageRead); assert.equal(usageRead.status, 200); assert.equal(usageRows.length, 1, `owner usage bucket unavailable: ${JSON.stringify(usageRows)}`); assert.equal(Number(usageRows[0].committed_quantity) + Number(usageRows[0].reserved_quantity), 18);
 
 const browser = await chromium.launch({ headless: true });
 try {
   const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); await login(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
   await desktop.getByRole("heading", { name: "Piano e utilizzo" }).waitFor();
   const desktopText = await desktop.locator("main").innerText();
-  for (const expected of ["Piano personale", "Creazione contenuti con AI", "Autopilot", "18 di 50 utilizzati questo mese", "Instagram", "Facebook", "LinkedIn", "Google Business Profile", "Cancellazione account"]) assert.ok(desktopText.includes(expected), `desktop missing ${expected}`);
+  const planPanelText = await desktop.getByRole("heading", { name: "Piano e utilizzo" }).locator("xpath=../../..").innerText(); console.log("FASE7J_PLAN_PANEL:", JSON.stringify(planPanelText));
+  for (const expected of ["Piano personale", "Creazione contenuti con AI", "Autopilot", "Instagram", "Facebook", "LinkedIn", "Google Business Profile", "Cancellazione account"]) assert.ok(desktopText.includes(expected), `desktop missing ${expected}`);
+  assert.match(planPanelText, /18\s+di\s+50\s+utilizzati\s+questo\s+mese/, "customer usage did not render the real current bucket");
   for (const forbidden of ["ai.content.generate_text", "capability_key", "token_reference", "RLS", "database internals"]) assert.equal(desktopText.includes(forbidden), false, `desktop leaked ${forbidden}`);
   const accountForm = desktop.getByRole("heading", { name: "Account", exact: true }).locator("xpath=../../.."); await accountForm.getByLabel("Nome").fill("Settings 7J Updated"); await accountForm.getByRole("button", { name: "Salva dati account" }).click(); await desktop.getByText("Dati account aggiornati.").waitFor();
   await desktop.goto(`${APP_BASE}/app/profili`, { waitUntil: "networkidle" }); await desktop.getByText("La cancellazione definitiva non è ancora disponibile").waitFor(); assert.equal(await desktop.locator('button[aria-label^="Elimina"]').count(), 0);
