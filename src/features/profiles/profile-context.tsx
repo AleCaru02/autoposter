@@ -38,7 +38,6 @@ type ProfileContextValue = {
   reload: () => Promise<void>;
   createProfile: (input: CreateProfileInput) => Promise<Profile>;
   updateProfile: (id: string, input: UpdateProfileInput) => Promise<Profile>;
-  deleteProfile: (id: string) => Promise<void>;
 };
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
@@ -144,15 +143,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     return updated;
   }, []);
 
-  const deleteProfile = useCallback(async (id: string) => {
-    const result = await neonClient.from("profiles").delete().eq("id", id).select("id");
-    if (result.error) throw new Error(result.error.message);
-    await reload();
-  }, [reload]);
-
   const selectedProfile = useMemo(() => profiles.find((profile) => profile.id === selectedProfileId) ?? null, [profiles, selectedProfileId]);
 
-  const value = useMemo<ProfileContextValue>(() => ({ profiles, selectedProfile, selectedProfileId, setSelectedProfileId, loading, error, reload, createProfile, updateProfile, deleteProfile }), [profiles, selectedProfile, selectedProfileId, setSelectedProfileId, loading, error, reload, createProfile, updateProfile, deleteProfile]);
+  const value = useMemo<ProfileContextValue>(() => ({ profiles, selectedProfile, selectedProfileId, setSelectedProfileId, loading, error, reload, createProfile, updateProfile }), [profiles, selectedProfile, selectedProfileId, setSelectedProfileId, loading, error, reload, createProfile, updateProfile]);
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }
