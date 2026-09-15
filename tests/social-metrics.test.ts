@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { metricsCapability, normalizeFacebookPostMetrics, normalizeGoogleBusinessMetrics, normalizeInstagramMediaMetrics, normalizeLinkedInMetrics } from "../api/_lib/social-metrics.js";
+import { LINKEDIN_MEMBER_ANALYTICS_QUERY_TYPES, metricsCapability, normalizeFacebookPostMetrics, normalizeGoogleBusinessMetrics, normalizeInstagramMediaMetrics, normalizeLinkedInMetrics } from "../api/_lib/social-metrics.js";
 
 assert.equal(metricsCapability({ provider: "INSTAGRAM", connectionStatus: "ACTIVE", providerAccountId: "ig-1", permissions: ["instagram_basic", "pages_read_engagement"] }).available, false, "Instagram analytics must fail closed without instagram_manage_insights");
 assert.equal(metricsCapability({ provider: "INSTAGRAM", connectionStatus: "ACTIVE", providerAccountId: "ig-1", permissions: ["instagram_basic", "instagram_manage_insights", "pages_read_engagement"] }).available, true);
@@ -7,6 +7,7 @@ assert.equal(metricsCapability({ provider: "FACEBOOK", connectionStatus: "ACTIVE
 assert.equal(metricsCapability({ provider: "LINKEDIN", connectionStatus: "ACTIVE", providerAccountId: "member-1", permissions: ["w_member_social"] }).available, false, "publishing permission alone must not imply analytics access");
 assert.equal(metricsCapability({ provider: "LINKEDIN", connectionStatus: "ACTIVE", providerAccountId: "member-1", permissions: ["r_member_postAnalytics"] }).available, true);
 assert.equal(metricsCapability({ provider: "LINKEDIN", connectionStatus: "ACTIVE", providerAccountId: "org-1", permissions: ["rw_organization_admin"], linkedinOrganizationMode: true }).available, true);
+assert.deepEqual(LINKEDIN_MEMBER_ANALYTICS_QUERY_TYPES, ["IMPRESSION", "MEMBERS_REACHED", "REACTION", "COMMENT", "RESHARE", "LINK_CLICKS"]);
 assert.equal(metricsCapability({ provider: "GBP", connectionStatus: "ACTIVE", providerAccountId: "locations/1", permissions: ["https://www.googleapis.com/auth/business.manage"], googlePerformanceApiEnabled: false }).reason, "GBP_PERFORMANCE_API_NOT_ENABLED");
 assert.equal(metricsCapability({ provider: "GBP", connectionStatus: "ACTIVE", providerAccountId: "locations/1", permissions: ["https://www.googleapis.com/auth/business.manage"], googlePerformanceApiEnabled: true }).available, true);
 

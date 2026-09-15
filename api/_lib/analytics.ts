@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
-import { decryptTokenBundle, type SocialEnv, type SocialProvider } from "./social.js";
-import { metricsCapability, normalizeFacebookPostMetrics, normalizeInstagramMediaMetrics, normalizeLinkedInMetrics, type MetricPoint } from "./social-metrics.js";
+import { decryptTokenBundle, linkedinVersion, type SocialEnv, type SocialProvider } from "./social.js";
+import { LINKEDIN_MEMBER_ANALYTICS_QUERY_TYPES, metricsCapability, normalizeFacebookPostMetrics, normalizeInstagramMediaMetrics, normalizeLinkedInMetrics, type MetricPoint } from "./social-metrics.js";
 
 type Sql = ReturnType<typeof neon>;
 type AnalyticsProvider = Exclude<SocialProvider, "GBP">;
@@ -42,7 +42,7 @@ async function request(url: URL, provider: AnalyticsProvider, accessToken: strin
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), runtime.timeoutMs ?? 20_000);
   try {
-    const response = await (runtime.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", ...(provider === "LINKEDIN" ? { "X-Restli-Protocol-Version": "2.0.0", "Linkedin-Version": providerVersion || "202508" } : {}) }, signal: controller.signal });
+    const response = await (runtime.fetch ?? fetch)(url, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json", ...(provider === "LINKEDIN" ? { "X-Restli-Protocol-Version": "2.0.0", "Linkedin-Version": providerVersion || "202608" } : {}) }, signal: controller.signal });
     if (!response.ok) {
       if (tolerateUnsupported && (response.status === 400 || response.status === 404)) return null;
       throw failure(provider, response.status, retryAfter(response));
@@ -114,31 +114,33 @@ async function fetchFacebook(claim: Claim, connection: Connection, token: string
 
 async function fetchLinkedIn(claim: Claim, connection: Connection, token: string, env: SocialEnv, runtime: FetchRuntime) {
   const capturedAt = new Date().toISOString();
-  const permissions = new Set(Array.isArray(connection.permissions) ? connection.permissions.filter((item): item is string => typeof item === "string") : []);
   const info = metadata(connection.metadata);
   if (info.accountType === "ORGANIZATION") {
     const url = new URL("https://api.linkedin.com/rest/organizationalEntityShareStatistics");
     url.searchParams.set("q", "organizationalEntity");
     url.searchParams.set("organizationalEntity", `urn:li:organization:${connection.provider_account_id}`);
     url.searchParams.set("shares", `List(${claim.external_post_id})`);
-    const body = await request(url, "LINKEDIN", token, runtime, false, env.LINKEDIN_API_VERSION);
+    const body = await request(url, "LINKEDIN", token, runtime, false, linkedinVersion(env));
     const element = Array.isArray(body?.elements) ? metadata(body.elements[0]) : {};
     return pointsToMetrics(normalizeLinkedInMetrics({ externalPostId: claim.external_post_id, capturedAt, statistics: metadata(element.totalShareStatistics) }));
   }
-  if (permissions.has("r_member_postAnalytics")) {
+  const urn = /^urn:li:(share|ugcPost):(\d+)$/.exec(claim.external_post_id);
+  if (!urn) throw new AnalyticsProviderError("LINKEDIN_REMOTE_POST_ID_INVALID", false, "NOT_FOUND", "Il contenuto remoto non è più disponibile.");
+  const entity = `(${urn[1] === "share" ? "share" : "ugc"}:${claim.external_post_id})`;
+  const statistics: Record<string, number> = {};
+  for (const queryType of LINKEDIN_MEMBER_ANALYTICS_QUERY_TYPES) {
     const url = new URL("https://api.linkedin.com/rest/memberCreatorPostAnalytics");
-    url.searchParams.set("q", "entity"); url.searchParams.set("entity", claim.external_post_id);
-    url.searchParams.set("queryType", "TOTAL"); url.searchParams.set("pageType", "MEMBER");
-    const body = await request(url, "LINKEDIN", token, runtime, false, env.LINKEDIN_API_VERSION);
-    const element = Array.isArray(body?.elements) ? metadata(body.elements[0]) : {};
-    return pointsToMetrics(normalizeLinkedInMetrics({ externalPostId: claim.external_post_id, capturedAt, statistics: metadata(element.metrics) }));
+    url.searchParams.set("q", "entity"); url.searchParams.set("entity", entity);
+    url.searchParams.set("queryType", queryType); url.searchParams.set("aggregation", "TOTAL");
+    const body = await request(url, "LINKEDIN", token, runtime, false, linkedinVersion(env));
+    for (const raw of Array.isArray(body?.elements) ? body.elements : []) {
+      const element = metadata(raw); const metricValue = element.metricType;
+      const metricType = typeof metricValue === "string" ? metricValue : Object.values(metadata(metricValue)).find((value): value is string => typeof value === "string");
+      const count = numeric(element.count);
+      if (metricType === queryType && count !== null) statistics[metricType] = (statistics[metricType] ?? 0) + count;
+    }
   }
-  // Publishing access still permits the real social-action counters for the
-  // owned post. This is intentionally a partial metric set, never fabricated.
-  const url = new URL(`https://api.linkedin.com/rest/socialActions/${encodeURIComponent(claim.external_post_id)}`);
-  const body = await request(url, "LINKEDIN", token, runtime, false, env.LINKEDIN_API_VERSION);
-  const stats = { likeCount: metadata(body?.likesSummary).totalLikes, commentCount: metadata(body?.commentsSummary).totalFirstLevelComments };
-  return pointsToMetrics(normalizeLinkedInMetrics({ externalPostId: claim.external_post_id, capturedAt, statistics: stats }));
+  return pointsToMetrics(normalizeLinkedInMetrics({ externalPostId: claim.external_post_id, capturedAt, statistics }));
 }
 
 export async function fetchProviderMetrics(claim: Claim, connection: Connection, env: SocialEnv, runtime: FetchRuntime = {}) {
@@ -146,8 +148,7 @@ export async function fetchProviderMetrics(claim: Claim, connection: Connection,
   if (connection.expires_at && new Date(connection.expires_at).getTime() <= Date.now()) throw new AnalyticsProviderError(`${claim.provider}_TOKEN_EXPIRED`, false, "BLOCKED", "Ricollega il social per aggiornare i risultati.");
   const info = metadata(connection.metadata);
   const capability = metricsCapability({ provider: claim.provider, connectionStatus: connection.status, providerAccountId: connection.provider_account_id, permissions: connection.permissions, linkedinOrganizationMode: info.accountType === "ORGANIZATION" });
-  const linkedinBasicFallback = claim.provider === "LINKEDIN" && Array.isArray(connection.permissions) && connection.permissions.includes("w_member_social");
-  if (!capability.available && !linkedinBasicFallback) throw new AnalyticsProviderError(capability.reason || "ANALYTICS_PERMISSION_MISSING", false, "BLOCKED", "Autorizza la lettura dei risultati per questo social.");
+  if (!capability.available) throw new AnalyticsProviderError(capability.reason || "ANALYTICS_PERMISSION_MISSING", false, "BLOCKED", "Autorizza la lettura dei risultati per questo social.");
   const bundle = await decryptTokenBundle(connection.token_reference, env.SOCIAL_TOKEN_KEY!);
   if (claim.provider === "INSTAGRAM") return fetchInstagram(claim, connection, bundle.accessToken, env, runtime);
   if (claim.provider === "FACEBOOK") return fetchFacebook(claim, connection, bundle.accessToken, env, runtime);
