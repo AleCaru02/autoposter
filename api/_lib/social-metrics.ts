@@ -1,5 +1,9 @@
 export type MetricsProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 
+export const LINKEDIN_MEMBER_ANALYTICS_QUERY_TYPES = [
+  "IMPRESSION", "MEMBERS_REACHED", "REACTION", "COMMENT", "RESHARE", "LINK_CLICKS",
+] as const;
+
 export type MetricPoint = {
   provider: MetricsProvider;
   metric: string;
