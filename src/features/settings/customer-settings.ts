@@ -63,7 +63,7 @@ const SOCIAL_LABELS: Record<SettingsSocialProvider, string> = {
 };
 
 export function customerSocialState(row: SettingsSocialStatus) {
-  if (!row.configured || row.provider === "GBP") return { label: SOCIAL_LABELS[row.provider], state: "Non disponibile" };
+  if (!row.configured) return { label: SOCIAL_LABELS[row.provider], state: "Non disponibile" };
   if (row.status !== "ACTIVE") return { label: SOCIAL_LABELS[row.provider], state: "Da riconnettere" };
   if (row.provider === "INSTAGRAM" && !row.permissions.includes("instagram_manage_insights")) return { label: SOCIAL_LABELS[row.provider], state: "Permesso Analytics mancante" };
   if (row.provider === "LINKEDIN" && !row.permissions.includes("r_member_postAnalytics") && !row.permissions.includes("rw_organization_admin")) return { label: SOCIAL_LABELS[row.provider], state: "Permesso Analytics mancante" };
