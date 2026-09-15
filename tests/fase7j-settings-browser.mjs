@@ -35,6 +35,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); await login(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
   await desktop.getByRole("heading", { name: "Piano e utilizzo" }).waitFor();
+  await desktop.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 });
   const desktopText = await desktop.locator("main").innerText();
   const planPanelText = await desktop.getByRole("heading", { name: "Piano e utilizzo" }).locator("xpath=../../..").innerText(); console.log("FASE7J_PLAN_PANEL:", JSON.stringify(planPanelText));
   for (const expected of ["Piano personale", "Creazione contenuti con AI", "Autopilot", "Instagram", "Facebook", "LinkedIn", "Google Business Profile", "Cancellazione account"]) assert.ok(desktopText.includes(expected), `desktop missing ${expected}`);
@@ -44,7 +45,7 @@ try {
   await desktop.goto(`${APP_BASE}/app/profili`, { waitUntil: "networkidle" }); await desktop.getByText("La cancellazione definitiva non è ancora disponibile").waitFor(); assert.equal(await desktop.locator('button[aria-label^="Elimina"]').count(), 0);
   await desktop.getByRole("button", { name: "Esci" }).click(); await desktop.waitForURL((url) => url.pathname === "/login"); assert.deepEqual(desktopFailures, [], `desktop failures: ${JSON.stringify(desktopFailures)}`); await desktopContext.close();
 
-  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); const mobile = await mobileContext.newPage(); const mobileFailures = diagnostics(mobile); await login(mobile); await mobile.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 }); await mobile.getByRole("heading", { name: "Piano e utilizzo" }).waitFor();
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); const mobile = await mobileContext.newPage(); const mobileFailures = diagnostics(mobile); await login(mobile); await mobile.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 }); await mobile.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 });
   const size = await mobile.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth })); assert.ok(size.scrollWidth <= size.viewportWidth + 2, `mobile overflow ${size.scrollWidth} > ${size.viewportWidth}`);
   await mobile.getByRole("button", { name: "Apri altre sezioni" }).click(); await mobile.getByRole("button", { name: "Esci" }).click(); await mobile.waitForURL((url) => url.pathname === "/login"); assert.deepEqual(mobileFailures, [], `mobile failures: ${JSON.stringify(mobileFailures)}`); await mobileContext.close();
 
