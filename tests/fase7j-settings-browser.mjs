@@ -33,9 +33,9 @@ const usageRead = await dataApi(`/capability_usage_buckets?profile_id=eq.${profi
 
 const browser = await chromium.launch({ headless: true });
 try {
-  const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); await login(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
+  const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); const overviewResponses = []; desktop.on("response", (response) => { const url = new URL(response.url()); if (url.pathname.includes("profile_entitlements") || url.pathname.includes("capability_usage_buckets") || url.pathname === "/api/social/status") overviewResponses.push({ path: url.pathname, status: response.status() }); }); await login(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
   await desktop.getByRole("heading", { name: "Piano e utilizzo" }).waitFor();
-  await desktop.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 });
+  try { await desktop.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 }); } catch (reason) { console.error("FASE7J_OVERVIEW_DIAGNOSTIC:", JSON.stringify({ overviewResponses, main: await desktop.locator("main").innerText() })); throw reason; }
   const desktopText = await desktop.locator("main").innerText();
   const planPanelText = await desktop.getByRole("heading", { name: "Piano e utilizzo" }).locator("xpath=../../..").innerText(); console.log("FASE7J_PLAN_PANEL:", JSON.stringify(planPanelText));
   for (const expected of ["Piano personale", "Creazione contenuti con AI", "Autopilot", "Instagram", "Facebook", "LinkedIn", "Google Business Profile", "Cancellazione account"]) assert.ok(desktopText.includes(expected), `desktop missing ${expected}`);
