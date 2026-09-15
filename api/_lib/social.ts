@@ -269,7 +269,7 @@ function metaVersion(env: SocialEnv) {
   return /^v\d+\.\d+$/.test(value) ? value : "v26.0";
 }
 
-function linkedinVersion(env: SocialEnv) {
+export function linkedinVersion(env: SocialEnv) {
   const value = env.LINKEDIN_API_VERSION?.trim() || "202608";
   return /^20\d{4}$/.test(value) ? value : "202608";
 }
@@ -492,7 +492,7 @@ function providerScopes(provider: SocialProvider, env: SocialEnv) {
   if (provider === "FACEBOOK" || provider === "INSTAGRAM") return [...META_SCOPES[provider]];
   if (provider === "GBP") return [GOOGLE_SCOPE];
   return linkedinOrganizationMode(env)
-    ? ["openid", "profile", "r_organization_admin", "w_organization_social"]
+    ? ["openid", "profile", "rw_organization_admin", "w_organization_social"]
     : ["openid", "profile", "w_member_social", "r_member_postAnalytics"];
 }
 

@@ -31,11 +31,19 @@ await assert.rejects(
 );
 
 const linkedInClaim = { ...baseClaim, provider: "LINKEDIN" as const, external_post_id: "urn:li:share:1" };
-const linkedInConnection = { ...facebookConnection, provider_account_id: "member", permissions: ["openid", "profile", "w_member_social"], metadata: { accountType: "MEMBER" } };
-const linkedInMetrics = await fetchProviderMetrics(linkedInClaim, linkedInConnection, { SOCIAL_TOKEN_KEY: secret, LINKEDIN_API_VERSION: "202601" }, { fetch: async (_input, init) => {
-  assert.equal(new Headers(init?.headers).get("authorization"), "Bearer secret-provider-token");
-  return Response.json({ likesSummary: { totalLikes: 3 }, commentsSummary: { totalFirstLevelComments: 2 } });
+const linkedInConnection = { ...facebookConnection, provider_account_id: "member", permissions: ["openid", "profile", "w_member_social", "r_member_postAnalytics"], metadata: { accountType: "MEMBER" } };
+const linkedInQueries: string[] = [];
+const linkedInMetrics = await fetchProviderMetrics(linkedInClaim, linkedInConnection, { SOCIAL_TOKEN_KEY: secret }, { fetch: async (input, init) => {
+  const url = new URL(String(input)); const queryType = url.searchParams.get("queryType") || ""; linkedInQueries.push(queryType);
+  const headers = new Headers(init?.headers); assert.equal(headers.get("authorization"), "Bearer secret-provider-token"); assert.equal(headers.get("Linkedin-Version"), "202608"); assert.equal(headers.get("X-Restli-Protocol-Version"), "2.0.0");
+  assert.equal(url.searchParams.get("entity"), "(share:urn:li:share:1)"); assert.equal(url.searchParams.get("aggregation"), "TOTAL"); assert.equal(url.searchParams.has("pageType"), false);
+  return Response.json({ elements: [{ metricType: queryType, count: queryType === "IMPRESSION" ? 10 : 1 }] });
 } });
-assert.deepEqual(linkedInMetrics, { likes: 3, comments: 2 });
+assert.deepEqual(linkedInQueries, ["IMPRESSION", "MEMBERS_REACHED", "REACTION", "COMMENT", "RESHARE", "LINK_CLICKS"]);
+assert.deepEqual(linkedInMetrics, { impressions: 10, reach: 1, reactions: 1, comments: 1, shares: 1, link_clicks: 1 });
 
-console.log("FASE7H_RUNTIME_CONTRACT: PASS — 401/403/404/429/5xx/network classification and LinkedIn fallback normalization");
+let providerCalled = false;
+await assert.rejects(fetchProviderMetrics(linkedInClaim, { ...linkedInConnection, permissions: ["w_member_social"] }, { SOCIAL_TOKEN_KEY: secret }, { fetch: async () => { providerCalled = true; return Response.json({}); } }), (reason: unknown) => reason instanceof AnalyticsProviderError && reason.code === "MISSING_PERMISSIONS:r_member_postAnalytics" && reason.terminalState === "BLOCKED");
+assert.equal(providerCalled, false, "publishing scope must never be used as analytics fallback");
+
+console.log("FASE7H_RUNTIME_CONTRACT: PASS — provider errors and strict LinkedIn member analytics contract");
