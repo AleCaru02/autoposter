@@ -572,7 +572,7 @@ function metaCandidates(provider: "FACEBOOK" | "INSTAGRAM", pages: MetaPage[]): 
   });
 }
 
-async function activateMetaCandidate(sql: Sql, state: Pick<OAuthState, "profileId" | "provider">, userAccessToken: string, candidateId: string, env: SocialEnv) {
+async function activateMetaCandidate(sql: Sql, state: Pick<OAuthState, "profileId" | "provider">, userAccessToken: string, candidateId: string, env: SocialEnv, grantedPermissions = providerScopes(state.provider, env)) {
   if (state.provider !== "FACEBOOK" && state.provider !== "INSTAGRAM") throw new Error("META_PROVIDER_INVALID");
   const pages = await metaPages(userAccessToken, env);
   const candidates = metaCandidates(state.provider, pages);
@@ -588,9 +588,18 @@ async function activateMetaCandidate(sql: Sql, state: Pick<OAuthState, "profileI
     providerAccountId: candidate.id,
     accountName: candidate.username ? `${candidate.name} (@${candidate.username})` : candidate.name,
     tokenReference,
-    permissions: providerScopes(state.provider, env),
+    permissions: grantedPermissions,
     metadata: { pageId: candidate.pageId, pageName: page.name, username: candidate.username ?? null, accountKind: candidate.kind },
   });
+}
+
+export async function metaGrantedPermissions(accessToken: string, env: SocialEnv, fetcher: typeof fetch = fetch) {
+  const url = new URL(`https://graph.facebook.com/${metaVersion(env)}/me/permissions`);
+  url.searchParams.set("access_token", accessToken);
+  const response = await fetcher(url);
+  const body = await response.json() as { data?: Array<{ permission?: unknown; status?: unknown }>; error?: { message?: string } };
+  if (!response.ok || !Array.isArray(body.data)) throw new Error(body.error?.message || `META_PERMISSIONS_${response.status}`);
+  return body.data.flatMap((entry) => entry.status === "granted" && typeof entry.permission === "string" ? [entry.permission] : []);
 }
 
 async function linkedinExchange(code: string, callbackUri: string, env: SocialEnv) {
@@ -602,9 +611,14 @@ async function linkedinExchange(code: string, callbackUri: string, env: SocialEn
     redirect_uri: callbackUri,
   });
   const response = await fetch("https://www.linkedin.com/oauth/v2/accessToken", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
-  const body = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string; error_description?: string };
+  const body = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string; scope?: string; error_description?: string };
   if (!response.ok || !body.access_token) throw new Error(body.error_description || `LINKEDIN_TOKEN_${response.status}`);
   return body;
+}
+
+export function linkedinGrantedPermissions(scope: string | undefined, requested: string[]) {
+  if (typeof scope !== "string") return [...requested];
+  return scope.split(/\s+/).map((permission) => permission.trim()).filter(Boolean);
 }
 
 async function linkedinUserInfo(accessToken: string) {
@@ -726,11 +740,14 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
   try {
     if (provider === "FACEBOOK" || provider === "INSTAGRAM") {
       const token = await metaLongUserToken(code, state.callbackUri, env);
+      const grantedPermissions = await metaGrantedPermissions(token.accessToken, env);
+      const missingPermissions = providerScopes(provider, env).filter((permission) => !grantedPermissions.includes(permission));
+      if (missingPermissions.length) throw new Error(`MISSING_PERMISSIONS:${missingPermissions.join(",")}`);
       const pages = await metaPages(token.accessToken, env);
       const candidates = metaCandidates(provider, pages);
       if (!candidates.length) throw new Error(provider === "INSTAGRAM" ? "NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA" : "NESSUNA_PAGINA_FACEBOOK_GESTIBILE");
       const tokenReference = await encryptTokenBundle({ accessToken: token.accessToken, expiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : null, kind: "meta_user_pending" }, env.SOCIAL_TOKEN_KEY!);
-      await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), metadata: { candidates } });
+      await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: grantedPermissions, metadata: { candidates } });
       const result = { selection: provider };
       await finishOAuthCallback(sql, state, "COMPLETED", result);
       return oauthRedirect(state, result);
@@ -738,18 +755,22 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
 
     if (provider === "LINKEDIN") {
       const token = await linkedinExchange(code, state.callbackUri, env);
+      const requestedPermissions = providerScopes(provider, env);
+      const grantedPermissions = linkedinGrantedPermissions(token.scope, requestedPermissions);
+      const missingPermissions = requestedPermissions.filter((permission) => !grantedPermissions.includes(permission));
+      if (missingPermissions.length) throw new Error(`MISSING_PERMISSIONS:${missingPermissions.join(",")}`);
       const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null;
       const tokenReference = await encryptTokenBundle({ accessToken: token.access_token!, refreshToken: token.refresh_token ?? null, expiresAt, kind: "linkedin" }, env.SOCIAL_TOKEN_KEY!);
       if (linkedinOrganizationMode(env)) {
         const candidates = await linkedinOrganizations(token.access_token!, env);
         if (!candidates.length) throw new Error("NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO");
-        await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { candidates, accountType: "ORGANIZATION" } });
+        await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: grantedPermissions, expiresAt, metadata: { candidates, accountType: "ORGANIZATION" } });
         const result = { selection: provider };
         await finishOAuthCallback(sql, state, "COMPLETED", result);
         return oauthRedirect(state, result);
       }
       const member = await linkedinUserInfo(token.access_token!);
-      await upsertConnection(sql, { profileId: state.profileId, provider, status: "ACTIVE", providerAccountId: member.id, accountName: member.name, tokenReference, permissions: providerScopes(provider, env), expiresAt, metadata: { accountType: "MEMBER" } });
+      await upsertConnection(sql, { profileId: state.profileId, provider, status: "ACTIVE", providerAccountId: member.id, accountName: member.name, tokenReference, permissions: grantedPermissions, expiresAt, metadata: { accountType: "MEMBER" } });
       const result = { connected: provider };
       await finishOAuthCallback(sql, state, "COMPLETED", result);
       return oauthRedirect(state, result);
@@ -828,13 +849,15 @@ async function handleSelect(request: Request, env: SocialEnv) {
   try {
     const bundle = await decryptTokenBundle(row.token_reference, env.SOCIAL_TOKEN_KEY);
     if (provider === "FACEBOOK" || provider === "INSTAGRAM") {
-      await activateMetaCandidate(sql, { profileId, provider }, bundle.accessToken, candidateId, env);
+      const grantedPermissions = Array.isArray(row.permissions) ? row.permissions.filter((permission): permission is string => typeof permission === "string") : [];
+      await activateMetaCandidate(sql, { profileId, provider }, bundle.accessToken, candidateId, env, grantedPermissions);
     } else if (provider === "LINKEDIN") {
       if (!linkedinOrganizationMode(env)) return socialJson({ error: "LINKEDIN_ORGANIZATION_MODE_DISABLED" }, 409);
       const candidates = await linkedinOrganizations(bundle.accessToken, env);
       const candidate = candidates.find((item) => item.id === candidateId);
       if (!candidate) return socialJson({ error: "SOCIAL_ACCOUNT_NOT_FOUND" }, 404);
-      await upsertConnection(sql, { profileId, provider, status: "ACTIVE", providerAccountId: candidate.id, accountName: candidate.name, tokenReference: row.token_reference, permissions: providerScopes(provider, env), expiresAt: row.expires_at, metadata: { accountType: "ORGANIZATION" } });
+      const grantedPermissions = Array.isArray(row.permissions) ? row.permissions.filter((permission): permission is string => typeof permission === "string") : [];
+      await upsertConnection(sql, { profileId, provider, status: "ACTIVE", providerAccountId: candidate.id, accountName: candidate.name, tokenReference: row.token_reference, permissions: grantedPermissions, expiresAt: row.expires_at, metadata: { accountType: "ORGANIZATION" } });
     } else {
       const candidates = safeCandidates(connectionMetadata(row.metadata).candidates);
       const candidate = candidates.find((item) => item.id === candidateId);
