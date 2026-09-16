@@ -65,6 +65,7 @@ const UNAVAILABLE_PROVIDERS: ProviderStatus[] = (Object.keys(PROVIDER_LABELS) as
 }));
 
 function readableError(value: string) {
+  if (value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
   const normalized = value.replace(/_/g, " ").trim();
   const map: Record<string, string> = {
     PROVIDER_NOT_CONFIGURED: "Questo collegamento non è ancora disponibile. Contatta l’assistenza.",
@@ -82,6 +83,14 @@ function readableError(value: string) {
     access_denied: "Autorizzazione annullata.",
   };
   return map[value] ?? (normalized || "Collegamento non riuscito.");
+}
+
+function analyticsPermissionMissing(provider: ProviderStatus) {
+  if (provider.provider === "INSTAGRAM") return !provider.permissions.includes("instagram_manage_insights");
+  if (provider.provider === "LINKEDIN") return provider.accountType === "ORGANIZATION"
+    ? !provider.permissions.includes("rw_organization_admin")
+    : !provider.permissions.includes("r_member_postAnalytics");
+  return false;
 }
 
 function tokenFromSession(value: unknown) {
@@ -240,6 +249,7 @@ export function SocialPage() {
         const active = provider.status === "ACTIVE";
         const pending = provider.status === "PENDING_SELECTION";
         const unavailable = provider.status === "STATUS_UNAVAILABLE";
+        const analyticsMissing = active && analyticsPermissionMissing(provider);
         return <article className={`panel social-card ${active ? "connected" : ""}`} key={provider.provider}>
           <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${active ? "active" : pending ? "pending" : "idle"}`}>{active ? "Collegato" : pending ? "Scegli account" : unavailable ? "Stato non disponibile" : provider.configured ? "Non collegato" : "Da configurare"}</span></div>
 
@@ -247,9 +257,11 @@ export function SocialPage() {
 
           {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
 
+          {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
+
           {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Stato temporaneamente non disponibile. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Questo collegamento non è ancora disponibile. Contatta l’assistenza.</p>}
 
-          <div className="social-actions">{active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Unplug size={16} />} Scollega</button> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
+          <div className="social-actions">{active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
         </article>;
       })}
     </div>}
