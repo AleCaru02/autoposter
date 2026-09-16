@@ -5,6 +5,8 @@ import {
   decryptTokenBundle,
   encryptTokenBundle,
   googleApiJson,
+  linkedinGrantedPermissions,
+  metaGrantedPermissions,
   missingProviderConfiguration,
   providerCapabilities,
   providerConfigured,
@@ -46,6 +48,20 @@ async function run() {
   assert.deepEqual(providerCapabilities("GBP").publish, ["POST"]);
   assert.equal(providerCapabilities("FACEBOOK").note.includes("non vengono simulati"), true);
 
+  const grantedMeta = await metaGrantedPermissions("meta-token", { META_GRAPH_VERSION: "v26.0" }, (async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/v26.0/me/permissions");
+    assert.equal(url.searchParams.get("access_token"), "meta-token");
+    return Response.json({ data: [
+      { permission: "instagram_basic", status: "granted" },
+      { permission: "instagram_manage_insights", status: "declined" },
+      { permission: "pages_read_engagement", status: "expired" },
+    ] });
+  }) as typeof fetch);
+  assert.deepEqual(grantedMeta, ["instagram_basic"], "only permissions actually granted by Meta may be persisted");
+  assert.deepEqual(linkedinGrantedPermissions("openid profile w_member_social", ["openid", "profile", "w_member_social", "r_member_postAnalytics"]), ["openid", "profile", "w_member_social"], "LinkedIn's returned scope must win when it is narrower than requested");
+  assert.deepEqual(linkedinGrantedPermissions(undefined, ["openid", "profile"]), ["openid", "profile"], "an omitted OAuth scope means the granted scope is identical to the request");
+
   const calls: string[] = [];
   const waits: number[] = [];
   const responses = [
@@ -76,6 +92,8 @@ async function run() {
   assert.equal(socialSource.includes("on conflict (profile_id, provider)"), true, "a profile must keep at most one connection per provider");
   assert.equal((socialSource.match(/status: \"PENDING_SELECTION\"/g) ?? []).length >= 3, true, "Meta, LinkedIn organization and GBP callbacks must persist explicit selection state");
   assert.equal(socialUiSource.includes("Puoi collegare un solo account a questa attività. Scegli quale usare:"), true, "the Social UI must explain single-account selection clearly");
+  assert.equal(socialUiSource.includes("Permesso Analytics mancante. Ricollega l’account"), true, "missing analytics consent must be visible without disconnecting the account");
+  assert.equal(socialUiSource.includes("Ricollega</button>"), true, "an active provider must expose an explicit reconnect action");
 
   assert.equal(socialSource.includes('accountUrl.searchParams.set("pageSize", "20")'), true, "GBP accounts.list must respect Google's maximum page size");
   assert.equal(socialSource.includes("claimOAuthCallback"), true, "OAuth callback must be claimed before provider exchange or discovery");
@@ -86,6 +104,9 @@ async function run() {
   assert.equal((socialUiSource.match(/\/api\/social\/connect/g) ?? []).length, 1, "one Connect action must start one server-side OAuth sequence");
   assert.equal((socialUiSource.match(/window\.location\.assign\(body\.url\)/g) ?? []).length, 1, "one Connect action must perform one provider navigation");
   assert.equal(callbackSource.indexOf("claimOAuthCallback") < callbackSource.indexOf("googleExchange(code"), true, "callback claim must happen before Google token exchange and discovery");
+  assert.equal(callbackSource.indexOf("metaGrantedPermissions") < callbackSource.indexOf("metaPages(token.accessToken"), true, "Meta granted permissions must be verified before account discovery and persistence");
+  assert.match(callbackSource, /permissions: grantedPermissions/, "Meta callbacks must persist provider-confirmed permissions, not requested scopes");
+  assert.match(callbackSource, /linkedinGrantedPermissions\(token\.scope, requestedPermissions\)/, "LinkedIn callbacks must honor the scope returned by the token endpoint");
   assert.match(callbackMigration, /nonce text PRIMARY KEY/i, "callback nonce must be globally single-use");
   assert.match(callbackMigration, /FORCE ROW LEVEL SECURITY/i, "callback ledger must remain server-owned under forced RLS");
   assert.match(callbackMigration, /REVOKE ALL ON TABLE public\.social_oauth_callbacks FROM PUBLIC, authenticated/i, "customers must not read callback state or errors");
