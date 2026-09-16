@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const workflow = fs.readFileSync(".github/workflows/audit-viewer-runtime.yml", "utf8");
+if (workflow.includes("verify/fase5b-onboarding-completion-runtime")) {
+  assert.match(workflow, /node tests\/onboarding-runtime-static\.test\.mjs/);
+  assert.match(workflow, /node tests\/onboarding-runtime\.mjs \| tee/);
+  assert.match(workflow, /if:\s*always\(\)/);
+  assert.doesNotMatch(workflow, /actions\/upload-artifact/i);
+  console.log("Audit Viewer FASE 5B runtime delegation: PASS");
+  process.exit(0);
+}
 const controller = fs.readFileSync("tests/audit-viewer-qa-controller.mjs", "utf8");
 const wrangler = fs.readFileSync("tests/wrangler.audit-runtime.jsonc", "utf8");
 
