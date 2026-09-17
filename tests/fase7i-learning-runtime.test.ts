@@ -11,6 +11,7 @@ const snapshots: MetricSnapshotRecord[] = Array.from({ length: 12 }, (_, index) 
   return {
     profile_id: profileId,
     provider: strong ? "INSTAGRAM" : "FACEBOOK",
+    external_post_id: `${strong ? "ig" : "fb"}-post-${index}`,
     format: strong ? "STORY" : "POST",
     topic: strong ? "Case study proprietari" : "Notizie generiche",
     published_at: new Date(Date.UTC(2026, 8, 1 + index, strong ? 16 : 8)).toISOString(),
@@ -67,6 +68,7 @@ assert.match(migration, /ALTER COLUMN confidence TYPE text USING confidence::tex
 assert.match(migration, /WHERE dimension IS NOT NULL AND dimension_value IS NOT NULL/, "legacy rows must be excluded from structured deduplication");
 const runtime = fs.readFileSync("api/_lib/learning-runtime.ts", "utf8");
 assert.match(runtime, /distinct on \(snapshot\.provider,snapshot\.external_post_id\)/, "hourly captures must not inflate evidence");
+assert.match(runtime, /order by latest\.published_at desc,latest\.provider,latest\.external_post_id/, "the bounded learning window must keep the latest unique posts rather than arbitrary provider IDs");
 assert.match(runtime, /snapshot\.source='PROVIDER_API'/, "only real provider snapshots may feed learning");
 assert.match(runtime, /result\.errors\.push\("LEARNING_REFRESH_FAILED"\)/, "customer runtime response must not expose raw database errors");
 assert.equal(runtime.includes("result.errors.push(`${profile.id}"), false, "profile ids and raw errors must not be returned to the browser");

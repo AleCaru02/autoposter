@@ -3,6 +3,7 @@ import { buildLearningInsights, type LearningInsight, type LearningProvider, typ
 export type MetricSnapshotRecord = {
   profile_id: string;
   provider: LearningProvider;
+  external_post_id: string;
   format: string;
   topic: string;
   published_at: string;
@@ -33,10 +34,18 @@ function validIso(value: string) {
 }
 
 export function snapshotsToPerformanceSamples(profileId: string, rows: MetricSnapshotRecord[]): PerformanceSample[] {
-  return rows
+  const latestByRemotePost = new Map<string, MetricSnapshotRecord>();
+  for (const row of rows
     .filter((row) => row.profile_id === profileId)
     .filter((row) => validIso(row.published_at))
-    .filter((row) => row.provider === "INSTAGRAM" || row.provider === "FACEBOOK" || row.provider === "LINKEDIN" || row.provider === "GBP")
+    .filter((row) => validIso(row.captured_at))
+    .filter((row) => row.external_post_id.trim().length > 0)
+    .filter((row) => row.provider === "INSTAGRAM" || row.provider === "FACEBOOK" || row.provider === "LINKEDIN" || row.provider === "GBP")) {
+    const key = `${row.provider}\u0000${row.external_post_id}`;
+    const previous = latestByRemotePost.get(key);
+    if (!previous || new Date(row.captured_at).getTime() > new Date(previous.captured_at).getTime()) latestByRemotePost.set(key, row);
+  }
+  return [...latestByRemotePost.values()]
     .map((row) => ({
       profileId: row.profile_id,
       provider: row.provider,

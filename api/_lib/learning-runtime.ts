@@ -27,17 +27,22 @@ export async function runLearningRuntime(env: LearningRuntimeEnv, requestedProfi
       // Repeated hourly captures of one remote post are one performance sample,
       // not independent evidence. Only the latest real provider snapshot counts.
       const snapshots = await sql`
-        select distinct on (snapshot.provider,snapshot.external_post_id)
-          snapshot.profile_id,snapshot.provider,snapshot.format,snapshot.topic,
-          snapshot.published_at,snapshot.captured_at,snapshot.metrics
-        from public.metric_snapshots snapshot
-        where snapshot.profile_id=${profile.id}::uuid
-          and snapshot.source='PROVIDER_API'
-          and snapshot.external_post_id is not null
-          and snapshot.published_at is not null
-          and snapshot.format is not null
-          and snapshot.topic is not null
-        order by snapshot.provider,snapshot.external_post_id,snapshot.captured_at desc
+        select latest.profile_id,latest.provider,latest.external_post_id,latest.format,latest.topic,
+          latest.published_at,latest.captured_at,latest.metrics
+        from (
+          select distinct on (snapshot.provider,snapshot.external_post_id)
+            snapshot.profile_id,snapshot.provider,snapshot.external_post_id,snapshot.format,snapshot.topic,
+            snapshot.published_at,snapshot.captured_at,snapshot.metrics
+          from public.metric_snapshots snapshot
+          where snapshot.profile_id=${profile.id}::uuid
+            and snapshot.source='PROVIDER_API'
+            and snapshot.external_post_id is not null
+            and snapshot.published_at is not null
+            and snapshot.format is not null
+            and snapshot.topic is not null
+          order by snapshot.provider,snapshot.external_post_id,snapshot.captured_at desc
+        ) latest
+        order by latest.published_at desc,latest.provider,latest.external_post_id
         limit 500
       ` as unknown as MetricSnapshotRecord[];
       const generatedAt = new Date().toISOString();
