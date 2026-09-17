@@ -30,10 +30,21 @@ rows.push({
   captured_at: "2026-08-21T10:00:00.000Z",
   metrics: { reach: 10, likes: 10 },
 });
+for (const provider of ["LINKEDIN", "GBP"] as const) rows.push({
+  profile_id: profileId,
+  provider,
+  external_post_id: `${provider.toLowerCase()}-externally-blocked`,
+  format: "POST",
+  topic: "Provider esterno escluso",
+  published_at: "2026-08-22T10:00:00.000Z",
+  captured_at: "2026-08-23T10:00:00.000Z",
+  metrics: { reach: 1000, likes: 1000 },
+});
 
 const samples = snapshotsToPerformanceSamples(profileId, rows);
 assert.equal(samples.length, 12);
 assert.ok(samples.every((sample) => sample.profileId === profileId));
+assert.ok(samples.every((sample) => sample.provider === "FACEBOOK" || sample.provider === "INSTAGRAM"), "externally blocked analytics providers must not enter personal learning");
 
 const repeatedCaptures: MetricSnapshotRecord[] = Array.from({ length: 10 }, (_, index) => ({
   ...rows[0]!,
