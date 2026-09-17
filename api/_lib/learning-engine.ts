@@ -54,9 +54,12 @@ type Segment = {
   samples: ScoredSample[];
 };
 
-const DEFAULT_MIN_TOTAL = 6;
-const DEFAULT_MIN_SEGMENT = 3;
-const DEFAULT_MIN_UPLIFT = 0.15;
+// Keep creation and downstream consumption on the same evidence threshold.
+// A sample is one latest real-provider snapshot per remote post (deduplicated
+// by both the runtime query and the feedback-loop adapter).
+const DEFAULT_MIN_TOTAL = 10;
+const DEFAULT_MIN_SEGMENT = 5;
+const DEFAULT_MIN_UPLIFT = 0.18;
 
 function finite(value: unknown) {
   const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
