@@ -36,6 +36,7 @@ export async function runLearningRuntime(env: LearningRuntimeEnv, requestedProfi
           from public.metric_snapshots snapshot
           where snapshot.profile_id=${profile.id}::uuid
             and snapshot.source='PROVIDER_API'
+            and snapshot.provider in ('FACEBOOK','INSTAGRAM')
             and snapshot.external_post_id is not null
             and snapshot.published_at is not null
             and snapshot.format is not null
