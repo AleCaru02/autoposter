@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import type { SocialProvider } from "./openai-text.js";
 import type { ContentType, EditorialIntent, FunnelStage } from "./content-agents.js";
 import { StrategyPlannerMetering } from "./strategy-planner-metering.js";
+import { learningContext, type PersistedLearningInsight } from "./learning-guidance.js";
 
 export type StrategyPlannerEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string };
 
@@ -113,7 +114,7 @@ async function callAgent<T>(input: { apiKey: string; agent: "STRATEGIST" | "PLAN
   return { output: JSON.parse(text) as T, responseId: typeof body.id === "string" ? body.id : "", requestId, usage: usage(body) };
 }
 
-export function generateOpenAIStrategy(input: { apiKey: string; profile: ProfileRow; brand: BrandRow | undefined; existingObjectives: unknown; fetcher?: typeof fetch }) {
+export function generateOpenAIStrategy(input: { apiKey: string; profile: ProfileRow; brand: BrandRow | undefined; existingObjectives: unknown; learningInsights?: PersistedLearningInsight[]; fetcher?: typeof fetch }) {
   return callAgent<OpenAIStrategy>({
     apiKey: input.apiKey, agent: "STRATEGIST", fetcher: input.fetcher, schema: STRATEGY_SCHEMA, schemaName: "post_automatici_strategy",
     instructions: [
@@ -121,14 +122,15 @@ export function generateOpenAIStrategy(input: { apiKey: string; profile: Profile
       "Definisci una strategia editoriale concreta per la singola attività, non copy di post.",
       "Usa i dati del profilo e del brand come fonte per fatti specifici dell'attività. Non inventare prezzi, sedi, servizi, risultati o certificazioni.",
       "Bilancia educazione, consigli, news, storytelling e promozione. Le percentuali del contentMix devono sommare esattamente a 100.",
+      "Usa evidenceBasedLearning solo quando presente: contiene confronti da metriche provider reali con soglia di confidenza già verificata. Non inventare insight mancanti.",
       "Considera Instagram, Facebook, LinkedIn e Google Business Profile solo quando pertinenti.",
       "Restituisci esclusivamente JSON conforme allo schema.",
     ].join("\n"),
-    context: { profile: input.profile, brand: { description: input.brand?.description ?? null, businessModel: input.brand?.business_model ?? null, location: input.brand?.location ?? null, serviceArea: input.brand?.service_area ?? null, target: summary(input.brand?.target_audience), tone: summary(input.brand?.tone_of_voice), goals: strings(input.brand?.goals), visualIdentity: input.brand?.visual_identity ?? null }, existingObjectives: strings(input.existingObjectives) },
+    context: { profile: input.profile, brand: { description: input.brand?.description ?? null, businessModel: input.brand?.business_model ?? null, location: input.brand?.location ?? null, serviceArea: input.brand?.service_area ?? null, target: summary(input.brand?.target_audience), tone: summary(input.brand?.tone_of_voice), goals: strings(input.brand?.goals), visualIdentity: input.brand?.visual_identity ?? null }, existingObjectives: strings(input.existingObjectives), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []) },
   });
 }
 
-export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow; strategy: OpenAIStrategy; schedules: ScheduleRow[]; recentTopics: string[]; fetcher?: typeof fetch }) {
+export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow; strategy: OpenAIStrategy; schedules: ScheduleRow[]; recentTopics: string[]; learningInsights?: PersistedLearningInsight[]; fetcher?: typeof fetch }) {
   return callAgent<OpenAIEditorialPlan>({
     apiKey: input.apiKey, agent: "PLANNER", fetcher: input.fetcher, schema: PLAN_SCHEMA, schemaName: "post_automatici_editorial_plan",
     instructions: [
@@ -137,11 +139,13 @@ export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow;
       "Usa soltanto formati che il publisher reale può consegnare con il singolo asset generato dal piano.",
       "Per Facebook, LinkedIn e GBP usa SINGLE_POST. Per Instagram usa SINGLE_POST o SINGLE_STORY. Non pianificare caroselli finché non esiste un bundle reale di più asset.",
       "Evita i temi recenti e distribuisci intenti e funnel senza sequenze ripetitive.",
+      "Quando evidenceBasedLearning contiene segnali, modifica coerentemente almeno una decisione futura tra provider, formato, tema, giorno o orario, senza violare schedule e formati pubblicabili.",
+      "Ignora insight LOW, dati di altri profili e qualsiasi preferenza non presente in evidenceBasedLearning.",
       "Rispetta la frequenza dei schedule abilitati; se un provider ha posts_per_week=0 o disabled non pianificarlo.",
       "Non inventare eventi, news o fatti: NEWS indica soltanto una direzione da affidare successivamente al Research Agent.",
       "Restituisci esclusivamente JSON conforme allo schema.",
     ].join("\n"),
-    context: { profile: { name: input.profile.name, industry: input.profile.industry, timezone: input.profile.timezone }, strategy: input.strategy, schedules: input.schedules, recentTopics: input.recentTopics.slice(0, 40) },
+    context: { profile: { name: input.profile.name, industry: input.profile.industry, timezone: input.profile.timezone }, strategy: input.strategy, schedules: input.schedules, recentTopics: input.recentTopics.slice(0, 40), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []) },
   });
 }
 
@@ -156,6 +160,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   const current = await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profileId}::uuid limit 1` as unknown as StrategyRow[];
   const schedules = await sql`select provider,posts_per_week,preferred_slots,timezone,enabled from public.schedules where profile_id=${profileId}::uuid and enabled=true order by provider` as unknown as ScheduleRow[];
   const recent = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
+  const learning = await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];
 
   const meter = new StrategyPlannerMetering(env.DATABASE_URL);
   const reservation = await meter.reserve({ profileId, cycle: "STRATEGY_PLAN" });
@@ -167,7 +172,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   let logicalCommitted = false;
   try {
     await meter.markProviderStarted(eventId);
-    const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, fetcher });
+    const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, learningInsights: learning, fetcher });
     await meter.persistTechnicalUsage(profileId, eventId, {
       operation: "AGENT_STRATEGIST", model: MODEL,
       inputTokens: strategyResult.usage.inputTokens, outputTokens: strategyResult.usage.outputTokens,
@@ -176,7 +181,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
     });
     const mixTotal = Object.values(strategyResult.output.contentMix).reduce((sum, value) => sum + value, 0);
     if (mixTotal !== 100) throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
-    const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), fetcher });
+    const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), learningInsights: learning, fetcher });
     await meter.persistTechnicalUsage(profileId, eventId, {
       operation: "AGENT_PLANNER", model: MODEL,
       inputTokens: plannerResult.usage.inputTokens, outputTokens: plannerResult.usage.outputTokens,
