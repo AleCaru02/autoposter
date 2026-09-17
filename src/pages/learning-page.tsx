@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BrainCircuit, RefreshCw } from "lucide-react";
 import { neonClient } from "../lib/neon-client";
+import { authenticatedApiToken } from "../lib/auth-token";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type InsightRow = Record<string, unknown> & { id?: string };
@@ -10,7 +11,9 @@ function text(value: unknown) {
 }
 
 function title(row: InsightRow) {
-  return text(row.title) ?? text(row.insight_type) ?? text(row.type) ?? "Insight";
+  const dimension = text(row.dimension);
+  const value = text(row.dimension_value);
+  return text(row.title) ?? text(row.insight_type) ?? text(row.type) ?? (dimension && value ? `${dimension}: ${value}` : "Insight");
 }
 
 function body(row: InsightRow) {
@@ -23,7 +26,8 @@ function body(row: InsightRow) {
 }
 
 function source(row: InsightRow) {
-  return text(row.provider) ?? text(row.source) ?? "Dati performance";
+  const confidence = text(row.confidence);
+  return [text(row.provider) ?? text(row.source) ?? "Metriche provider reali", confidence ? `confidenza ${confidence.toLowerCase()}` : null].filter(Boolean).join(" · ");
 }
 
 function createdAt(row: InsightRow) {
@@ -44,11 +48,11 @@ export function LearningPage() {
     if (!profileId) return;
     setLoading(true);
     setError(null);
-    const result = await neonClient.from("learning_insights").select("*").eq("profile_id", profileId).limit(100);
+    const result = await neonClient.from("learning_insights").select("*").eq("profile_id", profileId).eq("active", true).order("generated_at", { ascending: false }).limit(100);
     setLoading(false);
     if (result.error) {
       setRows([]);
-      setError(result.error.message);
+      setError("Impossibile leggere gli insight. Riprova tra poco.");
       return;
     }
     setRows((result.data ?? []) as InsightRow[]);
@@ -56,11 +60,26 @@ export function LearningPage() {
 
   useEffect(() => { void load(); }, [selectedProfile?.id]);
 
-  const latest = useMemo(() => rows.slice().sort((a, b) => String(b.created_at ?? b.updated_at ?? "").localeCompare(String(a.created_at ?? a.updated_at ?? ""))).slice(0, 30), [rows]);
+  async function refreshLearning() {
+    if (!selectedProfile?.id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await authenticatedApiToken();
+      const response = await fetch("/api/learning/run", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id }) });
+      if (!response.ok) throw new Error("LEARNING_REFRESH_FAILED");
+      await load();
+    } catch {
+      setLoading(false);
+      setError("Non riesco ad aggiornare l’apprendimento in questo momento. I dati esistenti non sono stati modificati.");
+    }
+  }
+
+  const latest = useMemo(() => rows.slice().sort((a, b) => String(b.generated_at ?? b.created_at ?? b.updated_at ?? "").localeCompare(String(a.generated_at ?? a.created_at ?? a.updated_at ?? ""))).slice(0, 30), [rows]);
 
   if (!selectedProfile) return null;
   return <div className="page-content">
-    <header className="page-header"><div><p className="eyebrow">Apprendimento</p><h1>Ottimizzazione progressiva</h1><p>Gli insight di {selectedProfile.name} devono derivare esclusivamente da metriche reali del suo profilo.</p></div><button className="compact-action" type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna"}</button></header>
+    <header className="page-header"><div><p className="eyebrow">Apprendimento</p><h1>Ottimizzazione progressiva</h1><p>Gli insight di {selectedProfile.name} derivano esclusivamente da metriche reali del suo profilo.</p></div><button className="compact-action" type="button" onClick={() => void refreshLearning()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna apprendimento"}</button></header>
     {error && <p className="form-error" role="alert">Impossibile leggere gli insight: {error}</p>}
     {!loading && !error && latest.length === 0 && <section className="panel empty-state"><BrainCircuit size={28} /><h2>Apprendimento non ancora disponibile</h2><p>È corretto che sia vuoto finché non esistono pubblicazioni e metriche reali sufficienti. Il sistema non inventa suggerimenti, orari o temi.</p></section>}
     {latest.length > 0 && <section className="panel"><div className="status-rows">{latest.map((row, index) => <div key={String(row.id ?? `${title(row)}-${index}`)}><span><strong>{title(row)}</strong><br /><small>{body(row)}</small>{createdAt(row) && <><br /><small>{source(row)} · {createdAt(row)}</small></>}</span></div>)}</div></section>}

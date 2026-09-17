@@ -18,6 +18,7 @@ import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
 import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/_lib/social.js";
 import { processDueAnalytics } from "../api/_lib/analytics.js";
+import { runLearningRuntime } from "../api/_lib/learning-runtime.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -118,6 +119,16 @@ async function handleAutopilotRun(request: Request, env: Env) {
   }
 }
 
+async function handleLearningRun(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  let profileId = "";
+  try { const body = await request.json() as Record<string, unknown>; profileId = typeof body.profileId === "string" ? body.profileId : ""; } catch { /* handled below */ }
+  if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+  if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+  const result = await runLearningRuntime(env, profileId);
+  return json(result, result.ready ? 200 : 503);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
     const canonicalRedirect = canonicalNavigation(request, env);
@@ -140,6 +151,7 @@ export default {
       if (response) return response;
     }
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
+    if (path === "/api/learning/run") return handleLearningRun(request, env);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
     if (path === "/api/onboarding-provision") return handleWorkerOnboardingProvision(request, env);
@@ -166,15 +178,13 @@ export default {
       }));
       return;
     }
-    ctx.waitUntil(processDueAnalytics(env).then((result) => {
-      console.log("social-analytics-run", result);
-    }).catch((reason) => {
-      console.error("social-analytics-failed", reason instanceof Error ? reason.message : "unknown");
-    }));
-    ctx.waitUntil(runContentAutopilotSerialized(env).then((result) => {
-      console.log("content-autopilot", result);
-    }).catch((reason) => {
-      console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown");
-    }));
+    ctx.waitUntil((async () => {
+      try { console.log("social-analytics-run", await processDueAnalytics(env)); }
+      catch (reason) { console.error("social-analytics-failed", reason instanceof Error ? reason.message : "unknown"); }
+      try { console.log("learning-runtime", await runLearningRuntime(env)); }
+      catch (reason) { console.error("learning-runtime-failed", reason instanceof Error ? reason.message : "unknown"); }
+      try { console.log("content-autopilot", await runContentAutopilotSerialized(env)); }
+      catch (reason) { console.error("content-autopilot-failed", reason instanceof Error ? reason.message : "unknown"); }
+    })());
   },
 };

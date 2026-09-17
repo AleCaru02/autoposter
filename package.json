@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:fase7i-learning-runtime": "node --import tsx tests/fase7i-learning-runtime.test.ts",
     "test:fase7j-settings-account": "node --import tsx tests/fase7j-settings-account.test.ts",
     "test:fase7h-analytics-engine": "node --import tsx tests/fase7h-analytics-engine.test.ts",
     "test:fase7f-publication-engine": "node --import tsx tests/fase7f-publication-engine.test.ts",
