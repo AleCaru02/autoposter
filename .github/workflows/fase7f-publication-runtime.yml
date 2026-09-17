@@ -1,0 +1,126 @@
+name: FASE 7F Real Provider Publication Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/fase7f-publication-runtime.yml"
+      - "tests/fase7f-publication-*"
+      - "tests/wrangler.fase7f-runtime.jsonc"
+
+concurrency:
+  group: fase7f-publication-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/fase7f-publication-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Product regression
+        run: |
+          npm run typecheck
+          npm run test:fase7f-publication-engine
+          npm run build
+
+      - name: Generate ephemeral verifier material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="publication7f-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "PUBLICATION7F_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "PUBLICATION7F_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "PUBLICATION7F_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "PUBLICATION7F_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'PUBLICATION7F_TOKEN=%s\n' "$token" > .fase7f-runtime-secrets.env
+          chmod 600 .fase7f-runtime-secrets.env
+
+      - name: Upload isolated preview controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.fase7f-runtime.jsonc --keep-vars --preview-alias "publication7f-${GITHUB_RUN_ID}" --secrets-file .fase7f-runtime-secrets.env | tee fase7f-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase7f-upload.log | tail -n 1)
+          test -n "$version_id"
+          echo "PUBLICATION7F_CONTROLLER_VERSION=$version_id" >> "$GITHUB_ENV"
+
+      - name: Verify preview isolation and preflight
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7f-deployments-before.json
+          node - <<'NODE'
+          const fs=require('node:fs');const body=JSON.parse(fs.readFileSync('fase7f-deployments-before.json','utf8'));if(body?.success!==true)throw new Error('deployment read failed');const deployments=Array.isArray(body.result?.deployments)?body.result.deployments:body.result;
+          const ids=deployments.map(x=>String(x.id||'')).filter(Boolean).sort();const versions=[...new Set(deployments.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();
+          if(versions.includes(process.env.PUBLICATION7F_CONTROLLER_VERSION))throw new Error('preview attached to production');fs.appendFileSync(process.env.GITHUB_ENV,`PUBLICATION7F_PROD_DEPLOYMENTS=${ids.join(',')}\nPUBLICATION7F_PROD_VERSIONS=${versions.join(',')}\n`);console.log('FASE7F_PREVIEW_ISOLATION: PASS');
+          NODE
+          call_controller() { curl -fsS -X POST -H 'content-type: application/json' -H "x-publication7f-token: $PUBLICATION7F_TOKEN_VALUE" --data "{\"action\":\"$1\",\"marker\":\"$PUBLICATION7F_MARKER\"}" "$PUBLICATION7F_CONTROLLER_URL"; }
+          call_controller preflight > fase7f-preflight.json
+          stale=$(node -e "const b=require('./fase7f-preflight.json');process.stdout.write(String(b.recognizedQaUsers||0))")
+          if [ "$stale" -gt 0 ]; then call_controller cleanup-residue > fase7f-stale-cleanup.json; call_controller preflight > fase7f-preflight.json; fi
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7f-preflight.json','utf8'));for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaAssets','qaConnections','qaJobs','qaAttempts','qaUsage'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);if(b.jobsTotal!==0)throw new Error(`production publication baseline not empty: ${b.jobsTotal}`);fs.appendFileSync(process.env.GITHUB_ENV,`PUBLICATION7F_BASELINE_PROFILES=${b.profilesTotal}\nPUBLICATION7F_BASELINE_JOBS=${b.jobsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7F_PREFLIGHT: PASS',JSON.stringify({profiles:b.profilesTotal,jobs:b.jobsTotal}));
+          NODE
+
+      - name: Authenticated real-provider runtime
+        run: node tests/fase7f-publication-runtime.mjs
+
+      - name: Install browser
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Desktop and iPhone-sized runtime
+        run: node tests/fase7f-publication-browser.mjs
+
+      - name: Cleanup remote and local QA artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then exit 0; fi
+          if [ -f fase7f-profile-id.txt ]; then
+            id=$(cat fase7f-profile-id.txt)
+            curl -sS -X POST -H 'content-type: application/json' -H "x-publication7f-token: $PUBLICATION7F_TOKEN_VALUE" --data "{\"action\":\"cleanup-all-remote\",\"marker\":\"$PUBLICATION7F_MARKER\",\"profileId\":\"$id\"}" "$PUBLICATION7F_CONTROLLER_URL" > fase7f-remote-cleanup.json || true
+            node - <<'NODE'
+          const fs=require('node:fs');const path='fase7f-remote-cleanup.json';let body={error:'cleanup evidence unavailable'};try{body=JSON.parse(fs.readFileSync(path,'utf8'));}catch{}console.log('FASE7F_REMOTE_CLEANUP:',JSON.stringify(body));
+          NODE
+          fi
+          status=$(curl -sS -o fase7f-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-publication7f-token: $PUBLICATION7F_TOKEN_VALUE" --data "{\"action\":\"cleanup\",\"marker\":\"$PUBLICATION7F_MARKER\"}" "$PUBLICATION7F_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const b=require('./fase7f-cleanup.json');if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true)throw new Error('cleanup request failed');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaContent','qaAssets','qaConnections','qaJobs','qaAttempts','qaUsage'])if(b[key]!==0)throw new Error(`cleanup residue ${key}=${b[key]}`);if(String(b.profilesTotal)!==String(process.env.PUBLICATION7F_BASELINE_PROFILES)||String(b.jobsTotal)!==String(process.env.PUBLICATION7F_BASELINE_JOBS))throw new Error(`baseline mismatch ${JSON.stringify(b)}`);console.log('FASE7F_CLEANUP: PASS',JSON.stringify({profiles:b.profilesTotal,jobs:b.jobsTotal,residue:0}));
+          NODE
+
+      - name: Post-cleanup deployment invariant
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7f-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7f-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();if(ids!==process.env.PUBLICATION7F_PROD_DEPLOYMENTS||versions.join(',')!==process.env.PUBLICATION7F_PROD_VERSIONS||versions.includes(process.env.PUBLICATION7F_CONTROLLER_VERSION))throw new Error('production deployment changed');console.log('FASE7F_PRODUCTION_INVARIANT: PASS');
+          NODE
+      - name: Remove ephemeral local material
+        if: always()
+        run: |
+          shred -u .fase7f-runtime-secrets.env 2>/dev/null || rm -f .fase7f-runtime-secrets.env
+          rm -f fase7f-*.json fase7f-upload.log fase7f-profile-id.txt
