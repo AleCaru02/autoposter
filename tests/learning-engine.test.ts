@@ -47,6 +47,18 @@ const insufficient = buildLearningInsights(profileA, samples.slice(0, 4), { minT
 assert.equal(insufficient.status, "INSUFFICIENT_DATA");
 assert.deepEqual(insufficient.insights, [], "the engine must not invent recommendations from too little evidence");
 
+const defaultBelowThreshold = buildLearningInsights(profileA, samples.slice(0, 9));
+assert.equal(defaultBelowThreshold.status, "INSUFFICIENT_DATA", "the default runtime contract requires ten scorable posts");
+assert.deepEqual(defaultBelowThreshold.insights, []);
+
+const defaultThreshold = buildLearningInsights(profileA, samples.slice(0, 10));
+assert.equal(defaultThreshold.scorableSamples, 10);
+assert.ok(defaultThreshold.insights.length > 0, "ten sufficiently differentiated posts may create an insight");
+assert.ok(defaultThreshold.insights.every((insight) => insight.sampleSize >= 5));
+assert.ok(defaultThreshold.insights.every((insight) => insight.totalScorableSamples >= 10));
+assert.ok(defaultThreshold.insights.every((insight) => insight.upliftPct >= 18));
+assert.ok(defaultThreshold.insights.every((insight) => insight.confidence === "MEDIUM" || insight.confidence === "HIGH"));
+
 const flat: PerformanceSample[] = Array.from({ length: 8 }, (_, index) => ({
   profileId: profileA,
   provider: index % 2 ? "INSTAGRAM" : "FACEBOOK",
