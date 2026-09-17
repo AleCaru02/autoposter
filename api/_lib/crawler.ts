@@ -50,7 +50,7 @@ export type CrawlResult = {
 };
 
 type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
-type CrawlOptions = {
+export type CrawlOptions = {
   fetcher?: typeof fetch;
   validateTarget?: (url: URL) => Promise<void> | void;
   maxPages?: number;
@@ -58,6 +58,8 @@ type CrawlOptions = {
   maxDurationMs?: number;
   maxContentChars?: number;
   includeSitemap?: boolean;
+  maxSitemapFiles?: number;
+  maxStylesheets?: number;
 };
 
 const TRACKING_PARAMS = new Set(["fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"]);
@@ -219,8 +221,9 @@ async function enrichStylesheets(
   validateTarget: CrawlOptions["validateTarget"],
   colorCounts: Map<string, number>,
   fontCounts: Map<string, number>,
+  maxStylesheets: number,
 ) {
-  for (const href of stylesheetUrls.slice(0, MAX_STYLESHEETS)) {
+  for (const href of stylesheetUrls.slice(0, maxStylesheets)) {
     try {
       const url = new URL(href);
       await validateTarget?.(url);
@@ -271,11 +274,11 @@ async function fetchOptionalText(url: URL, fetcher: typeof fetch, validateTarget
   } catch { return null; }
 }
 
-async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: CrawlOptions["validateTarget"], maxPages: number) {
+async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: CrawlOptions["validateTarget"], maxPages: number, maxSitemapFiles: number) {
   const result = new Set<string>();
   const seenSitemaps = new Set<string>();
   const queue = [new URL("/sitemap.xml", root).toString()];
-  while (queue.length && seenSitemaps.size < 12 && result.size < maxPages) {
+  while (queue.length && seenSitemaps.size < maxSitemapFiles && result.size < maxPages) {
     const sitemapUrl = queue.shift()!;
     if (seenSitemaps.has(sitemapUrl)) continue;
     seenSitemaps.add(sitemapUrl);
@@ -285,7 +288,7 @@ async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: Cr
     const locs = $("loc").map((_, element) => $(element).text().trim()).get();
     const isIndex = $("sitemapindex").length > 0;
     for (const loc of locs) {
-      if (isIndex && queue.length < 12) {
+      if (isIndex && queue.length < maxSitemapFiles) {
         try { if (new URL(loc, root).origin === root.origin) queue.push(new URL(loc, root).toString()); } catch { /* invalid sitemap URL */ }
         continue;
       }
@@ -303,6 +306,8 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const maxDepth = Math.min(Math.max(options.maxDepth ?? 12, 0), 30);
   const maxDurationMs = Math.min(Math.max(options.maxDurationMs ?? 45_000, 1_000), 120_000);
   const maxContentChars = Math.min(Math.max(options.maxContentChars ?? 180_000, 10_000), 500_000);
+  const maxSitemapFiles = Math.min(Math.max(options.maxSitemapFiles ?? 12, 0), 12);
+  const maxStylesheets = Math.min(Math.max(options.maxStylesheets ?? MAX_STYLESHEETS, 0), MAX_STYLESHEETS);
   const root = new URL(input);
   if (root.protocol !== "http:" && root.protocol !== "https:") throw new Error("INVALID_ROOT_PROTOCOL");
   root.hash = "";
@@ -314,7 +319,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const disallow = robotsText ? parseRobots(robotsText) : [];
   const queue: QueueItem[] = [{ url: normalizedRoot, depth: 0, discoveredFrom: null }];
   if (options.includeSitemap !== false) {
-    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxPages)) if (url !== normalizedRoot) queue.push({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
+    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxPages, maxSitemapFiles)) if (url !== normalizedRoot) queue.push({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
   }
 
   const known = new Set(queue.map((item) => item.url));
@@ -360,7 +365,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
 
       if (item.depth === 0 && !rootEnriched) {
         const rootHints = collectRootHints(html, finalUrl);
-        await enrichStylesheets([...rootHints.stylesheetUrls], fetcher, options.validateTarget, rootHints.colorCounts, rootHints.fontCounts);
+        await enrichStylesheets([...rootHints.stylesheetUrls], fetcher, options.validateTarget, rootHints.colorCounts, rootHints.fontCounts, maxStylesheets);
         visualHints = {
           ...visualHints,
           colors: [...rootHints.colorCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([color]) => color),

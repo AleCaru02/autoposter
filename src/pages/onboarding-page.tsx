@@ -5,7 +5,7 @@ import { authenticatedApiToken } from "../lib/auth-token";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
-type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; discoveredPages?: number; error?: string; detail?: string };
+type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; discoveredPages?: number; error?: string; message?: string };
 type AnalysisResponse = {
   pagesAnalyzed?: number;
   analysis?: {
@@ -59,10 +59,10 @@ export function OnboardingPage() {
     const scanResponse = await fetch("/api/website-scan", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ profileId, pageLimit: 500 }),
+      body: JSON.stringify({ profileId, pageLimit: 8 }),
     });
     const scanBody = await scanResponse.json() as ScanResponse;
-    if (!scanResponse.ok) throw new Error(scanBody.detail || scanBody.error || "Non sono riuscito ad analizzare il sito.");
+    if (!scanResponse.ok) throw new Error(scanBody.message || "Non sono riuscito ad analizzare il sito. Riprova tra poco.");
     const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
     setVisualHints(hints);
     setPagesAnalyzed(scanBody.analyzedPages ?? 0);

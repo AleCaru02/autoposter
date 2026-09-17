@@ -5,6 +5,7 @@ import {
   decryptTokenBundle,
   encryptTokenBundle,
   googleApiJson,
+  googleLocations,
   linkedinGrantedPermissions,
   metaGrantedPermissions,
   missingProviderConfiguration,
@@ -84,6 +85,36 @@ async function run() {
     maxAttempts: 99,
   }), /GBP_RATE_LIMITED/);
 
+  const discoveryCalls: string[] = [];
+  const discovered = await googleLocations("google-token", {
+    fetch: (async (input) => {
+      const url = new URL(String(input));
+      discoveryCalls.push(url.toString());
+      if (url.hostname === "mybusinessaccountmanagement.googleapis.com") return Response.json({ accounts: [
+        { name: "accounts/personal", accountName: "Mario Rossi", type: "PERSONAL" },
+        { name: "accounts/group", accountName: "Gruppo sedi", type: "LOCATION_GROUP" },
+        { name: "accounts/org", accountName: "Organizzazione", type: "ORGANIZATION" },
+      ] });
+      if (url.pathname.includes("accounts/org/locations")) return Response.json({ locations: [{ name: "locations/123", title: "Sede Milano", storefrontAddress: { locality: "Milano", administrativeArea: "MI" } }] });
+      return Response.json({ locations: [] });
+    }) as typeof fetch,
+    sleep: async () => undefined,
+  });
+  assert.equal(discovered.length, 1);
+  assert.equal(discovered[0]?.accountId, "accounts/org");
+  assert.equal(discovered[0]?.accountType, "ORGANIZATION");
+  assert.ok(discoveryCalls.some((url) => url.includes("accounts/personal/locations")), "the personal account must be checked");
+  assert.ok(discoveryCalls.some((url) => url.includes("accounts/group/locations")), "location groups must be checked");
+  assert.ok(discoveryCalls.some((url) => url.includes("accounts/org/locations")), "organization accounts must be checked");
+
+  await assert.rejects(() => googleLocations("google-token", { fetch: (async (input) => {
+    const url = new URL(String(input));
+    if (url.hostname === "mybusinessaccountmanagement.googleapis.com") return Response.json({ accounts: [{ name: "accounts/1", type: "PERSONAL" }] });
+    return Response.json({ error: { message: "API has not been used or is disabled", details: [{ reason: "SERVICE_DISABLED", metadata: { service: "mybusinessbusinessinformation.googleapis.com" } }] } }, { status: 403 });
+  }) as typeof fetch }), /GBP_API_NOT_ENABLED/);
+  await assert.rejects(() => googleLocations("google-token", { fetch: (async () => Response.json({ accounts: [] })) as typeof fetch }), /GBP_NO_ACCESSIBLE_ACCOUNT/);
+  await assert.rejects(() => googleLocations("google-token", { fetch: (async (input) => new URL(String(input)).hostname === "mybusinessaccountmanagement.googleapis.com" ? Response.json({ accounts: [{ name: "accounts/1", type: "PERSONAL" }] }) : Response.json({ locations: [] })) as typeof fetch }), /GBP_ACCOUNT_WITHOUT_LOCATIONS/);
+
   const socialSource = readFileSync(new URL("../api/_lib/social.ts", import.meta.url), "utf8");
   const socialUiSource = readFileSync(new URL("../src/pages/social-page.tsx", import.meta.url), "utf8");
   const callbackMigration = readFileSync(new URL("../db/migrations/20260906_fase7b_social_oauth_idempotency.sql", import.meta.url), "utf8");
@@ -96,6 +127,8 @@ async function run() {
   assert.equal(socialUiSource.includes("Ricollega</button>"), true, "an active provider must expose an explicit reconnect action");
 
   assert.equal(socialSource.includes('accountUrl.searchParams.set("pageSize", "20")'), true, "GBP accounts.list must respect Google's maximum page size");
+  assert.equal(socialSource.includes('url.searchParams.set("prompt", "consent select_account")'), true, "GBP OAuth must force an explicit Google-account choice");
+  for (const code of ["GBP_API_NOT_ENABLED", "GBP_NO_ACCESSIBLE_ACCOUNT", "GBP_ACCOUNT_WITHOUT_LOCATIONS", "GBP_LOCATION_DISCOVERY_DEFECT", "GBP_OAUTH_ACCOUNT_MISMATCH"]) assert.equal(socialUiSource.includes(code), true, `${code} must have a customer-safe explanation`);
   assert.equal(socialSource.includes("claimOAuthCallback"), true, "OAuth callback must be claimed before provider exchange or discovery");
   assert.equal(socialSource.includes("social_oauth_callbacks"), true, "OAuth callback idempotency must be durable");
   assert.equal(socialUiSource.includes("GBP_RATE_LIMITED"), true, "GBP quota errors must be understandable to customers");

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { crawlWebsite } from "../api/_lib/crawler.js";
+import { boundedScanPageLimit, CLOUDFLARE_FREE_SUBREQUEST_LIMIT, estimatedScanSubrequests, SAFE_SCAN_MAX_PAGES } from "../api/_lib/website-scan-policy.js";
 
 const html = (title: string, body: string, head = "") => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Descrizione ${title}">${head}</head><body>${body}</body></html>`;
 
@@ -60,5 +61,16 @@ const limited = await crawlWebsite("https://example.test/", { fetcher, validateT
 assert.equal(limited.stopReason, "PAGE_LIMIT");
 assert.equal(limited.completeCoverage, false);
 assert.equal(limited.pages.length, 2);
+
+assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
+assert.ok(estimatedScanSubrequests(500) < CLOUDFLARE_FREE_SUBREQUEST_LIMIT, "the bounded crawl must remain below Cloudflare's 50-subrequest production ceiling");
+const workerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../cloudflare/worker.ts", import.meta.url), "utf8"));
+const contentPage = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8"));
+assert.match(workerSource, /boundedScanPageLimit\(body\.pageLimit\)/, "the server, not only the UI, must enforce the safe crawl bound");
+assert.match(workerSource, /createPublicTargetValidator/, "DNS safety checks must be memoized per hostname inside one crawl");
+assert.match(workerSource, /state=in\.\(COMPLETE,PARTIAL\).*analyzed_pages=gt\.0/, "a usable scan must be reused instead of crawling again");
+assert.equal(workerSource.includes('return json({ error: "SCAN_FAILED", detail }'), false, "raw Worker failures must not reach the customer");
+assert.match(contentPage, /pageLimit: 8/, "legacy content bootstrap must request the bounded scan explicitly");
+assert.equal(contentPage.includes("scanBody.detail"), false, "the content page must not display raw Cloudflare details");
 
 console.log(`PASS crawler intelligence: ${result.analyzedPages} pagine, CSS/font/logo/immagini/headings/OG/schema estratti, robots e dominio rispettati.`);

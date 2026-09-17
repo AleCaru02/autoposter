@@ -6,7 +6,7 @@ import { authenticatedApiToken } from "../lib/auth-token";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type Provider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
-type Candidate = { id: string; name: string; accountId?: string; pageId?: string; username?: string; kind?: string };
+type Candidate = { id: string; name: string; accountId?: string; accountType?: string; pageId?: string; username?: string; kind?: string };
 type ProviderStatus = {
   provider: Provider;
   configured: boolean;
@@ -76,6 +76,11 @@ function readableError(value: string) {
     NESSUNA_PAGINA_FACEBOOK_GESTIBILE: "Non trovo Pagine Facebook gestibili con questo account.",
     NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO: "Non trovo una Pagina LinkedIn amministrata oppure l’app non ha ancora l’accesso Community Management.",
     NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA: "Non trovo sedi Google Business Profile accessibili con questo account.",
+    GBP_API_NOT_ENABLED: "Nel progetto Google Cloud manca una delle API necessarie: abilita Account Management e Business Information, poi riprova.",
+    GBP_NO_ACCESSIBLE_ACCOUNT: "L'account Google scelto non gestisce alcun profilo dell'attività. Premi Ricollega e scegli l'account Google corretto.",
+    GBP_ACCOUNT_WITHOUT_LOCATIONS: "L'account Google è accessibile, ma non contiene sedi Google Business Profile gestibili.",
+    GBP_LOCATION_DISCOVERY_DEFECT: "Google ha restituito gli account, ma non ha permesso di leggere tutte le sedi. Riprova; se continua, verifica la Business Information API.",
+    GBP_OAUTH_ACCOUNT_MISMATCH: "La sessione Google non corrisponde a un account autorizzato. Premi Ricollega e scegli l'account che gestisce la sede.",
     GBP_RATE_LIMITED: "Google Business Profile non è disponibile in questo momento per un limite del servizio. Riprova più tardi; se il problema continua, contatta l’assistenza.",
     GBP_ACCESS_DENIED: "Google Business Profile non ha autorizzato l’accesso richiesto. Verifica di gestire almeno una sede e riprova.",
     OAUTH_CALLBACK_IN_PROGRESS: "Il collegamento è già in corso. Attendi qualche secondo e aggiorna la pagina.",

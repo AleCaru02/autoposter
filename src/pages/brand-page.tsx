@@ -137,9 +137,9 @@ export function BrandPage() {
     try {
       await autosave.flush();
       const token = await jwt();
-      const scanResponse = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, pageLimit: 500 }) });
-      const scanBody = await scanResponse.json() as { visualHints?: VisualHints; error?: string; detail?: string };
-      if (!scanResponse.ok) throw new Error(scanBody.detail || scanBody.error || "Analisi sito non riuscita.");
+      const scanResponse = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, pageLimit: 8 }) });
+      const scanBody = await scanResponse.json() as { visualHints?: VisualHints; error?: string; message?: string };
+      if (!scanResponse.ok) throw new Error(scanBody.message || "Analisi sito non riuscita. Riprova tra poco.");
       const analysisResponse = await fetch("/api/onboarding-analyze", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, visualHints: scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null } }) });
       const body = await analysisResponse.json() as { error?: string; detail?: string };
       if (!analysisResponse.ok) throw new Error(body.detail || body.error || "Analisi brand non riuscita.");

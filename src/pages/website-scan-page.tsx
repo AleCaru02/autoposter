@@ -48,7 +48,7 @@ type VisualHints = {
   stylesheetUrls?: string[];
   pageSignals?: unknown[];
 };
-type ScanResponse = { error?: string; detail?: string; visualHints?: VisualHints };
+type ScanResponse = { error?: string; message?: string; visualHints?: VisualHints };
 type AnalysisResponse = { error?: string; detail?: string };
 
 const EMPTY_INTELLIGENCE: SiteIntelligenceView = {
@@ -56,7 +56,8 @@ const EMPTY_INTELLIGENCE: SiteIntelligenceView = {
   services: [], toneTraits: [], targetSummary: null, differentiators: [],
 };
 
-function readableApiError(body: { error?: string; detail?: string }, fallback: string) {
+function readableApiError(body: { error?: string; detail?: string; message?: string }, fallback: string) {
+  if (body.message) return body.message;
   const value = body.detail || body.error;
   if (value === "OPENAI_NOT_CONFIGURED") return "L’analisi AI non è disponibile in questo momento. Riprova più tardi.";
   if (value === "PROFILE_NOT_FOUND") return "Attività non trovata per questo account.";
@@ -119,7 +120,7 @@ export function WebsiteScanPage() {
     setRunning(true); setError(null);
     try {
       const token = await authenticatedApiToken();
-      const response = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id, pageLimit: 500 }) });
+      const response = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id, pageLimit: 8 }) });
       const body = await response.json() as ScanResponse;
       if (!response.ok) throw new Error(readableApiError(body, "Scansione non riuscita."));
 

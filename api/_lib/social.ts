@@ -41,10 +41,11 @@ type TokenBundle = {
   kind?: string | undefined;
 };
 
-type Candidate = {
+export type Candidate = {
   id: string;
   name: string;
   accountId?: string | undefined;
+  accountType?: string | undefined;
   pageId?: string | undefined;
   username?: string | undefined;
   kind?: string | undefined;
@@ -206,9 +207,14 @@ function sleep(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function googlePublicError(status: number) {
+function googlePublicError(status: number, body: unknown = {}) {
+  const envelope = body && typeof body === "object" ? body as { error?: { message?: unknown; status?: unknown; details?: Array<{ reason?: unknown; metadata?: { service?: unknown } }> } } : {};
+  const message = typeof envelope.error?.message === "string" ? envelope.error.message.toLowerCase() : "";
+  const reasons = Array.isArray(envelope.error?.details) ? envelope.error.details.map((detail) => typeof detail.reason === "string" ? detail.reason : "") : [];
+  if (reasons.includes("SERVICE_DISABLED") || message.includes("api has not been used") || message.includes("is disabled")) return "GBP_API_NOT_ENABLED";
   if (status === 429) return "GBP_RATE_LIMITED";
-  if (status === 401 || status === 403) return "GBP_ACCESS_DENIED";
+  if (status === 401) return "GBP_OAUTH_ACCOUNT_MISMATCH";
+  if (status === 403) return "GBP_ACCESS_DENIED";
   return `GBP_PROVIDER_${status}`;
 }
 
@@ -226,7 +232,7 @@ export async function googleApiJson<T>(url: string | URL, headers: HeadersInit, 
     if (response.ok) return { body, attempts: attempt };
 
     const retryable = response.status === 429 || response.status >= 500;
-    if (!retryable || attempt === maxAttempts) throw new Error(googlePublicError(response.status));
+    if (!retryable || attempt === maxAttempts) throw new Error(googlePublicError(response.status, body));
     const retryAfterSeconds = Number(response.headers.get("retry-after"));
     const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0 ? retryAfterSeconds * 1_000 : 0;
     const exponentialMs = GOOGLE_RETRY_BASE_MS * (2 ** (attempt - 1));
@@ -405,6 +411,7 @@ function safeCandidates(value: unknown): Candidate[] {
       id: row.id,
       name: row.name,
       accountId: typeof row.accountId === "string" ? row.accountId : undefined,
+      accountType: typeof row.accountType === "string" ? row.accountType : undefined,
       pageId: typeof row.pageId === "string" ? row.pageId : undefined,
       username: typeof row.username === "string" ? row.username : undefined,
       kind: typeof row.kind === "string" ? row.kind : undefined,
@@ -523,7 +530,7 @@ function buildAuthorizationUrl(provider: SocialProvider, env: SocialEnv, state: 
   url.searchParams.set("scope", scopes.join(" "));
   url.searchParams.set("state", state);
   url.searchParams.set("access_type", "offline");
-  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("prompt", "consent select_account");
   url.searchParams.set("include_granted_scopes", "true");
   return { url: url.toString(), scopes };
 }
@@ -660,21 +667,29 @@ async function googleExchange(code: string, callbackUri: string, env: SocialEnv)
   return body;
 }
 
-async function googleLocations(accessToken: string): Promise<Candidate[]> {
+type GoogleAccount = { name?: string; accountName?: string; type?: "PERSONAL" | "LOCATION_GROUP" | "USER_GROUP" | "ORGANIZATION" | string; role?: string; permissionLevel?: string };
+
+export async function googleLocations(accessToken: string, runtime: GoogleRequestRuntime = {}): Promise<Candidate[]> {
   const headers = { authorization: `Bearer ${accessToken}` };
-  const accounts: Array<{ name?: string; accountName?: string }> = [];
+  const accounts: GoogleAccount[] = [];
   let accountPageToken: string | undefined;
-  for (let page = 0; page < 3 && accounts.length < 50; page += 1) {
+  const seenAccountPageTokens = new Set<string>();
+  for (;;) {
     const accountUrl = new URL("https://mybusinessaccountmanagement.googleapis.com/v1/accounts");
     accountUrl.searchParams.set("pageSize", "20");
     if (accountPageToken) accountUrl.searchParams.set("pageToken", accountPageToken);
-    const { body } = await googleApiJson<{ accounts?: Array<{ name?: string; accountName?: string }>; nextPageToken?: string }>(accountUrl, headers);
+    const { body } = await googleApiJson<{ accounts?: GoogleAccount[]; nextPageToken?: string }>(accountUrl, headers, runtime);
     accounts.push(...(body.accounts ?? []));
     accountPageToken = body.nextPageToken;
     if (!accountPageToken) break;
+    if (seenAccountPageTokens.has(accountPageToken)) throw new Error("GBP_LOCATION_DISCOVERY_DEFECT");
+    seenAccountPageTokens.add(accountPageToken);
   }
+  if (!accounts.some((account) => account.name)) throw new Error("GBP_NO_ACCESSIBLE_ACCOUNT");
   const candidates: Candidate[] = [];
-  for (const account of accounts.slice(0, 50)) {
+  const discoveryFailures: string[] = [];
+  let successfulLocationQueries = 0;
+  for (const account of accounts) {
     if (!account.name) continue;
     let locationPageToken: string | undefined;
     for (let page = 0; page < 2 && candidates.length < 100; page += 1) {
@@ -683,21 +698,26 @@ async function googleLocations(accessToken: string): Promise<Candidate[]> {
       locationUrl.searchParams.set("pageSize", "100");
       if (locationPageToken) locationUrl.searchParams.set("pageToken", locationPageToken);
       try {
-        const { body } = await googleApiJson<{ locations?: Array<{ name?: string; title?: string; storefrontAddress?: { locality?: string; administrativeArea?: string } }>; nextPageToken?: string }>(locationUrl, headers);
+        const { body } = await googleApiJson<{ locations?: Array<{ name?: string; title?: string; storefrontAddress?: { locality?: string; administrativeArea?: string } }>; nextPageToken?: string }>(locationUrl, headers, runtime);
+        successfulLocationQueries += 1;
         for (const location of body.locations ?? []) {
           if (!location.name) continue;
           const locality = [location.storefrontAddress?.locality, location.storefrontAddress?.administrativeArea].filter(Boolean).join(", ");
-          candidates.push({ id: location.name, accountId: account.name, name: locality ? `${location.title || location.name} · ${locality}` : location.title || location.name, kind: "LOCATION" });
+          candidates.push({ id: location.name, accountId: account.name, accountType: account.type || "ACCOUNT_TYPE_UNSPECIFIED", name: locality ? `${location.title || location.name} · ${locality}` : location.title || location.name, kind: "LOCATION" });
           if (candidates.length >= 100) break;
         }
         locationPageToken = body.nextPageToken;
         if (!locationPageToken) break;
       } catch (reason) {
-        if (reason instanceof Error && reason.message === "GBP_RATE_LIMITED") throw reason;
+        const code = reason instanceof Error ? reason.message : "GBP_LOCATION_DISCOVERY_DEFECT";
+        if (code === "GBP_RATE_LIMITED" || code === "GBP_API_NOT_ENABLED" || code === "GBP_OAUTH_ACCOUNT_MISMATCH") throw reason;
+        discoveryFailures.push(`${account.type || "ACCOUNT_TYPE_UNSPECIFIED"}:${code}`);
         break;
       }
     }
   }
+  if (!candidates.length && discoveryFailures.length) throw new Error("GBP_LOCATION_DISCOVERY_DEFECT");
+  if (!candidates.length && successfulLocationQueries > 0) throw new Error("GBP_ACCOUNT_WITHOUT_LOCATIONS");
   return candidates;
 }
 
@@ -780,7 +800,6 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null;
     const tokenReference = await encryptTokenBundle({ accessToken: token.access_token!, refreshToken: token.refresh_token ?? null, expiresAt, kind: "google" }, env.SOCIAL_TOKEN_KEY!);
     const candidates = await googleLocations(token.access_token!);
-    if (!candidates.length) throw new Error("NESSUNA_SEDE_GOOGLE_BUSINESS_PROFILE_ACCESSIBILE_O_QUOTA_API_NON_ATTIVA");
     await upsertConnection(sql, { profileId: state.profileId, provider, status: "PENDING_SELECTION", tokenReference, permissions: [GOOGLE_SCOPE], expiresAt, metadata: { candidates } });
     const result = { selection: provider };
     await finishOAuthCallback(sql, state, "COMPLETED", result);
@@ -862,7 +881,7 @@ async function handleSelect(request: Request, env: SocialEnv) {
       const candidates = safeCandidates(connectionMetadata(row.metadata).candidates);
       const candidate = candidates.find((item) => item.id === candidateId);
       if (!candidate) return socialJson({ error: "SOCIAL_ACCOUNT_NOT_FOUND" }, 404);
-      await upsertConnection(sql, { profileId, provider, status: "ACTIVE", providerAccountId: candidate.id, accountName: candidate.name, tokenReference: row.token_reference, permissions: [GOOGLE_SCOPE], expiresAt: row.expires_at, metadata: { accountId: candidate.accountId, locationName: candidate.id } });
+      await upsertConnection(sql, { profileId, provider, status: "ACTIVE", providerAccountId: candidate.id, accountName: candidate.name, tokenReference: row.token_reference, permissions: [GOOGLE_SCOPE], expiresAt: row.expires_at, metadata: { accountId: candidate.accountId, accountType: candidate.accountType, locationName: candidate.id } });
     }
     return socialJson({ connected: true, provider });
   } catch (reason) {
