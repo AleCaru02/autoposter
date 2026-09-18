@@ -3,6 +3,7 @@ import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
+import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS } from "../api/_lib/website-scan-policy.js";
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -22,7 +23,7 @@ interface Env {
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
-type ScanRow = { id: string };
+type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
 type UsageRow = { id: string };
@@ -117,15 +118,23 @@ async function resolvePublicDns(hostname: string) {
   if (!addresses.length || addresses.some(privateIp)) throw new Error("PRIVATE_TARGET");
 }
 
-async function assertPublicTarget(url: URL) {
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) throw new Error("PRIVATE_TARGET");
-  if (url.port && url.port !== "80" && url.port !== "443") throw new Error("UNSAFE_PORT");
-  if (literalIp(hostname)) {
-    if (privateIp(hostname)) throw new Error("PRIVATE_TARGET");
-    return;
-  }
-  await resolvePublicDns(hostname);
+function createPublicTargetValidator() {
+  const dnsChecks = new Map<string, Promise<void>>();
+  return async (url: URL) => {
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+    if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) throw new Error("PRIVATE_TARGET");
+    if (url.port && url.port !== "80" && url.port !== "443") throw new Error("UNSAFE_PORT");
+    if (literalIp(hostname)) {
+      if (privateIp(hostname)) throw new Error("PRIVATE_TARGET");
+      return;
+    }
+    let check = dnsChecks.get(hostname);
+    if (!check) {
+      check = resolvePublicDns(hostname);
+      dnsChecks.set(hostname, check);
+    }
+    await check;
+  };
 }
 
 async function handleHealth(env: Env) {
@@ -303,23 +312,25 @@ async function handleWebsiteScan(request: Request) {
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
-  const requestedLimit = Number(body.pageLimit ?? 500);
-  const pageLimit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 2_000) : 500;
+  const pageLimit = boundedScanPageLimit(body.pageLimit);
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   let scanId: string | null = null;
   try {
+    const validateTarget = createPublicTargetValidator();
     const profileRows = await rows<Pick<ProfileRow, "id" | "website_url">>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,website_url&limit=1`, token);
     const profile = profileRows[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
     if (!profile.website_url) return json({ error: "WEBSITE_NOT_CONFIGURED" }, 409);
     const root = new URL(profile.website_url);
     if (root.protocol !== "http:" && root.protocol !== "https:") return json({ error: "INVALID_WEBSITE" }, 400);
-    await assertPublicTarget(root);
+    await validateTarget(root);
+    const reusable = await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(root.toString())}&state=in.(COMPLETE,PARTIAL)&analyzed_pages=gt.0&select=id,state,discovered_pages,analyzed_pages,skipped_pages,failed_pages&order=created_at.desc&limit=1`, token);
+    if (reusable[0]) return json({ scanId: reusable[0].id, state: reusable[0].state, discoveredPages: reusable[0].discovered_pages ?? 0, analyzedPages: reusable[0].analyzed_pages ?? 0, skippedPages: reusable[0].skipped_pages ?? 0, failedPages: reusable[0].failed_pages ?? 0, reused: true });
     const create = await dataApi("website_scans", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, root_url: root.toString(), state: "RUNNING", page_limit: pageLimit, max_depth: 12, started_at: new Date().toISOString(), last_progress_at: new Date().toISOString() }) });
     if (!create.ok) throw new Error(`DATA_API_CREATE_SCAN_${create.status}`);
     scanId = ((await create.json()) as ScanRow[])[0]?.id ?? null;
     if (!scanId) throw new Error("SCAN_ID_MISSING");
-    const result = await crawlWebsite(root.toString(), { maxPages: pageLimit, maxDepth: 12, maxDurationMs: 48_000, validateTarget: assertPublicTarget, includeSitemap: true });
+    const result = await crawlWebsite(root.toString(), { maxPages: pageLimit, maxDepth: 12, maxDurationMs: 48_000, validateTarget, includeSitemap: true, maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS, maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS });
     for (let index = 0; index < result.pages.length; index += 25) {
       const chunk = result.pages.slice(index, index + 25).map((page) => ({ scan_id: scanId, profile_id: profileId, url: page.url, normalized_url: page.normalizedUrl, status: page.status, depth: page.depth, title: page.title, meta_description: page.metaDescription, content_text: page.contentText, content_hash: page.contentHash, discovered_from: page.discoveredFrom, skip_reason: page.skipReason, error: page.error, scanned_at: new Date().toISOString() }));
       const write = await dataApi("website_pages", token, { method: "POST", headers: { prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(chunk) });
@@ -333,7 +344,7 @@ async function handleWebsiteScan(request: Request) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_SCAN_ERROR";
     if (scanId) await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), error: detail.slice(0, 500) }) }).catch(() => undefined);
     console.error("cloudflare-website-scan", { profileId, scanId, detail });
-    return json({ error: "SCAN_FAILED", detail }, 500);
+    return json({ error: "SCAN_FAILED", message: "Non riesco a completare l'analisi del sito in questo momento. Riprova tra poco." }, 500);
   }
 }
 

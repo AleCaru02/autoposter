@@ -9,7 +9,7 @@ import { CustomerWorkflowJourney } from "../components/customer-workflow-journey
 import { ManualContentComposer } from "../components/manual-content-composer";
 
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
-type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; detail?: string };
+type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; message?: string };
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -75,10 +75,10 @@ export function ContentGeneratorPage() {
       const scanResponse = await fetch("/api/website-scan", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId: profile.id, pageLimit: 500 }),
+        body: JSON.stringify({ profileId: profile.id, pageLimit: 8 }),
       });
       const scanBody = await scanResponse.json() as ScanResponse;
-      if (!scanResponse.ok) throw new Error(scanBody.detail || scanBody.error || "Analisi iniziale del sito non riuscita.");
+      if (!scanResponse.ok) throw new Error(scanBody.message || "Analisi iniziale del sito non riuscita. Riprova tra poco.");
       const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
       setBootstrapPages(scanBody.analyzedPages ?? 0);
 
