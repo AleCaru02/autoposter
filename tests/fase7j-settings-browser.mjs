@@ -25,6 +25,31 @@ async function controller(action, extra = {}) { const response = await fetch(con
 async function login(page) { await page.goto(`${APP_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30000 }); await page.locator('input[type="email"]').fill(emails.owner); await page.locator('input[type="password"]').fill(password); await page.locator('button[type="submit"]').click(); await page.waitForURL((url) => url.pathname !== "/login", { timeout: 20000 }); }
 function diagnostics(page) { const failures = []; page.on("pageerror", (error) => failures.push(`page:${error.message}`)); page.on("response", (response) => { if (response.status() >= 500) failures.push(`http:${response.status()}:${new URL(response.url()).pathname}`); }); return failures; }
 
+const customerPages = [
+  ["dashboard", "Cosa richiede attenzione oggi"],
+  ["profili", "Le tue attività"],
+  ["brand", "Identità dell’attività"],
+  ["sito", "Analisi pagina per pagina"],
+  ["contenuti", "Contenuti automatici"],
+  ["approvazioni", "Revisione contenuti"],
+  ["calendario", "Calendario contenuti"],
+  ["social", "Collegamenti social"],
+  ["analytics", "Risultati dei tuoi social"],
+  ["apprendimento", "Ottimizzazione progressiva"],
+  ["impostazioni", /^Settings 7J owner /],
+];
+async function smokeCustomerPages(page, pages = customerPages) {
+  const checked = [];
+  for (const [path, heading] of pages) {
+    await page.goto(`${APP_BASE}/app/${path}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.getByRole("heading", { name: heading, exact: typeof heading === "string" }).waitFor({ timeout: 20000 });
+    const main = await page.locator("main").innerText();
+    assert.doesNotMatch(main, /HTTP\s+(404|5\d\d)|CLOUDFLARE_ERROR|Errore Cloudflare/i, `${path} exposed a runtime error`);
+    checked.push(path);
+  }
+  return checked;
+}
+
 const preflight = await controller("preflight"); assert.equal(preflight.recognizedQaUsers, 0); assert.equal(preflight.qaProfiles, 0); assert.equal(preflight.qaUsage, 0);
 const owner = await signup(emails.owner, "Settings 7J Owner"); const other = await signup(emails.other, "Settings 7J Other"); await waitIdentity(owner); await waitIdentity(other);
 const profileId = await createProfile(owner, "owner"); const otherProfileId = await createProfile(other, "other"); await controller("fixture", { profileId });
@@ -33,7 +58,7 @@ const usageRead = await dataApi(`/capability_usage_buckets?profile_id=eq.${profi
 
 const browser = await chromium.launch({ headless: true });
 try {
-  const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); const overviewResponses = []; desktop.on("response", (response) => { const url = new URL(response.url()); if (url.pathname.includes("profile_entitlements") || url.pathname.includes("capability_usage_buckets") || url.pathname === "/api/social/status") overviewResponses.push({ path: url.pathname, status: response.status() }); }); await login(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
+  const desktopContext = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const desktop = await desktopContext.newPage(); const desktopFailures = diagnostics(desktop); const overviewResponses = []; desktop.on("response", (response) => { const url = new URL(response.url()); if (url.pathname.includes("profile_entitlements") || url.pathname.includes("capability_usage_buckets") || url.pathname === "/api/social/status") overviewResponses.push({ path: url.pathname, status: response.status() }); }); await login(desktop); const desktopPages = await smokeCustomerPages(desktop); await desktop.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 });
   await desktop.getByRole("heading", { name: "Piano e utilizzo" }).waitFor();
   try { await desktop.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 }); } catch (reason) { console.error("FASE7J_OVERVIEW_DIAGNOSTIC:", JSON.stringify({ overviewResponses, main: await desktop.locator("main").innerText() })); throw reason; }
   const desktopText = await desktop.locator("main").innerText();
@@ -45,10 +70,10 @@ try {
   await desktop.goto(`${APP_BASE}/app/profili`, { waitUntil: "networkidle" }); await desktop.getByText("La cancellazione definitiva non è ancora disponibile").waitFor(); assert.equal(await desktop.locator('button[aria-label^="Elimina"]').count(), 0);
   await desktop.getByRole("button", { name: "Esci" }).click(); await desktop.waitForURL((url) => url.pathname === "/login"); assert.deepEqual(desktopFailures, [], `desktop failures: ${JSON.stringify(desktopFailures)}`); await desktopContext.close();
 
-  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); const mobile = await mobileContext.newPage(); const mobileFailures = diagnostics(mobile); await login(mobile); await mobile.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 }); await mobile.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 });
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); const mobile = await mobileContext.newPage(); const mobileFailures = diagnostics(mobile); await login(mobile); const mobilePages = await smokeCustomerPages(mobile, [["contenuti", "Contenuti automatici"], ["social", "Collegamenti social"], ["impostazioni", /^Settings 7J owner /]]); await mobile.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "networkidle", timeout: 30000 }); await mobile.getByText(/18\s+di\s+50\s+utilizzati\s+questo\s+mese/).waitFor({ timeout: 20000 });
   const size = await mobile.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth })); assert.ok(size.scrollWidth <= size.viewportWidth + 2, `mobile overflow ${size.scrollWidth} > ${size.viewportWidth}`);
   await mobile.getByRole("button", { name: "Apri altre sezioni" }).click(); await mobile.getByRole("button", { name: "Esci" }).click(); await mobile.waitForURL((url) => url.pathname === "/login"); assert.deepEqual(mobileFailures, [], `mobile failures: ${JSON.stringify(mobileFailures)}`); await mobileContext.close();
 
   const anonymous = await browser.newPage(); await anonymous.goto(`${APP_BASE}/app/impostazioni`, { waitUntil: "domcontentloaded" }); await anonymous.waitForURL((url) => url.pathname === "/login"); await anonymous.close();
-  console.log("FASE7J_SETTINGS_RUNTIME: PASS", JSON.stringify({ authenticated: "PASS", desktop: "PASS", mobile: "PASS", logout: "PASS", unauthenticated: "DENIED", tenantIsolation: "PASS", planUsage: "PASS", socialStates: "PASS", deletionSafety: "PASS", sensitiveFindings: 0, profileId }));
+  console.log("FASE7J_SETTINGS_RUNTIME: PASS", JSON.stringify({ authenticated: "PASS", desktop: "PASS", mobile: "PASS", desktopPages, mobilePages, logout: "PASS", unauthenticated: "DENIED", tenantIsolation: "PASS", planUsage: "PASS", socialStates: "PASS", deletionSafety: "PASS", sensitiveFindings: 0, profileId }));
 } finally { await browser.close(); }
