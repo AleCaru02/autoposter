@@ -27,7 +27,7 @@ async function noUpstream(request: Request) {
 
 try {
   assert.equal(SAME_ORIGIN_AUTH_PROXY_CONTRACT.prefix, "/api/auth");
-  assert.equal(SAME_ORIGIN_AUTH_PROXY_CONTRACT.upstream, "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth");
+  assert.equal(SAME_ORIGIN_AUTH_PROXY_CONTRACT.upstream, "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth");
   assert.deepEqual(SAME_ORIGIN_AUTH_PROXY_CONTRACT.methods, ["GET", "POST"]);
 
   {
