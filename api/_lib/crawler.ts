@@ -113,14 +113,18 @@ function pageMetadata(html: string) {
   return { title, description, hrefs };
 }
 
-function normalizeObservedColor(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
+export function normalizeObservedColor(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!normalized || /(?:var|calc|min|max|clamp)\(|--/.test(normalized)) return null;
+  if (/^#(?:0000|00000000)$/.test(normalized)) return null;
+  return normalized;
 }
 
 function extractColors(source: string, counts: Map<string, number>) {
   const matches = source.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^\)]{3,80}\)|hsla?\([^\)]{3,80}\)/g) ?? [];
   for (const raw of matches) {
     const color = normalizeObservedColor(raw);
+    if (!color) continue;
     counts.set(color, (counts.get(color) ?? 0) + 1);
   }
 }
