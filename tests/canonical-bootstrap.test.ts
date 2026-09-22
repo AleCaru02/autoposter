@@ -81,9 +81,11 @@ for (const column of ["error_code","error_message","provider_request_id"]) {
     `FASE 7F must version its own ${column} column before functions use it`,
   );
 }
+const publicationAttemptInsertColumns = /INSERT INTO public\.publication_attempts\(([\s\S]*?)\)\s*SELECT/i.exec(publication)?.[1] ?? "";
+assert.ok(publicationAttemptInsertColumns, "FASE 7F publication-attempt INSERT must be readable");
 assert.doesNotMatch(
-  publication,
-  /INSERT INTO public\.publication_attempts\([\s\S]*?profile_id[\s\S]*?provider[\s\S]*?\)/i,
+  publicationAttemptInsertColumns,
+  /\bprofile_id\b|\bprovider\b/i,
   "FASE 7F must not write non-canonical publication_attempts tenant/provider columns",
 );
 
