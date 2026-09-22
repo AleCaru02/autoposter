@@ -54,6 +54,14 @@ function nestedList(value: unknown, key: string) {
 function listFromText(value: string) {
   return [...new Set(value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))];
 }
+function concreteColors(values: string[]) {
+  return values.filter((value) => {
+    const normalized = value.trim().toLowerCase();
+    return Boolean(normalized)
+      && !/(?:var|calc|min|max|clamp)\(|--/.test(normalized)
+      && !/^#(?:0000|00000000)$/.test(normalized);
+  });
+}
 
 export function BrandPage() {
   const { selectedProfile, reload, updateProfile } = useProfiles();
@@ -83,7 +91,7 @@ export function BrandPage() {
       services: draft.services,
       differentiators: draft.differentiators,
       value_propositions: draft.valuePropositions,
-      visual_identity: { observedColors: draft.colors, summary: draft.visualSummary },
+      visual_identity: { observedColors: concreteColors(draft.colors), summary: draft.visualSummary },
       updated_at: new Date().toISOString(),
     };
     const write = current.data
@@ -119,7 +127,7 @@ export function BrandPage() {
       services: stringList(row?.services),
       differentiators: stringList(row?.differentiators),
       valuePropositions: stringList(row?.value_propositions),
-      colors: Array.isArray(visual.observedColors) ? visual.observedColors.filter((item): item is string => typeof item === "string") : [],
+      colors: Array.isArray(visual.observedColors) ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [],
       visualSummary: typeof visual.summary === "string" ? visual.summary : "",
     });
   }, [selectedProfile?.id]);
