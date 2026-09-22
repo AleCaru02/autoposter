@@ -212,7 +212,7 @@ async function handleGenerateText(request: Request, env: Env) {
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
-    return json({ error: "GENERATION_FAILED", detail }, detail.startsWith("OPENAI_") ? 502 : 500);
+    return json({ error: "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : 500);
   }
 }
 
@@ -302,7 +302,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
-    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED", detail }, status);
+    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" }, status);
   }
 }
 

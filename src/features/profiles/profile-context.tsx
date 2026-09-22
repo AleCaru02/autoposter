@@ -12,6 +12,8 @@ export type Profile = {
   locale: string;
   onboarding_completed: boolean;
   created_at: string;
+  tenant_type: "CUSTOMER_REAL" | "QA_EPHEMERAL" | "DEMO_PERSISTENT";
+  external_publishing_enabled: boolean;
 };
 
 type CreateProfileInput = {
@@ -75,13 +77,24 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await neonClient.from("profiles").select(PROFILE_COLUMNS).is("archived_at", null).order("created_at", { ascending: true });
+    const [result, modes] = await Promise.all([
+      neonClient.from("profiles").select(PROFILE_COLUMNS).is("archived_at", null).order("created_at", { ascending: true }),
+      neonClient.from("profile_tenant_modes").select("profile_id,tenant_type,external_publishing_enabled"),
+    ]);
     setLoading(false);
-    if (result.error) {
-      setError(result.error.message);
+    if (result.error || modes.error) {
+      setError("Impossibile caricare le attività. Riprova.");
       return;
     }
-    const next = (result.data ?? []) as Profile[];
+    const modeByProfile = new Map((modes.data ?? []).map((mode) => [mode.profile_id, mode]));
+    const next = (result.data ?? []).map((row) => {
+      const mode = modeByProfile.get(row.id);
+      return {
+        ...row,
+        tenant_type: mode?.tenant_type ?? "CUSTOMER_REAL",
+        external_publishing_enabled: mode?.external_publishing_enabled ?? true,
+      };
+    }) as Profile[];
     setProfiles(next);
     setSelectedProfileIdState((current) => {
       const urlProfileId = profileIdFromUrl();
@@ -118,7 +131,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       throw new Error(result.error === "ONBOARDING_WEBSITE_INVALID" ? "Inserisci un indirizzo web valido." : "Impossibile creare il profilo.");
     }
     sessionStorage.removeItem(ONBOARDING_OPERATION_KEY);
-    const created = result.profile;
+    const created = { ...result.profile, tenant_type: "CUSTOMER_REAL", external_publishing_enabled: true } as Profile;
     setProfiles((rows) => [...rows, created]);
     setSelectedProfileId(created.id);
     return created;
@@ -137,11 +150,16 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (input.locale !== undefined) payload.locale = input.locale.trim() || "it-IT";
 
     const result = await neonClient.from("profiles").update(payload).eq("id", id).select(PROFILE_COLUMNS).single();
-    if (result.error || !result.data) throw new Error(result.error?.message ?? "Salvataggio attività non riuscito.");
-    const updated = result.data as Profile;
+    if (result.error || !result.data) throw new Error("Salvataggio attività non riuscito. Riprova.");
+    const current = profiles.find((profile) => profile.id === id);
+    const updated = {
+      ...result.data,
+      tenant_type: current?.tenant_type ?? "CUSTOMER_REAL",
+      external_publishing_enabled: current?.external_publishing_enabled ?? true,
+    } as Profile;
     setProfiles((rows) => rows.map((profile) => profile.id === id ? updated : profile));
     return updated;
-  }, []);
+  }, [profiles]);
 
   const selectedProfile = useMemo(() => profiles.find((profile) => profile.id === selectedProfileId) ?? null, [profiles, selectedProfileId]);
 

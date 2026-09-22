@@ -160,7 +160,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   const current = await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profileId}::uuid limit 1` as unknown as StrategyRow[];
   const schedules = await sql`select provider,posts_per_week,preferred_slots,timezone,enabled from public.schedules where profile_id=${profileId}::uuid and enabled=true order by provider` as unknown as ScheduleRow[];
   const recent = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
-  const learning = await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];
+  const learning = await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and source_type='PROVIDER_API' and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];
 
   const meter = new StrategyPlannerMetering(env.DATABASE_URL);
   const reservation = await meter.reserve({ profileId, cycle: "STRATEGY_PLAN" });

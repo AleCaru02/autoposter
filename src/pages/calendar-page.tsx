@@ -119,6 +119,8 @@ function timeLabel(value: string, timezone: string) {
 }
 
 function jobStatus(job: CalendarJobRow, timezone: string) {
+  if (job.execution_mode === "DEMO_SIMULATION" && job.state === "PUBLISHED") return "Pubblicato in demo · nessun invio reale";
+  if (job.execution_mode === "DEMO_SIMULATION" && job.state === "SCHEDULED") return "Programmato in demo · nessun invio reale";
   if (job.state === "PROCESSING") return "In pubblicazione";
   if (job.state === "PUBLISHED") return job.published_at ? `Pubblicato · ${timeLabel(job.published_at, timezone)}` : "Pubblicato";
   if (job.state === "BLOCKED_APPROVAL") return "In attesa di approvazione";

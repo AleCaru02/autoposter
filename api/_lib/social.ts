@@ -250,6 +250,20 @@ function socialJson(body: unknown, status = 200) {
   });
 }
 
+function publicOAuthErrorCode(provider: SocialProvider, detail: string) {
+  const safeCodes = new Set([
+    "AUTH_DENIED", "AUTH_CODE_MISSING", "OAUTH_CALLBACK_IN_PROGRESS", "OAUTH_CALLBACK_ALREADY_USED",
+    "GBP_API_NOT_ENABLED", "GBP_NO_ACCESSIBLE_ACCOUNT", "GBP_ACCOUNT_WITHOUT_LOCATIONS",
+    "GBP_LOCATION_DISCOVERY_DEFECT", "GBP_OAUTH_ACCOUNT_MISMATCH", "GBP_RATE_LIMITED", "GBP_ACCESS_DENIED",
+  ]);
+  if (safeCodes.has(detail)) return detail;
+  if (detail.startsWith("MISSING_PERMISSIONS:")) return "MISSING_PERMISSIONS";
+  if (detail === "NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA") return detail;
+  if (detail === "NESSUNA_PAGINA_FACEBOOK_GESTIBILE") return detail;
+  if (detail === "NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO") return detail;
+  return `${provider}_OAUTH_FAILED`;
+}
+
 function bearer(request: Request) {
   const value = request.headers.get("authorization");
   return value?.startsWith("Bearer ") ? value.slice(7).trim() || null : null;
@@ -730,8 +744,14 @@ async function handleConnect(request: Request, env: SocialEnv) {
   const provider = body.provider;
   if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
   const missingConfiguration = missingProviderConfiguration(provider, env);
-  if (missingConfiguration.length) return socialJson({ error: "PROVIDER_NOT_CONFIGURED", provider, detail: `Mancano sul server: ${missingConfiguration.join(", ")}.` }, 503);
+  if (missingConfiguration.length) {
+    console.error("social-provider-not-configured", { provider, missingConfiguration });
+    return socialJson({ error: "PROVIDER_NOT_CONFIGURED", provider }, 503);
+  }
   if (!await canAccessProfile(profileId, token)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  const sql = neon(env.DATABASE_URL!);
+  const demo = await sql`select public.is_demo_persistent_profile(${profileId}::uuid) value` as unknown as Array<{ value: boolean }>;
+  if (demo[0]?.value === true) return socialJson({ error: "DEMO_EXTERNAL_CONNECTION_DISABLED" }, 409);
   const callbackUri = `${baseUrl(env, request.url)}/api/social/callback/${provider.toLowerCase()}`;
   const state = await createOAuthState({ provider, profileId, callbackUri }, env.SOCIAL_TOKEN_KEY!);
   const authorization = buildAuthorizationUrl(provider, env, state, callbackUri);
@@ -748,7 +768,7 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
   try { state = await verifyOAuthState(stateValue, env.SOCIAL_TOKEN_KEY!); }
   catch (reason) { return socialJson({ error: reason instanceof Error ? reason.message : "OAUTH_STATE_INVALID" }, 400); }
   if (state.provider !== provider) return socialJson({ error: "OAUTH_PROVIDER_MISMATCH" }, 400);
-  if (url.searchParams.get("error")) return oauthRedirect(state, { social_error: url.searchParams.get("error_description") || url.searchParams.get("error") || "AUTH_DENIED" });
+  if (url.searchParams.get("error")) return oauthRedirect(state, { social_error: "AUTH_DENIED" });
   const code = url.searchParams.get("code");
   if (!code) return oauthRedirect(state, { social_error: "AUTH_CODE_MISSING" });
   const sql = neon(env.DATABASE_URL!);
@@ -808,7 +828,7 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     const errorCode = reason instanceof Error ? reason.message : "SOCIAL_OAUTH_FAILED";
     await finishOAuthCallback(sql, state, "FAILED", {}, errorCode).catch(() => undefined);
     console.error("social-oauth-callback", { provider, errorCode });
-    return oauthRedirect(state, { social_error: errorCode });
+    return oauthRedirect(state, { social_error: publicOAuthErrorCode(provider, errorCode) });
   }
 }
 
@@ -863,6 +883,8 @@ async function handleSelect(request: Request, env: SocialEnv) {
   if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
   const sql = neon(env.DATABASE_URL);
+  const demo = await sql`select public.is_demo_persistent_profile(${profileId}::uuid) value` as unknown as Array<{ value: boolean }>;
+  if (demo[0]?.value === true) return socialJson({ error: "DEMO_EXTERNAL_CONNECTION_DISABLED" }, 409);
   const row = await storedConnection(sql, profileId, provider);
   if (!row?.token_reference || row.status !== "PENDING_SELECTION") return socialJson({ error: "NO_PENDING_SELECTION" }, 409);
   try {
@@ -885,7 +907,8 @@ async function handleSelect(request: Request, env: SocialEnv) {
     }
     return socialJson({ connected: true, provider });
   } catch (reason) {
-    return socialJson({ error: "SOCIAL_SELECTION_FAILED", detail: reason instanceof Error ? reason.message : "unknown" }, 502);
+    console.error("social-selection-failed", { profileId, provider, code: reason instanceof Error ? reason.message : "unknown" });
+    return socialJson({ error: "SOCIAL_SELECTION_FAILED" }, 502);
   }
 }
 
@@ -966,7 +989,8 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
     const data = await assetBytes(asset.storage_url, asset.mime_type || "image/png");
     return new Response(bytesBody(data.bytes), { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
   } catch (reason) {
-    return socialJson({ error: "ASSET_READ_FAILED", detail: reason instanceof Error ? reason.message : "unknown" }, 502);
+    console.error("social-asset-read-failed", { code: reason instanceof Error ? reason.message : "unknown" });
+    return socialJson({ error: "ASSET_READ_FAILED" }, 502);
   }
 }
 
@@ -1135,9 +1159,22 @@ async function failClaim(sql: Sql, job: JobRecord, error: SocialPublishError, us
   return rows[0]?.result ?? "STALE_CLAIM";
 }
 
+async function completeDemoPublication(sql: Sql, job: JobRecord) {
+  const modes = await sql`
+    select public.is_demo_persistent_profile(${job.profile_id}::uuid) as demo
+  ` as unknown as Array<{ demo: boolean }>;
+  if (modes[0]?.demo !== true) return null;
+  const completed = await sql`
+    select public.complete_demo_publication_job(${job.id}::uuid,${job.claim_token}::uuid) completed
+  ` as unknown as Array<{ completed: boolean }>;
+  return { published: completed[0]?.completed === true, demo: true, externalRequest: false, retryScheduled: false, reviewRequired: false };
+}
+
 async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
   let usageEventId: string | null = null;
   try {
+    const demoResult = await completeDemoPublication(sql, job);
+    if (demoResult) return demoResult;
     const meter = new EntitlementUsageService(env.DATABASE_URL!);
     const scheduled = await meter.canUseCapability(job.profile_id, "social.publish.scheduled");
     if (!scheduled.allowed) throw terminalPublishError("CAPABILITY_SCHEDULED_DISABLED");

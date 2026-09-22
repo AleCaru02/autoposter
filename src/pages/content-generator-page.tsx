@@ -88,7 +88,7 @@ export function ContentGeneratorPage() {
         body: JSON.stringify({ profileId: profile.id, visualHints: hints }),
       });
       const analysisBody = await analysisResponse.json() as AnalysisResponse;
-      if (!analysisResponse.ok) throw new Error(analysisBody.detail || analysisBody.error || "Analisi iniziale del brand non riuscita.");
+      if (!analysisResponse.ok) throw new Error("Analisi iniziale del brand non riuscita. Riprova tra poco.");
       setBootstrapPages(analysisBody.pagesAnalyzed ?? scanBody.analyzedPages ?? 0);
       await reloadProfiles();
     } catch (reason) {
@@ -124,7 +124,7 @@ export function ContentGeneratorPage() {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { detail?: string; error?: string };
-        throw new Error(body.detail || body.error || "AUTOPILOT_RUN_FAILED");
+        throw new Error("Autopilot non avviato. Riprova tra poco.");
       }
       window.setTimeout(() => { void load(); }, 2500);
     } catch (reason) {

@@ -187,6 +187,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
-    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED", detail });
+    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" });
   }
 }

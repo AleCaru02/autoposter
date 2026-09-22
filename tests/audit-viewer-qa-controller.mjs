@@ -122,6 +122,7 @@ async function promote(sql, marker) {
   const target = users.find((user) => user.email === targetEmail);
   if (!target) return { ok: false, status: 409, body: { error: "SMOKE_ADMIN_NOT_FOUND" } };
   await sql`update neon_auth.user set role = 'admin' where id::text = ${target.id}`;
+  await markQaProfiles(sql, users, marker);
   const after = await state(sql, marker);
   if (after.qaAdmins !== 1 || after.superAdmins !== 2) {
     return { ok: false, status: 409, body: { error: "SMOKE_ADMIN_PROMOTION_POSTCONDITION", qaAdmins: after.qaAdmins, superAdmins: after.superAdmins } };
@@ -129,9 +130,33 @@ async function promote(sql, marker) {
   return { ok: true, status: 200, body: { promoted: true, ...after } };
 }
 
+async function markQaProfiles(sql, users, marker) {
+  for (const user of users) {
+    await sql`
+      insert into public.profile_tenant_modes(profile_id,tenant_type,external_publishing_enabled,metadata)
+      select p.id,'QA_EPHEMERAL',true,jsonb_build_object('qaMarker',${marker})
+      from public.profiles p where p.owner_auth_user_id=${user.id}
+      on conflict (profile_id) do nothing
+    `;
+  }
+}
+
 async function cleanupUsers(sql, users) {
   for (const user of users) {
-    await sql`delete from public.profiles where owner_auth_user_id = ${user.id}`;
+    const profiles = await sql`
+      select p.id::text id,mode.tenant_type
+      from public.profiles p
+      left join public.profile_tenant_modes mode on mode.profile_id=p.id
+      where p.owner_auth_user_id=${user.id}
+    `;
+    if (profiles.some((profile) => profile.tenant_type !== "QA_EPHEMERAL")) {
+      throw new Error("QA_CLEANUP_NON_EPHEMERAL_PROFILE_DENIED");
+    }
+    await sql`
+      delete from public.profiles p using public.profile_tenant_modes mode
+      where p.id=mode.profile_id and p.owner_auth_user_id=${user.id}
+        and mode.tenant_type='QA_EPHEMERAL'
+    `;
     await sql`
       delete from public.profile_members pm
       using public.app_users au
@@ -150,6 +175,7 @@ async function cleanup(sql, marker) {
   if (users.length > 2 || users.some((user) => !allowed.has(user.email))) {
     return { ok: false, status: 409, body: { error: "SMOKE_CLEANUP_SCOPE_MISMATCH", count: users.length } };
   }
+  await markQaProfiles(sql, users, marker);
   await cleanupUsers(sql, users);
   return { ok: true, status: 200, body: { cleaned: true, ...(await state(sql, marker)) } };
 }
@@ -161,6 +187,7 @@ async function cleanupRecognizedResidue(sql, marker) {
   }
   const cleanedUsers = users.length;
   const cleanedAdmins = users.filter((user) => user.role === "admin").length;
+  for (const user of users) await markQaProfiles(sql, [user], user.marker);
   await cleanupUsers(sql, users);
   const after = await state(sql, marker);
   if (after.recognizedQaUsers !== 0 || after.recognizedQaAdmins !== 0) {

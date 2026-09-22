@@ -74,7 +74,7 @@ export function OnboardingPage() {
       body: JSON.stringify({ profileId, visualHints: hints }),
     });
     const analysisBody = await analysisResponse.json() as AnalysisResponse;
-    if (!analysisResponse.ok) throw new Error(analysisBody.detail || analysisBody.error || "Analisi del brand non riuscita.");
+    if (!analysisResponse.ok) throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
     setAnalysis(analysisBody.analysis ?? null);
     setPagesAnalyzed(analysisBody.pagesAnalyzed ?? scanBody.analyzedPages ?? 0);
     setVisualHints(analysisBody.visualHints ?? hints);

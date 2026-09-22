@@ -227,7 +227,7 @@ export function ApprovalsPage() {
         }),
       });
       const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error(body.detail || body.message || body.error || "Immagine non salvata.");
+      if (!response.ok || !body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
       await reload();
     });
   }
