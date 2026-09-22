@@ -18,6 +18,7 @@ type BrandRow = {
   differentiators: unknown;
   value_propositions: unknown;
   goals: unknown;
+  user_context: string | null;
 };
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
 type BrandDraft = {
@@ -38,6 +39,7 @@ type BrandDraft = {
   valuePropositions: string[];
   colors: string[];
   visualSummary: string;
+  userContext: string;
 };
 
 const STANDARD_GOALS = ["Più richieste", "Più prenotazioni", "Notorietà locale", "Educare il pubblico", "Fiducia nel brand", "Traffico al sito"];
@@ -91,6 +93,7 @@ export function BrandPage() {
       services: draft.services,
       differentiators: draft.differentiators,
       value_propositions: draft.valuePropositions,
+      user_context: draft.userContext.trim() || null,
       visual_identity: { observedColors: concreteColors(draft.colors), summary: draft.visualSummary },
       updated_at: new Date().toISOString(),
     };
@@ -106,7 +109,7 @@ export function BrandPage() {
     const profile = selectedProfile;
     if (!profile) return;
     setLoading(true); setPageError(null);
-    const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,visual_identity,services,differentiators,value_propositions,goals").eq("profile_id", profile.id).maybeSingle();
+    const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,visual_identity,services,differentiators,value_propositions,goals,user_context").eq("profile_id", profile.id).maybeSingle();
     setLoading(false);
     if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
@@ -129,6 +132,7 @@ export function BrandPage() {
       valuePropositions: stringList(row?.value_propositions),
       colors: Array.isArray(visual.observedColors) ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [],
       visualSummary: typeof visual.summary === "string" ? visual.summary : "",
+      userContext: row?.user_context ?? "",
     });
   }, [selectedProfile?.id]);
 
@@ -168,6 +172,11 @@ export function BrandPage() {
 
   return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base e mantiene i dati associati a questa attività.</p></div><div className="header-actions">{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Analisi in corso…" : "Analizza di nuovo il sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
     <section className="panel brand-intelligence"><div className="panel-heading"><div><h2>Brand rilevato</h2><p>Informazioni ricavate dalle pagine del sito e già associate a questa attività.</p></div><Sparkles size={19} /></div>{draft.colors.length > 0 && <div className="brand-colors">{draft.colors.slice(0, 8).map((color) => <span key={color} title={color} style={{ background: color }} />)}</div>}{draft.visualSummary && <p className="brand-summary">{draft.visualSummary}</p>}<div className="insight-groups">{draft.toneTraits.length > 0 && <div><small>Tono</small><div className="insight-chips">{draft.toneTraits.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.targetSegments.length > 0 && <div><small>Pubblico</small><div className="insight-chips">{draft.targetSegments.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.services.length > 0 && <div><small>Servizi</small><div className="insight-chips">{draft.services.map((item) => <span key={item}>{item}</span>)}</div></div>}</div></section>
+    <section className="panel"><div className="panel-heading"><div><h2>Aggiungi quello che il sito non dice</h2><p>Queste informazioni sono confermate da te e verranno usate dall’AI insieme al sito. Inserisci solo dati veri e abbastanza stabili.</p></div><Sparkles size={19} /></div>
+      <div className="insight-groups"><div><small>Puoi aggiungere, per esempio</small><div className="insight-chips"><span>Servizi non ancora sul sito</span><span>Zone che gestisci davvero</span><span>Clienti che vuoi acquisire</span><span>Metodo di lavoro</span><span>Limiti da rispettare</span><span>Offerte o condizioni confermate</span></div></div></div>
+      <label className="full">Informazioni aggiuntive<textarea rows={6} maxLength={5000} value={draft.userContext} placeholder="Esempio: Gestisco personalmente gli immobili a Milano; preferisco pochi appartamenti selezionati; faccio una valutazione preliminare prima di accettare una gestione; non promettere rendimenti garantiti." onChange={(event) => patch("userContext", event.target.value)} onBlur={() => void autosave.flush().catch(() => undefined)} /></label>
+      <p className="section-hint">Non inserire password, chiavi API, dati degli ospiti o altre informazioni sensibili. Puoi correggere questo testo in qualsiasi momento.</p>
+    </section>
     <section className="panel"><h2>Obiettivi</h2><p className="section-hint">Tocca un obiettivo per attivarlo o disattivarlo.</p><div className="goal-options">{goalOptions.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} onClick={() => toggleGoal(goal)}>{draft.goals.includes(goal) && <Check size={13} />}{goal}</button>)}</div></section>
     <details className="panel editable-details"><summary>Modifica dati attività e brand</summary><div className="form-grid details-grid" onBlurCapture={() => void autosave.flush().catch(() => undefined)}>
       <label>Nome attività<input value={draft.name} onChange={(event) => patch("name", event.target.value)} /></label><label>Settore<input value={draft.industry} onChange={(event) => patch("industry", event.target.value)} /></label>

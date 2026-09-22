@@ -44,8 +44,10 @@ const mockFetch: typeof fetch = async (_url, init) => {
 };
 
 const profile = { id: "11111111-1111-4111-8111-111111111111", name: "Attività Test", industry: "Property management", website_url: "https://example.com", timezone: "Europe/Rome" };
-const strategy = await generateOpenAIStrategy({ apiKey: "test", profile, brand: { description: "Gestione affitti brevi", business_model: "Servizi", location: "Milano", service_area: "Milano e Monza", target_audience: { summary: "Proprietari" }, tone_of_voice: { summary: "Professionale" }, goals: ["Lead"], visual_identity: {} }, existingObjectives: ["Lead"], fetcher: mockFetch });
+const strategy = await generateOpenAIStrategy({ apiKey: "test", profile, brand: { description: "Gestione affitti brevi", business_model: "Servizi", location: "Milano", service_area: "Milano e Monza", target_audience: { summary: "Proprietari" }, tone_of_voice: { summary: "Professionale" }, goals: ["Lead"], visual_identity: {}, user_context: "Preferiamo pochi immobili selezionati e una valutazione preliminare." }, existingObjectives: ["Lead"], fetcher: mockFetch });
 assert.equal(strategy.output.primaryObjective, "Generare richieste qualificate");
+assert.ok(String(calls[0]?.input).includes("Preferiamo pochi immobili selezionati"), "Strategist must receive user-confirmed brand context");
+assert.ok(String(calls[0]?.instructions).includes("userProvidedContext"), "Strategist must treat manual context as data, not instructions");
 assert.equal(Object.values(strategy.output.contentMix).reduce((a, b) => a + b, 0), 100);
 
 const plan = await generateOpenAIPlan({ apiKey: "test", profile, strategy: strategy.output, schedules: [{ provider: "INSTAGRAM", posts_per_week: 2, preferred_slots: [], timezone: "Europe/Rome", enabled: true }, { provider: "GBP", posts_per_week: 1, preferred_slots: [], timezone: "Europe/Rome", enabled: true }], recentTopics: ["Tema recente"], fetcher: mockFetch });
