@@ -1,23 +1,21 @@
 name: Deploy Post Automatici Worker
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Post Automatici Gate"]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'cloudflare/**'
-      - 'api/**'
-      - 'src/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'wrangler.jsonc'
-      - '.github/workflows/deploy-worker.yml'
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Checkout exact gated SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Setup Node
         uses: actions/setup-node@v4
         with: { node-version: 22 }
@@ -66,7 +64,7 @@ jobs:
       - { name: Build, run: "npm run build" }
       - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
       - name: Provision ephemeral admin bootstrap secret
-        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -215,7 +213,7 @@ jobs:
           console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
           NODE
       - name: Configure initial native SUPER_ADMIN
-        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
         run: |
           set -euo pipefail
@@ -234,7 +232,7 @@ jobs:
           console.log('initial SUPER_ADMIN bootstrap: PASS', JSON.stringify(body));
           NODE
       - name: Verify native SUPER_ADMIN persisted
-        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
         run: |
           set -euo pipefail
@@ -252,7 +250,7 @@ jobs:
           console.log('native SUPER_ADMIN persistence: PASS', JSON.stringify({ nativeAdminUsers: auth.nativeAdminUsers, platformAdminAuditPresent: auth.platformAdminAuditPresent }));
           NODE
       - name: Remove ephemeral admin bootstrap secret
-        if: always() && contains(github.event.head_commit.message, '[bootstrap-admin]')
+        if: always() && contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -261,7 +259,7 @@ jobs:
           set -euo pipefail
           printf 'y\n' | npx wrangler secret delete ADMIN_BOOTSTRAP_TOKEN
       - name: Verify bootstrap route closed
-        if: contains(github.event.head_commit.message, '[bootstrap-admin]')
+        if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
         run: |
           set -euo pipefail
