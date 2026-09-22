@@ -16,6 +16,9 @@ ALTER TABLE public.publication_jobs ADD COLUMN IF NOT EXISTS usage_event_id uuid
 
 ALTER TABLE public.publication_attempts ADD COLUMN IF NOT EXISTS claim_token uuid NULL;
 ALTER TABLE public.publication_attempts ADD COLUMN IF NOT EXISTS request_started_at timestamptz NULL;
+ALTER TABLE public.publication_attempts ADD COLUMN IF NOT EXISTS error_code text NULL;
+ALTER TABLE public.publication_attempts ADD COLUMN IF NOT EXISTS error_message text NULL;
+ALTER TABLE public.publication_attempts ADD COLUMN IF NOT EXISTS provider_request_id text NULL;
 
 CREATE INDEX IF NOT EXISTS publication_jobs_due_idx
   ON public.publication_jobs (coalesce(next_attempt_at, scheduled_at), scheduled_at, id)
@@ -140,9 +143,9 @@ BEGIN
       job.scheduled_at, job.attempt_count, job.claim_token, job.lease_expires_at
   ), attempts AS (
     INSERT INTO public.publication_attempts(
-      job_id,profile_id,provider,attempt_no,state,claim_token,response_metadata,started_at
+      job_id,attempt_no,state,claim_token,response_metadata,started_at
     )
-    SELECT claimed.id,claimed.profile_id,claimed.provider,claimed.attempt_count,
+    SELECT claimed.id,claimed.attempt_count,
       'CLAIMED',claimed.claim_token,'{}'::jsonb,clock_timestamp()
     FROM claimed
     RETURNING publication_attempts.job_id

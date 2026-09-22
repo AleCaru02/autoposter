@@ -38,6 +38,7 @@ jobs:
       - { name: Banned-user RLS security regression, run: "npm run test:banned-user-rls" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
+      - { name: Canonical bootstrap regression, run: "npm run test:canonical-bootstrap" }
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
       - { name: FASE 4E plan packaging regression, run: "npm run test:plan-packages" }
@@ -90,3 +91,27 @@ jobs:
         run: npm run test:openai-image-live
       - { name: Vercel build, run: "npm run build" }
       - { name: Cloudflare bundle dry run, run: "npx wrangler deploy --dry-run" }
+
+  fresh-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: autoposter_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d autoposter_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/autoposter_ci
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Fresh database migration chain
+        run: bash scripts/ci-fresh-db.sh
