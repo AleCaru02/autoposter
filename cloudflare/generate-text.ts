@@ -15,7 +15,7 @@ type Env = {
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 };
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
@@ -100,7 +100,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   try {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-    const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity&limit=1`, token))[0] ?? null;
+    const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token))[0] ?? null;
     const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
     const pages = scan ? await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
     const context: BrandContext = {
@@ -114,6 +114,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       target: summaryField(brand?.target_audience),
       tone: summaryField(brand?.tone_of_voice),
       goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
+      userContext: brand?.user_context ?? null,
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
     const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
