@@ -7,13 +7,13 @@ import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/te
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
@@ -95,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profiles = await readJsonRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
-    const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity&limit=1`, token);
+    const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token);
     const brand = brands[0] ?? null;
     const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
     const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
@@ -111,6 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       target: summaryField(brand?.target_audience),
       tone: summaryField(brand?.tone_of_voice),
       goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
+      userContext: brand?.user_context ?? null,
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
     const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
