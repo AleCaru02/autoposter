@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const migration = fs.readFileSync("db/migrations/20260905_fase5a_onboarding_provisioning.sql", "utf8");
+const packageDefaultsMigration = fs.readFileSync("db/migrations/20260922_z_onboarding_package_defaults.sql", "utf8");
 const shared = fs.readFileSync("api/_lib/onboarding-provisioning.ts", "utf8");
 const auth = fs.readFileSync("api/_lib/verified-customer-auth.ts", "utf8");
 const vercel = fs.readFileSync("api/onboarding-provision.ts", "utf8");
@@ -18,6 +19,18 @@ assert.match(migration, /PERFORM public\.apply_entitlement_package\([\s\S]*'comm
 assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(migration, /FORCE ROW LEVEL SECURITY/);
 assert.match(migration, /REVOKE ALL ON FUNCTION public\.provision_onboarding_profile[\s\S]*PUBLIC, authenticated/);
+
+assert.match(packageDefaultsMigration, /CREATE TABLE IF NOT EXISTS public\.user_provisioning_package_defaults/);
+assert.match(packageDefaultsMigration, /FOREIGN KEY \(package_key, package_version\)[\s\S]*REFERENCES public\.entitlement_packages\(package_key, version\)/);
+assert.match(packageDefaultsMigration, /ALTER TABLE public\.user_provisioning_package_defaults ENABLE ROW LEVEL SECURITY/);
+assert.match(packageDefaultsMigration, /ALTER TABLE public\.user_provisioning_package_defaults FORCE ROW LEVEL SECURITY/);
+assert.match(packageDefaultsMigration, /REVOKE ALL ON TABLE public\.user_provisioning_package_defaults FROM PUBLIC, authenticated/);
+assert.match(packageDefaultsMigration, /FROM public\.user_provisioning_package_defaults defaults[\s\S]*defaults\.auth_user_id = p_owner_auth_user_id/);
+assert.match(packageDefaultsMigration, /v_package_source := 'ONBOARDING_USER_DEFAULT'/);
+assert.match(packageDefaultsMigration, /INSERT INTO public\.profile_tenant_modes[\s\S]*'CUSTOMER_REAL'[\s\S]*true/);
+assert.match(packageDefaultsMigration, /PERFORM public\.apply_entitlement_package\([\s\S]*v_package_key[\s\S]*v_package_version[\s\S]*v_package_source/);
+assert.match(packageDefaultsMigration, /v_package_key := 'commercial_guarded'/);
+assert.doesNotMatch(packageDefaultsMigration, /02alessandrocaruso|Alessandro Caruso|0500c860-c3db-41f9-a967-bcdb7d3e9f73/i);
 
 assert.match(auth, /\$\{DATA_API\}\/rpc\/current_auth_user_id/);
 assert.match(auth, /coalesce\(banned, false\)/);
