@@ -26,6 +26,7 @@ jobs:
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Same-origin Auth proxy regression, run: "npm run test:auth-proxy" }
       - { name: Same-origin Auth boundary static regression, run: "npm run test:auth-boundary-static" }
+      - { name: User-facing error boundary regression, run: "npm run test:user-error-boundary" }
       - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
       - { name: FASE 3 CORE harness absence and audit regression, run: "npm run test:fase3-core" }
       - { name: Admin Audit Viewer regression, run: "npm run test:admin-audit-viewer" }
@@ -56,6 +57,9 @@ jobs:
       - { name: Social metrics contract, run: "npm run test:social-metrics" }
       - { name: FASE 7H analytics engine regression, run: "npm run test:fase7h-analytics-engine" }
       - { name: FASE 7J settings and account regression, run: "npm run test:fase7j-settings-account" }
+      - { name: Persistent demo tenant infrastructure regression, run: "npm run test:persistent-demo" }
+      - { name: Final personal readiness runner regression, run: "npm run test:final-personal-readiness" }
+      - { name: Release candidate migration safety regression, run: "npm run test:release-candidate-migration" }
       - { name: Autopilot route contract, run: "npm run test:autopilot-route" }
       - { name: OpenAI text contract, run: "npm run test:openai" }
       - { name: OpenAI image contract, run: "npm run test:openai-image" }

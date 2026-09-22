@@ -5,7 +5,7 @@ import { useProfiles } from "../features/profiles/profile-context";
 
 type MetricRow = {
   id: string; provider: string; external_post_id: string; format: string; topic: string;
-  published_at: string; captured_at: string; metrics: Record<string, unknown> | null;
+  published_at: string; captured_at: string; metrics: Record<string, unknown> | null; source: string; data_origin: string;
 };
 
 const providerNames: Record<string, string> = { INSTAGRAM: "Instagram", FACEBOOK: "Facebook", LINKEDIN: "LinkedIn" };
@@ -40,7 +40,7 @@ export function AnalyticsPage() {
     if (!profileId) return;
     setLoading(true); setError(null);
     const result = await neonClient.from("metric_snapshots")
-      .select("id,provider,external_post_id,format,topic,published_at,captured_at,metrics")
+      .select("id,provider,external_post_id,format,topic,published_at,captured_at,metrics,source,data_origin")
       .eq("profile_id", profileId).order("captured_at", { ascending: false }).limit(100);
     setLoading(false);
     if (result.error) { setRows([]); setError("Non riesco a leggere i risultati in questo momento. Riprova più tardi."); return; }
@@ -54,14 +54,16 @@ export function AnalyticsPage() {
   }, [rows]);
 
   if (!selectedProfile) return null;
+  const demo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
   return <div className="page-content">
-    <header className="page-header"><div><p className="eyebrow">Analytics</p><h1>Risultati dei tuoi social</h1><p>Dati reali dei contenuti pubblicati per {selectedProfile.name}.</p></div><button className="compact-action" type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Ricarica dati"}</button></header>
+    <header className="page-header"><div><p className="eyebrow">Analytics</p><h1>Risultati dei tuoi social</h1><p>{demo ? `Dati dimostrativi per ${selectedProfile.name}. Non provengono dai provider.` : `Dati reali dei contenuti pubblicati per ${selectedProfile.name}.`}</p></div><button className="compact-action" type="button" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Ricarica dati"}</button></header>
+    {demo && <p className="form-success" role="status">Dati dimostrativi · SAMPLE DATA</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {!loading && !error && latest.length === 0 && <section className="panel empty-state"><BarChart3 size={28} /><h2>Nessun risultato disponibile</h2><p>I risultati compariranno dopo una pubblicazione e il primo aggiornamento automatico del social.</p></section>}
     {!error && latest.map((row) => {
       const metrics = Object.entries(row.metrics ?? {}).flatMap(([key, raw]) => { const value = number(raw); return value === null ? [] : [{ key, value }]; });
       return <section className="panel" key={row.id}>
-        <p className="eyebrow">{providerNames[row.provider] ?? row.provider} · {row.format}</p>
+        <p className="eyebrow">{providerNames[row.provider] ?? row.provider} · {row.format}{row.data_origin === "DEMO_SAMPLE" ? " · DEMO" : ""}</p>
         <h2>{row.topic || "Contenuto pubblicato"}</h2>
         <div className="status-rows"><div><span>Pubblicato</span><strong>{moment(row.published_at)}</strong></div><div><span>Ultimo aggiornamento</span><strong>{moment(row.captured_at)}</strong></div></div>
         {metrics.length ? <div className="stat-grid">{metrics.map(({ key, value }) => <article className="stat-card" key={key}><span>{metricNames[key] ?? key.replaceAll("_", " ")}</span><strong>{formatMetric(value, key)}</strong></article>)}</div> : <p>Nessuna metrica disponibile per questo contenuto.</p>}

@@ -95,13 +95,13 @@ export async function saveGeneratedContent(input: {
     status: "IN_REVIEW",
     updated_at: now,
   }).select("id").single();
-  if (item.error || !item.data) throw new Error(item.error?.message ?? "Impossibile salvare il contenuto.");
+  if (item.error || !item.data) throw new Error("Impossibile salvare il contenuto. Riprova.");
 
   const payload = variantRows.map(({ _key, ...row }) => row);
   const variants = await neonClient.from("content_variants").insert(payload).select("id,provider,format");
   if (variants.error) {
     await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", input.profileId);
-    throw new Error(variants.error.message);
+    throw new Error("Impossibile salvare il contenuto. Riprova.");
   }
 
   return {
@@ -116,7 +116,7 @@ export async function loadContentWorkflow(profileId: string) {
     .eq("profile_id", profileId)
     .order("updated_at", { ascending: false })
     .limit(50);
-  if (itemsResult.error) throw new Error(itemsResult.error.message);
+  if (itemsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
   const items = (itemsResult.data ?? []) as ContentItemRow[];
   if (!items.length) return { items: [], variants: [] as ContentVariantRow[], assets: [] as AssetRow[] };
 
@@ -126,7 +126,7 @@ export async function loadContentWorkflow(profileId: string) {
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
-  if (variantsResult.error) throw new Error(variantsResult.error.message);
+  if (variantsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
   const rawVariants = (variantsResult.data ?? []) as Array<Omit<ContentVariantRow, "hashtags"> & { hashtags: unknown }>;
   const variants = rawVariants.map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[];
 
@@ -137,7 +137,7 @@ export async function loadContentWorkflow(profileId: string) {
       .select("id,profile_id,source,kind,name,storage_url,mime_type,metadata,created_at")
       .eq("profile_id", profileId)
       .in("id", assetIds);
-    if (assetsResult.error) throw new Error(assetsResult.error.message);
+    if (assetsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
     assets = (assetsResult.data ?? []) as AssetRow[];
   }
 
@@ -174,13 +174,13 @@ export async function reviewVariant(input: {
 
 export async function deleteContent(profileId: string, contentId: string) {
   const variantAssets = await neonClient.from("content_variants").select("image_asset_id").eq("content_id", contentId).eq("profile_id", profileId);
-  if (variantAssets.error) throw new Error(variantAssets.error.message);
+  if (variantAssets.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   const assetIds = (variantAssets.data ?? []).map((row) => row.image_asset_id).filter((id): id is string => typeof id === "string" && Boolean(id));
 
   const result = await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", profileId).select("id");
-  if (result.error) throw new Error(result.error.message);
+  if (result.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   if (assetIds.length) {
     const assetDelete = await neonClient.from("assets").delete().eq("profile_id", profileId).in("id", assetIds);
-    if (assetDelete.error) throw new Error(assetDelete.error.message);
+    if (assetDelete.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   }
 }

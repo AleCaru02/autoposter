@@ -13,6 +13,7 @@ import { handleAdminApi } from "./admin-api.js";
 import { handleAdminSessionApi } from "./admin-session-api.js";
 import { handleAdminBanApi } from "./admin-ban-api.js";
 import { handleAdminImpersonationApi } from "./admin-impersonation-api.js";
+import { handleAdminDemoApi } from "./admin-demo-api.js";
 import { handleSameOriginAuthProxy } from "./auth-proxy.js";
 import { runContentAutopilotSerialized } from "../api/_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "../api/_lib/autopilot.js";
@@ -125,8 +126,13 @@ async function handleLearningRun(request: Request, env: Env) {
   try { const body = await request.json() as Record<string, unknown>; profileId = typeof body.profileId === "string" ? body.profileId : ""; } catch { /* handled below */ }
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
   if (!await canAccessProfile(request, profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-  const result = await runLearningRuntime(env, profileId);
-  return json(result, result.ready ? 200 : 503);
+  try {
+    const result = await runLearningRuntime(env, profileId);
+    return json(result, result.ready ? 200 : 503);
+  } catch (reason) {
+    console.error("learning-profile-failed", { profileId, code: reason instanceof Error ? reason.message.split(":")[0] : "unknown" });
+    return json({ error: "LEARNING_RUN_FAILED" }, 500);
+  }
 }
 
 export default {
@@ -141,6 +147,8 @@ export default {
     if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
     if (path === "/api/internal/fase3/bootstrap-super-admin") return handleInitialSuperAdminBootstrap(request, env);
     if (path.startsWith("/api/admin/")) {
+      const demoResponse = await handleAdminDemoApi(request, env);
+      if (demoResponse) return demoResponse;
       const impersonationResponse = await handleAdminImpersonationApi(request, env);
       if (impersonationResponse) return impersonationResponse;
       const banResponse = await handleAdminBanApi(request, env);
@@ -160,11 +168,16 @@ export default {
     if (path === "/api/content-review") return handleWorkerContentReview(request, env);
     if (path === "/api/calendar") return handleWorkerCalendar(request, env);
     if (path.startsWith("/api/social/")) {
-      const response = await handleSocialApi(request, env);
-      if (response) {
-        if (path === "/api/social/connect") return withFreshMetaConsent(response);
-        if (path.startsWith("/api/social/callback/")) return withOAuthProfileRedirect(request, response);
-        return response;
+      try {
+        const response = await handleSocialApi(request, env);
+        if (response) {
+          if (path === "/api/social/connect") return withFreshMetaConsent(response);
+          if (path.startsWith("/api/social/callback/")) return withOAuthProfileRedirect(request, response);
+          return response;
+        }
+      } catch (reason) {
+        console.error("social-api-failed", { path, code: reason instanceof Error ? reason.message.split(":")[0] : "unknown" });
+        return json({ error: "SOCIAL_API_FAILED" }, 500);
       }
     }
     return worker.fetch(request, env);

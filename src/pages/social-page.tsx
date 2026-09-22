@@ -65,8 +65,7 @@ const UNAVAILABLE_PROVIDERS: ProviderStatus[] = (Object.keys(PROVIDER_LABELS) as
 }));
 
 function readableError(value: string) {
-  if (value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
-  const normalized = value.replace(/_/g, " ").trim();
+  if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
   const map: Record<string, string> = {
     PROVIDER_NOT_CONFIGURED: "Questo collegamento non è ancora disponibile. Contatta l’assistenza.",
     PROFILE_NOT_FOUND: "Non riesco a trovare l’attività selezionata. Ricarica la pagina e riprova.",
@@ -83,11 +82,18 @@ function readableError(value: string) {
     GBP_OAUTH_ACCOUNT_MISMATCH: "La sessione Google non corrisponde a un account autorizzato. Premi Ricollega e scegli l'account che gestisce la sede.",
     GBP_RATE_LIMITED: "Google Business Profile non è disponibile in questo momento per un limite del servizio. Riprova più tardi; se il problema continua, contatta l’assistenza.",
     GBP_ACCESS_DENIED: "Google Business Profile non ha autorizzato l’accesso richiesto. Verifica di gestire almeno una sede e riprova.",
+    FACEBOOK_OAUTH_FAILED: "Il collegamento Facebook non è riuscito. Riprova; se continua, contatta l’assistenza.",
+    INSTAGRAM_OAUTH_FAILED: "Il collegamento Instagram non è riuscito. Riprova; se continua, contatta l’assistenza.",
+    LINKEDIN_OAUTH_FAILED: "Il collegamento LinkedIn non è riuscito. Riprova; se continua, contatta l’assistenza.",
+    GBP_OAUTH_FAILED: "Il collegamento Google Business Profile non è riuscito. Riprova; se continua, contatta l’assistenza.",
+    SOCIAL_SELECTION_FAILED: "Non riesco a salvare l’account scelto. Riprova tra poco.",
+    SOCIAL_STATUS_FAILED: "Non riesco a caricare i collegamenti social. Riprova tra poco.",
     OAUTH_CALLBACK_IN_PROGRESS: "Il collegamento è già in corso. Attendi qualche secondo e aggiorna la pagina.",
     OAUTH_CALLBACK_ALREADY_USED: "Questo tentativo di collegamento è già terminato. Avvia nuovamente il collegamento.",
     access_denied: "Autorizzazione annullata.",
+    DEMO_EXTERNAL_CONNECTION_DISABLED: "Nel profilo demo non è possibile collegare account social reali.",
   };
-  return map[value] ?? (normalized || "Collegamento non riuscito.");
+  return map[value] ?? "Collegamento non riuscito. Riprova tra poco.";
 }
 
 function analyticsPermissionMissing(provider: ProviderStatus) {
@@ -240,10 +246,12 @@ export function SocialPage() {
   const providers = status?.providers?.length ? status.providers : UNAVAILABLE_PROVIDERS;
 
   if (!selectedProfile) return null;
+  const demo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
   return <div className="page-content social-page">
     <header className="page-header"><div><p className="eyebrow">Social · {selectedProfile.name}</p><h1>Collegamenti social</h1><p>Collega gli account che appartengono a questa attività. Le credenziali restano protette e non vengono mai mostrate.</p></div><button className="compact-action" type="button" disabled={loading} onClick={() => void load()}><RefreshCw size={15} className={loading ? "spin" : ""} /> Aggiorna</button></header>
 
     {notice && <p className="form-success social-message" role="status"><CheckCircle2 size={17} /> {notice}</p>}
+    {demo && <p className="form-success social-message" role="status"><CheckCircle2 size={17} /> DEMO DATA · Nessun social reale collegato. La pubblicazione esterna è disabilitata lato server.</p>}
     {error && <p className="form-error social-message" role="alert"><AlertTriangle size={17} /> {error}</p>}
 
     <section className="social-summary"><div><Share2 size={20} /><span>Account collegati</span><strong>{connectedCount}/4</strong></div><p>La pubblicazione automatica parte soltanto sui social collegati e per contenuti approvati.</p></section>
@@ -266,7 +274,7 @@ export function SocialPage() {
 
           {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Stato temporaneamente non disponibile. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Questo collegamento non è ancora disponibile. Contatta l’assistenza.</p>}
 
-          <div className="social-actions">{active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
+          <div className="social-actions">{active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
         </article>;
       })}
     </div>}

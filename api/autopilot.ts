@@ -54,6 +54,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "AUTOPILOT_RUN_FAILED";
     console.error("vercel.autopilot", { profileId, detail });
-    return res.status(500).json({ error: "AUTOPILOT_RUN_FAILED", detail });
+    return res.status(500).json({ error: "AUTOPILOT_RUN_FAILED" });
   }
 }

@@ -27,7 +27,8 @@ function body(row: InsightRow) {
 
 function source(row: InsightRow) {
   const confidence = text(row.confidence);
-  return [text(row.provider) ?? text(row.source) ?? "Metriche provider reali", confidence ? `confidenza ${confidence.toLowerCase()}` : null].filter(Boolean).join(" · ");
+  const origin = text(row.source_type) === "DEMO_SAMPLE" ? "Dati dimostrativi" : text(row.provider) ?? text(row.source) ?? "Metriche provider reali";
+  return [origin, confidence ? `confidenza ${confidence.toLowerCase()}` : null].filter(Boolean).join(" · ");
 }
 
 function createdAt(row: InsightRow) {
@@ -78,8 +79,10 @@ export function LearningPage() {
   const latest = useMemo(() => rows.slice().sort((a, b) => String(b.generated_at ?? b.created_at ?? b.updated_at ?? "").localeCompare(String(a.generated_at ?? a.created_at ?? a.updated_at ?? ""))).slice(0, 30), [rows]);
 
   if (!selectedProfile) return null;
+  const demo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
   return <div className="page-content">
-    <header className="page-header"><div><p className="eyebrow">Apprendimento</p><h1>Ottimizzazione progressiva</h1><p>Gli insight di {selectedProfile.name} derivano esclusivamente da metriche reali del suo profilo.</p></div><button className="compact-action" type="button" onClick={() => void refreshLearning()} disabled={loading}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna apprendimento"}</button></header>
+    <header className="page-header"><div><p className="eyebrow">Apprendimento</p><h1>Ottimizzazione progressiva</h1><p>{demo ? `Insight dimostrativi per ${selectedProfile.name}; non alimentano il Learning reale.` : `Gli insight di ${selectedProfile.name} derivano esclusivamente da metriche reali del suo profilo.`}</p></div><button className="compact-action" type="button" onClick={() => void refreshLearning()} disabled={loading || demo}><RefreshCw size={16} /> {loading ? "Aggiornamento…" : "Aggiorna apprendimento"}</button></header>
+    {demo && <p className="form-success" role="status">Dati dimostrativi · SAMPLE DATA</p>}
     {error && <p className="form-error" role="alert">Impossibile leggere gli insight: {error}</p>}
     {!loading && !error && latest.length === 0 && <section className="panel empty-state"><BrainCircuit size={28} /><h2>Apprendimento non ancora disponibile</h2><p>È corretto che sia vuoto finché non esistono pubblicazioni e metriche reali sufficienti. Il sistema non inventa suggerimenti, orari o temi.</p></section>}
     {latest.length > 0 && <section className="panel"><div className="status-rows">{latest.map((row, index) => <div key={String(row.id ?? `${title(row)}-${index}`)}><span><strong>{title(row)}</strong><br /><small>{body(row)}</small>{createdAt(row) && <><br /><small>{source(row)} · {createdAt(row)}</small></>}</span></div>)}</div></section>}

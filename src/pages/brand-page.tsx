@@ -70,7 +70,7 @@ export function BrandPage() {
       industry: draft.industry,
     });
     const current = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", profileId).maybeSingle();
-    if (current.error) throw new Error(current.error.message);
+    if (current.error) throw new Error("Salvataggio del brand non riuscito. Riprova.");
     const payload = {
       profile_id: profileId,
       description: draft.description.trim() || null,
@@ -89,7 +89,7 @@ export function BrandPage() {
     const write = current.data
       ? await neonClient.from("brand_profiles").update(payload).eq("profile_id", profileId).select("profile_id")
       : await neonClient.from("brand_profiles").insert(payload).select("profile_id");
-    if (write.error) throw new Error(write.error.message);
+    if (write.error) throw new Error("Salvataggio del brand non riuscito. Riprova.");
   }, [selectedProfile?.id, updateProfile]);
 
   const autosave = useAutoSaveDraft<BrandDraft>(save, 500);
@@ -100,7 +100,7 @@ export function BrandPage() {
     setLoading(true); setPageError(null);
     const result = await neonClient.from("brand_profiles").select("profile_id,description,business_model,location,service_area,target_audience,tone_of_voice,visual_identity,services,differentiators,value_propositions,goals").eq("profile_id", profile.id).maybeSingle();
     setLoading(false);
-    if (result.error) { setPageError(result.error.message); return; }
+    if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
     const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
     autosave.replaceDraft({
@@ -142,7 +142,7 @@ export function BrandPage() {
       if (!scanResponse.ok) throw new Error(scanBody.message || "Analisi sito non riuscita. Riprova tra poco.");
       const analysisResponse = await fetch("/api/onboarding-analyze", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, visualHints: scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null } }) });
       const body = await analysisResponse.json() as { error?: string; detail?: string };
-      if (!analysisResponse.ok) throw new Error(body.detail || body.error || "Analisi brand non riuscita.");
+      if (!analysisResponse.ok) throw new Error("Analisi brand non riuscita. Riprova tra poco.");
       await reload();
       await load();
     } catch (reason) {

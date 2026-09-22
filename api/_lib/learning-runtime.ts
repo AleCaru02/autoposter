@@ -17,8 +17,8 @@ export async function runLearningRuntime(env: LearningRuntimeEnv, requestedProfi
   if (!env.DATABASE_URL) return { ready: false, profilesChecked: 0, profilesReady: 0, profilesInsufficient: 0, insightsPersisted: 0, errors: ["DATABASE_NOT_CONFIGURED"] };
   const sql = neon(env.DATABASE_URL);
   const profiles = requestedProfileId
-    ? await sql`select distinct profile.id,profile.timezone from public.profiles profile join public.metric_snapshots snapshot on snapshot.profile_id=profile.id where profile.id=${requestedProfileId}::uuid and profile.archived_at is null limit 1` as unknown as ProfileRow[]
-    : await sql`select distinct profile.id,profile.timezone from public.profiles profile join public.metric_snapshots snapshot on snapshot.profile_id=profile.id where profile.archived_at is null order by profile.id limit 100` as unknown as ProfileRow[];
+    ? await sql`select distinct profile.id,profile.timezone from public.profiles profile join public.metric_snapshots snapshot on snapshot.profile_id=profile.id where profile.id=${requestedProfileId}::uuid and profile.archived_at is null and snapshot.source='PROVIDER_API' and not public.is_demo_persistent_profile(profile.id) limit 1` as unknown as ProfileRow[]
+    : await sql`select distinct profile.id,profile.timezone from public.profiles profile join public.metric_snapshots snapshot on snapshot.profile_id=profile.id where profile.archived_at is null and snapshot.source='PROVIDER_API' and not public.is_demo_persistent_profile(profile.id) order by profile.id limit 100` as unknown as ProfileRow[];
   const result: LearningRuntimeResult = { ready: true, profilesChecked: 0, profilesReady: 0, profilesInsufficient: 0, insightsPersisted: 0, errors: [] };
 
   for (const profile of profiles) {

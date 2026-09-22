@@ -41,10 +41,9 @@ export async function loadAutopilotOverview(profileId: string): Promise<Autopilo
     neonClient.from("content_items").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "IN_REVIEW"),
     neonClient.from("publication_jobs").select("id", { count: "exact", head: true }).eq("profile_id", profileId).gt("scheduled_at", new Date().toISOString()).in("state", ["SCHEDULED", "BLOCKED_APPROVAL", "QUEUED"]),
   ]);
-  if (strategy.error) throw new Error(strategy.error.message);
-  if (schedules.error) throw new Error(schedules.error.message);
-  if (review.error) throw new Error(review.error.message);
-  if (upcoming.error) throw new Error(upcoming.error.message);
+  if (strategy.error || schedules.error || review.error || upcoming.error) {
+    throw new Error("Impossibile caricare l’automazione contenuti. Riprova.");
+  }
   const strategyData = strategy.data as { platform_strategy?: unknown } | null;
   return {
     settings: parseSettings(strategyData?.platform_strategy),
@@ -56,7 +55,7 @@ export async function loadAutopilotOverview(profileId: string): Promise<Autopilo
 
 export async function saveAutopilotSettings(profileId: string, settings: AutopilotSettings) {
   const current = await neonClient.from("content_strategies").select("profile_id,platform_strategy").eq("profile_id", profileId).maybeSingle();
-  if (current.error) throw new Error(current.error.message);
+  if (current.error) throw new Error("Impostazione non salvata. Riprova.");
   const currentData = current.data as { profile_id?: string; platform_strategy?: unknown } | null;
   const platformStrategy = {
     ...object(currentData?.platform_strategy),
@@ -68,5 +67,5 @@ export async function saveAutopilotSettings(profileId: string, settings: Autopil
   const write = currentData?.profile_id
     ? await neonClient.from("content_strategies").update(payload).eq("profile_id", profileId).select("profile_id")
     : await neonClient.from("content_strategies").insert({ profile_id: profileId, ...payload }).select("profile_id");
-  if (write.error) throw new Error(write.error.message);
+  if (write.error) throw new Error("Impostazione non salvata. Riprova.");
 }

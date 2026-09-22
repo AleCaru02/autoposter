@@ -78,7 +78,12 @@
     "test:image-generation-gating": "tsx tests/image-generation-gating.test.ts",
     "test:worker-deploy-trigger": "tsx tests/worker-deploy-trigger.test.ts",
     "test:canonical-bootstrap": "tsx tests/canonical-bootstrap.test.ts",
-    "test:fresh-db": "bash scripts/ci-fresh-db.sh"
+    "test:fresh-db": "bash scripts/ci-fresh-db.sh",
+    "test:persistent-demo": "node --import tsx tests/persistent-demo-infrastructure.test.ts",
+    "test:final-personal-readiness": "node --import tsx tests/final-personal-readiness.test.mjs",
+    "test:release-candidate-migration": "node tests/release-candidate-migration-safety.test.mjs",
+    "qa:final-readiness": "node --import tsx tests/final-personal-readiness.mjs",
+    "test:user-error-boundary": "node --import tsx tests/user-facing-error-boundary.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",

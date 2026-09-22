@@ -39,9 +39,10 @@ function periodLabel(value: string) {
 export function buildCustomerPlan(entitlements: CustomerEntitlement[], buckets: CustomerUsageBucket[]): CustomerPlan {
   const currentUsage = new Map(buckets.map((row) => [row.capability_key, finite(row.committed_quantity) + finite(row.reserved_quantity)]));
   const visible = entitlements.filter((row) => row.enabled && CUSTOMER_FEATURES[row.capability_key]);
+  const demo = entitlements.some((row) => row.source === "PACKAGE:demo_persistent:v1");
   const packaged = entitlements.some((row) => row.source.startsWith("PACKAGE:"));
   return {
-    name: packaged ? "Piano assegnato" : "Piano personale",
+    name: demo ? "Piano demo" : packaged ? "Piano assegnato" : "Piano personale",
     features: visible.map((row) => CUSTOMER_FEATURES[row.capability_key].label),
     usage: visible.flatMap((row) => {
       const definition = CUSTOMER_FEATURES[row.capability_key];

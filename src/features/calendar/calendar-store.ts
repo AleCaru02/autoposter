@@ -46,6 +46,7 @@ export type CalendarJobRow = {
   remote_post_id: string | null;
   published_at: string | null;
   last_error: string | null;
+  execution_mode: "REAL_EXTERNAL" | "DEMO_SIMULATION";
   created_at: string;
   updated_at: string;
 };
@@ -109,14 +110,14 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
       .order("updated_at", { ascending: false })
       .limit(200),
     neonClient.from("publication_jobs")
-      .select("id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,next_attempt_at,failure_code,outcome_unknown,remote_post_id,published_at,last_error,created_at,updated_at")
+      .select("id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,next_attempt_at,failure_code,outcome_unknown,remote_post_id,published_at,last_error,execution_mode,created_at,updated_at")
       .eq("profile_id", profileId)
       .order("scheduled_at", { ascending: true })
       .limit(200),
   ]);
-  if (scheduleResult.error) throw new Error(scheduleResult.error.message);
-  if (variantsResult.error) throw new Error(variantsResult.error.message);
-  if (jobsResult.error) throw new Error(jobsResult.error.message);
+  if (scheduleResult.error || variantsResult.error || jobsResult.error) {
+    throw new Error("Impossibile caricare il calendario. Riprova.");
+  }
 
   const schedules = (scheduleResult.data ?? []).map((row) => ({ ...row, preferred_slots: normalizePreferredSlots(row.preferred_slots) })) as ScheduleRow[];
   const variants = (variantsResult.data ?? []) as CalendarVariantRow[];
@@ -125,7 +126,7 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
   let contentTitles: Record<string, string> = {};
   if (contentIds.length) {
     const contentResult = await neonClient.from("content_items").select("id,topic,title").eq("profile_id", profileId).in("id", contentIds);
-    if (contentResult.error) throw new Error(contentResult.error.message);
+    if (contentResult.error) throw new Error("Impossibile caricare il calendario. Riprova.");
     contentTitles = Object.fromEntries(((contentResult.data ?? []) as ContentTitleRow[]).map((item) => [item.id, item.title || item.topic]));
   }
   return { schedules, variants, jobs, contentTitles };

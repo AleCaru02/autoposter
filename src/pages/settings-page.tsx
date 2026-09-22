@@ -108,7 +108,7 @@ export function SettingsPage() {
       setPasswordDone("Password aggiornata.");
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Cambio password non riuscito.";
-      setPasswordError(/invalid|incorrect|password/i.test(message) ? "La password attuale non è corretta." : message);
+      setPasswordError(/invalid|incorrect|password/i.test(message) ? "La password attuale non è corretta." : "Cambio password non riuscito. Riprova.");
     } finally {
       setPasswordBusy(false);
     }
