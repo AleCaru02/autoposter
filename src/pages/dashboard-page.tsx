@@ -75,8 +75,10 @@ export function DashboardPage() {
   }, [data]);
 
   if (!selectedProfile) return null;
-  const priority = view.failed.length > 0
-    ? { icon: AlertTriangle, eyebrow: "Richiede attenzione", title: `${view.failed.length} pubblicazion${view.failed.length === 1 ? "e" : "i"} da sistemare`, body: "Controlla il collegamento social e riprogramma dal calendario.", label: "Risolvi ora", to: "/app/calendario" }
+  const priority = !selectedProfile.onboarding_completed
+    ? { icon: Sparkles, eyebrow: "Configurazione incompleta", title: "Completa il profilo dell’attività", body: "Il profilo è salvo. Completa la configurazione iniziale prima di passare ai social.", label: "Completa configurazione", to: "/onboarding" }
+    : view.failed.length > 0
+      ? { icon: AlertTriangle, eyebrow: "Richiede attenzione", title: `${view.failed.length} pubblicazion${view.failed.length === 1 ? "e" : "i"} da sistemare`, body: "Controlla il collegamento social e riprogramma dal calendario.", label: "Risolvi ora", to: "/app/calendario" }
     : data.approvals > 0
       ? { icon: FileCheck2, eyebrow: "Da fare ora", title: `${data.approvals} contenut${data.approvals === 1 ? "o" : "i"} da rivedere`, body: "Controlla testo e immagine, poi approva ciò che è pronto per il calendario.", label: "Apri revisioni", to: "/app/approvazioni" }
     : data.connected === 0

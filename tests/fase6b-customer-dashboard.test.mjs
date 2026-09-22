@@ -8,7 +8,7 @@ const main = readFileSync("src/main.tsx", "utf8");
 for (const answer of ["Cosa richiede attenzione oggi", "Prossime pubblicazioni", "Pubblicato di recente", "Come stanno andando i social", "Consiglio AI", "Problemi da risolvere"]) {
   assert.ok(page.includes(answer), `customer question is not answered: ${answer}`);
 }
-for (const destination of ["/app/contenuti", "/app/approvazioni", "/app/calendario", "/app/social", "/app/analytics", "/app/apprendimento"]) {
+for (const destination of ["/onboarding", "/app/contenuti", "/app/approvazioni", "/app/calendario", "/app/social", "/app/analytics", "/app/apprendimento"]) {
   assert.ok(page.includes(destination), `operational dashboard link missing: ${destination}`);
 }
 for (const table of ["content_items", "content_variants", "publication_jobs", "social_connections", "metric_snapshots", "learning_insights"]) {
@@ -19,6 +19,7 @@ assert.match(page, /select\(\"id,insight,confidence,recommended_action,created_a
 for (const removedColumn of ["recommendation", "generated_at", 'eq(\"active\", true)']) {
   assert.equal(page.includes(removedColumn), false, `dashboard queries removed learning_insights column: ${removedColumn}`);
 }
+assert.match(page, /!selectedProfile\.onboarding_completed[\s\S]*Completa configurazione[\s\S]*to: "\/onboarding"/, "incomplete onboarding must outrank social setup on the dashboard");
 assert.equal(page.includes("/api/health"), false, "customer dashboard must not present runtime health");
 for (const forbidden of ["PostgreSQL", "RLS", "OpenAI", "entitlement", "Worker", "technical usage"]) {
   assert.equal(page.includes(forbidden), false, `customer dashboard exposes technical term: ${forbidden}`);

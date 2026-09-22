@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Globe2, LoaderCircle, RefreshCw, Sparkles, WandSparkles } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authenticatedApiToken } from "../lib/auth-token";
@@ -37,6 +37,14 @@ export function OnboardingPage() {
   const [pagesAnalyzed, setPagesAnalyzed] = useState(0);
   const [analysis, setAnalysis] = useState<AnalysisResponse["analysis"] | null>(null);
   const [visualHints, setVisualHints] = useState<VisualHints>({ colors: [], socialLinks: {}, logoUrl: null });
+  const incompleteProfile = useMemo(() => profiles.find((profile) => !profile.onboarding_completed) ?? null, [profiles]);
+
+  useEffect(() => {
+    if (loading || creatingAnother || stage !== "FORM" || !incompleteProfile) return;
+    setCreatedProfileId(incompleteProfile.id);
+    setError("La configurazione di questa attività non è ancora completa. Riprendi da dove si era interrotta.");
+    setStage("ERROR");
+  }, [loading, creatingAnother, stage, incompleteProfile?.id]);
 
   const steps = useMemo(() => [
     { key: "FORM", label: "Attività" },
@@ -46,7 +54,7 @@ export function OnboardingPage() {
   ] as const, []);
 
   if (loading) return <main className="center-state">Caricamento…</main>;
-  if (profiles.length > 0 && !creatingAnother && stage === "FORM") return <Navigate to="/app/dashboard" replace />;
+  if (profiles.length > 0 && !creatingAnother && stage === "FORM" && !incompleteProfile) return <Navigate to="/app/dashboard" replace />;
 
   async function jwt() {
     return authenticatedApiToken();
@@ -82,6 +90,18 @@ export function OnboardingPage() {
     setStage("DONE");
   }
 
+  async function completeWithoutWebsite(profileId: string) {
+    const token = await jwt();
+    const response = await fetch("/api/onboarding-complete", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ profileId }),
+    });
+    if (!response.ok) throw new Error("Non sono riuscito a completare la configurazione.");
+    await reload();
+    setStage("DONE");
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (submitLock.current) return;
@@ -97,15 +117,7 @@ export function OnboardingPage() {
       // workspace exists so a refresh/retry cannot reopen creation accidentally.
       if (creatingAnother) navigate("/onboarding", { replace: true });
       if (!website.trim()) {
-        const token = await jwt();
-        const response = await fetch("/api/onboarding-complete", {
-          method: "POST",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify({ profileId: created.id }),
-        });
-        if (!response.ok) throw new Error("Non sono riuscito a completare la configurazione.");
-        await reload();
-        setStage("DONE");
+        await completeWithoutWebsite(created.id);
         return;
       }
       await analyzeProfile(created.id);
@@ -120,14 +132,22 @@ export function OnboardingPage() {
 
   async function retryAnalysis() {
     if (!createdProfileId) return;
+    const profile = profiles.find((item) => item.id === createdProfileId);
+    if (!profile) {
+      setError("Non riesco a trovare l’attività salvata. Ricarica la pagina.");
+      setStage("ERROR");
+      return;
+    }
     try {
-      await analyzeProfile(createdProfileId);
+      if (profile.website_url?.trim()) await analyzeProfile(createdProfileId);
+      else await completeWithoutWebsite(createdProfileId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Analisi non riuscita.");
       setStage("ERROR");
     }
   }
 
+  const pendingProfile = profiles.find((profile) => profile.id === createdProfileId) ?? incompleteProfile;
   const progressStage = stage === "ERROR" ? (pagesAnalyzed > 0 ? "ANALYZE" : "CRAWL") : stage;
   return <main className="onboarding-page"><section className="onboarding-card onboarding-card-wide">
     <div className="onboarding-progress">{steps.map((step, index) => {
@@ -143,7 +163,7 @@ export function OnboardingPage() {
 
     {stage === "ANALYZE" && <div className="onboarding-loading"><span className="onboarding-icon"><Sparkles size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto costruendo il brand</h1><p>{pagesAnalyzed > 0 ? `${pagesAnalyzed} pagine lette. ` : ""}Ora individuo tono, servizi, pubblico, messaggi ricorrenti, obiettivi e stile visivo osservato.</p><div className="analysis-pulse"><span /> <span /> <span /></div></div>}
 
-    {stage === "ERROR" && <div className="onboarding-done onboarding-error"><span className="onboarding-icon"><RefreshCw size={22} /></span><h1>L’attività è salva</h1><p>L’analisi automatica si è interrotta, ma non creo un secondo profilo. Puoi riprovare dallo stesso punto.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="button" onClick={() => void retryAnalysis()}><RefreshCw size={16} /> Riprova analisi</button><button className="text-action" type="button" onClick={() => navigate("/app/brand", { replace: true })}>Apri il profilo e completa dopo</button></div>}
+    {stage === "ERROR" && <div className="onboarding-done onboarding-error"><span className="onboarding-icon"><RefreshCw size={22} /></span><h1>L’attività è salva</h1><p>La configurazione non è ancora completa. Riprendi dallo stesso profilo senza crearne un secondo.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="button" onClick={() => void retryAnalysis()}><RefreshCw size={16} /> {pendingProfile?.website_url ? "Riprendi analisi" : "Completa configurazione"}</button><button className="text-action" type="button" onClick={() => navigate("/app/brand", { replace: true })}>Apri il profilo e completa dopo</button></div>}
 
     {stage === "DONE" && <div className="onboarding-done"><span className="onboarding-icon success"><Check size={24} /></span><h1>Profilo pronto</h1><p>{pagesAnalyzed > 0 ? `Ho analizzato ${pagesAnalyzed} pagine e preparato una base di brand modificabile.` : "Profilo creato. Potrai aggiungere il sito in seguito."}</p>{analysis && <div className="onboarding-findings">{analysis.toneOfVoice?.traits?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{analysis.services?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{visualHints.colors.slice(0, 5).map((color) => <span className="color-finding" key={color}><i style={{ background: color }} />{color}</span>)}</div>}<button className="primary-button onboarding-cta" type="button" onClick={() => navigate("/app/dashboard", { replace: true })}>Apri la dashboard <span>→</span></button></div>}
   </section></main>;
