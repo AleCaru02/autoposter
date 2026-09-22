@@ -50,6 +50,15 @@ BEGIN
     RAISE EXCEPTION 'FRESH_DB_CANONICAL_PROFILE_ID_MISSING';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='profiles' AND column_name='locale'
+      AND data_type='text' AND is_nullable='NO'
+      AND column_default = '''it-IT''::text'
+  ) THEN
+    RAISE EXCEPTION 'FRESH_DB_PROFILE_LOCALE_CONTRACT_MISSING';
+  END IF;
+
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='publication_attempts'
