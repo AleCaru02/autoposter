@@ -5,7 +5,7 @@ import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, 
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS } from "../api/_lib/website-scan-policy.js";
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const VALID_IMAGE_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
