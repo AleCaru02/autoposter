@@ -32,6 +32,45 @@ const enabledCommercialCapabilities: Partial<Record<CapabilityKey, Omit<PackageC
   "ai.image.generate": { limitType: "COUNT_PER_MONTH", limitValue: 20, periodType: "MONTH", providerAttemptReserveUsd: 0.5 },
 };
 
+
+const enabledPersonalOperatorCapabilities: Record<CapabilityKey, Omit<PackageCapability, "capabilityKey" | "enabled">> = {
+  "workspace.profile.manage": { limitType: "CONCURRENT", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "website.scan": { limitType: "COUNT_PER_MONTH", limitValue: 50, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "website.pages.persist": { limitType: "STORAGE", limitValue: 5000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "brand.analyze": { limitType: "COUNT_PER_MONTH", limitValue: 20, periodType: "MONTH", providerAttemptReserveUsd: 0.25 },
+  "ai.content.generate_text": { limitType: "COUNT_PER_MONTH", limitValue: 200, periodType: "MONTH", providerAttemptReserveUsd: 0.10 },
+  "ai.research.web": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.05 },
+  "ai.research.factcheck": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.05 },
+  "ai.strategy.generate": { limitType: "COUNT_PER_MONTH", limitValue: 50, periodType: "MONTH", providerAttemptReserveUsd: 0.10 },
+  "ai.image.generate": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.25 },
+  "media.image.persist": { limitType: "STORAGE", limitValue: 2000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "content.approval.auto": { limitType: "BOOLEAN", limitValue: 1, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "autopilot.manage": { limitType: "BOOLEAN", limitValue: 1, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "autopilot.hourly": { limitType: "COUNT_PER_DAY", limitValue: 24, periodType: "DAY", providerAttemptReserveUsd: 0.01 },
+  "schedule.job.create": { limitType: "COUNT_PER_MONTH", limitValue: 1000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.facebook.connect": { limitType: "MAX_CONNECTED_ACCOUNTS", limitValue: 5, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.instagram.connect": { limitType: "MAX_CONNECTED_ACCOUNTS", limitValue: 5, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.linkedin.connect": { limitType: "MAX_CONNECTED_ACCOUNTS", limitValue: 5, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.gbp.connect": { limitType: "MAX_CONNECTED_ACCOUNTS", limitValue: 5, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.facebook.publish": { limitType: "COUNT_PER_MONTH", limitValue: 1000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.instagram.publish": { limitType: "COUNT_PER_MONTH", limitValue: 1000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.linkedin.publish": { limitType: "COUNT_PER_MONTH", limitValue: 1000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.gbp.publish": { limitType: "COUNT_PER_MONTH", limitValue: 1000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+  "social.publish.scheduled": { limitType: "BOOLEAN", limitValue: 1, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
+};
+
+export const PERSONAL_OPERATOR_V1: EntitlementPackage = {
+  key: "personal_operator",
+  version: 1,
+  lifecycle: "ACTIVE",
+  hardMonthlyProviderCostCapUsd: 5,
+  capabilities: commerciallyAssignableKeys.map((capabilityKey) => ({
+    capabilityKey,
+    enabled: true,
+    ...enabledPersonalOperatorCapabilities[capabilityKey],
+  })),
+};
+
 export const COMMERCIAL_GUARDED_V1: EntitlementPackage = {
   key: "commercial_guarded",
   version: 1,
@@ -81,3 +120,4 @@ export function validateEntitlementPackage(candidate: EntitlementPackage) {
 }
 
 validateEntitlementPackage(COMMERCIAL_GUARDED_V1);
+validateEntitlementPackage(PERSONAL_OPERATOR_V1);
