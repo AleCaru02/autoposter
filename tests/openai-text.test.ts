@@ -35,6 +35,7 @@ const brand = {
   target: "Proprietari immobiliari",
   tone: "Professionale e diretto",
   goals: ["lead"],
+  userContext: "Gestiamo pochi appartamenti selezionati e non promettiamo rendimenti garantiti.",
   confirmedWebsiteContent: [
     { url: "https://example.test/storia", title: "La nostra storia", text: "Una lunga storia aziendale senza dettagli sulla gestione." },
     { url: "https://example.test/servizi/property-management", title: "Property management e affitti brevi", text: "Gestione completa degli affitti brevi per proprietari di immobili." },
@@ -76,6 +77,8 @@ assert.ok(String(body.instructions).includes("non inventare"));
 assert.ok(String(body.instructions).includes("Perimetro editoriale"));
 assert.ok(String(body.instructions).includes("non è l'unico universo di argomenti"));
 assert.ok(String(body.input).includes("https://example.test/servizi/property-management"));
+assert.ok(String(body.input).includes("Gestiamo pochi appartamenti selezionati"), "manual brand context must reach OpenAI generation");
+assert.ok(String(body.instructions).includes("userProvidedContext"), "the model must be told how to treat manual brand context safely");
 assert.equal(String(capturedInit?.body).includes("sk-test-only"), false, "la chiave non deve finire nel body/prompt");
 assert.equal(result.researchMode, "BALANCED");
 assert.deepEqual(result.externalSources, ["https://example.org/industry-report"]);
@@ -124,6 +127,7 @@ const brandFactFetcher = (async (_url: string | URL | Request, init?: RequestIni
 const brandFactResult = await generateSocialText({ apiKey: "sk-test-only", topic: "Presentazione attività", providers: ["INSTAGRAM"], formats: ["POST"], brand: { ...brand, profileName: "QA Property 7" }, fetcher: brandFactFetcher, researchMode: "WEBSITE_ONLY" });
 assert.equal(brandFactCall, 2, "a material numbered brand claim must still run fact-checking");
 assert.equal(factCheckPayload?.content?.brandFacts?.name, "QA Property 7", "fact-check must receive the same authoritative brand facts used for generation");
+assert.equal(factCheckPayload?.content?.brandFacts?.userProvidedContext, brand.userContext, "fact-check must receive user-confirmed facts too");
 assert.equal(brandFactResult.verification.factCheckVerdict, "PASS");
 
 const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand, researchMode: "BALANCED" });
