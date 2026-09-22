@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
 export const TENANT_TABLES = [
   "profiles",

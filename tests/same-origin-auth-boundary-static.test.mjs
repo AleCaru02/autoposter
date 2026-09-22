@@ -21,7 +21,7 @@ const proxy = read("cloudflare/auth-proxy.ts");
 const entry = read("cloudflare/entry.ts");
 const frontend = sourceFiles("src").map((file) => `${file}\n${read(file)}`).join("\n");
 
-const providerHost = "ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech";
+const providerHost = "ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech";
 const providerUrl = `https://${providerHost}/neondb/auth`;
 
 assert.match(client, /SAME_ORIGIN_AUTH_PATH = "\/api\/auth"/);
@@ -31,7 +31,7 @@ assert.equal(frontend.includes(providerHost), false, "production frontend must h
 assert.equal(frontend.includes(providerUrl), false, "production frontend must not retain a direct Auth fallback");
 
 assert.equal((proxy.match(new RegExp(providerHost.replace(/\./g, "\\."), "g")) || []).length, 1, "proxy must define exactly one fixed Neon Auth upstream");
-assert.match(proxy, /const AUTH_UPSTREAM = "https:\/\/ep-nameless-truth-a698bwer\.neonauth\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
+assert.match(proxy, /const AUTH_UPSTREAM = "https:\/\/ep-divine-band-arrkz7vq\.neonauth\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
 assert.match(proxy, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(proxy, /FORBIDDEN_PROXY_QUERY_KEYS = new Set\(\["url", "upstream"\]\)/);
 assert.match(proxy, /FORWARDED_FROM_CLIENT/);

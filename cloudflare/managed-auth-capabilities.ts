@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 
-const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
+const AUTH_URL = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
 
 type AuthColumnRow = { table_name: string; column_name: string };
 type PlatformStateRow = { native_admin_users: number; platform_admin_audit_present: boolean };

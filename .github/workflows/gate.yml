@@ -20,6 +20,7 @@ jobs:
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Same-origin Auth proxy regression, run: "npm run test:auth-proxy" }
       - { name: Same-origin Auth boundary static regression, run: "npm run test:auth-boundary-static" }
+      - { name: Recovery Neon endpoint regression, run: "npm run test:recovery-neon-endpoints" }
       - { name: User-facing error boundary regression, run: "npm run test:user-error-boundary" }
       - { name: Platform RBAC regression, run: "npm run test:platform-rbac" }
       - { name: FASE 3 CORE harness absence and audit regression, run: "npm run test:fase3-core" }
