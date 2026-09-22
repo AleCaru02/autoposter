@@ -38,10 +38,17 @@ assert.match(
   /CREATE POLICY publication_attempts_bootstrap_owner[\s\S]*FROM public\.publication_jobs job[\s\S]*job\.id = publication_attempts\.job_id/i,
   "publication attempts must derive tenant scope through publication_jobs.profile_id",
 );
+const publicationAttemptsTable = /CREATE TABLE IF NOT EXISTS public\.publication_attempts \(([\s\S]*?)\n\);/i.exec(bootstrap)?.[1] ?? "";
+assert.ok(publicationAttemptsTable, "publication_attempts definition must be readable");
 assert.doesNotMatch(
-  bootstrap,
-  /CREATE TABLE IF NOT EXISTS public\.publication_attempts[\s\S]*?\n\);[\s\S]*?\bprofile_id\b/i,
+  publicationAttemptsTable,
+  /\bprofile_id\b/i,
   "publication_attempts must not duplicate tenant ownership; job_id is the tenant link",
+);
+assert.doesNotMatch(
+  publicationAttemptsTable,
+  /\bprovider\b/i,
+  "publication_attempts provider is derived from its publication job",
 );
 
 assert.match(bootstrap, /UNIQUE \(profile_id, capability_key\)/i);
