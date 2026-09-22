@@ -32,6 +32,13 @@ function stringList(value: unknown, max: number) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()).slice(0, max) : [];
 }
 
+function isConcreteColor(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return Boolean(normalized)
+    && !/(?:var|calc|min|max|clamp)\(|--/.test(normalized)
+    && !/^#(?:0000|00000000)$/.test(normalized);
+}
+
 function safeUrl(value: unknown) {
   if (typeof value !== "string") return null;
   try {
@@ -61,7 +68,7 @@ function sanitizeVisualHints(value: unknown): WebsiteVisualHints {
     }];
   }) : [];
   return {
-    colors: stringList(input.colors, 12),
+    colors: stringList(input.colors, 12).filter(isConcreteColor),
     fontFamilies: stringList(input.fontFamilies, 10),
     socialLinks,
     logoUrl: safeUrl(input.logoUrl),
