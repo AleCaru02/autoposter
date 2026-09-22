@@ -83,7 +83,8 @@
     "test:final-personal-readiness": "node --import tsx tests/final-personal-readiness.test.mjs",
     "test:release-candidate-migration": "node tests/release-candidate-migration-safety.test.mjs",
     "qa:final-readiness": "node --import tsx tests/final-personal-readiness.mjs",
-    "test:user-error-boundary": "node --import tsx tests/user-facing-error-boundary.test.ts"
+    "test:user-error-boundary": "node --import tsx tests/user-facing-error-boundary.test.ts",
+    "test:recovery-neon-endpoints": "tsx tests/recovery-neon-endpoints.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
