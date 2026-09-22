@@ -9,7 +9,7 @@ const publication = readFileSync("db/migrations/20260908_fase7f_safe_publication
 const requiredCoreTables = [
   "app_users","profiles","profile_members","brand_profiles","website_scans","website_pages",
   "content_strategies","assets","content_items","content_variants","social_connections",
-  "schedules","publication_jobs","publication_attempts","ai_usage_events","audit_log",
+  "schedules","publication_jobs","publication_attempts","ai_usage_events","audit_log","learning_insights",
 ] as const;
 
 for (const table of requiredCoreTables) {
@@ -28,6 +28,12 @@ for (const table of ["profile_entitlements","capability_usage_events","capabilit
   );
   assert.match(grants, new RegExp(`GRANT\\s+SELECT[\\s\\S]*public\\.${table}[\\s\\S]*authenticated`, "i"));
 }
+
+assert.match(
+  bootstrap,
+  /CREATE TABLE IF NOT EXISTS public\.learning_insights \([\s\S]*scope text NOT NULL[\s\S]*insight text NOT NULL[\s\S]*created_at timestamptz NOT NULL DEFAULT now\(\)/i,
+  "legacy learning columns must exist before the 20260917 backfill reads created_at",
+);
 
 assert.match(bootstrap, /CREATE OR REPLACE FUNCTION public\.current_auth_user_id\(\)/i);
 assert.match(bootstrap, /CREATE OR REPLACE FUNCTION public\.current_app_user_id\(\)/i);
