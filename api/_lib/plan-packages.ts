@@ -33,7 +33,7 @@ const enabledCommercialCapabilities: Partial<Record<CapabilityKey, Omit<PackageC
 };
 
 
-const enabledPersonalOperatorCapabilities: Record<CapabilityKey, Omit<PackageCapability, "capabilityKey" | "enabled">> = {
+const enabledPersonalOperatorCapabilities: Partial<Record<CapabilityKey, Omit<PackageCapability, "capabilityKey" | "enabled">>> = {
   "workspace.profile.manage": { limitType: "CONCURRENT", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
   "website.scan": { limitType: "COUNT_PER_MONTH", limitValue: 50, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
   "website.pages.persist": { limitType: "STORAGE", limitValue: 5000, periodType: "MONTH", providerAttemptReserveUsd: 0.01 },
@@ -64,11 +64,11 @@ export const PERSONAL_OPERATOR_V1: EntitlementPackage = {
   version: 1,
   lifecycle: "ACTIVE",
   hardMonthlyProviderCostCapUsd: 5,
-  capabilities: commerciallyAssignableKeys.map((capabilityKey) => ({
-    capabilityKey,
-    enabled: true,
-    ...enabledPersonalOperatorCapabilities[capabilityKey],
-  })),
+  capabilities: commerciallyAssignableKeys.map((capabilityKey) => {
+    const limits = enabledPersonalOperatorCapabilities[capabilityKey];
+    if (!limits) throw new Error(`PERSONAL_PACKAGE_CAPABILITY_MISSING:${capabilityKey}`);
+    return { capabilityKey, enabled: true, ...limits };
+  }),
 };
 
 export const COMMERCIAL_GUARDED_V1: EntitlementPackage = {
