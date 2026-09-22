@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const files = [
   "src/lib/neon-client.ts",
+  "api/_lib/verified-customer-auth.ts",
   "cloudflare/auth-proxy.ts",
   "cloudflare/editorial-agents.ts",
   "cloudflare/entry.ts",
@@ -30,5 +31,8 @@ assert.match(worker, /ep-divine-band-arrkz7vq\.apirest\.c-4\.us-west-2\.aws\.neo
 
 const client = readFileSync("src/lib/neon-client.ts", "utf8");
 assert.match(client, /ep-divine-band-arrkz7vq\.apirest\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/rest\/v1/);
+
+const verifiedCustomerAuth = readFileSync("api/_lib/verified-customer-auth.ts", "utf8");
+assert.match(verifiedCustomerAuth, /ep-divine-band-arrkz7vq\.apirest\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/rest\/v1/);
 
 console.log("recovery Neon endpoint regression: PASS");
