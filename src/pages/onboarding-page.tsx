@@ -21,6 +21,15 @@ type AnalysisResponse = {
 
 type Stage = "FORM" | "CRAWL" | "ANALYZE" | "ERROR" | "DONE";
 
+function concreteColors(values: string[]) {
+  return values.filter((value) => {
+    const normalized = value.trim().toLowerCase();
+    return Boolean(normalized)
+      && !/(?:var|calc|min|max|clamp)\(|--/.test(normalized)
+      && !/^#(?:0000|00000000)$/.test(normalized);
+  });
+}
+
 export function OnboardingPage() {
   const { profiles, loading, createProfile, reload } = useProfiles();
   const navigate = useNavigate();
@@ -72,7 +81,7 @@ export function OnboardingPage() {
     const scanBody = await scanResponse.json() as ScanResponse;
     if (!scanResponse.ok) throw new Error(scanBody.message || "Non sono riuscito ad analizzare il sito. Riprova tra poco.");
     const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
-    setVisualHints(hints);
+    setVisualHints({ ...hints, colors: concreteColors(hints.colors) });
     setPagesAnalyzed(scanBody.analyzedPages ?? 0);
 
     setStage("ANALYZE");
@@ -85,7 +94,8 @@ export function OnboardingPage() {
     if (!analysisResponse.ok) throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
     setAnalysis(analysisBody.analysis ?? null);
     setPagesAnalyzed(analysisBody.pagesAnalyzed ?? scanBody.analyzedPages ?? 0);
-    setVisualHints(analysisBody.visualHints ?? hints);
+    const analyzedHints = analysisBody.visualHints ?? hints;
+    setVisualHints({ ...analyzedHints, colors: concreteColors(analyzedHints.colors) });
     await reload();
     setStage("DONE");
   }
@@ -165,6 +175,6 @@ export function OnboardingPage() {
 
     {stage === "ERROR" && <div className="onboarding-done onboarding-error"><span className="onboarding-icon"><RefreshCw size={22} /></span><h1>L’attività è salva</h1><p>La configurazione non è ancora completa. Riprendi dallo stesso profilo senza crearne un secondo.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="button" onClick={() => void retryAnalysis()}><RefreshCw size={16} /> {pendingProfile?.website_url ? "Riprendi analisi" : "Completa configurazione"}</button><button className="text-action" type="button" onClick={() => navigate("/app/brand", { replace: true })}>Apri il profilo e completa dopo</button></div>}
 
-    {stage === "DONE" && <div className="onboarding-done"><span className="onboarding-icon success"><Check size={24} /></span><h1>Profilo pronto</h1><p>{pagesAnalyzed > 0 ? `Ho analizzato ${pagesAnalyzed} pagine e preparato una base di brand modificabile.` : "Profilo creato. Potrai aggiungere il sito in seguito."}</p>{analysis && <div className="onboarding-findings">{analysis.toneOfVoice?.traits?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{analysis.services?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{visualHints.colors.slice(0, 5).map((color) => <span className="color-finding" key={color}><i style={{ background: color }} />{color}</span>)}</div>}<button className="primary-button onboarding-cta" type="button" onClick={() => navigate("/app/dashboard", { replace: true })}>Apri la dashboard <span>→</span></button></div>}
+    {stage === "DONE" && <div className="onboarding-done"><span className="onboarding-icon success"><Check size={24} /></span><h1>Profilo pronto</h1><p>{pagesAnalyzed > 0 ? `Ho analizzato ${pagesAnalyzed} pagine e preparato una base di brand modificabile.` : "Profilo creato. Potrai aggiungere il sito in seguito."}</p>{analysis && <div className="onboarding-findings">{analysis.toneOfVoice?.traits?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{analysis.services?.slice(0, 4).map((item) => <span key={item}>{item}</span>)}{concreteColors(visualHints.colors).slice(0, 5).map((color) => <span className="color-finding" key={color} aria-label="Colore brand"><i style={{ background: color }} /></span>)}</div>}<button className="primary-button onboarding-cta" type="button" onClick={() => navigate("/app/dashboard", { replace: true })}>Apri la dashboard <span>→</span></button></div>}
   </section></main>;
 }
