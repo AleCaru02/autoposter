@@ -232,6 +232,20 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Legacy learning shape consumed by the later canonical learning migrations.
+-- 20260829 adds the metrics-oriented fields; 20260917 backfills them from these
+-- historical columns before locking the real learning runtime contract.
+CREATE TABLE IF NOT EXISTS public.learning_insights (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  scope text NOT NULL,
+  insight text NOT NULL,
+  evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+  recommended_action jsonb NOT NULL DEFAULT '{}'::jsonb,
+  applied_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- FASE 4B grants sort before the FASE 4B foundation file. These three source
 -- tables therefore belong to the canonical baseline. Only their structural
 -- contract is bootstrapped here; FASE 4B remains authoritative for its indexes,
