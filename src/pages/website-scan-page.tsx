@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, Globe2, ImageIcon, Palette, RefreshCw, Tags, Type } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Globe2, ImageIcon, Palette, RefreshCw, Tags, Type } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { runFullWebsiteScan } from "../lib/full-website-scan";
+import { websiteScanProgress, websiteScanUiState } from "../lib/website-scan-state";
 import { siteIntelligenceView, type SiteIntelligenceView } from "../lib/site-intelligence-view";
 import { useProfiles } from "../features/profiles/profile-context";
 
@@ -78,76 +79,147 @@ export function WebsiteScanPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const runnerInFlightRef = useRef(false);
+  const pollInFlightRef = useRef(false);
+  const scanAbortRef = useRef<AbortController | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     const profileId = selectedProfile?.id;
     if (!profileId) return null;
-    setLoading(true); setError(null);
+    if (!background) { setLoading(true); setError(null); }
     const [scanResult, brandResult] = await Promise.all([
       neonClient.from("website_scans").select("id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,page_limit,error,created_at,finished_at").eq("profile_id", profileId).order("created_at", { ascending: false }).limit(1),
       neonClient.from("brand_profiles").select("visual_identity,services,tone_of_voice,target_audience,differentiators").eq("profile_id", profileId).limit(1),
     ]);
-    if (scanResult.error || brandResult.error) { setLoading(false); setError("Impossibile caricare l’analisi del sito. Riprova."); return null; }
+    if (scanResult.error || brandResult.error) {
+      if (!background) setLoading(false);
+      setError("Impossibile caricare l’analisi del sito. Riprova.");
+      return null;
+    }
     setIntelligence(siteIntelligenceView((brandResult.data?.[0] ?? null) as BrandRow | null));
     const latest = (scanResult.data?.[0] ?? null) as Scan | null;
     setScan(latest);
-    if (!latest) { setPages([]); setLoading(false); return null; }
+    if (!latest) { setPages([]); if (!background) setLoading(false); return null; }
     const pageResult = await neonClient.from("website_pages").select("id,url,status,depth,title,skip_reason,error").eq("profile_id", profileId).eq("scan_id", latest.id).order("depth", { ascending: true }).order("url", { ascending: true });
-    setLoading(false);
+    if (!background) setLoading(false);
     if (pageResult.error) { setError("Impossibile caricare l’analisi del sito. Riprova."); return latest; }
     setPages((pageResult.data ?? []) as ScanPage[]);
     return latest;
   }, [selectedProfile?.id]);
 
+  const pollScan = useCallback(async () => {
+    const profileId = selectedProfile?.id;
+    if (!profileId || pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    try {
+      const result = await neonClient.from("website_scans").select("id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,page_limit,error,created_at,finished_at").eq("profile_id", profileId).order("created_at", { ascending: false }).limit(1);
+      if (!result.error && result.data?.[0]) setScan(result.data[0] as Scan);
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, [selectedProfile?.id]);
+
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => () => {
+    scanAbortRef.current?.abort();
+    scanAbortRef.current = null;
+    runnerInFlightRef.current = false;
+  }, [selectedProfile?.id]);
+
   async function startScan(automatic = false) {
-    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || running) return;
-    setRunning(true); setError(null);
+    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || runnerInFlightRef.current) return;
+    runnerInFlightRef.current = true;
+    setRunning(true);
+    setError(null);
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     try {
       const token = await authenticatedApiToken();
       const body = await runFullWebsiteScan({
         profileId: selectedProfile.id,
         token,
         forceNew: !automatic,
+        signal: controller.signal,
         onProgress: (batch) => {
-          setScan((current) => current ? {
-            ...current,
-            state: batch.hasMore ? "PARTIAL" : (batch.state ?? current.state),
-            discovered_pages: batch.discoveredPages ?? current.discovered_pages,
-            analyzed_pages: batch.analyzedPages ?? current.analyzed_pages,
-            skipped_pages: batch.skippedPages ?? current.skipped_pages,
-            failed_pages: batch.failedPages ?? current.failed_pages,
-            error: batch.hasMore ? "BATCH_PENDING" : null,
-          } : current);
+          setScan((current) => ({
+            id: batch.scanId ?? current?.id ?? "running",
+            state: batch.hasMore ? "PARTIAL" : (batch.state ?? current?.state ?? "RUNNING"),
+            root_url: current?.root_url ?? selectedProfile.website_url ?? "",
+            discovered_pages: batch.discoveredPages ?? current?.discovered_pages ?? 0,
+            analyzed_pages: batch.analyzedPages ?? current?.analyzed_pages ?? 0,
+            skipped_pages: batch.skippedPages ?? current?.skipped_pages ?? 0,
+            failed_pages: batch.failedPages ?? current?.failed_pages ?? 0,
+            page_limit: current?.page_limit ?? 8,
+            error: batch.hasMore ? "BATCH_PENDING" : (batch.failedPages ?? 0) > 0 ? "PAGE_ERRORS" : null,
+            created_at: current?.created_at ?? new Date().toISOString(),
+            finished_at: batch.hasMore ? null : current?.finished_at ?? new Date().toISOString(),
+          }));
         },
       });
 
+      if (controller.signal.aborted) return;
       const analysisResponse = await fetch("/api/onboarding-analyze", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ profileId: selectedProfile.id, visualHints: body.visualHints }),
+        signal: controller.signal,
       });
       const analysisBody = await analysisResponse.json() as AnalysisResponse;
       if (!analysisResponse.ok) throw new Error(readableApiError(analysisBody, "Analisi brand non riuscita."));
 
       await reload();
-      await load();
+      await load(true);
     } catch (reason) {
+      if (controller.signal.aborted || (reason instanceof DOMException && reason.name === "AbortError")) return;
       setError(reason instanceof Error ? reason.message : "Scansione non riuscita.");
+      await load(true);
     } finally {
+      if (scanAbortRef.current === controller) scanAbortRef.current = null;
+      runnerInFlightRef.current = false;
       setRunning(false);
     }
   }
 
+  const scanUiState = websiteScanUiState(scan);
+  const progress = websiteScanProgress(scan);
+
   useEffect(() => {
-    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || loading || running || error) return;
-    if (scan?.state === "COMPLETE") return;
-    void startScan(true);
-  }, [selectedProfile?.id, selectedProfile?.website_url, selectedProfile?.tenant_type, loading, scan?.id, scan?.state, running, error]);
+    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || loading || runnerInFlightRef.current) return;
+    if (!scan || scanUiState === "IN_PROGRESS") void startScan(true);
+  }, [selectedProfile?.id, selectedProfile?.website_url, selectedProfile?.tenant_type, loading, scan?.id, scan?.state, scan?.error, scanUiState]);
+
+  useEffect(() => {
+    if (!selectedProfile?.id || selectedProfile.tenant_type === "DEMO_PERSISTENT" || scanUiState !== "IN_PROGRESS") return;
+    const interval = window.setInterval(() => { void pollScan(); }, 2500);
+    return () => window.clearInterval(interval);
+  }, [selectedProfile?.id, selectedProfile?.tenant_type, scanUiState, pollScan]);
 
   if (!selectedProfile) return null;
   const isDemo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
-  const coverage = scan?.discovered_pages ? Math.round((scan.analyzed_pages / scan.discovered_pages) * 100) : 0;
-  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : "Ripeti analisi"}</button>}</header>{error && <p className="form-error" role="alert">{error}</p>}{!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section> : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section> : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non completata</h2><p>L’analisi riparte automaticamente. Se il problema continua, trovi qui il motivo.</p></section> : <><section className="scan-summary"><article><span>Stato</span><strong className={scan.state === "COMPLETE" ? "status-ok" : "status-wait"}>{scan.state === "COMPLETE" ? "Completata" : "In corso"}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura</span><strong>{coverage}%</strong></article></section>{scan.state !== "COMPLETE" && <p className="coverage-warning">Copertura non completa. Motivo: {scan.error || "alcune pagine non sono state analizzate"}.</p>}<IntelligencePanel intelligence={intelligence} demo={isDemo} /><section className="panel"><div className="panel-heading"><div><h2>Pagine analizzate</h2><p>{scan.root_url}</p></div><span>{pages.length} pagine</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status === "ANALYZED" ? "Analizzata" : page.status === "SKIPPED" ? "Saltata" : page.status === "FAILED" ? "Errore" : "In corso"}</span><small>livello {page.depth}</small></div></article>)}</div></section></>}</div>;
+  const analysisCoverage = scan?.discovered_pages ? Math.round((scan.analyzed_pages / scan.discovered_pages) * 100) : 0;
+  const stateLabel = scanUiState === "COMPLETED" ? "Completata"
+    : scanUiState === "COMPLETED_WITH_WARNINGS" ? "Completata con avvisi"
+      : scanUiState === "FAILED" ? "Errore"
+        : "In corso";
+  const stateClass = scanUiState === "COMPLETED" ? "status-ok" : scanUiState === "FAILED" ? "status-error" : "status-wait";
+
+  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : scanUiState === "FAILED" ? "Riprova analisi" : "Ripeti analisi"}</button>}</header>
+    {error && scanUiState !== "IN_PROGRESS" && <p className="form-error" role="alert">{error}</p>}
+    {!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section>
+      : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section>
+        : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non ancora disponibile</h2><p>L’analisi parte automaticamente dal sito configurato.</p></section>
+          : <>
+            <section className="scan-summary"><article><span>Stato</span><strong className={stateClass}>{stateLabel}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori pagina</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura analizzata</span><strong>{analysisCoverage}%</strong></article></section>
+
+            {scanUiState === "IN_PROGRESS" && <section className="scan-progress-panel" role="status" aria-live="polite"><div className="scan-progress-heading"><div><Globe2 size={20} /><div><h2>Analisi del sito in corso</h2><p>Sto continuando ad analizzare le pagine del sito.</p></div></div><strong>{progress.percent}% completato</strong></div><div className="scan-progress-copy"><span>{scan.analyzed_pages} / {scan.discovered_pages} pagine analizzate</span>{progress.remaining > 0 && <span>{progress.remaining} ancora da processare</span>}</div><div className="scan-progress-track" role="progressbar" aria-label="Avanzamento analisi sito" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}><span style={{ width: `${progress.percent}%` }} /></div></section>}
+
+            {scanUiState === "COMPLETED_WITH_WARNINGS" && <p className="coverage-warning"><AlertTriangle size={16} /><span><strong>Analisi completata con alcune pagine non accessibili.</strong> {scan.failed_pages > 0 ? `${scan.failed_pages} pagine non sono state analizzate correttamente.` : "La parte disponibile del sito è stata elaborata."}</span></p>}
+            {scanUiState === "FAILED" && <p className="form-error scan-failure" role="alert"><AlertTriangle size={16} /> La scansione si è interrotta per un errore reale. Premi “Riprova analisi”.</p>}
+            {scanUiState === "COMPLETED" && <p className="scan-complete"><CheckCircle2 size={16} /> Analisi completata.</p>}
+
+            <IntelligencePanel intelligence={intelligence} demo={isDemo} />
+            <section className="panel"><div className="panel-heading"><div><h2>Pagine rilevate</h2><p>{scan.root_url}</p></div><span>{pages.length} pagine</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status === "ANALYZED" ? "Analizzata" : page.status === "SKIPPED" ? "Saltata" : page.status === "FAILED" ? "Errore" : "In coda"}</span><small>livello {page.depth}</small></div></article>)}</div></section>
+          </>}
+  </div>;
 }
