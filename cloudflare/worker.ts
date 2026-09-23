@@ -388,7 +388,7 @@ async function handleWebsiteScan(request: Request) {
       maxDepth: 12,
       maxDurationMs: 48_000,
       validateTarget,
-      includeSitemap: true,
+      includeSitemap: pending.length === 0,
       maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS,
       maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS,
       maxSitemapSeeds: SAFE_SCAN_MAX_SITEMAP_SEEDS,
