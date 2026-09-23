@@ -242,7 +242,7 @@ for (let batch = 0; batch < 220; batch += 1) {
     assert.ok(pendingResponse.ok && Array.isArray(pendingRows), "pending batch inspection failed");
     console.log("CRAWLER_NEXT_BATCH", JSON.stringify({ batch: batch + 1, urls: pendingRows.map((row) => ({ url: row.normalized_url, depth: row.depth })) }));
   }
-  const requestedPageLimit = batch < 32 ? 8 : 1;
+  const requestedPageLimit = batch < 28 ? 8 : 1;
   console.log("CRAWLER_REQUEST", JSON.stringify({ batch: batch + 1, pageLimit: requestedPageLimit }));
   const { body, elapsedMs } = await productionScan(identity.token, profileId, batch === 0, requestedPageLimit);
   assert.equal(typeof body.scanId, "string", "scanId missing");
