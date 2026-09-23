@@ -3,6 +3,7 @@ import { handleWorkerGenerateText } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerOnboardingProvision } from "./onboarding-provision.js";
 import { handleWorkerOnboardingComplete } from "./onboarding-complete.js";
+import { handleWorkerProfileBootstrap } from "./profile-bootstrap.js";
 import { handleWorkerContentReview } from "./content-review.js";
 import { handleWorkerCalendar } from "./calendar.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
@@ -162,6 +163,7 @@ export default {
     if (path === "/api/learning/run") return handleLearningRun(request, env);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
+    if (path === "/api/profile-bootstrap") return handleWorkerProfileBootstrap(request, env);
     if (path === "/api/onboarding-provision") return handleWorkerOnboardingProvision(request, env);
     if (path === "/api/onboarding-complete") return handleWorkerOnboardingComplete(request, env);
     if (path === "/api/onboarding-analyze") return handleWorkerOnboardingAnalyze(request, env);
