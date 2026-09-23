@@ -37,6 +37,11 @@ async function tenantInventory(sql) {
     (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='personal_operator' and package_version=1) personal_operator,
     (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='commercial_guarded' and package_version=1) commercial_guarded,
     (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='demo_persistent' and package_version=1) demo_package,
+    (select count(*)::int from public.social_connections) social_connections_total,
+    (select count(*)::int from public.social_connections where provider='FACEBOOK' and status='ACTIVE') facebook_active,
+    (select count(*)::int from public.social_connections where provider='INSTAGRAM' and status='ACTIVE') instagram_active,
+    (select count(*)::int from public.social_connections where provider='LINKEDIN' and status='ACTIVE') linkedin_active,
+    (select count(*)::int from public.social_connections where provider='GOOGLE_BUSINESS' and status='ACTIVE') gbp_active,
     (select count(*)::int from public.profiles p left join public.profile_entitlement_package_assignments a on a.profile_id=p.id and a.revoked_at is null where a.id is null) profiles_without_current_package,
     (select count(*)::int from public.profiles p join public.profile_tenant_modes m on m.profile_id=p.id join public.profile_entitlement_package_assignments a on a.profile_id=p.id and a.revoked_at is null where m.tenant_type='CUSTOMER_REAL' and a.package_key='personal_operator' and a.package_version=1) customer_personal_operator`;
   const row = rows[0] || {};
