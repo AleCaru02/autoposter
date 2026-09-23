@@ -66,6 +66,11 @@ async function state(sql, marker) {
       (select count(*)::int from public.profiles p where p.owner_auth_user_id in (
         select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
       )) as qa_profiles,
+      (select count(*)::int from public.brand_profiles bp where bp.profile_id in (
+        select p.id from public.profiles p where p.owner_auth_user_id in (
+          select u.id::text from neon_auth.user u where lower(coalesce(to_jsonb(u)->>'email', '')) like ${pattern}
+        )
+      )) as qa_brand_profiles,
       (select count(*)::int
         from public.app_users au
         join public.profile_members pm on pm.user_id = au.id
@@ -98,6 +103,7 @@ async function state(sql, marker) {
     qaUsers: users.length,
     qaAdmins: users.filter((user) => user.role === "admin").length,
     qaProfiles: Number(row.qa_profiles || 0),
+    qaBrandProfiles: Number(row.qa_brand_profiles || 0),
     qaOwners: Number(row.qa_owners || 0),
     qaAppUsers: Number(row.qa_app_users || 0),
     qaSessions: Number(row.qa_sessions || 0),
