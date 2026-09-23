@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { PageErrorBoundary } from "./components/page-error-boundary";
 import "./styles.css";
 import "./auth.css";
 import "./scan.css";
@@ -19,7 +20,7 @@ import "./workflow-journey.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <PageErrorBoundary><App /></PageErrorBoundary>
     </BrowserRouter>
   </React.StrictMode>,
 );
