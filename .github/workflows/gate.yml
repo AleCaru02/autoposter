@@ -47,6 +47,7 @@ jobs:
       - { name: FASE 4F provider cost budget regression, run: "npm run test:provider-cost-budget" }
       - { name: FASE 5A onboarding provisioning regression, run: "npm run test:onboarding-provisioning" }
       - { name: Onboarding authenticated dashboard path regression, run: "npm run test:onboarding-dashboard-path" }
+      - { name: Profile persistence contract regression, run: "npm run test:profile-persistence-contract" }
       - { name: FASE 7A brand reanalysis Auth regression, run: "npm run test:fase7a-brand-reanalysis-auth" }
       - { name: FASE 7A editable brand intelligence regression, run: "npm run test:fase7a-editable-brand" }
       - { name: FASE 7C manual content generation regression, run: "npm run test:fase7c-content-generation" }
