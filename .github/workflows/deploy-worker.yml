@@ -66,20 +66,14 @@ jobs:
       - name: Provision ephemeral admin bootstrap secret
         if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           token=$(openssl rand -hex 32)
           echo "::add-mask::$token"
           echo "ADMIN_BOOTSTRAP_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
-          printf '%s' "$token" | npx wrangler secret put ADMIN_BOOTSTRAP_TOKEN
-      - name: Synchronize OpenAI Worker secret
+      - name: Prepare Worker secrets
         shell: bash
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPENAI_API_KEY_SOURCE: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
@@ -88,7 +82,33 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$OPENAI_API_KEY_SOURCE"
-          printf '%s' "$OPENAI_API_KEY_SOURCE" | npx wrangler secret put OPENAI_API_KEY
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const openai = process.env.OPENAI_API_KEY_SOURCE?.trim();
+          if (!openai) {
+            console.error('Required GitHub secret OPENAI_API_KEY is missing');
+            process.exit(1);
+          }
+          const secrets = { OPENAI_API_KEY: openai };
+          const bootstrap = process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE?.trim();
+          if (bootstrap) secrets.ADMIN_BOOTSTRAP_TOKEN = bootstrap;
+          fs.writeFileSync('worker-secrets.json', JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+      - name: Deploy Cloudflare Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f worker-secrets.json' EXIT
+          npx wrangler deploy --secrets-file worker-secrets.json
+      - name: Verify Worker secret bindings
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
           npx wrangler secret list --format json > worker-secret-names.json
           node - <<'NODE'
           const fs = require('node:fs');
@@ -98,13 +118,12 @@ jobs:
             console.error('Cloudflare Worker secret OPENAI_API_KEY was not provisioned');
             process.exit(1);
           }
-          console.log('OpenAI Worker secret binding: PASS');
+          if (process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE && !names.has('ADMIN_BOOTSTRAP_TOKEN')) {
+            console.error('Cloudflare Worker bootstrap secret was not provisioned');
+            process.exit(1);
+          }
+          console.log('Worker secret bindings: PASS');
           NODE
-      - name: Deploy Cloudflare Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
       - name: Production application smoke
         shell: bash
         run: |
