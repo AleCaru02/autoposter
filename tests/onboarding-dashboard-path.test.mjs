@@ -23,7 +23,7 @@ assert.match(onboarding, /navigate\("\/app\/dashboard"/, "completed onboarding m
 assert.match(onboarding, /authenticatedApiToken\(\)/, "analysis and completion must use the same reliable token boundary");
 assert.doesNotMatch(onboarding, /getJWTToken/);
 assert.match(profiles, /const token = await authenticatedApiToken\(\)[\s\S]*authenticatedProfileRows<ProfileRow>/, "hard refresh profile bootstrap must fetch a fresh authenticated token before reading profiles");
-assert.match(profiles, /authorization: \`Bearer \\$\{token\}\`/, "profile bootstrap reads must carry the verified bearer token explicitly");
+assert.match(profiles, /authorization: \`Bearer \$\{token\}\`/, "profile bootstrap reads must carry the verified bearer token explicitly");
 assert.doesNotMatch(profiles, /const \[result, modes\] = await Promise\.all\(\[[\s\S]*neonClient\.from\("profiles"\)/, "profile bootstrap must not depend on an unauthenticated SDK read race after hard refresh");
 assert.ok(
   app.indexOf('if (error) return <main className="center-state profile-load-error"') <
