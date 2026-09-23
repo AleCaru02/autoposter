@@ -119,7 +119,7 @@ async function failScan(scanId: string, token: string, error: string) {
   await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
     method: "PATCH",
     headers: { prefer: "return=minimal" },
-    body: JSON.stringify({ state: "PARTIAL", last_progress_at: new Date().toISOString(), error: error.slice(0, 500) }),
+    body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: error.slice(0, 500) }),
   }).catch(() => undefined);
 }
 
@@ -145,20 +145,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let existingScan: ScanRow | null = null;
     if (!forceNew) {
       const reusableResponse = await dataApi(
-        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
         token,
       );
       if (!reusableResponse.ok) throw new Error(`DATA_API_REUSABLE_SCAN_${reusableResponse.status}`);
       existingScan = ((await reusableResponse.json()) as ScanRow[])[0] ?? null;
-      if (existingScan?.state === "COMPLETE") {
+      if (existingScan?.state === "COMPLETE" || existingScan?.state === "COMPLETE_WITH_WARNINGS") {
         return res.status(200).json({
           scanId: existingScan.id,
-          state: "COMPLETE",
+          state: existingScan.state,
           discoveredPages: existingScan.discovered_pages ?? 0,
           analyzedPages: existingScan.analyzed_pages ?? 0,
           skippedPages: existingScan.skipped_pages ?? 0,
           failedPages: existingScan.failed_pages ?? 0,
-          completeCoverage: true,
+          completeCoverage: existingScan.state === "COMPLETE",
           hasMore: false,
           reused: true,
         });
@@ -210,7 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const failedPages = all.filter((page) => page.status === "FAILED").length;
     const pendingPages = all.filter((page) => page.status === "DISCOVERED").length;
     const hasMore = pendingPages > 0;
-    const state = !hasMore && failedPages === 0 ? "COMPLETE" : "PARTIAL";
+    const state = hasMore ? "PARTIAL" : failedPages > 0 ? "COMPLETE_WITH_WARNINGS" : "COMPLETE";
     const now = new Date().toISOString();
     await updateScan(scanId, {
       state,
