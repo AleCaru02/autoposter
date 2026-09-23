@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
-const AUTH_URL = "https://ep-nameless-truth-a698bwer.neonauth.us-west-2.aws.neon.tech/neondb/auth";
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const AUTH_URL = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
 const marker = process.env.SETTINGS7J_MARKER || "";
 const password = process.env.SETTINGS7J_PASSWORD || "";
