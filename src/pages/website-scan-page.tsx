@@ -85,11 +85,10 @@ function storedVisualHints(row: BrandRow | null): StoredVisualHints {
 }
 
 function isBrandRetryableError(error: string | null) {
-  return Boolean(error) && (
-    error === "Analisi brand non riuscita."
+  if (!error) return false;
+  return error === "Analisi brand non riuscita."
     || error.startsWith("L’analisi AI")
-    || error.startsWith("L’analisi non è disponibile")
-  );
+    || error.startsWith("L’analisi non è disponibile");
 }
 
 function IntelligencePanel({ intelligence, demo = false }: { intelligence: SiteIntelligenceView; demo?: boolean }) {
