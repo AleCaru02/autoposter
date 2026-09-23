@@ -71,6 +71,7 @@
     "test:provider-cost-budget": "tsx tests/provider-cost-budget.test.ts",
     "test:onboarding-provisioning": "tsx tests/onboarding-provisioning.test.ts",
     "test:onboarding-dashboard-path": "node tests/onboarding-dashboard-path.test.mjs",
+    "test:profile-persistence-contract": "node tests/profile-persistence-contract.test.mjs",
     "test:onboarding-completion": "tsx tests/onboarding-completion.test.ts",
     "test:ai-text-gating": "tsx tests/ai-text-gating.test.ts",
     "test:brand-analysis-gating": "tsx tests/brand-analysis-gating.test.ts",
