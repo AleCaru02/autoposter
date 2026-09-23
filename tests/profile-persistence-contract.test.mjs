@@ -47,11 +47,15 @@ assert.match(startScanBlock, /forceNew: !automatic/, "manual Ripeti analisi must
 assert.match(site, /onClick=\{\(\) => void startScan\(false\)\}/, "Ripeti analisi must remain available after onboarding");
 assert.match(fullScan, /forceNew: Boolean\(input\.forceNew && batchIndex === 0\)/,
   "only the first batch of a manual re-scan may create a new scan");
-assert.match(worker, /if \(!forceNew\)[\s\S]*website_scans\?profile_id=eq\./,
+const scanHandlerStart = worker.indexOf("async function handleWebsiteScan");
+const scanHandlerEnd = worker.indexOf("async function routeApi", scanHandlerStart);
+const scanHandler = worker.slice(scanHandlerStart, scanHandlerEnd);
+assert.ok(scanHandlerStart >= 0 && scanHandlerEnd > scanHandlerStart, "website scan worker handler must exist");
+assert.match(scanHandler, /if \(!forceNew\)[\s\S]*website_scans\?profile_id=eq\./,
   "automatic continuation must resume an existing persisted scan");
-assert.match(worker, /else \{[\s\S]*dataApi\("website_scans"[\s\S]*method: "POST"/,
+assert.match(scanHandler, /else \{[\s\S]*dataApi\("website_scans"[\s\S]*method: "POST"/,
   "a forced manual re-scan must append a new persisted scan");
-assert.doesNotMatch(worker, /DELETE[\s\S]*website_scans|website_scans[\s\S]*method:\s*"DELETE"/i,
+assert.doesNotMatch(scanHandler, /method:\s*"DELETE"|\bDELETE\b/i,
   "re-scanning must never erase previous scan history");
 
 // Activity settings and brand edits must persist to DB, not browser-only state.
