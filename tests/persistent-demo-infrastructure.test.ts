@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { buildCustomerPlan } from "../src/features/settings/customer-settings.js";
 
-const [migration, social, learning, autopilot, planner, plannerRefresh, profiles, analyticsUi, learningUi, socialUi, calendar, websiteUi, qaCleanup, demoApi, entry] = await Promise.all([
+const [migration, social, learning, autopilot, planner, plannerRefresh, profiles, profileBootstrap, analyticsUi, learningUi, socialUi, calendar, websiteUi, qaCleanup, demoApi, entry] = await Promise.all([
   readFile("db/migrations/20260920_persistent_demo_tenant.sql", "utf8"),
   readFile("api/_lib/social.ts", "utf8"),
   readFile("api/_lib/learning-runtime.ts", "utf8"),
@@ -10,6 +10,7 @@ const [migration, social, learning, autopilot, planner, plannerRefresh, profiles
   readFile("api/_lib/openai-strategy-planner.ts", "utf8"),
   readFile("api/_lib/openai-strategy-planner-refresh.ts", "utf8"),
   readFile("src/features/profiles/profile-context.tsx", "utf8"),
+  readFile("api/_lib/profile-bootstrap.ts", "utf8"),
   readFile("src/pages/analytics-page.tsx", "utf8"),
   readFile("src/pages/learning-page.tsx", "utf8"),
   readFile("src/pages/social-page.tsx", "utf8"),
@@ -69,7 +70,8 @@ assert.match(learning, /snapshot\.source='PROVIDER_API'/);
 assert.match(learning, /not public\.is_demo_persistent_profile/);
 for (const source of [autopilot, planner, plannerRefresh]) assert.match(source, /source_type='PROVIDER_API'/);
 
-assert.match(profiles, /profile_tenant_modes/);
+assert.match(profileBootstrap, /profile_tenant_modes/, "tenant mode must remain part of the authoritative server profile bootstrap");
+assert.match(profiles, /\/api\/profile-bootstrap/, "client profile state must consume the authoritative server bootstrap");
 assert.match(analyticsUi, /Dati dimostrativi/);
 assert.match(learningUi, /Dati dimostrativi/);
 assert.match(socialUi, /pubblicazione esterna è disabilitata lato server/);
