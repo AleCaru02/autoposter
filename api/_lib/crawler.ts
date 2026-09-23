@@ -336,12 +336,16 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
       .filter((value): value is string => Boolean(value)),
   );
   const queue: QueueItem[] = [];
-  const enqueue = (item: QueueItem) => {
+  const queuedUrls = new Set<string>();
+  const persistedSeedUrls = new Set<string>();
+  const enqueue = (item: QueueItem, persistedSeed = false) => {
     const normalized = normalizeCrawlUrl(item.url, root);
-    if (!normalized || excluded.has(normalized) || queue.some((queued) => queued.url === normalized)) return;
+    if (!normalized || excluded.has(normalized) || queuedUrls.has(normalized)) return;
+    queuedUrls.add(normalized);
+    if (persistedSeed) persistedSeedUrls.add(normalized);
     queue.push({ url: normalized, depth: item.depth, discoveredFrom: item.discoveredFrom });
   };
-  for (const seed of options.seedUrls ?? []) enqueue(seed);
+  for (const seed of options.seedUrls ?? []) enqueue(seed, true);
   if (!queue.length && !excluded.has(normalizedRoot)) enqueue({ url: normalizedRoot, depth: 0, discoveredFrom: null });
 
   const robotsText = await fetchOptionalText(new URL("/robots.txt", root), fetcher, options.validateTarget, 100_000);
@@ -422,7 +426,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   }
 
   for (const item of queue) {
-    if (visited.has(item.url) || excluded.has(item.url)) continue;
+    if (visited.has(item.url) || excluded.has(item.url) || persistedSeedUrls.has(item.url)) continue;
     pages.push({
       url: item.url,
       normalizedUrl: item.url,
