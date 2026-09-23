@@ -102,7 +102,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
   try {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
+    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
     if (!scan) return json({ error: "WEBSITE_SCAN_REQUIRED" }, 409);
     const pageRows = await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=100`, token);
     const pages = pageRows.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" }));
