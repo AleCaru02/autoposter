@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { socialProviderUiLabel, socialProviderUiState } from "../lib/social-status-view";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type Provider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -42,27 +43,6 @@ const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
   LINKEDIN: "Profilo LinkedIn oppure Pagina aziendale quando l’accesso Community Management è abilitato.",
   GBP: "Sede Google Business Profile che gestisci.",
 };
-
-const PROVIDER_CAPABILITIES: Record<Provider, ProviderStatus["capabilities"]> = {
-  INSTAGRAM: { publish: ["POST", "STORY"], note: "Carosello disponibile quando il contenuto contiene più media reali." },
-  FACEBOOK: { publish: ["POST"], note: "Storie e caroselli non vengono dichiarati disponibili finché non esistono gli asset richiesti dalle API." },
-  LINKEDIN: { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." },
-  GBP: { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." },
-};
-
-const UNAVAILABLE_PROVIDERS: ProviderStatus[] = (Object.keys(PROVIDER_LABELS) as Provider[]).map((provider) => ({
-  provider,
-  configured: false,
-  status: "STATUS_UNAVAILABLE",
-  accountId: null,
-  accountName: null,
-  permissions: [],
-  expiresAt: null,
-  lastValidatedAt: null,
-  candidates: [],
-  accountType: null,
-  capabilities: PROVIDER_CAPABILITIES[provider],
-}));
 
 function readableError(value: string) {
   if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
@@ -242,8 +222,8 @@ export function SocialPage() {
     }
   }
 
-  const connectedCount = useMemo(() => status?.providers.filter((provider) => provider.status === "ACTIVE").length ?? 0, [status]);
-  const providers = status?.providers?.length ? status.providers : UNAVAILABLE_PROVIDERS;
+  const providers = status?.providers ?? [];
+  const connectedCount = useMemo(() => providers.filter((provider) => socialProviderUiState(provider) === "ACTIVE").length, [providers]);
 
   if (!selectedProfile) return null;
   const demo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
@@ -254,30 +234,43 @@ export function SocialPage() {
     {demo && <p className="form-success social-message" role="status"><CheckCircle2 size={17} /> DEMO DATA · Nessun social reale collegato. La pubblicazione esterna è disabilitata lato server.</p>}
     {error && <p className="form-error social-message" role="alert"><AlertTriangle size={17} /> {error}</p>}
 
-    <section className="social-summary"><div><Share2 size={20} /><span>Account collegati</span><strong>{connectedCount}/4</strong></div><p>La pubblicazione automatica parte soltanto sui social collegati e per contenuti approvati.</p></section>
+    {status && <section className={`social-summary ${connectedCount === 0 ? "empty" : ""}`}><div><Share2 size={20} /><span>{connectedCount === 0 ? "Nessun social collegato" : "Account collegati"}</span><strong>{connectedCount}/4</strong></div><p>{connectedCount === 0 ? "Collega almeno un account per iniziare a pubblicare." : "La pubblicazione automatica parte soltanto sui social collegati e per contenuti approvati."}</p></section>}
 
-    {loading && !status ? <section className="panel social-loading"><LoaderCircle className="spin" size={22} /> Caricamento collegamenti…</section> : <div className="social-grid">
-      {providers.map((provider) => {
-        const busy = busyProvider === provider.provider;
-        const active = provider.status === "ACTIVE";
-        const pending = provider.status === "PENDING_SELECTION";
-        const unavailable = provider.status === "STATUS_UNAVAILABLE";
-        const analyticsMissing = active && analyticsPermissionMissing(provider);
-        return <article className={`panel social-card ${active ? "connected" : ""}`} key={provider.provider}>
-          <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${active ? "active" : pending ? "pending" : "idle"}`}>{active ? "Collegato" : pending ? "Scegli account" : unavailable ? "Stato non disponibile" : provider.configured ? "Non collegato" : "Da configurare"}</span></div>
+    {loading && !status ? <section className="panel social-loading"><LoaderCircle className="spin" size={22} /> Caricamento collegamenti…</section>
+      : !status ? <section className="unavailable-panel social-status-load-error"><AlertTriangle size={24} /><div><h2>Stato social non disponibile</h2><p>Non riesco a leggere i collegamenti dal backend. Questo è un errore temporaneo reale, non significa che gli account siano scollegati.</p><button className="compact-action" type="button" onClick={() => void load()}><RefreshCw size={15} /> Riprova</button></div></section>
+        : <div className="social-grid">
+          {providers.map((provider) => {
+            const busy = busyProvider === provider.provider;
+            const uiState = socialProviderUiState(provider);
+            const active = uiState === "ACTIVE";
+            const connecting = uiState === "CONNECTING";
+            const reconnect = uiState === "RECONNECT";
+            const providerError = uiState === "ERROR";
+            const unavailable = uiState === "UNAVAILABLE";
+            const disconnected = uiState === "DISCONNECTED";
+            const analyticsMissing = active && analyticsPermissionMissing(provider);
+            const accountPresent = Boolean(provider.accountName || provider.accountId);
+            return <article className={`panel social-card ${active ? "connected" : reconnect ? "reconnect" : providerError ? "provider-error" : ""}`} key={provider.provider}>
+              <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${uiState.toLowerCase()}`}>{socialProviderUiLabel(uiState)}</span></div>
 
-          {active && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
+              {accountPresent && (active || reconnect || providerError) && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
 
-          {pending && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
+              {connecting && provider.status === "PENDING_SELECTION" && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}
 
-          {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
+              {connecting && provider.status !== "PENDING_SELECTION" && <p className="social-config-info"><LoaderCircle className="spin" size={15} /> Connessione in corso. Lo stato si aggiornerà al termine dell’autorizzazione.</p>}
+              {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
+              {unavailable && <p className="social-config-info"><Link2 size={15} /> Questo provider deve essere configurato sul server prima di poterlo collegare.</p>}
+              {reconnect && <p className="social-config-warning"><AlertTriangle size={15} /> L’autorizzazione non è più valida. Ricollega l’account per continuare.</p>}
+              {providerError && <p className="social-config-error"><AlertTriangle size={15} /> Il provider ha restituito un errore reale. Ricollega l’account o riprova dopo aver verificato il servizio.</p>}
 
-          {unavailable ? <p className="social-config-warning"><AlertTriangle size={15} /> Stato temporaneamente non disponibile. Premi Aggiorna per riprovare.</p> : !provider.configured && <p className="social-config-warning"><AlertTriangle size={15} /> Questo collegamento non è ancora disponibile. Contatta l’assistenza.</p>}
-
-          <div className="social-actions">{active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></> : !pending && !unavailable && <button type="button" className="primary-button" disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega</button>}</div>
-        </article>;
-      })}
-    </div>}
-
+              <div className="social-actions">
+                {active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></>
+                  : reconnect || providerError ? <><button type="button" className="primary-button" disabled={busy || demo || unavailable} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button>{accountPresent && <button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button>}</>
+                    : disconnected ? <button type="button" className="primary-button" disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega account</button>
+                      : null}
+              </div>
+            </article>;
+          })}
+        </div>}
   </div>;
 }

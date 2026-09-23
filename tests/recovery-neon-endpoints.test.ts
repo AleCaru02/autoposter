@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const files = [
   "src/lib/neon-client.ts",
   "api/_lib/verified-customer-auth.ts",
+  "api/_lib/social.ts",
   "cloudflare/auth-proxy.ts",
   "cloudflare/editorial-agents.ts",
   "cloudflare/entry.ts",

@@ -60,15 +60,18 @@ export async function runFullWebsiteScan(input: {
   token: string;
   forceNew?: boolean;
   onProgress?: (batch: WebsiteScanBatch) => void;
+  signal?: AbortSignal;
 }): Promise<FullWebsiteScanResult> {
   let hints: WebsiteVisualHints = {};
   let latest: WebsiteScanBatch = {};
   const maxBatches = 260;
 
   for (let batchIndex = 0; batchIndex < maxBatches; batchIndex += 1) {
+    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const response = await fetch("/api/website-scan", {
       method: "POST",
       headers: { authorization: `Bearer ${input.token}`, "content-type": "application/json" },
+      signal: input.signal,
       body: JSON.stringify({
         profileId: input.profileId,
         pageLimit: 8,

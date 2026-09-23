@@ -332,18 +332,18 @@ async function handleWebsiteScan(request: Request) {
     let existingScan: ScanRow | null = null;
     if (!forceNew) {
       existingScan = (await rows<ScanRow>(
-        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
         token,
       ))[0] ?? null;
-      if (existingScan?.state === "COMPLETE") {
+      if (existingScan?.state === "COMPLETE" || existingScan?.state === "COMPLETE_WITH_WARNINGS") {
         return json({
           scanId: existingScan.id,
-          state: "COMPLETE",
+          state: existingScan.state,
           discoveredPages: existingScan.discovered_pages ?? 0,
           analyzedPages: existingScan.analyzed_pages ?? 0,
           skippedPages: existingScan.skipped_pages ?? 0,
           failedPages: existingScan.failed_pages ?? 0,
-          completeCoverage: true,
+          completeCoverage: existingScan.state === "COMPLETE",
           hasMore: false,
           reused: true,
         });
@@ -440,7 +440,7 @@ async function handleWebsiteScan(request: Request) {
     const failedPages = all.filter((page) => page.status === "FAILED").length;
     const pendingPages = all.filter((page) => page.status === "DISCOVERED").length;
     const hasMore = pendingPages > 0;
-    const state = !hasMore && failedPages === 0 ? "COMPLETE" : "PARTIAL";
+    const state = hasMore ? "PARTIAL" : failedPages > 0 ? "COMPLETE_WITH_WARNINGS" : "COMPLETE";
     const now = new Date().toISOString();
     const finish = await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
       method: "PATCH",
@@ -477,7 +477,7 @@ async function handleWebsiteScan(request: Request) {
       await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
         method: "PATCH",
         headers: { prefer: "return=minimal" },
-        body: JSON.stringify({ state: "PARTIAL", last_progress_at: new Date().toISOString(), error: detail.slice(0, 500) }),
+        body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: detail.slice(0, 500) }),
       }).catch(() => undefined);
     }
     console.error("cloudflare-website-scan", { profileId, scanId, detail });

@@ -14,6 +14,7 @@ import {
   verifyOAuthState,
   type SocialEnv,
 } from "../api/_lib/social.js";
+import { socialProviderUiLabel, socialProviderUiState } from "../src/lib/social-status-view.js";
 
 const secret = "social-test-secret-0123456789-abcdef";
 const base: SocialEnv = {
@@ -125,7 +126,18 @@ async function run() {
   assert.equal(socialUiSource.includes("Puoi collegare un solo account a questa attività. Scegli quale usare:"), true, "the Social UI must explain single-account selection clearly");
   assert.equal(socialUiSource.includes("Permesso Analytics mancante. Ricollega l’account"), true, "missing analytics consent must be visible without disconnecting the account");
   assert.equal(socialUiSource.includes("Ricollega</button>"), true, "an active provider must expose an explicit reconnect action");
-
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "NOT_CONNECTED" }), "DISCONNECTED", "no connection record must render as disconnected");
+  assert.equal(socialProviderUiLabel("DISCONNECTED"), "Non collegato");
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ACTIVE" }), "ACTIVE");
+  assert.equal(socialProviderUiLabel("ACTIVE"), "Collegato");
+  assert.equal(socialProviderUiState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", expiresAt: "2026-01-01T00:00:00.000Z" }, Date.UTC(2026, 8, 23)), "RECONNECT", "expired LinkedIn authorization must request reconnect");
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "RECONNECT_REQUIRED" }), "RECONNECT");
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ERROR" }), "ERROR", "real provider errors must remain errors");
+  assert.equal(socialProviderUiState({ provider: "GBP", configured: false, status: "NOT_CONNECTED" }), "UNAVAILABLE", "missing provider configuration must not pretend to be disconnected");
+  assert.equal(socialUiSource.includes("Nessun social collegato"), true, "0/4 must be a normal empty state");
+  assert.equal(socialUiSource.includes("Collega almeno un account per iniziare a pubblicare."), true, "0/4 must explain the next action");
+  assert.equal(socialUiSource.includes("Collega account"), true, "a disconnected provider must expose the correct CTA");
+  assert.equal(socialUiSource.includes("Stato temporaneamente non disponibile"), false, "the UI must not fabricate unavailable provider states for 0/4");
   assert.equal(socialSource.includes('accountUrl.searchParams.set("pageSize", "20")'), true, "GBP accounts.list must respect Google's maximum page size");
   assert.equal(socialSource.includes('url.searchParams.set("prompt", "consent select_account")'), true, "GBP OAuth must force an explicit Google-account choice");
   for (const code of ["GBP_API_NOT_ENABLED", "GBP_NO_ACCESSIBLE_ACCOUNT", "GBP_ACCOUNT_WITHOUT_LOCATIONS", "GBP_LOCATION_DISCOVERY_DEFECT", "GBP_OAUTH_ACCOUNT_MISMATCH"]) assert.equal(socialUiSource.includes(code), true, `${code} must have a customer-safe explanation`);

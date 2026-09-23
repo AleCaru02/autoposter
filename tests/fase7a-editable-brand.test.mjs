@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const page = fs.readFileSync("src/pages/brand-page.tsx", "utf8");
 const migration = fs.readFileSync("db/migrations/20260923_brand_user_context.sql", "utf8");
+const brandCss = fs.readFileSync("src/brand.css", "utf8");
 
 for (const field of ["targetSegments", "toneTraits", "services", "differentiators", "valuePropositions", "visualSummary", "colors", "userContext"]) {
   assert.match(page, new RegExp(`patch\\(\\"${field}\\"`), `${field} must be customer-editable`);
@@ -12,8 +13,14 @@ assert.match(page, /brand_profiles"\)\.update\(payload\)/, "existing brand intel
 assert.match(page, /brand_profiles"\)\.insert\(payload\)/, "a missing brand row must be creatable for the selected profile");
 assert.match(page, /autosave\.flush\(\)/, "the customer must have an explicit save action");
 assert.match(page, /aria-live="polite"/, "save status must be announced accessibly");
-assert.match(page, /Aggiungi quello che il sito non dice/, "the user must understand where to add missing website information");
-assert.match(page, /Servizi non ancora sul sito[\s\S]*Zone che gestisci davvero[\s\S]*Clienti che vuoi acquisire/, "guided examples must explain useful context");
+assert.match(page, /Informazioni aggiuntive confermate da te/, "the confirmed user context must have a clear premium heading");
+assert.match(page, /Aggiungi dettagli che il sito non comunica ma che l’AI deve conoscere\./, "the helper copy must explain the purpose");
+assert.match(page, /Es\. servizi particolari, punti di forza, modalità di lavoro, informazioni importanti che non sono presenti sul sito\.\.\./, "the textarea must provide a useful placeholder");
+assert.match(page, /Non inserire password, chiavi API o dati sensibili\./, "sensitive-data guidance must stay visible");
+assert.match(page, /Salvataggio automatico/, "the real autosave behavior must be visible");
+assert.match(page, /draft\.userContext\.length\}\/5000/, "the real database-backed character limit must be visible");
+assert.match(brandCss, /\.brand-context-field textarea[\s\S]*min-height:168px/, "the additional context textarea must be full-size and usable");
+assert.match(brandCss, /@media\(max-width:760px\)[\s\S]*\.brand-context-field textarea/, "the context textarea must remain responsive on mobile");
 assert.match(page, /user_context:\s*draft\.userContext\.trim\(\)/, "user context must persist in the selected brand profile");
 assert.match(page, /maxLength=\{5000\}/, "user context must have a bounded payload");
 assert.match(migration, /ADD COLUMN IF NOT EXISTS user_context text/);
