@@ -106,16 +106,20 @@ async function cleanupUser(sql, user, marker) {
   if (profiles.some((profile) => profile.tenant_type !== "QA_EPHEMERAL")) throw new Error("QA_CLEANUP_NON_EPHEMERAL_PROFILE_DENIED");
 
   await sql`
-    delete from public.profiles p
-    using public.profile_tenant_modes m
-    where p.id = m.profile_id
+    delete from public.profile_members pm
+    using public.app_users au
+    where pm.user_id = au.id and au.auth_user_id = ${user.id}
+  `;
+  await sql`
+    delete from public.profile_tenant_modes m
+    using public.profiles p
+    where m.profile_id = p.id
       and p.owner_auth_user_id = ${user.id}
       and m.tenant_type = 'QA_EPHEMERAL'
   `;
   await sql`
-    delete from public.profile_members pm
-    using public.app_users au
-    where pm.user_id = au.id and au.auth_user_id = ${user.id}
+    delete from public.profiles p
+    where p.owner_auth_user_id = ${user.id}
   `;
   await sql`delete from neon_auth.session s where coalesce(to_jsonb(s)->>'userId', to_jsonb(s)->>'user_id', '') = ${user.id}`;
   await sql`delete from neon_auth.account a where coalesce(to_jsonb(a)->>'userId', to_jsonb(a)->>'user_id', '') = ${user.id}`;
