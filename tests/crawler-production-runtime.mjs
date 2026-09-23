@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as cheerio from "cheerio";
 
 const APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -15,6 +16,77 @@ assert.ok(controllerToken.length >= 32, "preview controller token missing");
 
 const email = `crawler-smoke-${marker}@example.invalid`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const FAILING_URL = "https://iltuopropertymanager.it/blog/self-check-in-riconoscimento-de-visu-affitti-brevi";
+const CONTROL_URL = "https://iltuopropertymanager.it/blog/pricing-dinamico-affitti-brevi";
+
+function walkJsonLd(value, types) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) { for (const item of value) walkJsonLd(item, types); return; }
+  const record = value;
+  const type = record["@type"];
+  if (typeof type === "string") types.add(type);
+  else if (Array.isArray(type)) for (const item of type) if (typeof item === "string") types.add(item);
+  for (const child of Object.values(record)) if (child && typeof child === "object") walkJsonLd(child, types);
+}
+
+async function diagnosePage(url) {
+  const response = await fetch(url, { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/html,application/xhtml+xml" } });
+  const html = await response.text();
+  const t0 = performance.now();
+  const $ = cheerio.load(html);
+  const parseMs = performance.now() - t0;
+
+  const t1 = performance.now();
+  const hrefs = $("a[href]").map((_, el) => $(el).attr("href") ?? "").get().filter(Boolean);
+  const title = $("title").first().text().replace(/\s+/g, " ").trim();
+  const description = $('meta[name="description"]').attr("content")?.replace(/\s+/g, " ").trim() ?? "";
+  const metadataMs = performance.now() - t1;
+
+  const t2 = performance.now();
+  const headings = $("h1,h2,h3").map((_, el) => $(el).text().replace(/\s+/g, " ").trim()).get().filter(Boolean).slice(0, 20);
+  const images = $("img[src],img[data-src],source[srcset]").length;
+  const jsonLd = $('script[type="application/ld+json"]');
+  let jsonLdChars = 0;
+  const types = new Set();
+  jsonLd.each((_, el) => {
+    const raw = $(el).html() || "";
+    jsonLdChars += raw.length;
+    try { walkJsonLd(JSON.parse(raw), types); } catch {}
+  });
+  const signalsMs = performance.now() - t2;
+
+  const t3 = performance.now();
+  $("script,style,noscript,svg,template").remove();
+  const text = $("body").text().replace(/\s+/g, " ").trim();
+  const textMs = performance.now() - t3;
+
+  console.log("CRAWLER_PAGE_DIAGNOSTIC", JSON.stringify({
+    url,
+    status: response.status,
+    contentLengthHeader: Number(response.headers.get("content-length") || 0),
+    htmlChars: html.length,
+    domElements: $("*").length,
+    hrefs: hrefs.length,
+    images,
+    headings: headings.length,
+    jsonLdScripts: jsonLd.length,
+    jsonLdChars,
+    schemaTypes: [...types].slice(0, 16),
+    visibleTextChars: text.length,
+    titleChars: title.length,
+    descriptionChars: description.length,
+    parseMs: Number(parseMs.toFixed(2)),
+    metadataMs: Number(metadataMs.toFixed(2)),
+    signalsMs: Number(signalsMs.toFixed(2)),
+    textMs: Number(textMs.toFixed(2)),
+    totalMeasuredMs: Number((parseMs + metadataMs + signalsMs + textMs).toFixed(2)),
+  }));
+}
+
+await diagnosePage(CONTROL_URL);
+await diagnosePage(FAILING_URL);
+
 
 class CookieJar {
   constructor() { this.values = new Map(); }
