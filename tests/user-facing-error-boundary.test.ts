@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { recoverMissingChunk } from "../src/lib/chunk-recovery.js";
 
 async function source(path: string) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -67,4 +68,15 @@ for (const [name, code] of [
   assert.doesNotMatch(code, /(?:throw new Error|set[A-Za-z]*Error)\([^\n]*\.error(?:\?)*\.message/, `${name} must not render PostgREST errors verbatim`);
 }
 
+const stored = new Map<string, string>();
+let reloads = 0;
+const browser = { storage: { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, value); } }, reload: () => { reloads += 1; } };
+const missingRoute = new TypeError("Failed to fetch dynamically imported module: https://example.invalid/assets/social-old.js");
+assert.equal(recoverMissingChunk(missingRoute, browser, 1_000_000), true, "stale route asset should recover with a fresh document");
+assert.equal(recoverMissingChunk(missingRoute, browser, 1_000_001), false, "persistent failures must not cause a reload loop");
+assert.equal(recoverMissingChunk(new Error("Private provider diagnostic"), browser, 2_000_000), false, "ordinary rendering errors must remain in the safe fallback");
+assert.equal(reloads, 1);
+assert.equal(recoverMissingChunk(missingRoute, { ...browser, storage: { getItem: () => { throw new Error("Storage denied"); }, setItem: () => {} } }), false, "blocked storage must leave a recovery UI instead of an unbounded reload");
+assert.match(await source("src/main.tsx"), /<PageErrorBoundary><App \/><\/PageErrorBoundary>/, "lazy routes must be inside the error boundary");
+assert.doesNotMatch(await source("src/components/page-error-boundary.tsx"), /\{error\.(message|stack)\}/, "fallback must not expose internal diagnostics");
 console.log("User-facing error boundary: PASS");
