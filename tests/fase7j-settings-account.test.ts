@@ -27,7 +27,11 @@ assert.equal(JSON.stringify(plan).includes("ai.content.generate_text"), false, "
 assert.deepEqual(customerSocialState({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_basic"] }), { label: "Instagram", state: "Permesso Analytics mancante" });
 assert.deepEqual(customerSocialState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", permissions: ["w_member_social"] }), { label: "LinkedIn", state: "Permesso Analytics mancante" });
 assert.deepEqual(customerSocialState({ provider: "FACEBOOK", configured: true, status: "ACTIVE", permissions: [] }), { label: "Facebook", state: "Collegato" });
-assert.deepEqual(customerSocialState({ provider: "GBP", configured: false, status: "NOT_CONNECTED", permissions: [] }), { label: "Google Business Profile", state: "Non disponibile" });
+assert.deepEqual(customerSocialState({ provider: "GBP", configured: false, status: "NOT_CONNECTED", permissions: [] }), { label: "Google Business Profile", state: "Da configurare" });
+for (const [status, state] of [["NOT_CONNECTED", "Non collegato"], ["RECONNECT_REQUIRED", "Ricollega"], ["PROVIDER_ERROR", "Errore"], ["PENDING_SELECTION", "Connessione in corso"]]) {
+  assert.deepEqual(customerSocialState({ provider: "FACEBOOK", configured: true, status, permissions: [] }), { label: "Facebook", state });
+}
+assert.equal(customerSocialState({ provider: "FACEBOOK", configured: true, status: "ACTIVE", permissions: [], expiresAt: "2000-01-01T00:00:00Z" }).state, "Ricollega");
 assert.deepEqual(customerSocialState({ provider: "GBP", configured: true, status: "ACTIVE", permissions: [] }), { label: "Google Business Profile", state: "Collegato" });
 assert.match(deletionGuard, /DROP POLICY IF EXISTS profiles_owner_delete ON public\.profiles/, "direct profile delete policy must be removed");
 assert.match(deletionGuard, /REVOKE DELETE ON TABLE public\.profiles FROM authenticated/, "authenticated customers must not retain direct profile delete privileges");
