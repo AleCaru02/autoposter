@@ -31,6 +31,7 @@ for (const source of [api, worker]) {
   assert.match(source, /activeMeter\.release/);
   assert.match(source, /BRAND_ANALYSIS_IN_PROGRESS/);
   assert.doesNotMatch(source, /dataApi\("ai_usage_events"/);
+  assert.match(source, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, "brand analysis must accept terminal scans completed with page warnings");
 }
 
 assert.match(metering, /CAPABILITY_DISABLED/);
