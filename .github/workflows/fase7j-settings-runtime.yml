@@ -74,6 +74,22 @@ jobs:
           node - <<'NODE'
           const fs=require('node:fs');const b=require('./fase7j-preflight.json');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaEntitlements','qaUsage'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);fs.appendFileSync(process.env.GITHUB_ENV,`SETTINGS7J_BASELINE_PROFILES=${b.profilesTotal}\nSETTINGS7J_BASELINE_JOBS=${b.jobsTotal}\nSETTINGS7J_BASELINE_SNAPSHOTS=${b.snapshotsTotal}\nSETTINGS7J_BASELINE_TARGETS=${b.targetsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7J_PREFLIGHT: PASS',JSON.stringify(b));
           NODE
+      - name: Verify current tenant inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H 'content-type: application/json' -H "x-settings7j-token: $SETTINGS7J_TOKEN_VALUE" \
+            --data "{\"action\":\"inventory\",\"marker\":\"$SETTINGS7J_MARKER\"}" "$SETTINGS7J_CONTROLLER_URL" > fase7j-inventory.json
+          node - <<'NODE'
+          const b=require('./fase7j-inventory.json');
+          if(!(b.profilesTotal>=1))throw new Error('no production profiles');
+          if(b.profilesWithoutMode!==0)throw new Error(`profiles without tenant mode: ${b.profilesWithoutMode}`);
+          if(b.profilesWithoutCurrentPackage!==0)throw new Error(`profiles without current package: ${b.profilesWithoutCurrentPackage}`);
+          if(b.currentPackages!==b.profilesTotal)throw new Error(`package/profile mismatch: ${b.currentPackages}/${b.profilesTotal}`);
+          if(!(b.customerReal>=1))throw new Error('no CUSTOMER_REAL tenant');
+          if(!(b.customerPersonalOperator>=1))throw new Error('no CUSTOMER_REAL personal_operator tenant');
+          console.log('FASE7J_TENANT_INVENTORY: PASS',JSON.stringify(b));
+          NODE
       - name: Install browser
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.62.1
