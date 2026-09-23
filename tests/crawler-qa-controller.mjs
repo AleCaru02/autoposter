@@ -68,14 +68,14 @@ async function markUserProfilesQa(sql, user, marker) {
     set tenant_type = 'QA_EPHEMERAL',
         external_publishing_enabled = false,
         metadata = coalesce(m.metadata, '{}'::jsonb)
-          || jsonb_build_object('qaMarker', ${marker}, 'purpose', 'crawler-runtime')
+          || jsonb_build_object('qaMarker', ${marker}::text, 'purpose', 'crawler-runtime')
     from public.profiles p
     where m.profile_id = p.id
       and p.owner_auth_user_id = ${user.id}
   `;
   await sql`
     insert into public.profile_tenant_modes(profile_id, tenant_type, external_publishing_enabled, metadata)
-    select p.id, 'QA_EPHEMERAL', false, jsonb_build_object('qaMarker', ${marker}, 'purpose', 'crawler-runtime')
+    select p.id, 'QA_EPHEMERAL', false, jsonb_build_object('qaMarker', ${marker}::text, 'purpose', 'crawler-runtime')
     from public.profiles p
     left join public.profile_tenant_modes m on m.profile_id = p.id
     where p.owner_auth_user_id = ${user.id}
