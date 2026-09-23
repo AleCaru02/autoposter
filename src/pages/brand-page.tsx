@@ -21,7 +21,6 @@ type BrandRow = {
   goals: unknown;
   user_context: string | null;
 };
-type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
 type BrandDraft = {
   name: string;
   description: string;
