@@ -1,0 +1,131 @@
+name: FASE 7E Authenticated Calendar Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/fase7e-calendar-runtime.yml"
+      - "tests/fase7e-calendar-*"
+      - "tests/wrangler.fase7e-runtime.jsonc"
+
+concurrency:
+  group: fase7e-calendar-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/fase7e-calendar-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Static and product gate
+        run: |
+          npm run typecheck
+          npm run test:fase7e-calendar-mutations
+          npm run build
+
+      - name: Generate ephemeral verifier material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="calendar7e-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "CALENDAR7E_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "CALENDAR7E_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "CALENDAR7E_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "CALENDAR7E_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'CALENDAR7E_TOKEN=%s\n' "$token" > .fase7e-runtime-secrets.env
+          chmod 600 .fase7e-runtime-secrets.env
+
+      - name: Upload isolated preview controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.fase7e-runtime.jsonc --keep-vars --preview-alias "calendar7e-${GITHUB_RUN_ID}" --secrets-file .fase7e-runtime-secrets.env | tee fase7e-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' fase7e-upload.log | tail -n 1)
+          test -n "$version_id"
+          echo "CALENDAR7E_CONTROLLER_VERSION=$version_id" >> "$GITHUB_ENV"
+
+      - name: Verify preview isolation and preflight
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7e-deployments-before.json
+          node - <<'NODE'
+          const fs=require('node:fs'); const body=JSON.parse(fs.readFileSync('fase7e-deployments-before.json','utf8'));
+          if(body?.success!==true)throw new Error('deployment read failed'); const deployments=Array.isArray(body.result?.deployments)?body.result.deployments:body.result;
+          const ids=deployments.map(x=>String(x.id||'')).filter(Boolean).sort(); const versions=[...new Set(deployments.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();
+          if(versions.includes(process.env.CALENDAR7E_CONTROLLER_VERSION))throw new Error('preview attached to production');
+          fs.appendFileSync(process.env.GITHUB_ENV,`CALENDAR7E_PROD_DEPLOYMENTS=${ids.join(',')}\nCALENDAR7E_PROD_VERSIONS=${versions.join(',')}\n`);
+          console.log('FASE7E_PREVIEW_ISOLATION: PASS');
+          NODE
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H 'content-type: application/json' -H 'x-calendar7e-token: wrong' --data "{\"action\":\"preflight\",\"marker\":\"$CALENDAR7E_MARKER\"}" "$CALENDAR7E_CONTROLLER_URL" || true)
+          test "$wrong" = "403"
+          call_controller() { curl -fsS -X POST -H 'content-type: application/json' -H "x-calendar7e-token: $CALENDAR7E_TOKEN_VALUE" --data "{\"action\":\"$1\",\"marker\":\"$CALENDAR7E_MARKER\"}" "$CALENDAR7E_CONTROLLER_URL"; }
+          call_controller preflight > fase7e-preflight.json
+          stale=$(node -e "const b=require('./fase7e-preflight.json');process.stdout.write(String(b.recognizedQaUsers||0))")
+          if [ "$stale" -gt 0 ]; then call_controller cleanup-residue > fase7e-stale-cleanup.json; call_controller preflight > fase7e-preflight.json; fi
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7e-preflight.json','utf8'));
+          if(b.qaUsers!==0||b.recognizedQaUsers!==0||b.qaProfiles!==0||b.profilesWithoutOwner!==0)throw new Error(`preflight residue ${JSON.stringify(b)}`);
+          fs.appendFileSync(process.env.GITHUB_ENV,`CALENDAR7E_BASELINE_PROFILES=${b.profilesTotal}\nCONTROLLER_READY=true\n`); console.log('FASE7E_PREFLIGHT: PASS',JSON.stringify({profiles:b.profilesTotal}));
+          NODE
+
+      - name: Authenticated API runtime
+        run: node tests/fase7e-calendar-runtime.mjs
+      - name: Install browser
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Desktop and mobile runtime
+        run: node tests/fase7e-calendar-browser.mjs
+
+      - name: Cleanup QA namespace
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then exit 0; fi
+          status=$(curl -sS -o fase7e-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-calendar7e-token: $CALENDAR7E_TOKEN_VALUE" --data "{\"action\":\"cleanup\",\"marker\":\"$CALENDAR7E_MARKER\"}" "$CALENDAR7E_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const b=require('./fase7e-cleanup.json'); if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true)throw new Error('cleanup request failed');
+          for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaSchedules','qaJobs','qaCommitted','qaReleased','qaReserved'])if(b[key]!==0)throw new Error(`cleanup residue ${key}=${b[key]}`);
+          if(b.profilesWithoutOwner!==0||String(b.profilesTotal)!==String(process.env.CALENDAR7E_BASELINE_PROFILES))throw new Error(`baseline mismatch ${JSON.stringify(b)}`);
+          console.log('FASE7E_CLEANUP: PASS',JSON.stringify({profiles:b.profilesTotal,residue:0}));
+          NODE
+
+      - name: Post-cleanup deployment invariant
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o fase7e-deployments-after.json
+          node - <<'NODE'
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('fase7e-deployments-after.json','utf8'));if(b?.success!==true)throw new Error('deployment read failed');const d=Array.isArray(b.result?.deployments)?b.result.deployments:b.result;
+          const ids=d.map(x=>String(x.id||'')).filter(Boolean).sort().join(',');const versions=[...new Set(d.flatMap(x=>(x.versions||[]).map(v=>String(v.version_id||''))).filter(Boolean))].sort();
+          if(ids!==process.env.CALENDAR7E_PROD_DEPLOYMENTS||versions.join(',')!==process.env.CALENDAR7E_PROD_VERSIONS||versions.includes(process.env.CALENDAR7E_CONTROLLER_VERSION))throw new Error('production deployment changed');
+          console.log('FASE7E_PRODUCTION_INVARIANT: PASS');
+          NODE
+      - name: Remove ephemeral local material
+        if: always()
+        run: |
+          shred -u .fase7e-runtime-secrets.env 2>/dev/null || rm -f .fase7e-runtime-secrets.env
+          rm -f fase7e-*.json fase7e-upload.log
