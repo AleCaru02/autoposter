@@ -56,6 +56,12 @@ assert.ok(source.includes("2500"), "il polling deve avere una cadenza leggera di
 assert.ok(source.includes("window.clearInterval"), "il polling deve fermarsi allo smontaggio o al cambio stato");
 assert.ok(source.includes("pollInFlightRef"), "il polling non deve creare richieste duplicate");
 assert.ok(source.includes("runnerInFlightRef"), "la continuation non deve avviare due runner concorrenti");
+assert.ok(source.includes("Riprova solo analisi brand"), "un errore brand deve poter essere ritentato senza rifare il crawler");
+assert.ok(source.includes("async function retryBrandAnalysis()"), "la pagina Sito deve avere un retry brand dedicato");
+const retryBrandBlock = source.slice(source.indexOf("async function retryBrandAnalysis()"), source.indexOf("async function startScan"));
+assert.ok(retryBrandBlock.includes('fetch("/api/onboarding-analyze"'), "il retry brand deve richiamare direttamente l'analisi persistita");
+assert.equal(retryBrandBlock.includes("runFullWebsiteScan"), false, "il retry brand non deve rilanciare la scansione completa");
+assert.ok(source.includes("setBrandVisualHints(storedVisualHints(brandRow))"), "il retry deve preservare i segnali visivi già persistiti");
 
 const batchPending = { state: "PARTIAL", error: "BATCH_PENDING", discovered_pages: 113, analyzed_pages: 63, skipped_pages: 0, failed_pages: 0 };
 assert.equal(websiteScanUiState(batchPending), "IN_PROGRESS", "BATCH_PENDING non deve mai essere un failure");

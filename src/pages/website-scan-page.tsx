@@ -34,10 +34,22 @@ type ScanPage = {
 
 type BrandRow = {
   visual_identity: unknown;
+  social_links: unknown;
   services: unknown;
   tone_of_voice: unknown;
   target_audience: unknown;
   differentiators: unknown;
+};
+
+type StoredVisualHints = {
+  colors: string[];
+  fontFamilies: string[];
+  socialLinks: Record<string, string>;
+  logoUrl: string | null;
+  logoCandidates: string[];
+  imageUrls: string[];
+  stylesheetUrls: string[];
+  pageSignals: unknown[];
 };
 
 type AnalysisResponse = { error?: string; detail?: string };
@@ -54,6 +66,29 @@ function readableApiError(body: { error?: string; detail?: string; message?: str
   if (value === "AUTH_REQUIRED") return "Sessione scaduta. Accedi di nuovo.";
   if (["CAPABILITY_DISABLED", "CAPABILITY_LIMIT_REACHED", "PROVIDER_COST_BUDGET_REACHED"].includes(value || "")) return "L’analisi non è disponibile per questa attività in questo momento.";
   return fallback;
+}
+
+function storedVisualHints(row: BrandRow | null): StoredVisualHints {
+  const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
+  const socials = row?.social_links && typeof row.social_links === "object" ? row.social_links as Record<string, unknown> : {};
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return {
+    colors: strings(visual.observedColors),
+    fontFamilies: strings(visual.observedFonts),
+    socialLinks: Object.fromEntries(Object.entries(socials).filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1]))),
+    logoUrl: typeof visual.logoUrl === "string" ? visual.logoUrl : null,
+    logoCandidates: strings(visual.logoCandidates),
+    imageUrls: strings(visual.observedImages),
+    stylesheetUrls: strings(visual.stylesheets),
+    pageSignals: Array.isArray(visual.pageSignals) ? visual.pageSignals : [],
+  };
+}
+
+function isBrandRetryableError(error: string | null) {
+  if (!error) return false;
+  return error === "Analisi brand non riuscita."
+    || error.startsWith("L’analisi AI")
+    || error.startsWith("L’analisi non è disponibile");
 }
 
 function IntelligencePanel({ intelligence, demo = false }: { intelligence: SiteIntelligenceView; demo?: boolean }) {
@@ -78,6 +113,8 @@ export function WebsiteScanPage() {
   const [intelligence, setIntelligence] = useState<SiteIntelligenceView>(EMPTY_INTELLIGENCE);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [brandRetrying, setBrandRetrying] = useState(false);
+  const [brandVisualHints, setBrandVisualHints] = useState<StoredVisualHints>(() => storedVisualHints(null));
   const [error, setError] = useState<string | null>(null);
   const runnerInFlightRef = useRef(false);
   const pollInFlightRef = useRef(false);
@@ -89,14 +126,16 @@ export function WebsiteScanPage() {
     if (!background) { setLoading(true); setError(null); }
     const [scanResult, brandResult] = await Promise.all([
       neonClient.from("website_scans").select("id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,page_limit,error,created_at,finished_at").eq("profile_id", profileId).order("created_at", { ascending: false }).limit(1),
-      neonClient.from("brand_profiles").select("visual_identity,services,tone_of_voice,target_audience,differentiators").eq("profile_id", profileId).limit(1),
+      neonClient.from("brand_profiles").select("visual_identity,social_links,services,tone_of_voice,target_audience,differentiators").eq("profile_id", profileId).limit(1),
     ]);
     if (scanResult.error || brandResult.error) {
       if (!background) setLoading(false);
       setError("Impossibile caricare l’analisi del sito. Riprova.");
       return null;
     }
-    setIntelligence(siteIntelligenceView((brandResult.data?.[0] ?? null) as BrandRow | null));
+    const brandRow = (brandResult.data?.[0] ?? null) as BrandRow | null;
+    setIntelligence(siteIntelligenceView(brandRow));
+    setBrandVisualHints(storedVisualHints(brandRow));
     const latest = (scanResult.data?.[0] ?? null) as Scan | null;
     setScan(latest);
     if (!latest) { setPages([]); if (!background) setLoading(false); return null; }
@@ -126,6 +165,29 @@ export function WebsiteScanPage() {
     scanAbortRef.current = null;
     runnerInFlightRef.current = false;
   }, [selectedProfile?.id]);
+
+  async function retryBrandAnalysis() {
+    if (!selectedProfile?.id || brandRetrying || selectedProfile.tenant_type === "DEMO_PERSISTENT") return;
+    setBrandRetrying(true);
+    setError(null);
+    try {
+      const token = await authenticatedApiToken();
+      const analysisResponse = await fetch("/api/onboarding-analyze", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: brandVisualHints }),
+      });
+      const analysisBody = await analysisResponse.json() as AnalysisResponse;
+      if (!analysisResponse.ok) throw new Error(readableApiError(analysisBody, "Analisi brand non riuscita."));
+      await reload();
+      await load(true);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Analisi brand non riuscita.");
+    } finally {
+      setBrandRetrying(false);
+    }
+  }
 
   async function startScan(automatic = false) {
     if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || runnerInFlightRef.current) return;
@@ -205,7 +267,7 @@ export function WebsiteScanPage() {
   const stateClass = scanUiState === "COMPLETED" ? "status-ok" : scanUiState === "FAILED" ? "status-error" : "status-wait";
 
   return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : scanUiState === "FAILED" ? "Riprova analisi" : "Ripeti analisi"}</button>}</header>
-    {error && scanUiState !== "IN_PROGRESS" && <p className="form-error" role="alert">{error}</p>}
+    {error && scanUiState !== "IN_PROGRESS" && <div className="form-error" role="alert"><span>{error}</span>{isBrandRetryableError(error) && !isDemo && <button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? "Analisi brand in corso…" : "Riprova solo analisi brand"}</button>}</div>}
     {!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section>
       : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section>
         : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non ancora disponibile</h2><p>L’analisi parte automaticamente dal sito configurato.</p></section>

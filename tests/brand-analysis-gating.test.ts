@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { BRAND_ANALYZE_CAPABILITY, BRAND_ANALYZE_TECHNICAL_OPERATION, deriveBrandAnalysisOperationKey } from "../api/_lib/brand-analysis-metering.js";
+import { BRAND_ANALYZE_CAPABILITY, BRAND_ANALYZE_TECHNICAL_OPERATION, deriveBrandAnalysisAttemptOperationKey, deriveBrandAnalysisOperationKey } from "../api/_lib/brand-analysis-metering.js";
 
 const api = fs.readFileSync("api/onboarding-analyze.ts", "utf8");
 const worker = fs.readFileSync("cloudflare/onboarding-analyze.ts", "utf8");
@@ -19,6 +19,9 @@ const scanB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 assert.equal(deriveBrandAnalysisOperationKey(profileA, scanA), deriveBrandAnalysisOperationKey(profileA, scanA));
 assert.notEqual(deriveBrandAnalysisOperationKey(profileA, scanA), deriveBrandAnalysisOperationKey(profileB, scanA));
 assert.notEqual(deriveBrandAnalysisOperationKey(profileA, scanA), deriveBrandAnalysisOperationKey(profileA, scanB));
+assert.equal(deriveBrandAnalysisAttemptOperationKey(profileA, scanA, 0), deriveBrandAnalysisOperationKey(profileA, scanA));
+assert.equal(deriveBrandAnalysisAttemptOperationKey(profileA, scanA, 1), `${deriveBrandAnalysisOperationKey(profileA, scanA)}:retry:1`);
+assert.notEqual(deriveBrandAnalysisAttemptOperationKey(profileA, scanA, 1), deriveBrandAnalysisAttemptOperationKey(profileA, scanA, 2));
 
 for (const source of [api, worker]) {
   assert.match(source, /DATABASE_NOT_CONFIGURED/);
@@ -36,6 +39,9 @@ for (const source of [api, worker]) {
 
 assert.match(metering, /CAPABILITY_DISABLED/);
 assert.match(metering, /CAPABILITY_LIMIT_REACHED/);
+assert.match(metering, /deriveBrandAnalysisAttemptOperationKey/);
+assert.match(metering, /existing\.state === "RESERVED"/);
+assert.match(metering, /retry_attempt: attempt/);
 assert.match(ui, /fetch\("\/api\/onboarding-analyze"/);
 assert.match(entry, /path === "\/api\/onboarding-analyze"\) return handleWorkerOnboardingAnalyze/);
 assert.match(wrangler, /"main": "\.\/cloudflare\/entry\.ts"/);
