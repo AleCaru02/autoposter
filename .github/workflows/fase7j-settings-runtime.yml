@@ -1,4 +1,5 @@
 name: FASE 7J Settings Account Runtime
+# Synced against current main for runtime verification.
 
 on:
   pull_request:
