@@ -103,14 +103,12 @@ function absoluteHttpUrl(value: string | undefined, base: URL) {
   } catch { return null; }
 }
 
-function plainText(html: string) {
-  const $ = cheerio.load(html);
+function pageText($: cheerio.CheerioAPI) {
   $("script,style,noscript,svg,template").remove();
   return $("body").text().replace(/\s+/g, " ").trim();
 }
 
-function pageMetadata(html: string) {
-  const $ = cheerio.load(html);
+function pageMetadata($: cheerio.CheerioAPI) {
   const title = $("title").first().text().replace(/\s+/g, " ").trim() || null;
   const description = $('meta[name="description"]').attr("content")?.replace(/\s+/g, " ").trim() || null;
   const hrefs = $("a[href]").map((_, element) => $(element).attr("href") ?? "").get().filter(Boolean);
@@ -166,8 +164,7 @@ function schemaTypes($: cheerio.CheerioAPI) {
   return [...types].slice(0, 16);
 }
 
-function pageSignals(html: string, pageUrl: URL): PageSignals {
-  const $ = cheerio.load(html);
+function pageSignals($: cheerio.CheerioAPI, pageUrl: URL): PageSignals {
   const headings = $("h1,h2,h3").map((_, element) => $(element).text().replace(/\s+/g, " ").trim()).get().filter(Boolean).slice(0, 20);
   const imageUrls = new Set<string>();
   $("img[src],img[data-src],source[srcset]").each((_, element) => {
@@ -181,8 +178,7 @@ function pageSignals(html: string, pageUrl: URL): PageSignals {
   return { canonicalUrl, headings, imageUrls: [...imageUrls].slice(0, 8), ogImageUrl, schemaTypes: schemaTypes($) };
 }
 
-function collectRootHints(html: string, root: URL) {
-  const $ = cheerio.load(html);
+function collectRootHints($: cheerio.CheerioAPI, root: URL) {
   const colorCounts = new Map<string, number>();
   const fontCounts = new Map<string, number>();
   const inlineStyles = [
@@ -221,6 +217,15 @@ function collectRootHints(html: string, root: URL) {
   $('link[rel="stylesheet"][href]').each((_, element) => { const absolute = absoluteHttpUrl($(element).attr("href"), root); if (absolute) stylesheetUrls.add(absolute); });
 
   return { colorCounts, fontCounts, socialLinks, logoCandidates, stylesheetUrls };
+}
+
+export function parseWebsitePage(html: string, pageUrl: URL, includeRootHints = false) {
+  const $ = cheerio.load(html);
+  const metadata = pageMetadata($);
+  const signals = pageSignals($, pageUrl);
+  const rootHints = includeRootHints ? collectRootHints($, pageUrl) : null;
+  const contentText = pageText($);
+  return { ...metadata, signals, rootHints, contentText };
 }
 
 async function enrichStylesheets(
@@ -380,16 +385,16 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
         continue;
       }
       const html = await safeText(response, maxContentChars);
-      const { title, description, hrefs } = pageMetadata(html);
-      const signals = pageSignals(html, finalUrl);
-      const contentText = plainText(html).slice(0, maxContentChars);
+      const parsed = parseWebsitePage(html, finalUrl, item.depth === 0 && !rootEnriched);
+      const { title, description, hrefs, signals } = parsed;
+      const contentText = parsed.contentText.slice(0, maxContentChars);
       pages.push({ url: finalUrl.toString(), normalizedUrl: item.url, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null, signals });
 
       if (visualHints.pageSignals.length < MAX_PAGE_SIGNALS) visualHints.pageSignals.push({ url: finalUrl.toString(), ...signals });
       for (const imageUrl of signals.imageUrls) if (visualHints.imageUrls.length < MAX_IMAGES && !visualHints.imageUrls.includes(imageUrl)) visualHints.imageUrls.push(imageUrl);
 
-      if (item.depth === 0 && !rootEnriched) {
-        const rootHints = collectRootHints(html, finalUrl);
+      if (parsed.rootHints) {
+        const rootHints = parsed.rootHints;
         await enrichStylesheets([...rootHints.stylesheetUrls], fetcher, options.validateTarget, rootHints.colorCounts, rootHints.fontCounts, maxStylesheets);
         visualHints = {
           ...visualHints,

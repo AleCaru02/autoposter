@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { crawlWebsite } from "../api/_lib/crawler.js";
+import { crawlWebsite, parseWebsitePage } from "../api/_lib/crawler.js";
 import { boundedScanPageLimit, CLOUDFLARE_FREE_SUBREQUEST_LIMIT, estimatedScanSubrequests, SAFE_SCAN_MAX_PAGES } from "../api/_lib/website-scan-policy.js";
 
 const html = (title: string, body: string, head = "") => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Descrizione ${title}">${head}</head><body>${body}</body></html>`;
@@ -15,6 +15,19 @@ const fixtures = new Map<string, { type: string; body: string; status?: number }
   ["https://example.test/faq", { type: "text/html", body: html("FAQ", "<h1>Domande frequenti</h1>") }],
   ["https://example.test/private", { type: "text/html", body: html("Privata", "Non deve essere richiesta") }],
 ]);
+
+const homeFixture = fixtures.get("https://example.test/")!;
+const parsedHome = parseWebsitePage(homeFixture.body, new URL("https://example.test/"), true);
+assert.equal(parsedHome.title, "Home", "single-parse metadata title must remain unchanged");
+assert.equal(parsedHome.description, "Descrizione Home", "single-parse metadata description must remain unchanged");
+assert.equal(parsedHome.signals.canonicalUrl, "https://example.test/", "single-parse canonical must remain unchanged");
+assert.deepEqual(parsedHome.signals.headings, ["Property management Milano", "Gestione completa"], "single-parse headings must remain unchanged");
+assert.deepEqual(parsedHome.signals.schemaTypes, ["LocalBusiness"], "single-parse structured-data signals must remain unchanged");
+assert.ok(parsedHome.hrefs.includes("/servizi"), "single-parse link extraction must remain unchanged");
+assert.ok(parsedHome.contentText.includes("Property management Milano"), "single-parse visible text must remain unchanged");
+assert.equal(parsedHome.contentText.includes("LocalBusiness"), false, "JSON-LD must not leak into visible page text");
+assert.equal(parsedHome.rootHints?.socialLinks.instagram, "https://instagram.com/example", "single-parse business/social signals must remain unchanged");
+assert.ok(parsedHome.rootHints?.logoCandidates.has("https://example.test/assets/logo.svg"), "single-parse logo signals must remain unchanged");
 
 const calls: string[] = [];
 const fetcher = (async (input: string | URL | Request) => {
@@ -77,9 +90,13 @@ const resumed = await crawlWebsite("https://example.test/", {
   seedUrls: firstBatchPending,
 });
 assert.equal(resumed.pages.some((page) => firstBatchPending.some((pending) => pending.url === page.normalizedUrl) && page.status === "ANALYZED"), true, "il batch successivo deve riprendere le URL DISCOVERED");
+assert.equal(resumed.pages.some((page) => firstBatchTerminal.includes(page.normalizedUrl) && page.status === "ANALYZED"), false, "le pagine terminali del batch precedente non devono essere elaborate di nuovo");
+assert.equal(new Set(resumed.pages.map((page) => page.normalizedUrl)).size, resumed.pages.length, "la continuation non deve produrre duplicati nello stesso batch");
 
 assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
 assert.ok(estimatedScanSubrequests(500) < CLOUDFLARE_FREE_SUBREQUEST_LIMIT, "the bounded crawl must remain below Cloudflare's 50-subrequest production ceiling");
+const crawlerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../api/_lib/crawler.ts", import.meta.url), "utf8"));
+assert.equal((crawlerSource.match(/cheerio\.load\(html\)/g) ?? []).length, 1, "each HTML page must have exactly one full Cheerio parse");
 const workerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../cloudflare/worker.ts", import.meta.url), "utf8"));
 const contentPage = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8"));
 assert.match(workerSource, /boundedScanPageLimit\(body\.pageLimit\)/, "the server, not only the UI, must enforce the safe crawl bound");
@@ -88,6 +105,8 @@ assert.match(workerSource, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,
 assert.match(workerSource, /status !== "DISCOVERED"/, "terminal pages must be excluded from later crawl batches");
 assert.match(workerSource, /status === "DISCOVERED"/, "pending pages must seed the next crawl batch");
 assert.match(workerSource, /resolution=merge-duplicates/, "batch progress must update the same scan frontier idempotently");
+assert.match(workerSource, /const state = hasMore \? "PARTIAL"/, "BATCH_PENDING must remain a non-terminal PARTIAL scan state");
+assert.match(workerSource, /error: hasMore \? "BATCH_PENDING"/, "pending continuation must persist the BATCH_PENDING checkpoint");
 assert.equal(workerSource.includes('return json({ error: "SCAN_FAILED", detail }'), false, "raw Worker failures must not reach the customer");
 assert.match(contentPage, /runFullWebsiteScan/, "legacy content bootstrap must complete the site through the shared batched scanner");
 assert.equal(contentPage.includes("scanBody.detail"), false, "the content page must not display raw Cloudflare details");
