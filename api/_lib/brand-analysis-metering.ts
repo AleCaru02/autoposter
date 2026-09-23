@@ -19,6 +19,12 @@ export function deriveBrandAnalysisOperationKey(profileId: string, scanId: strin
   return `brand-analyze:v1:${profileId}:${scanId}`;
 }
 
+export function deriveBrandAnalysisAttemptOperationKey(profileId: string, scanId: string, attempt = 0) {
+  if (!Number.isInteger(attempt) || attempt < 0) throw new Error("BRAND_ANALYSIS_ATTEMPT_INVALID");
+  const base = deriveBrandAnalysisOperationKey(profileId, scanId);
+  return attempt === 0 ? base : `${base}:retry:${attempt}`;
+}
+
 export class BrandAnalysisMetering {
   private readonly usage: EntitlementUsageService;
   private readonly sql: ReturnType<typeof neon>;
@@ -30,10 +36,8 @@ export class BrandAnalysisMetering {
   }
 
   async reserve(input: { profileId: string; scanId: string }): Promise<BrandAnalysisReservation> {
-    const baseOperationKey = deriveBrandAnalysisOperationKey(input.profileId, input.scanId);
-
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      const operationKey = attempt === 0 ? baseOperationKey : `${baseOperationKey}:retry:${attempt}`;
+      const operationKey = deriveBrandAnalysisAttemptOperationKey(input.profileId, input.scanId, attempt);
       const reserved = await this.usage.reserveUsage({
         profileId: input.profileId,
         capabilityKey: BRAND_ANALYZE_CAPABILITY,
