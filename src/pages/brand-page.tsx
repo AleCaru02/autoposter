@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Sparkles } from "lucide-react";
 import { neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { runFullWebsiteScan } from "../lib/full-website-scan";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
 
@@ -149,10 +150,8 @@ export function BrandPage() {
     try {
       await autosave.flush();
       const token = await jwt();
-      const scanResponse = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, pageLimit: 8 }) });
-      const scanBody = await scanResponse.json() as { visualHints?: VisualHints; error?: string; message?: string };
-      if (!scanResponse.ok) throw new Error(scanBody.message || "Analisi sito non riuscita. Riprova tra poco.");
-      const analysisResponse = await fetch("/api/onboarding-analyze", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, visualHints: scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null } }) });
+      const scanBody = await runFullWebsiteScan({ profileId, token, forceNew: true });
+      const analysisResponse = await fetch("/api/onboarding-analyze", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, visualHints: scanBody.visualHints }) });
       const body = await analysisResponse.json() as { error?: string; detail?: string };
       if (!analysisResponse.ok) throw new Error("Analisi brand non riuscita. Riprova tra poco.");
       await reload();
