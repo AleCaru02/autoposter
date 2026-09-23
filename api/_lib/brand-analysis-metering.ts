@@ -30,34 +30,43 @@ export class BrandAnalysisMetering {
   }
 
   async reserve(input: { profileId: string; scanId: string }): Promise<BrandAnalysisReservation> {
-    const operationKey = deriveBrandAnalysisOperationKey(input.profileId, input.scanId);
-    const reserved = await this.usage.reserveUsage({
-      profileId: input.profileId,
-      capabilityKey: BRAND_ANALYZE_CAPABILITY,
-      quantity: 1,
-      idempotencyKey: operationKey,
-      source: "BRAND_ANALYZE_ONBOARDING",
-      referenceId: input.scanId,
-      metadata: { logical_unit: 1, scan_id: input.scanId, execution_state: "RESERVED" },
-    });
-    if (!reserved.allowed) {
-      return {
-        status: "DENIED",
-        code: reserved.reason === "ENTITLEMENT_DISABLED" ? "CAPABILITY_DISABLED" : "CAPABILITY_LIMIT_REACHED",
-        operationKey,
-      };
-    }
-    const eventId = reserved.result?.event_id;
-    if (!eventId) throw new Error("METERING_FAILED");
-    if (!reserved.result?.duplicate) return { status: "RESERVED", eventId, operationKey };
+    const baseOperationKey = deriveBrandAnalysisOperationKey(input.profileId, input.scanId);
 
-    const existing = await this.usage.getUsageEvent(eventId);
-    if (!existing) throw new Error("METERING_FAILED");
-    const metadata = existing.metadata && typeof existing.metadata === "object" ? existing.metadata as Record<string, unknown> : {};
-    const cached = metadata.cached_result && typeof metadata.cached_result === "object" ? metadata.cached_result as CachedResult : null;
-    if (existing.state === "COMMITTED" && cached) return { status: "COMPLETED", eventId, operationKey, cached };
-    if (existing.state === "RESERVED") return { status: "IN_PROGRESS", eventId, operationKey };
-    return { status: "RELEASED", eventId, operationKey };
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const operationKey = attempt === 0 ? baseOperationKey : `${baseOperationKey}:retry:${attempt}`;
+      const reserved = await this.usage.reserveUsage({
+        profileId: input.profileId,
+        capabilityKey: BRAND_ANALYZE_CAPABILITY,
+        quantity: 1,
+        idempotencyKey: operationKey,
+        source: "BRAND_ANALYZE_ONBOARDING",
+        referenceId: input.scanId,
+        metadata: { logical_unit: 1, scan_id: input.scanId, execution_state: "RESERVED", retry_attempt: attempt },
+      });
+      if (!reserved.allowed) {
+        return {
+          status: "DENIED",
+          code: reserved.reason === "ENTITLEMENT_DISABLED" ? "CAPABILITY_DISABLED" : "CAPABILITY_LIMIT_REACHED",
+          operationKey,
+        };
+      }
+      const eventId = reserved.result?.event_id;
+      if (!eventId) throw new Error("METERING_FAILED");
+      if (!reserved.result?.duplicate) return { status: "RESERVED", eventId, operationKey };
+
+      const existing = await this.usage.getUsageEvent(eventId);
+      if (!existing) throw new Error("METERING_FAILED");
+      const metadata = existing.metadata && typeof existing.metadata === "object" ? existing.metadata as Record<string, unknown> : {};
+      const cached = metadata.cached_result && typeof metadata.cached_result === "object" ? metadata.cached_result as CachedResult : null;
+      if (existing.state === "COMMITTED" && cached) return { status: "COMPLETED", eventId, operationKey, cached };
+      if (existing.state === "RESERVED") return { status: "IN_PROGRESS", eventId, operationKey };
+
+      // RELEASED events must remain immutable for audit/history, but they must not
+      // permanently poison the idempotency key for this scan. Move to the next
+      // deterministic retry key; concurrent callers will converge on the same key.
+    }
+
+    throw new Error("METERING_FAILED:RETRY_EXHAUSTED");
   }
 
   async markProviderStarted(eventId: string) {
