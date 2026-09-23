@@ -161,6 +161,15 @@ let previousTerminal = 0;
 let complete = null;
 
 for (let batch = 0; batch < 40; batch += 1) {
+  if (scanId) {
+    const pendingResponse = await dataApi(
+      `/website_pages?scan_id=eq.${encodeURIComponent(scanId)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.DISCOVERED&select=normalized_url,depth,created_at&order=created_at.asc&limit=8`,
+      identity.token,
+    );
+    const pendingRows = await readJson(pendingResponse);
+    assert.ok(pendingResponse.ok && Array.isArray(pendingRows), "pending batch inspection failed");
+    console.log("CRAWLER_NEXT_BATCH", JSON.stringify({ batch: batch + 1, urls: pendingRows.map((row) => ({ url: row.normalized_url, depth: row.depth })) }));
+  }
   const { body, elapsedMs } = await productionScan(identity.token, profileId, batch === 0);
   assert.equal(typeof body.scanId, "string", "scanId missing");
   if (scanId === null) scanId = body.scanId;
