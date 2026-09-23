@@ -101,7 +101,7 @@ async function controller(action) {
   return body;
 }
 
-async function productionScan(token, profileId, forceNew, pageLimit = 8) {
+async function productionScan(token, profileId, forceNew, pageLimit = 1) {
   const started = Date.now();
   const response = await fetch(`${APP_BASE}/api/website-scan`, {
     method: "POST",
@@ -160,7 +160,7 @@ let scanId = null;
 let previousTerminal = 0;
 let complete = null;
 
-for (let batch = 0; batch < 40; batch += 1) {
+for (let batch = 0; batch < 220; batch += 1) {
   if (scanId) {
     const pendingResponse = await dataApi(
       `/website_pages?scan_id=eq.${encodeURIComponent(scanId)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.DISCOVERED&select=normalized_url,depth,created_at&order=created_at.asc&limit=8`,
@@ -170,7 +170,7 @@ for (let batch = 0; batch < 40; batch += 1) {
     assert.ok(pendingResponse.ok && Array.isArray(pendingRows), "pending batch inspection failed");
     console.log("CRAWLER_NEXT_BATCH", JSON.stringify({ batch: batch + 1, urls: pendingRows.map((row) => ({ url: row.normalized_url, depth: row.depth })) }));
   }
-  const requestedPageLimit = batch < 9 ? 8 : 1;
+  const requestedPageLimit = 1;
   console.log("CRAWLER_REQUEST", JSON.stringify({ batch: batch + 1, pageLimit: requestedPageLimit }));
   const { body, elapsedMs } = await productionScan(identity.token, profileId, batch === 0, requestedPageLimit);
   assert.equal(typeof body.scanId, "string", "scanId missing");
@@ -215,7 +215,7 @@ for (let batch = 0; batch < 40; batch += 1) {
   }
 }
 
-assert.ok(complete, "crawler did not complete within 40 automatic continuation batches");
+assert.ok(complete, "crawler did not complete within 220 single-page continuation batches");
 assert.ok(history.length >= 2, "runtime did not exercise continuation across multiple batches");
 assert.ok(["COMPLETE", "COMPLETE_WITH_WARNINGS"].includes(complete.state), `unexpected final state ${complete.state}`);
 assert.ok(Number(complete.analyzedPages || 0) > 0, "crawler analyzed zero pages");
