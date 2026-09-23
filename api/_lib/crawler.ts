@@ -381,18 +381,37 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
       const response = await fetcher(url.toString(), { redirect: "follow", headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/html,application/xhtml+xml;q=0.9" }, signal: AbortSignal.timeout(12_000) });
       const finalUrl = new URL(response.url || url.toString());
       if (finalUrl.origin !== root.origin) throw new Error("CROSS_ORIGIN_REDIRECT");
+      const finalNormalized = normalizeCrawlUrl(finalUrl.toString(), root);
+      if (!finalNormalized) throw new Error("INVALID_REDIRECT_TARGET");
       await options.validateTarget?.(finalUrl);
       if (!response.ok) throw new Error(`HTTP_${response.status}`);
+
+      if (finalNormalized !== item.url && (excluded.has(finalNormalized) || visited.has(finalNormalized))) {
+        pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "REDIRECT_DUPLICATE" });
+        continue;
+      }
+      if (finalNormalized !== item.url) {
+        pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "REDIRECT_CANONICAL" });
+        known.add(finalNormalized);
+        visited.add(finalNormalized);
+      }
+
       const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
       if (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
-        pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "NON_HTML" });
+        pages.push({
+          ...baseSkipped,
+          url: finalNormalized,
+          normalizedUrl: finalNormalized,
+          status: "SKIPPED",
+          skipReason: "NON_HTML",
+        });
         continue;
       }
       const html = await safeText(response, maxContentChars);
       const parsed = parseWebsitePage(html, finalUrl, item.depth === 0 && !rootEnriched);
       const { title, description, hrefs, signals } = parsed;
       const contentText = parsed.contentText.slice(0, maxContentChars);
-      pages.push({ url: finalUrl.toString(), normalizedUrl: item.url, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null, signals });
+      pages.push({ url: finalNormalized, normalizedUrl: finalNormalized, status: "ANALYZED", depth: item.depth, title, metaDescription: description, contentText, contentHash: createHash("sha256").update(contentText).digest("hex"), discoveredFrom: item.discoveredFrom, skipReason: null, error: null, signals });
 
       if (visualHints.pageSignals.length < MAX_PAGE_SIGNALS) visualHints.pageSignals.push({ url: finalUrl.toString(), ...signals });
       for (const imageUrl of signals.imageUrls) if (visualHints.imageUrls.length < MAX_IMAGES && !visualHints.imageUrls.includes(imageUrl)) visualHints.imageUrls.push(imageUrl);
