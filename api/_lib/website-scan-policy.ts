@@ -1,5 +1,5 @@
 export const CLOUDFLARE_FREE_SUBREQUEST_LIMIT = 50;
-export const SAFE_SCAN_MAX_PAGES = 8;
+export const SAFE_SCAN_MAX_PAGES = 4;
 export const SAFE_SCAN_MAX_SITEMAPS = 3;
 export const SAFE_SCAN_MAX_STYLESHEETS = 2;
 export const SAFE_SCAN_MAX_SITEMAP_SEEDS = 250;
