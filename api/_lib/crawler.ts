@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
 
-export type CrawlPageStatus = "ANALYZED" | "SKIPPED" | "FAILED";
+export type CrawlPageStatus = "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED";
 
 export type PageSignals = {
   canonicalUrl: string | null;
@@ -49,7 +49,7 @@ export type CrawlResult = {
   visualHints: WebsiteVisualHints;
 };
 
-type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
+export type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
 export type CrawlOptions = {
   fetcher?: typeof fetch;
   validateTarget?: (url: URL) => Promise<void> | void;
@@ -60,6 +60,10 @@ export type CrawlOptions = {
   includeSitemap?: boolean;
   maxSitemapFiles?: number;
   maxStylesheets?: number;
+  seedUrls?: QueueItem[];
+  excludeUrls?: string[];
+  maxDiscoveredPages?: number;
+  maxSitemapSeeds?: number;
 };
 
 const TRACKING_PARAMS = new Set(["fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"]);
@@ -278,7 +282,7 @@ async function fetchOptionalText(url: URL, fetcher: typeof fetch, validateTarget
   } catch { return null; }
 }
 
-async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: CrawlOptions["validateTarget"], maxPages: number, maxSitemapFiles: number) {
+async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: CrawlOptions["validateTarget"], maxPages: number, maxSitemapFiles: number, excluded = new Set<string>()) {
   const result = new Set<string>();
   const seenSitemaps = new Set<string>();
   const queue = [new URL("/sitemap.xml", root).toString()];
@@ -297,7 +301,7 @@ async function sitemapSeeds(root: URL, fetcher: typeof fetch, validateTarget: Cr
         continue;
       }
       const normalized = normalizeCrawlUrl(loc, root);
-      if (normalized) result.add(normalized);
+      if (normalized && !excluded.has(normalized)) result.add(normalized);
       if (result.size >= maxPages) break;
     }
   }
@@ -312,6 +316,8 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const maxContentChars = Math.min(Math.max(options.maxContentChars ?? 180_000, 10_000), 500_000);
   const maxSitemapFiles = Math.min(Math.max(options.maxSitemapFiles ?? 12, 0), 12);
   const maxStylesheets = Math.min(Math.max(options.maxStylesheets ?? MAX_STYLESHEETS, 0), MAX_STYLESHEETS);
+  const maxDiscoveredPages = Math.min(Math.max(options.maxDiscoveredPages ?? 2_000, maxPages), 2_000);
+  const maxSitemapSeeds = Math.min(Math.max(options.maxSitemapSeeds ?? 250, maxPages), 500);
   const root = new URL(input);
   if (root.protocol !== "http:" && root.protocol !== "https:") throw new Error("INVALID_ROOT_PROTOCOL");
   root.hash = "";
@@ -319,14 +325,29 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const normalizedRoot = normalizeCrawlUrl(root.toString(), root);
   if (!normalizedRoot) throw new Error("INVALID_ROOT_URL");
 
+  const excluded = new Set(
+    (options.excludeUrls ?? [])
+      .map((value) => normalizeCrawlUrl(value, root))
+      .filter((value): value is string => Boolean(value)),
+  );
+  const queue: QueueItem[] = [];
+  const enqueue = (item: QueueItem) => {
+    const normalized = normalizeCrawlUrl(item.url, root);
+    if (!normalized || excluded.has(normalized) || queue.some((queued) => queued.url === normalized)) return;
+    queue.push({ url: normalized, depth: item.depth, discoveredFrom: item.discoveredFrom });
+  };
+  for (const seed of options.seedUrls ?? []) enqueue(seed);
+  if (!queue.length && !excluded.has(normalizedRoot)) enqueue({ url: normalizedRoot, depth: 0, discoveredFrom: null });
+
   const robotsText = await fetchOptionalText(new URL("/robots.txt", root), fetcher, options.validateTarget, 100_000);
   const disallow = robotsText ? parseRobots(robotsText) : [];
-  const queue: QueueItem[] = [{ url: normalizedRoot, depth: 0, discoveredFrom: null }];
   if (options.includeSitemap !== false) {
-    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxPages, maxSitemapFiles)) if (url !== normalizedRoot) queue.push({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
+    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxSitemapSeeds, maxSitemapFiles, excluded)) {
+      if (url !== normalizedRoot) enqueue({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
+    }
   }
 
-  const known = new Set(queue.map((item) => item.url));
+  const known = new Set<string>([...excluded, ...queue.map((item) => item.url)]);
   const visited = new Set<string>();
   const pages: CrawlPage[] = [];
   const startedAt = Date.now();
@@ -385,7 +406,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
       if (item.depth < maxDepth) {
         for (const href of hrefs) {
           const normalized = normalizeCrawlUrl(href, root);
-          if (!normalized || known.has(normalized)) continue;
+          if (!normalized || known.has(normalized) || known.size >= maxDiscoveredPages) continue;
           known.add(normalized);
           queue.push({ url: normalized, depth: item.depth + 1, discoveredFrom: item.url });
         }
@@ -395,8 +416,37 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
     }
   }
 
+  for (const item of queue) {
+    if (visited.has(item.url) || excluded.has(item.url)) continue;
+    pages.push({
+      url: item.url,
+      normalizedUrl: item.url,
+      status: "DISCOVERED",
+      depth: item.depth,
+      title: null,
+      metaDescription: null,
+      contentText: null,
+      contentHash: null,
+      discoveredFrom: item.discoveredFrom,
+      skipReason: null,
+      error: null,
+      signals: null,
+    });
+  }
+
   const analyzedPages = pages.filter((page) => page.status === "ANALYZED").length;
   const skippedPages = pages.filter((page) => page.status === "SKIPPED").length;
   const failedPages = pages.filter((page) => page.status === "FAILED").length;
-  return { rootUrl: normalizedRoot, discoveredPages: known.size, analyzedPages, skippedPages, failedPages, completeCoverage: stopReason === "COMPLETE" && queue.length === 0, stopReason, pages, visualHints };
+  const pendingPages = pages.filter((page) => page.status === "DISCOVERED").length;
+  return {
+    rootUrl: normalizedRoot,
+    discoveredPages: known.size,
+    analyzedPages,
+    skippedPages,
+    failedPages,
+    completeCoverage: stopReason === "COMPLETE" && pendingPages === 0,
+    stopReason,
+    pages,
+    visualHints,
+  };
 }

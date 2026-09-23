@@ -2,14 +2,15 @@ import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { crawlWebsite } from "./_lib/crawler.js";
-import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS } from "./_lib/website-scan-policy.js";
+import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "./_lib/website-scan-policy.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
 type ProfileRow = { id: string; website_url: string | null };
-type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number };
+type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
+type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 
 function privateIp(address: string) {
   if (address === "::1" || address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd")) return true;
@@ -69,6 +70,15 @@ async function createScan(profileId: string, rootUrl: string, pageLimit: number,
   return rows[0].id;
 }
 
+async function readScanPages(scanId: string, profileId: string, token: string) {
+  const response = await dataApi(
+    `website_pages?scan_id=eq.${encodeURIComponent(scanId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=url,normalized_url,status,depth,discovered_from&order=created_at.asc&limit=${SAFE_SCAN_MAX_TOTAL_PAGES}`,
+    token,
+  );
+  if (!response.ok) throw new Error(`DATA_API_SCAN_PAGES_${response.status}`);
+  return response.json() as Promise<ScanPageStateRow[]>;
+}
+
 async function writePages(scanId: string, profileId: string, pages: Awaited<ReturnType<typeof crawlWebsite>>["pages"], token: string) {
   for (let index = 0; index < pages.length; index += 25) {
     const chunk = pages.slice(index, index + 25).map((page) => ({
@@ -85,26 +95,32 @@ async function writePages(scanId: string, profileId: string, pages: Awaited<Retu
       discovered_from: page.discoveredFrom,
       skip_reason: page.skipReason,
       error: page.error,
-      scanned_at: new Date().toISOString(),
+      scanned_at: page.status === "DISCOVERED" ? null : new Date().toISOString(),
     }));
-    const response = await dataApi("website_pages", token, { method: "POST", headers: { prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(chunk) });
+    const response = await dataApi(
+      "website_pages?on_conflict=scan_id,normalized_url",
+      token,
+      { method: "POST", headers: { prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(chunk) },
+    );
     if (!response.ok) throw new Error(`DATA_API_WRITE_PAGES_${response.status}`);
   }
 }
 
-async function finishScan(scanId: string, result: Awaited<ReturnType<typeof crawlWebsite>>, token: string) {
-  const state = result.completeCoverage && result.failedPages === 0 ? "COMPLETE" : "PARTIAL";
+async function updateScan(scanId: string, payload: Record<string, unknown>, token: string) {
   const response = await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
     method: "PATCH",
     headers: { prefer: "return=minimal" },
-    body: JSON.stringify({ state, discovered_pages: result.discoveredPages, analyzed_pages: result.analyzedPages, skipped_pages: result.skippedPages, failed_pages: result.failedPages, finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: result.stopReason === "COMPLETE" ? null : result.stopReason }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) throw new Error(`DATA_API_FINISH_SCAN_${response.status}`);
-  return state;
 }
 
 async function failScan(scanId: string, token: string, error: string) {
-  await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), error: error.slice(0, 500) }) }).catch(() => undefined);
+  await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
+    method: "PATCH",
+    headers: { prefer: "return=minimal" },
+    body: JSON.stringify({ state: "PARTIAL", last_progress_at: new Date().toISOString(), error: error.slice(0, 500) }),
+  }).catch(() => undefined);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -113,6 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   const pageLimit = boundedScanPageLimit(req.body?.pageLimit);
+  const forceNew = req.body?.forceNew === true;
   if (!profileId) return res.status(400).json({ error: "PROFILE_REQUIRED" });
 
   let scanId: string | null = null;
@@ -123,15 +140,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const root = new URL(profile.website_url);
     if (root.protocol !== "http:" && root.protocol !== "https:") return res.status(400).json({ error: "INVALID_WEBSITE" });
     await assertPublicTarget(root);
-    const reusableResponse = await dataApi(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(root.toString())}&state=in.(COMPLETE,PARTIAL)&analyzed_pages=gt.0&select=id,state,discovered_pages,analyzed_pages,skipped_pages,failed_pages&order=created_at.desc&limit=1`, token);
-    if (!reusableResponse.ok) throw new Error(`DATA_API_REUSABLE_SCAN_${reusableResponse.status}`);
-    const reusable = await reusableResponse.json() as ScanRow[];
-    if (reusable[0]) return res.status(200).json({ scanId: reusable[0].id, state: reusable[0].state, discoveredPages: reusable[0].discovered_pages ?? 0, analyzedPages: reusable[0].analyzed_pages ?? 0, skippedPages: reusable[0].skipped_pages ?? 0, failedPages: reusable[0].failed_pages ?? 0, reused: true });
-    scanId = await createScan(profileId, root.toString(), pageLimit, token);
-    const result = await crawlWebsite(root.toString(), { maxPages: pageLimit, maxDepth: 12, maxDurationMs: 48_000, validateTarget: assertPublicTarget, includeSitemap: true, maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS, maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS });
+    const rootUrl = root.toString();
+
+    let existingScan: ScanRow | null = null;
+    if (!forceNew) {
+      const reusableResponse = await dataApi(
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        token,
+      );
+      if (!reusableResponse.ok) throw new Error(`DATA_API_REUSABLE_SCAN_${reusableResponse.status}`);
+      existingScan = ((await reusableResponse.json()) as ScanRow[])[0] ?? null;
+      if (existingScan?.state === "COMPLETE") {
+        return res.status(200).json({
+          scanId: existingScan.id,
+          state: "COMPLETE",
+          discoveredPages: existingScan.discovered_pages ?? 0,
+          analyzedPages: existingScan.analyzed_pages ?? 0,
+          skippedPages: existingScan.skipped_pages ?? 0,
+          failedPages: existingScan.failed_pages ?? 0,
+          completeCoverage: true,
+          hasMore: false,
+          reused: true,
+        });
+      }
+    }
+
+    scanId = existingScan?.id ?? await createScan(profileId, rootUrl, pageLimit, token);
+    const storedPages = await readScanPages(scanId, profileId, token);
+    const terminal = storedPages.filter((page) => page.status !== "DISCOVERED");
+    const pending = storedPages.filter((page) => page.status === "DISCOVERED");
+    const excludeUrls = terminal.map((page) => page.normalized_url);
+    const rootNormalized = new URL(rootUrl).toString();
+    if (!pending.length && terminal.length > 0) {
+      const rootIndex = excludeUrls.indexOf(rootNormalized);
+      if (rootIndex >= 0) excludeUrls.splice(rootIndex, 1);
+    }
+
+    const result = await crawlWebsite(rootUrl, {
+      maxPages: pageLimit,
+      maxDepth: 12,
+      maxDurationMs: 48_000,
+      validateTarget: assertPublicTarget,
+      includeSitemap: true,
+      maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS,
+      maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS,
+      maxSitemapSeeds: SAFE_SCAN_MAX_SITEMAP_SEEDS,
+      maxDiscoveredPages: SAFE_SCAN_MAX_TOTAL_PAGES,
+      excludeUrls,
+      seedUrls: pending.map((page) => ({ url: page.normalized_url, depth: page.depth, discoveredFrom: page.discovered_from })),
+    });
+
     await writePages(scanId, profileId, result.pages, token);
-    const state = await finishScan(scanId, result, token);
-    return res.status(200).json({ scanId, state, discoveredPages: result.discoveredPages, analyzedPages: result.analyzedPages, skippedPages: result.skippedPages, failedPages: result.failedPages, completeCoverage: result.completeCoverage, stopReason: result.stopReason, visualHints: result.visualHints });
+
+    const totals = new Map<string, ScanPageStateRow>();
+    for (const page of storedPages) totals.set(page.normalized_url, page);
+    for (const page of result.pages) {
+      totals.set(page.normalizedUrl, {
+        url: page.url,
+        normalized_url: page.normalizedUrl,
+        status: page.status,
+        depth: page.depth,
+        discovered_from: page.discoveredFrom,
+      });
+    }
+    const all = [...totals.values()];
+    const discoveredPages = all.length;
+    const analyzedPages = all.filter((page) => page.status === "ANALYZED").length;
+    const skippedPages = all.filter((page) => page.status === "SKIPPED").length;
+    const failedPages = all.filter((page) => page.status === "FAILED").length;
+    const pendingPages = all.filter((page) => page.status === "DISCOVERED").length;
+    const hasMore = pendingPages > 0;
+    const state = !hasMore && failedPages === 0 ? "COMPLETE" : "PARTIAL";
+    const now = new Date().toISOString();
+    await updateScan(scanId, {
+      state,
+      discovered_pages: discoveredPages,
+      analyzed_pages: analyzedPages,
+      skipped_pages: skippedPages,
+      failed_pages: failedPages,
+      finished_at: hasMore ? null : now,
+      last_progress_at: now,
+      error: hasMore ? "BATCH_PENDING" : failedPages > 0 ? "PAGE_ERRORS" : null,
+    }, token);
+
+    return res.status(200).json({
+      scanId,
+      state,
+      discoveredPages,
+      analyzedPages,
+      skippedPages,
+      failedPages,
+      pendingPages,
+      completeCoverage: !hasMore,
+      hasMore,
+      stopReason: hasMore ? result.stopReason : "COMPLETE",
+      visualHints: result.visualHints,
+    });
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "UNKNOWN_SCAN_ERROR";
     if (scanId) await failScan(scanId, token, message);

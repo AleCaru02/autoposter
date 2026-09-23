@@ -3,13 +3,12 @@ import { CalendarDays, Eye, Globe2, LoaderCircle, Pause, Play, ShieldCheck, Spar
 import { NavLink } from "react-router-dom";
 import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { runFullWebsiteScan } from "../lib/full-website-scan";
 import { useProfiles } from "../features/profiles/profile-context";
 import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, type AutopilotSettings } from "../features/content/autopilot-store";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 import { ManualContentComposer } from "../components/manual-content-composer";
 
-type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
-type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; message?: string };
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -72,14 +71,12 @@ export function ContentGeneratorPage() {
     setError(null);
     try {
       const token = await jwt();
-      const scanResponse = await fetch("/api/website-scan", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId: profile.id, pageLimit: 8 }),
+      const scanBody = await runFullWebsiteScan({
+        profileId: profile.id,
+        token,
+        onProgress: (batch) => setBootstrapPages(batch.analyzedPages ?? 0),
       });
-      const scanBody = await scanResponse.json() as ScanResponse;
-      if (!scanResponse.ok) throw new Error(scanBody.message || "Analisi iniziale del sito non riuscita. Riprova tra poco.");
-      const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
+      const hints = scanBody.visualHints;
       setBootstrapPages(scanBody.analyzedPages ?? 0);
 
       const analysisResponse = await fetch("/api/onboarding-analyze", {

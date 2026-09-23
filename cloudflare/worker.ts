@@ -3,7 +3,7 @@ import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
-import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS } from "../api/_lib/website-scan-policy.js";
+import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -23,7 +23,8 @@ interface Env {
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
-type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number };
+type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
+type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
 type UsageRow = { id: string };
@@ -313,7 +314,9 @@ async function handleWebsiteScan(request: Request) {
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const pageLimit = boundedScanPageLimit(body.pageLimit);
+  const forceNew = body.forceNew === true;
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+
   let scanId: string | null = null;
   try {
     const validateTarget = createPublicTargetValidator();
@@ -324,25 +327,159 @@ async function handleWebsiteScan(request: Request) {
     const root = new URL(profile.website_url);
     if (root.protocol !== "http:" && root.protocol !== "https:") return json({ error: "INVALID_WEBSITE" }, 400);
     await validateTarget(root);
-    const reusable = await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(root.toString())}&state=in.(COMPLETE,PARTIAL)&analyzed_pages=gt.0&select=id,state,discovered_pages,analyzed_pages,skipped_pages,failed_pages&order=created_at.desc&limit=1`, token);
-    if (reusable[0]) return json({ scanId: reusable[0].id, state: reusable[0].state, discoveredPages: reusable[0].discovered_pages ?? 0, analyzedPages: reusable[0].analyzed_pages ?? 0, skippedPages: reusable[0].skipped_pages ?? 0, failedPages: reusable[0].failed_pages ?? 0, reused: true });
-    const create = await dataApi("website_scans", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, root_url: root.toString(), state: "RUNNING", page_limit: pageLimit, max_depth: 12, started_at: new Date().toISOString(), last_progress_at: new Date().toISOString() }) });
-    if (!create.ok) throw new Error(`DATA_API_CREATE_SCAN_${create.status}`);
-    scanId = ((await create.json()) as ScanRow[])[0]?.id ?? null;
-    if (!scanId) throw new Error("SCAN_ID_MISSING");
-    const result = await crawlWebsite(root.toString(), { maxPages: pageLimit, maxDepth: 12, maxDurationMs: 48_000, validateTarget, includeSitemap: true, maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS, maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS });
+    const rootUrl = root.toString();
+
+    let existingScan: ScanRow | null = null;
+    if (!forceNew) {
+      existingScan = (await rows<ScanRow>(
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        token,
+      ))[0] ?? null;
+      if (existingScan?.state === "COMPLETE") {
+        return json({
+          scanId: existingScan.id,
+          state: "COMPLETE",
+          discoveredPages: existingScan.discovered_pages ?? 0,
+          analyzedPages: existingScan.analyzed_pages ?? 0,
+          skippedPages: existingScan.skipped_pages ?? 0,
+          failedPages: existingScan.failed_pages ?? 0,
+          completeCoverage: true,
+          hasMore: false,
+          reused: true,
+        });
+      }
+    }
+
+    if (existingScan) scanId = existingScan.id;
+    else {
+      const create = await dataApi("website_scans", token, {
+        method: "POST",
+        headers: { prefer: "return=representation" },
+        body: JSON.stringify({
+          profile_id: profileId,
+          root_url: rootUrl,
+          state: "RUNNING",
+          page_limit: pageLimit,
+          max_depth: 12,
+          started_at: new Date().toISOString(),
+          last_progress_at: new Date().toISOString(),
+        }),
+      });
+      if (!create.ok) throw new Error(`DATA_API_CREATE_SCAN_${create.status}`);
+      scanId = ((await create.json()) as ScanRow[])[0]?.id ?? null;
+      if (!scanId) throw new Error("SCAN_ID_MISSING");
+    }
+
+    const storedPages = await rows<ScanPageStateRow>(
+      `website_pages?scan_id=eq.${encodeURIComponent(scanId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=url,normalized_url,status,depth,discovered_from&order=created_at.asc&limit=${SAFE_SCAN_MAX_TOTAL_PAGES}`,
+      token,
+    );
+    const terminal = storedPages.filter((page) => page.status !== "DISCOVERED");
+    const pending = storedPages.filter((page) => page.status === "DISCOVERED");
+    const excludeUrls = terminal.map((page) => page.normalized_url);
+    const rootNormalized = new URL(rootUrl).toString();
+    if (!pending.length && terminal.length > 0) {
+      const rootIndex = excludeUrls.indexOf(rootNormalized);
+      if (rootIndex >= 0) excludeUrls.splice(rootIndex, 1);
+    }
+
+    const result = await crawlWebsite(rootUrl, {
+      maxPages: pageLimit,
+      maxDepth: 12,
+      maxDurationMs: 48_000,
+      validateTarget,
+      includeSitemap: true,
+      maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS,
+      maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS,
+      maxSitemapSeeds: SAFE_SCAN_MAX_SITEMAP_SEEDS,
+      maxDiscoveredPages: SAFE_SCAN_MAX_TOTAL_PAGES,
+      excludeUrls,
+      seedUrls: pending.map((page) => ({ url: page.normalized_url, depth: page.depth, discoveredFrom: page.discovered_from })),
+    });
+
     for (let index = 0; index < result.pages.length; index += 25) {
-      const chunk = result.pages.slice(index, index + 25).map((page) => ({ scan_id: scanId, profile_id: profileId, url: page.url, normalized_url: page.normalizedUrl, status: page.status, depth: page.depth, title: page.title, meta_description: page.metaDescription, content_text: page.contentText, content_hash: page.contentHash, discovered_from: page.discoveredFrom, skip_reason: page.skipReason, error: page.error, scanned_at: new Date().toISOString() }));
-      const write = await dataApi("website_pages", token, { method: "POST", headers: { prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(chunk) });
+      const chunk = result.pages.slice(index, index + 25).map((page) => ({
+        scan_id: scanId,
+        profile_id: profileId,
+        url: page.url,
+        normalized_url: page.normalizedUrl,
+        status: page.status,
+        depth: page.depth,
+        title: page.title,
+        meta_description: page.metaDescription,
+        content_text: page.contentText,
+        content_hash: page.contentHash,
+        discovered_from: page.discoveredFrom,
+        skip_reason: page.skipReason,
+        error: page.error,
+        scanned_at: page.status === "DISCOVERED" ? null : new Date().toISOString(),
+      }));
+      const write = await dataApi(
+        `website_pages?on_conflict=scan_id,normalized_url`,
+        token,
+        { method: "POST", headers: { prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(chunk) },
+      );
       if (!write.ok) throw new Error(`DATA_API_WRITE_PAGES_${write.status}`);
     }
-    const state = result.completeCoverage && result.failedPages === 0 ? "COMPLETE" : "PARTIAL";
-    const finish = await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state, discovered_pages: result.discoveredPages, analyzed_pages: result.analyzedPages, skipped_pages: result.skippedPages, failed_pages: result.failedPages, finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: result.stopReason === "COMPLETE" ? null : result.stopReason }) });
+
+    const totals = new Map<string, ScanPageStateRow>();
+    for (const page of storedPages) totals.set(page.normalized_url, page);
+    for (const page of result.pages) {
+      totals.set(page.normalizedUrl, {
+        url: page.url,
+        normalized_url: page.normalizedUrl,
+        status: page.status,
+        depth: page.depth,
+        discovered_from: page.discoveredFrom,
+      });
+    }
+    const all = [...totals.values()];
+    const discoveredPages = all.length;
+    const analyzedPages = all.filter((page) => page.status === "ANALYZED").length;
+    const skippedPages = all.filter((page) => page.status === "SKIPPED").length;
+    const failedPages = all.filter((page) => page.status === "FAILED").length;
+    const pendingPages = all.filter((page) => page.status === "DISCOVERED").length;
+    const hasMore = pendingPages > 0;
+    const state = !hasMore && failedPages === 0 ? "COMPLETE" : "PARTIAL";
+    const now = new Date().toISOString();
+    const finish = await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
+      method: "PATCH",
+      headers: { prefer: "return=minimal" },
+      body: JSON.stringify({
+        state,
+        discovered_pages: discoveredPages,
+        analyzed_pages: analyzedPages,
+        skipped_pages: skippedPages,
+        failed_pages: failedPages,
+        finished_at: hasMore ? null : now,
+        last_progress_at: now,
+        error: hasMore ? "BATCH_PENDING" : failedPages > 0 ? "PAGE_ERRORS" : null,
+      }),
+    });
     if (!finish.ok) throw new Error(`DATA_API_FINISH_SCAN_${finish.status}`);
-    return json({ scanId, state, discoveredPages: result.discoveredPages, analyzedPages: result.analyzedPages, skippedPages: result.skippedPages, failedPages: result.failedPages, completeCoverage: result.completeCoverage, stopReason: result.stopReason, visualHints: result.visualHints });
+
+    return json({
+      scanId,
+      state,
+      discoveredPages,
+      analyzedPages,
+      skippedPages,
+      failedPages,
+      pendingPages,
+      completeCoverage: !hasMore,
+      hasMore,
+      stopReason: hasMore ? result.stopReason : "COMPLETE",
+      visualHints: result.visualHints,
+    });
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_SCAN_ERROR";
-    if (scanId) await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), error: detail.slice(0, 500) }) }).catch(() => undefined);
+    if (scanId) {
+      await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({ state: "PARTIAL", last_progress_at: new Date().toISOString(), error: detail.slice(0, 500) }),
+      }).catch(() => undefined);
+    }
     console.error("cloudflare-website-scan", { profileId, scanId, detail });
     return json({ error: "SCAN_FAILED", message: "Non riesco a completare l'analisi del sito in questo momento. Riprova tra poco." }, 500);
   }

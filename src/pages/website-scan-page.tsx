@@ -3,6 +3,7 @@ import { ExternalLink, Globe2, ImageIcon, Palette, RefreshCw, Tags, Type } from 
 import { NavLink } from "react-router-dom";
 import { neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { runFullWebsiteScan } from "../lib/full-website-scan";
 import { siteIntelligenceView, type SiteIntelligenceView } from "../lib/site-intelligence-view";
 import { useProfiles } from "../features/profiles/profile-context";
 
@@ -38,17 +39,6 @@ type BrandRow = {
   differentiators: unknown;
 };
 
-type VisualHints = {
-  colors?: string[];
-  fontFamilies?: string[];
-  socialLinks?: Record<string, string>;
-  logoUrl?: string | null;
-  logoCandidates?: string[];
-  imageUrls?: string[];
-  stylesheetUrls?: string[];
-  pageSignals?: unknown[];
-};
-type ScanResponse = { error?: string; message?: string; visualHints?: VisualHints };
 type AnalysisResponse = { error?: string; detail?: string };
 
 const EMPTY_INTELLIGENCE: SiteIntelligenceView = {
@@ -113,29 +103,37 @@ export function WebsiteScanPage() {
 
   async function startScan(automatic = false) {
     if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || running) return;
-    const automaticKey = `post-automatici.initial-scan.${selectedProfile.id}`;
-    if (automatic && sessionStorage.getItem(automaticKey) === "running") return;
-    if (automatic) sessionStorage.setItem(automaticKey, "running");
     setRunning(true); setError(null);
     try {
       const token = await authenticatedApiToken();
-      const response = await fetch("/api/website-scan", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId: selectedProfile.id, pageLimit: 8 }) });
-      const body = await response.json() as ScanResponse;
-      if (!response.ok) throw new Error(readableApiError(body, "Scansione non riuscita."));
+      const body = await runFullWebsiteScan({
+        profileId: selectedProfile.id,
+        token,
+        forceNew: !automatic,
+        onProgress: (batch) => {
+          setScan((current) => current ? {
+            ...current,
+            state: batch.hasMore ? "PARTIAL" : (batch.state ?? current.state),
+            discovered_pages: batch.discoveredPages ?? current.discovered_pages,
+            analyzed_pages: batch.analyzedPages ?? current.analyzed_pages,
+            skipped_pages: batch.skippedPages ?? current.skipped_pages,
+            failed_pages: batch.failedPages ?? current.failed_pages,
+            error: batch.hasMore ? "BATCH_PENDING" : null,
+          } : current);
+        },
+      });
 
       const analysisResponse = await fetch("/api/onboarding-analyze", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: body.visualHints ?? {} }),
+        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: body.visualHints }),
       });
       const analysisBody = await analysisResponse.json() as AnalysisResponse;
       if (!analysisResponse.ok) throw new Error(readableApiError(analysisBody, "Analisi brand non riuscita."));
 
-      sessionStorage.setItem(automaticKey, "done");
       await reload();
       await load();
     } catch (reason) {
-      if (automatic) sessionStorage.removeItem(automaticKey);
       setError(reason instanceof Error ? reason.message : "Scansione non riuscita.");
     } finally {
       setRunning(false);
@@ -143,14 +141,13 @@ export function WebsiteScanPage() {
   }
 
   useEffect(() => {
-    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || loading || scan || running || error) return;
-    const automaticKey = `post-automatici.initial-scan.${selectedProfile.id}`;
-    if (sessionStorage.getItem(automaticKey)) return;
+    if (!selectedProfile?.id || !selectedProfile.website_url || selectedProfile.tenant_type === "DEMO_PERSISTENT" || loading || running || error) return;
+    if (scan?.state === "COMPLETE") return;
     void startScan(true);
-  }, [selectedProfile?.id, selectedProfile?.website_url, selectedProfile?.tenant_type, loading, scan, running, error]);
+  }, [selectedProfile?.id, selectedProfile?.website_url, selectedProfile?.tenant_type, loading, scan?.id, scan?.state, running, error]);
 
   if (!selectedProfile) return null;
   const isDemo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
   const coverage = scan?.discovered_pages ? Math.round((scan.analyzed_pages / scan.discovered_pages) * 100) : 0;
-  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "La prima analisi parte automaticamente dal sito configurato e prepara anche il profilo del brand."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : "Ripeti analisi"}</button>}</header>{error && <p className="form-error" role="alert">{error}</p>}{!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section> : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section> : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non completata</h2><p>L’analisi riparte automaticamente. Se il problema continua, trovi qui il motivo.</p></section> : <><section className="scan-summary"><article><span>Stato</span><strong className={scan.state === "COMPLETE" ? "status-ok" : "status-wait"}>{scan.state === "COMPLETE" ? "Completata" : "In corso"}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura</span><strong>{coverage}%</strong></article></section>{scan.state !== "COMPLETE" && <p className="coverage-warning">Copertura non completa. Motivo: {scan.error || "alcune pagine non sono state analizzate"}.</p>}<IntelligencePanel intelligence={intelligence} demo={isDemo} /><section className="panel"><div className="panel-heading"><div><h2>Pagine analizzate</h2><p>{scan.root_url}</p></div><span>{pages.length} pagine</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status === "ANALYZED" ? "Analizzata" : page.status === "SKIPPED" ? "Saltata" : page.status === "FAILED" ? "Errore" : "In corso"}</span><small>livello {page.depth}</small></div></article>)}</div></section></>}</div>;
+  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : "Ripeti analisi"}</button>}</header>{error && <p className="form-error" role="alert">{error}</p>}{!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section> : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section> : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non completata</h2><p>L’analisi riparte automaticamente. Se il problema continua, trovi qui il motivo.</p></section> : <><section className="scan-summary"><article><span>Stato</span><strong className={scan.state === "COMPLETE" ? "status-ok" : "status-wait"}>{scan.state === "COMPLETE" ? "Completata" : "In corso"}</strong></article><article><span>Pagine rilevate</span><strong>{scan.discovered_pages}</strong></article><article><span>Analizzate</span><strong>{scan.analyzed_pages}</strong></article><article><span>Saltate</span><strong>{scan.skipped_pages}</strong></article><article><span>Errori</span><strong>{scan.failed_pages}</strong></article><article><span>Copertura</span><strong>{coverage}%</strong></article></section>{scan.state !== "COMPLETE" && <p className="coverage-warning">Copertura non completa. Motivo: {scan.error || "alcune pagine non sono state analizzate"}.</p>}<IntelligencePanel intelligence={intelligence} demo={isDemo} /><section className="panel"><div className="panel-heading"><div><h2>Pagine analizzate</h2><p>{scan.root_url}</p></div><span>{pages.length} pagine</span></div><div className="scan-pages">{pages.map((page) => <article className="scan-page-row" key={page.id}><div className={`scan-dot ${page.status.toLowerCase()}`} /><div className="scan-page-copy"><strong>{page.title || new URL(page.url).pathname || "/"}</strong><a href={page.url} target="_blank" rel="noreferrer">{page.url} <ExternalLink size={12} /></a>{(page.skip_reason || page.error) && <small>{page.skip_reason || page.error}</small>}</div><div className="scan-page-meta"><span>{page.status === "ANALYZED" ? "Analizzata" : page.status === "SKIPPED" ? "Saltata" : page.status === "FAILED" ? "Errore" : "In corso"}</span><small>livello {page.depth}</small></div></article>)}</div></section></>}</div>;
 }
