@@ -177,8 +177,10 @@ export default {
       const result = await cleanup(sql, body.marker);
       return json(result.body, result.status);
     } catch (reason) {
-      console.error("crawler-qa-controller", reason instanceof Error ? reason.message : "unknown");
-      return json({ error: "CONTROLLER_FAILED" }, 500);
+      const message = reason instanceof Error ? reason.message : "unknown";
+      const code = typeof reason === "object" && reason && "code" in reason ? String(reason.code || "") : "";
+      console.error("crawler-qa-controller", code, message);
+      return json({ error: "CONTROLLER_FAILED", code, message: message.slice(0, 500) }, 500);
     }
   },
 };
