@@ -96,11 +96,37 @@ assert.equal(resumed.pages.some((page) => firstBatchTerminal.includes(page.norma
 assert.equal(new Set(resumed.pages.map((page) => page.normalizedUrl)).size, resumed.pages.length, "la continuation non deve produrre duplicati nello stesso batch");
 assert.equal(calls.includes("https://example.test/sitemap.xml"), false, "la continuation deve riusare la frontiera persistita senza riparsare la sitemap");
 
+calls.length = 0;
+const singleResume = await crawlWebsite("https://example.test/", {
+  fetcher,
+  validateTarget: () => undefined,
+  maxPages: 1,
+  maxDepth: 10,
+  maxDurationMs: 10_000,
+  excludeUrls: firstBatchTerminal,
+  seedUrls: firstBatchPending,
+  includeSitemap: false,
+});
+assert.equal(
+  singleResume.pages.filter((page) => page.status !== "DISCOVERED").length,
+  1,
+  "una continuation da una pagina deve processare una sola seed persistita",
+);
+assert.equal(
+  singleResume.pages.some((page) => page.status === "DISCOVERED" && firstBatchPending.some((pending) => pending.url === page.normalizedUrl)),
+  false,
+  "le seed DISCOVERED già persistite non devono essere riemesse e riserializzate a ogni continuation",
+);
+
+
 assert.equal(SAFE_SCAN_MAX_PAGES, 4, "Cloudflare free runtime must keep crawler batches at the verified CPU-safe size");
 assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
 assert.ok(estimatedScanSubrequests(500) < CLOUDFLARE_FREE_SUBREQUEST_LIMIT, "the bounded crawl must remain below Cloudflare's 50-subrequest production ceiling");
 const crawlerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../api/_lib/crawler.ts", import.meta.url), "utf8"));
 assert.equal((crawlerSource.match(/cheerio\.load\(html\)/g) ?? []).length, 1, "each HTML page must have exactly one full Cheerio parse");
+assert.match(crawlerSource, /const queuedUrls = new Set<string>\(\)/, "continuation queue dedupe must use an O(1) set");
+assert.equal(crawlerSource.includes("queue.some((queued) => queued.url === normalized)"), false, "continuation must not dedupe the persisted frontier with repeated linear queue scans");
+assert.match(crawlerSource, /persistedSeedUrls\.has\(item\.url\)/, "persisted pending seeds must not be re-emitted as DISCOVERED");
 const workerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../cloudflare/worker.ts", import.meta.url), "utf8"));
 const contentPage = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8"));
 assert.match(workerSource, /boundedScanPageLimit\(body\.pageLimit\)/, "the server, not only the UI, must enforce the safe crawl bound");
