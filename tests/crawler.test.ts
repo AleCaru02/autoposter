@@ -62,7 +62,21 @@ assert.ok(serviceSignals?.schemaTypes.includes("Service"));
 const limited = await crawlWebsite("https://example.test/", { fetcher, validateTarget: () => undefined, maxPages: 2, maxDepth: 10, maxDurationMs: 10_000 });
 assert.equal(limited.stopReason, "PAGE_LIMIT");
 assert.equal(limited.completeCoverage, false);
-assert.equal(limited.pages.length, 2);
+assert.equal(limited.pages.filter((page) => page.status !== "DISCOVERED").length, 2);
+assert.ok(limited.pages.some((page) => page.status === "DISCOVERED"), "le URL scoperte ma non ancora visitate devono essere persistibili per il batch successivo");
+
+const firstBatchTerminal = limited.pages.filter((page) => page.status !== "DISCOVERED").map((page) => page.normalizedUrl);
+const firstBatchPending = limited.pages.filter((page) => page.status === "DISCOVERED").map((page) => ({ url: page.normalizedUrl, depth: page.depth, discoveredFrom: page.discoveredFrom }));
+const resumed = await crawlWebsite("https://example.test/", {
+  fetcher,
+  validateTarget: () => undefined,
+  maxPages: 8,
+  maxDepth: 10,
+  maxDurationMs: 10_000,
+  excludeUrls: firstBatchTerminal,
+  seedUrls: firstBatchPending,
+});
+assert.equal(resumed.pages.some((page) => firstBatchPending.some((pending) => pending.url === page.normalizedUrl) && page.status === "ANALYZED"), true, "il batch successivo deve riprendere le URL DISCOVERED");
 
 assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
 assert.ok(estimatedScanSubrequests(500) < CLOUDFLARE_FREE_SUBREQUEST_LIMIT, "the bounded crawl must remain below Cloudflare's 50-subrequest production ceiling");
@@ -70,9 +84,12 @@ const workerSource = await import("node:fs/promises").then(({ readFile }) => rea
 const contentPage = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8"));
 assert.match(workerSource, /boundedScanPageLimit\(body\.pageLimit\)/, "the server, not only the UI, must enforce the safe crawl bound");
 assert.match(workerSource, /createPublicTargetValidator/, "DNS safety checks must be memoized per hostname inside one crawl");
-assert.match(workerSource, /state=in\.\(COMPLETE,PARTIAL\).*analyzed_pages=gt\.0/, "a usable scan must be reused instead of crawling again");
+assert.match(workerSource, /state=in\.\(COMPLETE,PARTIAL,RUNNING\)/, "an existing partial scan must be resumed instead of discarded");
+assert.match(workerSource, /status !== "DISCOVERED"/, "terminal pages must be excluded from later crawl batches");
+assert.match(workerSource, /status === "DISCOVERED"/, "pending pages must seed the next crawl batch");
+assert.match(workerSource, /resolution=merge-duplicates/, "batch progress must update the same scan frontier idempotently");
 assert.equal(workerSource.includes('return json({ error: "SCAN_FAILED", detail }'), false, "raw Worker failures must not reach the customer");
-assert.match(contentPage, /pageLimit: 8/, "legacy content bootstrap must request the bounded scan explicitly");
+assert.match(contentPage, /runFullWebsiteScan/, "legacy content bootstrap must complete the site through the shared batched scanner");
 assert.equal(contentPage.includes("scanBody.detail"), false, "the content page must not display raw Cloudflare details");
 
 console.log(`PASS crawler intelligence: ${result.analyzedPages} pagine, CSS/font/logo/immagini/headings/OG/schema estratti, robots e dominio rispettati.`);
