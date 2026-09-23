@@ -1,0 +1,129 @@
+name: Crawler Production Runtime QA
+
+on:
+  push:
+    branches: [qa-crawler-runtime-20260923]
+
+concurrency:
+  group: crawler-production-runtime-qa
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - { name: Crawler static regression, run: "npm run test:crawler" }
+
+      - name: Generate ephemeral crawler QA material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -hex 24)
+          token=$(openssl rand -hex 32)
+          alias="crawlerqa-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "CRAWLER_QA_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "CRAWLER_QA_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "CRAWLER_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "CRAWLER_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "CRAWLER_QA_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'CRAWLER_QA_TOKEN=%s\n' "$token" > .crawler-runtime-secrets.env
+          chmod 600 .crawler-runtime-secrets.env
+
+      - name: Upload isolated crawler QA controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload             --config tests/wrangler.crawler-runtime.jsonc             --keep-vars             --preview-alias "$CRAWLER_PREVIEW_ALIAS"             --secrets-file .crawler-runtime-secrets.env
+
+      - name: QA preflight and scoped stale cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST             -H 'content-type: application/json' -H 'x-crawler-qa-token: wrong'             --data "{\"action\":\"state\",\"marker\":\"$CRAWLER_QA_MARKER\"}"             "$CRAWLER_QA_CONTROLLER_URL" || true)
+          if [ "$wrong" != "403" ]; then
+            echo "crawler QA token gate failed: HTTP $wrong" >&2
+            exit 1
+          fi
+
+          cleanup_status=$(curl -sS -o crawler-residue.json -w "%{http_code}" -X POST             -H 'content-type: application/json' -H "x-crawler-qa-token: $CRAWLER_QA_TOKEN_VALUE"             --data "{\"action\":\"cleanup-residue\",\"marker\":\"$CRAWLER_QA_MARKER\"}"             "$CRAWLER_QA_CONTROLLER_URL")
+          if [ "$cleanup_status" != "200" ]; then
+            cat crawler-residue.json
+            exit 1
+          fi
+
+          state_status=$(curl -sS -o crawler-baseline.json -w "%{http_code}" -X POST             -H 'content-type: application/json' -H "x-crawler-qa-token: $CRAWLER_QA_TOKEN_VALUE"             --data "{\"action\":\"state\",\"marker\":\"$CRAWLER_QA_MARKER\"}"             "$CRAWLER_QA_CONTROLLER_URL")
+          STATE_STATUS="$state_status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('crawler-baseline.json', 'utf8'));
+          if (process.env.STATE_STATUS !== '200' || body.qaUser !== 0 || body.qaProfiles !== 0 || body.recognizedQaUsers !== 0) {
+            throw new Error('crawler QA preflight residue');
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `CRAWLER_BASELINE_PROFILES=${body.profilesTotal}\nCONTROLLER_READY=true\n`);
+          console.log('CRAWLER_QA_PREFLIGHT: PASS', JSON.stringify({ profilesTotal: body.profilesTotal, recognizedQaUsers: body.recognizedQaUsers }));
+          NODE
+
+      - name: Production crawler authenticated runtime
+        run: node tests/crawler-production-runtime.mjs
+
+      - name: Cleanup crawler QA identities and data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${CONTROLLER_READY:-}" != "true" ]; then
+            echo "CRAWLER_QA_CLEANUP_SKIPPED: controller not ready"
+            exit 0
+          fi
+
+          curl -sS -o /dev/null -X POST             -H 'content-type: application/json' -H "x-crawler-qa-token: $CRAWLER_QA_TOKEN_VALUE"             --data "{\"action\":\"mark\",\"marker\":\"$CRAWLER_QA_MARKER\"}"             "$CRAWLER_QA_CONTROLLER_URL" || true
+
+          status=$(curl -sS -o crawler-cleanup.json -w "%{http_code}" -X POST             -H 'content-type: application/json' -H "x-crawler-qa-token: $CRAWLER_QA_TOKEN_VALUE"             --data "{\"action\":\"cleanup\",\"marker\":\"$CRAWLER_QA_MARKER\"}"             "$CRAWLER_QA_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('crawler-cleanup.json', 'utf8'));
+          if (process.env.CLEANUP_STATUS !== '200' || body.cleaned !== true || body.qaUser !== 0 || body.qaProfiles !== 0) {
+            throw new Error(`crawler QA cleanup failed HTTP ${process.env.CLEANUP_STATUS}: ${JSON.stringify(body)}`);
+          }
+          if (String(body.profilesTotal) !== String(process.env.CRAWLER_BASELINE_PROFILES)) {
+            throw new Error(`profile baseline mismatch ${body.profilesTotal} != ${process.env.CRAWLER_BASELINE_PROFILES}`);
+          }
+          console.log('CRAWLER_QA_CLEANUP: PASS', JSON.stringify({ profilesTotal: body.profilesTotal }));
+          NODE
+
+      - name: Post-cleanup production invariant
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o tenant-audit.json
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const body = JSON.parse(fs.readFileSync('tenant-audit.json', 'utf8'));
+          if (body?.ready !== true || body?.ownerContract?.ready !== true || Number(body.ownerContract.profilesWithoutOwner || 0) !== 0) {
+            throw new Error('post-crawler tenant invariant failed');
+          }
+          if (process.env.CRAWLER_BASELINE_PROFILES && String(body.ownerContract.profilesTotal) !== String(process.env.CRAWLER_BASELINE_PROFILES)) {
+            throw new Error(`production profile baseline mismatch ${body.ownerContract.profilesTotal} != ${process.env.CRAWLER_BASELINE_PROFILES}`);
+          }
+          console.log('CRAWLER_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ profilesTotal: body.ownerContract.profilesTotal, profilesWithoutOwner: body.ownerContract.profilesWithoutOwner }));
+          NODE
+
+      - name: Remove ephemeral credential material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .crawler-runtime-secrets.env crawler-residue.json crawler-baseline.json crawler-cleanup.json tenant-audit.json
+          echo "CRAWLER_QA_LOCAL_SECRET_CLEANUP: PASS"
