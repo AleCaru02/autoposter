@@ -46,7 +46,7 @@ assert.ok(source.includes("siteIntelligenceView"), "la UI deve usare il parser f
 assert.ok(source.includes("Cosa ho imparato dal sito"), "la site intelligence deve essere visibile all’utente");
 assert.ok(source.includes("Non vengono mostrati valori demo"), "la UI deve dichiarare la provenienza reale dei dati");
 assert.ok(source.includes("runFullWebsiteScan"), "la pagina Sito deve usare il runner condiviso di scansione completa");
-assert.ok(source.includes('scan?.state === "COMPLETE"'), "una scansione parziale deve riprendere automaticamente");
+assert.ok(source.includes('scanUiState === "IN_PROGRESS"'), "una scansione parziale deve riprendere automaticamente");
 assert.match(fullScan, /pageLimit:\s*8/, "ogni singolo batch deve restare entro il limite Cloudflare sicuro");
 assert.match(fullScan, /if \(!body\.hasMore\) return/, "il runner deve continuare finché il backend segnala pagine pendenti");
 assert.match(fullScan, /maxBatches = 260/, "deve esistere un limite fail-safe coerente con la copertura massima");
