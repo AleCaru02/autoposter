@@ -80,6 +80,7 @@ assert.ok(limited.pages.some((page) => page.status === "DISCOVERED"), "le URL sc
 
 const firstBatchTerminal = limited.pages.filter((page) => page.status !== "DISCOVERED").map((page) => page.normalizedUrl);
 const firstBatchPending = limited.pages.filter((page) => page.status === "DISCOVERED").map((page) => ({ url: page.normalizedUrl, depth: page.depth, discoveredFrom: page.discoveredFrom }));
+calls.length = 0;
 const resumed = await crawlWebsite("https://example.test/", {
   fetcher,
   validateTarget: () => undefined,
@@ -88,11 +89,14 @@ const resumed = await crawlWebsite("https://example.test/", {
   maxDurationMs: 10_000,
   excludeUrls: firstBatchTerminal,
   seedUrls: firstBatchPending,
+  includeSitemap: false,
 });
 assert.equal(resumed.pages.some((page) => firstBatchPending.some((pending) => pending.url === page.normalizedUrl) && page.status === "ANALYZED"), true, "il batch successivo deve riprendere le URL DISCOVERED");
 assert.equal(resumed.pages.some((page) => firstBatchTerminal.includes(page.normalizedUrl) && page.status === "ANALYZED"), false, "le pagine terminali del batch precedente non devono essere elaborate di nuovo");
 assert.equal(new Set(resumed.pages.map((page) => page.normalizedUrl)).size, resumed.pages.length, "la continuation non deve produrre duplicati nello stesso batch");
+assert.equal(calls.includes("https://example.test/sitemap.xml"), false, "la continuation deve riusare la frontiera persistita senza riparsare la sitemap");
 
+assert.equal(SAFE_SCAN_MAX_PAGES, 4, "Cloudflare free runtime must keep crawler batches at the verified CPU-safe size");
 assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
 assert.ok(estimatedScanSubrequests(500) < CLOUDFLARE_FREE_SUBREQUEST_LIMIT, "the bounded crawl must remain below Cloudflare's 50-subrequest production ceiling");
 const crawlerSource = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../api/_lib/crawler.ts", import.meta.url), "utf8"));
@@ -104,6 +108,7 @@ assert.match(workerSource, /createPublicTargetValidator/, "DNS safety checks mus
 assert.match(workerSource, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING\)/, "an existing partial scan must be resumed instead of discarded");
 assert.match(workerSource, /status !== "DISCOVERED"/, "terminal pages must be excluded from later crawl batches");
 assert.match(workerSource, /status === "DISCOVERED"/, "pending pages must seed the next crawl batch");
+assert.match(workerSource, /includeSitemap: pending\.length === 0/, "continuation must not re-fetch and reparse sitemap seeds already persisted in the frontier");
 assert.match(workerSource, /resolution=merge-duplicates/, "batch progress must update the same scan frontier idempotently");
 assert.match(workerSource, /const state = hasMore \? "PARTIAL"/, "BATCH_PENDING must remain a non-terminal PARTIAL scan state");
 assert.match(workerSource, /error: hasMore \? "BATCH_PENDING"/, "pending continuation must persist the BATCH_PENDING checkpoint");
