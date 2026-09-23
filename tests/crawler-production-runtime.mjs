@@ -101,12 +101,12 @@ async function controller(action) {
   return body;
 }
 
-async function productionScan(token, profileId, forceNew) {
+async function productionScan(token, profileId, forceNew, pageLimit = 8) {
   const started = Date.now();
   const response = await fetch(`${APP_BASE}/api/website-scan`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ profileId, pageLimit: 8, forceNew }),
+    body: JSON.stringify({ profileId, pageLimit, forceNew }),
   });
   const body = await readJson(response);
   const elapsedMs = Date.now() - started;
@@ -170,7 +170,9 @@ for (let batch = 0; batch < 40; batch += 1) {
     assert.ok(pendingResponse.ok && Array.isArray(pendingRows), "pending batch inspection failed");
     console.log("CRAWLER_NEXT_BATCH", JSON.stringify({ batch: batch + 1, urls: pendingRows.map((row) => ({ url: row.normalized_url, depth: row.depth })) }));
   }
-  const { body, elapsedMs } = await productionScan(identity.token, profileId, batch === 0);
+  const requestedPageLimit = batch < 9 ? 8 : 1;
+  console.log("CRAWLER_REQUEST", JSON.stringify({ batch: batch + 1, pageLimit: requestedPageLimit }));
+  const { body, elapsedMs } = await productionScan(identity.token, profileId, batch === 0, requestedPageLimit);
   assert.equal(typeof body.scanId, "string", "scanId missing");
   if (scanId === null) scanId = body.scanId;
   assert.equal(body.scanId, scanId, "continuation switched to a different scan");
