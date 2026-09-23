@@ -21,11 +21,11 @@ const ERROR = new Set(["ERROR", "FAILED", "PROVIDER_ERROR"]);
 export function socialProviderUiState(provider: SocialProviderSnapshot, now = Date.now()): SocialProviderUiState {
   const status = (provider.status || "").trim().toUpperCase();
 
+  if (!provider.configured) return "UNAVAILABLE";
   if (RECONNECT.has(status) || status.includes("RECONNECT_REQUIRED") || status.endsWith("_EXPIRED")) return "RECONNECT";
   if (ERROR.has(status) || status.endsWith("_ERROR") || status.endsWith("_FAILED")) return "ERROR";
 
   if (status === "ACTIVE") {
-    if (!provider.configured) return "UNAVAILABLE";
     if (provider.provider !== "GBP" && provider.expiresAt) {
       const expiresAt = Date.parse(provider.expiresAt);
       if (Number.isFinite(expiresAt) && expiresAt <= now) return "RECONNECT";
@@ -34,7 +34,6 @@ export function socialProviderUiState(provider: SocialProviderSnapshot, now = Da
   }
 
   if (CONNECTING.has(status)) return provider.configured ? "CONNECTING" : "UNAVAILABLE";
-  if (!provider.configured) return "UNAVAILABLE";
   if (DISCONNECTED.has(status)) return "DISCONNECTED";
   return "ERROR";
 }
