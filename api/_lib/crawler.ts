@@ -63,6 +63,7 @@ export type CrawlOptions = {
   seedUrls?: QueueItem[];
   excludeUrls?: string[];
   maxDiscoveredPages?: number;
+  maxSitemapSeeds?: number;
 };
 
 const TRACKING_PARAMS = new Set(["fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid"]);
@@ -316,6 +317,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const maxSitemapFiles = Math.min(Math.max(options.maxSitemapFiles ?? 12, 0), 12);
   const maxStylesheets = Math.min(Math.max(options.maxStylesheets ?? MAX_STYLESHEETS, 0), MAX_STYLESHEETS);
   const maxDiscoveredPages = Math.min(Math.max(options.maxDiscoveredPages ?? 2_000, maxPages), 2_000);
+  const maxSitemapSeeds = Math.min(Math.max(options.maxSitemapSeeds ?? 250, maxPages), 500);
   const root = new URL(input);
   if (root.protocol !== "http:" && root.protocol !== "https:") throw new Error("INVALID_ROOT_PROTOCOL");
   root.hash = "";
@@ -340,7 +342,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
   const robotsText = await fetchOptionalText(new URL("/robots.txt", root), fetcher, options.validateTarget, 100_000);
   const disallow = robotsText ? parseRobots(robotsText) : [];
   if (options.includeSitemap !== false) {
-    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxDiscoveredPages, maxSitemapFiles, excluded)) {
+    for (const url of await sitemapSeeds(root, fetcher, options.validateTarget, maxSitemapSeeds, maxSitemapFiles, excluded)) {
       if (url !== normalizedRoot) enqueue({ url, depth: 1, discoveredFrom: new URL("/sitemap.xml", root).toString() });
     }
   }
