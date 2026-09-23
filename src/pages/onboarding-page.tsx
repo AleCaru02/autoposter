@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Globe2, LoaderCircle, RefreshCw, Sparkles, WandSparkles } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { runFullWebsiteScan } from "../lib/full-website-scan";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
-type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; discoveredPages?: number; error?: string; message?: string };
 type AnalysisResponse = {
   pagesAnalyzed?: number;
   analysis?: {
@@ -73,15 +73,18 @@ export function OnboardingPage() {
     setError(null);
     const token = await jwt();
     setStage("CRAWL");
-    const scanResponse = await fetch("/api/website-scan", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ profileId, pageLimit: 8 }),
+    const scanBody = await runFullWebsiteScan({
+      profileId,
+      token,
+      onProgress: (batch) => setPagesAnalyzed(batch.analyzedPages ?? 0),
     });
-    const scanBody = await scanResponse.json() as ScanResponse;
-    if (!scanResponse.ok) throw new Error(scanBody.message || "Non sono riuscito ad analizzare il sito. Riprova tra poco.");
-    const hints = scanBody.visualHints ?? { colors: [], socialLinks: {}, logoUrl: null };
-    setVisualHints({ ...hints, colors: concreteColors(hints.colors) });
+    const hints = {
+      ...scanBody.visualHints,
+      colors: scanBody.visualHints.colors ?? [],
+      socialLinks: scanBody.visualHints.socialLinks ?? {},
+      logoUrl: scanBody.visualHints.logoUrl ?? null,
+    };
+    setVisualHints({ colors: concreteColors(hints.colors), socialLinks: hints.socialLinks, logoUrl: hints.logoUrl });
     setPagesAnalyzed(scanBody.analyzedPages ?? 0);
 
     setStage("ANALYZE");
