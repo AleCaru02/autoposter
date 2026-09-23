@@ -49,7 +49,7 @@ export type CrawlResult = {
   visualHints: WebsiteVisualHints;
 };
 
-type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
+export type QueueItem = { url: string; depth: number; discoveredFrom: string | null };
 export type CrawlOptions = {
   fetcher?: typeof fetch;
   validateTarget?: (url: URL) => Promise<void> | void;
