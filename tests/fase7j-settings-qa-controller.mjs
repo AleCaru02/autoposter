@@ -25,6 +25,24 @@ async function state(sql, marker) {
   return { qaUsers: users.length, recognizedQaUsers: all.length, profilesTotal: Number(row.profiles_total || 0), jobsTotal: Number(row.jobs_total || 0), snapshotsTotal: Number(row.snapshots_total || 0), targetsTotal: Number(row.targets_total || 0), qaProfiles: Number(row.qa_profiles || 0), qaEntitlements: Number(row.qa_entitlements || 0), qaUsage: Number(row.qa_usage || 0) };
 }
 
+async function tenantInventory(sql) {
+  const rows = await sql`select
+    (select count(*)::int from public.profiles) profiles_total,
+    (select count(*)::int from public.profile_tenant_modes) modes_total,
+    (select count(*)::int from public.profile_tenant_modes where tenant_type='CUSTOMER_REAL') customer_real,
+    (select count(*)::int from public.profile_tenant_modes where tenant_type='QA_EPHEMERAL') qa_ephemeral,
+    (select count(*)::int from public.profile_tenant_modes where tenant_type='DEMO_PERSISTENT') demo_persistent,
+    (select count(*)::int from public.profiles p left join public.profile_tenant_modes m on m.profile_id=p.id where m.profile_id is null) profiles_without_mode,
+    (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null) current_packages,
+    (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='personal_operator' and package_version=1) personal_operator,
+    (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='commercial_guarded' and package_version=1) commercial_guarded,
+    (select count(*)::int from public.profile_entitlement_package_assignments where revoked_at is null and package_key='demo_persistent' and package_version=1) demo_package,
+    (select count(*)::int from public.profiles p left join public.profile_entitlement_package_assignments a on a.profile_id=p.id and a.revoked_at is null where a.id is null) profiles_without_current_package,
+    (select count(*)::int from public.profiles p join public.profile_tenant_modes m on m.profile_id=p.id join public.profile_entitlement_package_assignments a on a.profile_id=p.id and a.revoked_at is null where m.tenant_type='CUSTOMER_REAL' and a.package_key='personal_operator' and a.package_version=1) customer_personal_operator`;
+  const row = rows[0] || {};
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), Number(value || 0)]));
+}
+
 async function ownedProfile(sql, marker, profileId) {
   if (!UUID.test(profileId || "")) return false;
   const email = `settings7j-${marker}-owner@example.invalid`;
@@ -63,6 +81,7 @@ export default { async fetch(request, env) {
   const sql = neon(env.DATABASE_URL);
   try {
     if (body.action === "preflight" || body.action === "state") return json(await state(sql, body.marker));
+    if (body.action === "inventory") return json(await tenantInventory(sql));
     if (body.action === "fixture") return json(await fixture(sql, body.marker, body.profileId));
     if (body.action === "cleanup" || body.action === "cleanup-residue") { const users = body.action === "cleanup" ? await qaUsers(sql, body.marker) : await qaUsers(sql); await cleanupUsers(sql, users); return json({ cleaned: true, ...await state(sql, body.marker) }); }
     return json({ error: "INVALID_ACTION" }, 400);
