@@ -9,8 +9,6 @@ import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, t
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 import { ManualContentComposer } from "../components/manual-content-composer";
 
-type VisualHints = { colors: string[]; socialLinks: Record<string, string>; logoUrl: string | null };
-type ScanResponse = { visualHints?: VisualHints; analyzedPages?: number; error?: string; message?: string };
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
 
 const PROVIDER_LABELS: Record<string, string> = {
