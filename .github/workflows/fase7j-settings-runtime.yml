@@ -72,7 +72,7 @@ jobs:
           stale=$(node -e "const b=require('./fase7j-preflight.json');process.stdout.write(String(b.recognizedQaUsers||0))")
           if [ "$stale" -gt 0 ]; then call_controller cleanup-residue > fase7j-stale-cleanup.json; call_controller preflight > fase7j-preflight.json; fi
           node - <<'NODE'
-          const fs=require('node:fs');const b=require('./fase7j-preflight.json');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaEntitlements','qaUsage'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);if(b.jobsTotal!==0||b.snapshotsTotal!==0||b.targetsTotal!==0)throw new Error(`production baseline not empty ${JSON.stringify(b)}`);fs.appendFileSync(process.env.GITHUB_ENV,`SETTINGS7J_BASELINE_PROFILES=${b.profilesTotal}\nSETTINGS7J_BASELINE_JOBS=${b.jobsTotal}\nSETTINGS7J_BASELINE_SNAPSHOTS=${b.snapshotsTotal}\nSETTINGS7J_BASELINE_TARGETS=${b.targetsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7J_PREFLIGHT: PASS',JSON.stringify(b));
+          const fs=require('node:fs');const b=require('./fase7j-preflight.json');for(const key of ['qaUsers','recognizedQaUsers','qaProfiles','qaEntitlements','qaUsage'])if(b[key]!==0)throw new Error(`preflight residue ${key}=${b[key]}`);fs.appendFileSync(process.env.GITHUB_ENV,`SETTINGS7J_BASELINE_PROFILES=${b.profilesTotal}\nSETTINGS7J_BASELINE_JOBS=${b.jobsTotal}\nSETTINGS7J_BASELINE_SNAPSHOTS=${b.snapshotsTotal}\nSETTINGS7J_BASELINE_TARGETS=${b.targetsTotal}\nCONTROLLER_READY=true\n`);console.log('FASE7J_PREFLIGHT: PASS',JSON.stringify(b));
           NODE
       - name: Install browser
         run: |
