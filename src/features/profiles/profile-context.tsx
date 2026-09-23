@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { NEON_DATA_API_URL, neonClient } from "../../lib/neon-client";
+import { neonClient } from "../../lib/neon-client";
 import { authenticatedApiToken } from "../../lib/auth-token";
 
 export type Profile = {
@@ -49,21 +49,6 @@ const PROFILE_COLUMNS = "id,name,slug,website_url,industry,timezone,locale,onboa
 
 type PendingOnboardingOperation = { operationId: string; fingerprint: string };
 
-type ProfileRow = Omit<Profile, "tenant_type" | "external_publishing_enabled">;
-type TenantModeRow = Pick<Profile, "tenant_type" | "external_publishing_enabled"> & { profile_id: string };
-
-async function authenticatedProfileRows<T>(path: string, token: string): Promise<T[]> {
-  const response = await fetch(`${NEON_DATA_API_URL}/${path}`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/json",
-      "cache-control": "no-store",
-    },
-  });
-  if (!response.ok) throw new Error(`PROFILE_DATA_API_${response.status}`);
-  return response.json() as Promise<T[]>;
-}
-
 function provisioningOperation(fingerprint: string) {
   try {
     const existing = JSON.parse(sessionStorage.getItem(ONBOARDING_OPERATION_KEY) || "null") as PendingOnboardingOperation | null;
@@ -94,19 +79,18 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const token = await authenticatedApiToken();
-      const [profileRows, modeRows] = await Promise.all([
-        authenticatedProfileRows<ProfileRow>(`profiles?select=${encodeURIComponent(PROFILE_COLUMNS)}&archived_at=is.null&order=created_at.asc`, token),
-        authenticatedProfileRows<TenantModeRow>("profile_tenant_modes?select=profile_id,tenant_type,external_publishing_enabled", token),
-      ]);
-      const modeByProfile = new Map(modeRows.map((mode) => [mode.profile_id, mode]));
-      const next = profileRows.map((row) => {
-        const mode = modeByProfile.get(row.id);
-        return {
-          ...row,
-          tenant_type: mode?.tenant_type ?? "CUSTOMER_REAL",
-          external_publishing_enabled: mode?.external_publishing_enabled ?? true,
-        };
-      }) as Profile[];
+      const response = await fetch("/api/profile-bootstrap", {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/json",
+          "cache-control": "no-store",
+        },
+        cache: "no-store",
+      });
+      const body = await response.json() as { profiles?: Profile[]; error?: string };
+      if (!response.ok || !Array.isArray(body.profiles)) throw new Error(body.error || `PROFILE_BOOTSTRAP_${response.status}`);
+      const next = body.profiles;
       setProfiles(next);
       setSelectedProfileIdState((current) => {
         const urlProfileId = profileIdFromUrl();
