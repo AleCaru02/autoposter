@@ -274,4 +274,3 @@ export function SocialPage() {
         </div>}
   </div>;
 }
-}
