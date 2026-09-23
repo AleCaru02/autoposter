@@ -118,6 +118,53 @@ assert.equal(
   "le seed DISCOVERED già persistite non devono essere riemesse e riserializzate a ogni continuation",
 );
 
+const redirectCalls: string[] = [];
+const redirectFetcher = (async (input: string | URL | Request) => {
+  const requestUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  redirectCalls.push(requestUrl);
+  if (requestUrl === "https://redirect.test/robots.txt") return new Response("User-agent: *", { headers: { "content-type": "text/plain" } });
+  if (requestUrl === "https://redirect.test/") {
+    return new Response(html("Redirect home", '<a href="/legacy-servizi">Legacy</a><a href="/servizi">Servizi</a>'), { headers: { "content-type": "text/html" } });
+  }
+  if (requestUrl === "https://redirect.test/legacy-servizi") {
+    const response = new Response(html("Servizi", "<h1>Servizi canonici</h1>"), { headers: { "content-type": "text/html" } });
+    Object.defineProperty(response, "url", { value: "https://redirect.test/servizi" });
+    return response;
+  }
+  if (requestUrl === "https://redirect.test/servizi") {
+    return new Response(html("Servizi", "<h1>Servizi canonici</h1>"), { headers: { "content-type": "text/html" } });
+  }
+  return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
+}) as typeof fetch;
+
+const redirectResult = await crawlWebsite("https://redirect.test/", {
+  fetcher: redirectFetcher,
+  validateTarget: () => undefined,
+  maxPages: 10,
+  maxDepth: 10,
+  maxDurationMs: 10_000,
+  includeSitemap: false,
+});
+assert.equal(
+  redirectResult.pages.filter((page) => page.status === "ANALYZED" && page.normalizedUrl === "https://redirect.test/servizi").length,
+  1,
+  "più URL che convergono sullo stesso redirect finale devono produrre una sola pagina canonica analizzata",
+);
+assert.equal(
+  redirectResult.pages.some((page) => page.normalizedUrl === "https://redirect.test/legacy-servizi" && page.status === "SKIPPED" && page.skipReason === "REDIRECT_CANONICAL"),
+  true,
+  "l'alias di redirect deve essere chiuso come alias e non duplicare il contenuto canonico",
+);
+assert.equal(
+  redirectCalls.filter((url) => url === "https://redirect.test/servizi").length,
+  0,
+  "la destinazione canonica già risolta dal redirect non deve essere richiesta una seconda volta nello stesso batch",
+);
+assert.equal(
+  new Set(redirectResult.pages.filter((page) => page.status === "ANALYZED").map((page) => page.url)).size,
+  redirectResult.pages.filter((page) => page.status === "ANALYZED").length,
+  "le pagine ANALYZED non devono contenere URL finali duplicate",
+);
 
 assert.equal(SAFE_SCAN_MAX_PAGES, 4, "Cloudflare free runtime must keep crawler batches at the verified CPU-safe size");
 assert.equal(boundedScanPageLimit(500), SAFE_SCAN_MAX_PAGES, "a legacy client cannot request hundreds of pages in one Worker invocation");
