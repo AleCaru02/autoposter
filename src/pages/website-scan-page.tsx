@@ -226,10 +226,9 @@ export function WebsiteScanPage() {
     const controller = new AbortController();
     scanAbortRef.current = controller;
     try {
-      const crawlToken = await authenticatedApiToken();
       const body = await runFullWebsiteScan({
         profileId: selectedProfile.id,
-        token: crawlToken,
+        getToken: authenticatedApiToken,
         forceNew: !automatic,
         signal: controller.signal,
         onProgress: (batch) => {
@@ -241,7 +240,7 @@ export function WebsiteScanPage() {
             analyzed_pages: batch.analyzedPages ?? current?.analyzed_pages ?? 0,
             skipped_pages: batch.skippedPages ?? current?.skipped_pages ?? 0,
             failed_pages: batch.failedPages ?? current?.failed_pages ?? 0,
-            page_limit: current?.page_limit ?? 8,
+            page_limit: current?.page_limit ?? 4,
             error: batch.hasMore ? "BATCH_PENDING" : (batch.failedPages ?? 0) > 0 ? "PAGE_ERRORS" : null,
             created_at: current?.created_at ?? new Date().toISOString(),
             finished_at: batch.hasMore ? null : current?.finished_at ?? new Date().toISOString(),
