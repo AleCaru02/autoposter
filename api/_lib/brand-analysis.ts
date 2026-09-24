@@ -62,9 +62,9 @@ export type BrandAnalysisResult = {
 
 const MODEL = "gpt-5.6-terra";
 const MAX_CONTEXT_CHARS = 110_000;
-const MAX_PAGE_CHARS = 2_800;
-const MAX_PAGES = 80;
-const MAX_OUTPUT_TOKENS = 8_000;
+const MAX_PAGE_CHARS = 1_800;
+const MAX_PAGES = 160;
+const MAX_OUTPUT_TOKENS = 16_000;
 
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -108,6 +108,7 @@ const OUTPUT_SCHEMA = {
     visualStyleSummary: { type: "string" },
     pageInsights: {
       type: "array",
+      maxItems: 160,
       items: {
         type: "object",
         additionalProperties: false,
@@ -127,16 +128,25 @@ const OUTPUT_SCHEMA = {
 } as const;
 
 function compactPages(pages: BrandAnalysisInput["pages"]) {
+  const selected = pages.slice(0, MAX_PAGES);
+  const overheadBudget = Math.max(selected.length * 180, 1);
+  const availableForText = Math.max(MAX_CONTEXT_CHARS - overheadBudget, selected.length * 420);
+  const adaptivePageChars = Math.min(MAX_PAGE_CHARS, Math.max(420, Math.floor(availableForText / Math.max(selected.length, 1))));
   const chunks: string[] = [];
   let used = 0;
-  for (const page of pages.slice(0, MAX_PAGES)) {
-    const text = page.text.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_CHARS);
-    if (!text) continue;
-    const chunk = `URL: ${page.url}\nTITLE: ${page.title ?? ""}\nCONTENT: ${text}`;
-    if (used + chunk.length > MAX_CONTEXT_CHARS) break;
+
+  for (const page of selected) {
+    const clean = page.text.replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    const overhead = `URL: ${page.url}\nTITLE: ${page.title ?? ""}\nCONTENT: `;
+    const remaining = Math.max(MAX_CONTEXT_CHARS - used - overhead.length, 0);
+    if (remaining <= 0) break;
+    const text = clean.slice(0, Math.min(adaptivePageChars, remaining));
+    const chunk = `${overhead}${text}`;
     chunks.push(chunk);
     used += chunk.length;
   }
+
   return chunks.join("\n\n--- PAGE ---\n\n");
 }
 
@@ -172,6 +182,7 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
     "Ricostruisci attività, modello di business, servizi, target, tono di voce, differenziatori, proposte di valore e obiettivi social plausibili.",
     "Costruisci contentPillars come tassonomia editoriale riutilizzabile: ogni pilastro deve essere specifico, distinto e collegato agli URL reali che lo supportano.",
     "Per pageInsights restituisci un elemento per ogni pagina inclusa nel contesto, mantenendo esattamente l'URL della fonte; classifica tipo pagina, intento, temi e servizi citati.",
+    "Mantieni ogni pageInsight molto conciso: summary breve, massimo 4 topics e massimo 4 servicesMentioned. Evita ripetizioni fra pagine.",
     "Non inventare sedi, servizi, prezzi, risultati, certificazioni, clienti o claim non presenti nelle fonti.",
     "Se un dato non è verificabile, restituisci null o una lista vuota.",
     "Gli obiettivi devono essere suggerimenti operativi per la strategia social, non fatti attribuiti all'azienda.",
@@ -191,10 +202,10 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
     body: JSON.stringify({
       model: MODEL,
       store: false,
-      reasoning: { effort: "medium" },
+      reasoning: { effort: "low" },
       instructions,
       input,
-      text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_brand_analysis", strict: true, schema: OUTPUT_SCHEMA } },
+      text: { verbosity: "low", format: { type: "json_schema", name: "post_automatici_brand_analysis", strict: true, schema: OUTPUT_SCHEMA } },
       max_output_tokens: MAX_OUTPUT_TOKENS,
     }),
   });
@@ -211,6 +222,7 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
   }
 
   const body = JSON.parse(raw) as Record<string, unknown>;
+  if (body.status === "incomplete") throw new Error("OPENAI_INCOMPLETE_BRAND_ANALYSIS");
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_BRAND_ANALYSIS");
   const analysis = validate(JSON.parse(outputText));

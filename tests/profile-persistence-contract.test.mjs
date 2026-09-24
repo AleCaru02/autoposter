@@ -11,18 +11,18 @@ const profiles = fs.readFileSync("src/features/profiles/profile-context.tsx", "u
 const autosave = fs.readFileSync("src/lib/use-autosave-draft.ts", "utf8");
 
 // Onboarding with a website must crawl before brand analysis/completion.
+const brandStart = onboarding.indexOf("async function analyzeBrandOnly");
 const analyzeStart = onboarding.indexOf("async function analyzeProfile");
 const analyzeEnd = onboarding.indexOf("async function completeWithoutWebsite");
+const brandBlock = onboarding.slice(brandStart, analyzeStart);
 const analyzeBlock = onboarding.slice(analyzeStart, analyzeEnd);
-assert.ok(analyzeStart >= 0 && analyzeEnd > analyzeStart, "onboarding analyzeProfile flow must exist");
+assert.ok(brandStart >= 0 && analyzeStart > brandStart && analyzeEnd > analyzeStart, "onboarding brand and scan flows must exist");
 assert.ok(analyzeBlock.indexOf("runFullWebsiteScan") >= 0, "onboarding must scan the website");
-assert.ok(
-  analyzeBlock.indexOf("runFullWebsiteScan") < analyzeBlock.indexOf('fetch("/api/onboarding-analyze"'),
-  "onboarding must complete the persisted site crawl before brand analysis",
-);
 assert.match(analyzeBlock, /runFullWebsiteScan\([\s\S]*getToken: jwt/, "new-activity onboarding must acquire fresh authentication throughout the long site crawl");
-assert.match(analyzeBlock, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)[\s\S]*const analysisToken = await jwt\(\)/, "brand analysis after onboarding crawl must obtain a fresh token and retry auth once");
-assert.match(analyzeBlock, /analysisResponse\.status === 401 \|\| analysisBody\.error === "AUTH_REQUIRED"/, "new-activity brand auth retry must be limited to AUTH_REQUIRED");
+assert.match(analyzeBlock, /await analyzeBrandOnly\(profileId, hints, scanBody\.analyzedPages \?\? 0\)/, "onboarding must start brand analysis only after the persisted site crawl resolves");
+assert.match(brandBlock, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)[\s\S]*const analysisToken = await jwt\(\)/, "brand analysis must use fresh authentication and bounded automatic retries");
+assert.match(brandBlock, /BRAND_ANALYSIS_IN_PROGRESS[\s\S]*ONBOARDING_ANALYSIS_FAILED/, "brand retry must absorb transient in-progress and provider failures");
+assert.match(onboarding, /failedPhase === "ANALYZE"[\s\S]*analyzeBrandOnly\(createdProfileId, visualHints, pagesAnalyzed\)/, "a failed brand phase must retry without re-running the completed site crawl");
 assert.match(
   onboarding,
   /if \(!website\.trim\(\)\)[\s\S]*completeWithoutWebsite\(created\.id\)[\s\S]*await analyzeProfile\(created\.id\)/,
@@ -30,8 +30,8 @@ assert.match(
 );
 assert.match(
   onboarding,
-  /if \(profile\.website_url\?\.trim\(\)\) await analyzeProfile\(createdProfileId\)/,
-  "an interrupted onboarding must resume the same persisted website scan",
+  /else \{[\s\S]*await analyzeProfile\(createdProfileId\)/,
+  "an interrupted crawl must resume the same persisted website scan",
 );
 
 // The Site page must restore persisted state from DB for the selected profile.

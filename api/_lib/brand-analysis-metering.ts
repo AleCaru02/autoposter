@@ -63,7 +63,15 @@ export class BrandAnalysisMetering {
       const metadata = existing.metadata && typeof existing.metadata === "object" ? existing.metadata as Record<string, unknown> : {};
       const cached = metadata.cached_result && typeof metadata.cached_result === "object" ? metadata.cached_result as CachedResult : null;
       if (existing.state === "COMMITTED" && cached) return { status: "COMPLETED", eventId, operationKey, cached };
-      if (existing.state === "RESERVED") return { status: "IN_PROGRESS", eventId, operationKey };
+      if (existing.state === "RESERVED") {
+        const createdAt = Date.parse(existing.created_at);
+        const stale = Number.isFinite(createdAt) && Date.now() - createdAt > 10 * 60 * 1000;
+        if (stale) {
+          await this.release(eventId, "STALE_RESERVED_RECOVERY");
+          continue;
+        }
+        return { status: "IN_PROGRESS", eventId, operationKey };
+      }
 
       // RELEASED events must remain immutable for audit/history, but they must not
       // permanently poison the idempotency key for this scan. Move to the next
