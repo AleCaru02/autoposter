@@ -286,7 +286,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "https://autoposter.02alessandrocaruso.workers.dev/api/internal/fase3/bootstrap-super-admin" || true)
+          status=""
+          for attempt in {1..12}; do
+            status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "https://autoposter.02alessandrocaruso.workers.dev/api/internal/fase3/bootstrap-super-admin" || true)
+            if [ "$status" = "404" ]; then break; fi
+            sleep 5
+          done
           if [ "$status" != "404" ]; then
             echo "Bootstrap route did not fail closed after secret removal: HTTP $status" >&2
             exit 1
