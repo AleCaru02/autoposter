@@ -9,7 +9,7 @@ type Env = { DATABASE_URL?: string; OPENAI_API_KEY?: string };
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
-type ExistingBrand = { profile_id: string; social_links: unknown };
+type ExistingBrand = { profile_id: string; social_links: unknown; goals: unknown; visual_identity: unknown };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -125,9 +125,24 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
     await meter.markProviderStarted(eventId);
     const result = await analyzeBrandFromWebsite({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, websiteUrl: profile.website_url, industry: profile.industry, pages, visualHints });
     await meter.persistTechnicalUsage(profileId, eventId, result, { scan_id: scan.id, pages_analyzed: pages.length });
-    const existingRows = await rows<ExistingBrand>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links&limit=1`, token);
-    const existingSocials = existingRows[0]?.social_links && typeof existingRows[0].social_links === "object" ? existingRows[0].social_links as Record<string, unknown> : {};
+    const existingRows = await rows<ExistingBrand>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=profile_id,social_links,goals,visual_identity&limit=1`, token);
+    const existingBrand = existingRows[0] ?? null;
+    const existingSocials = existingBrand?.social_links && typeof existingBrand.social_links === "object" ? existingBrand.social_links as Record<string, unknown> : {};
     const socialLinks = { ...visualHints.socialLinks, ...Object.fromEntries(Object.entries(existingSocials).filter(([, item]) => typeof item === "string" && item)) };
+    const existingVisualIdentity = existingBrand?.visual_identity && typeof existingBrand.visual_identity === "object" ? existingBrand.visual_identity as Record<string, unknown> : {};
+    const existingGoals = stringList(existingBrand?.goals, 40);
+    const previousDetectedGoals = stringList(existingVisualIdentity.detectedGoals, 40);
+    const detectedGoals = result.analysis.goals;
+    const hadPreviousAnalysis = previousDetectedGoals.length > 0
+      || typeof existingVisualIdentity.analyzedAt === "string"
+      || existingVisualIdentity.source === "website_scan";
+    const preservedOtherGoals = existingGoals.filter((goal) => !previousDetectedGoals.includes(goal) && !detectedGoals.includes(goal));
+    const activeDetectedGoals = !hadPreviousAnalysis
+      ? detectedGoals
+      : previousDetectedGoals.length > 0
+        ? detectedGoals.filter((goal) => !previousDetectedGoals.includes(goal) || existingGoals.includes(goal))
+        : detectedGoals.filter((goal) => existingGoals.includes(goal));
+    const activeGoals = [...new Set([...preservedOtherGoals, ...activeDetectedGoals])];
     const now = new Date().toISOString();
     const visualIdentity = {
       source: "website_scan",
@@ -140,6 +155,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
       pageSignals: visualHints.pageSignals,
       pageInsights: result.analysis.pageInsights,
       contentPillars: result.analysis.contentPillars,
+      detectedGoals,
       summary: result.analysis.visualStyleSummary,
       analyzedAt: now,
     };
@@ -156,7 +172,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
       visual_identity: visualIdentity,
       tone_of_voice: result.analysis.toneOfVoice,
       social_links: socialLinks,
-      goals: result.analysis.goals,
+      goals: activeGoals,
       updated_at: now,
     };
 
