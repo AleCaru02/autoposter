@@ -68,15 +68,13 @@ function profileIdFromUrl() {
   }
 }
 
-export function ProfileProvider({ children }: { children: ReactNode }) {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [selectedProfileId, setSelectedProfileIdState] = useState<string | null>(() => profileIdFromUrl() || localStorage.getItem(ACTIVE_PROFILE_KEY));
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = [0, 250, 700] as const;
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+async function fetchBootstrappedProfiles(): Promise<Profile[]> {
+  let lastError: unknown = new Error("PROFILE_BOOTSTRAP_FAILED");
+  for (let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS.length; attempt += 1) {
+    const delay = PROFILE_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
+    if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay));
     try {
       const token = await authenticatedApiToken();
       const response = await fetch("/api/profile-bootstrap", {
@@ -88,9 +86,27 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         },
         cache: "no-store",
       });
-      const body = await response.json() as { profiles?: Profile[]; error?: string };
+      const body = await response.json().catch(() => ({})) as { profiles?: Profile[]; error?: string };
       if (!response.ok || !Array.isArray(body.profiles)) throw new Error(body.error || `PROFILE_BOOTSTRAP_${response.status}`);
-      const next = body.profiles;
+      return body.profiles;
+    } catch (reason) {
+      lastError = reason;
+    }
+  }
+  throw lastError;
+}
+
+export function ProfileProvider({ children }: { children: ReactNode }) {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selectedProfileId, setSelectedProfileIdState] = useState<string | null>(() => profileIdFromUrl() || localStorage.getItem(ACTIVE_PROFILE_KEY));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await fetchBootstrappedProfiles();
       setProfiles(next);
       setSelectedProfileIdState((current) => {
         const urlProfileId = profileIdFromUrl();
