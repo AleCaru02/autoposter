@@ -59,9 +59,16 @@ assert.ok(source.includes("runnerInFlightRef"), "la continuation non deve avviar
 assert.ok(source.includes("Riprova solo analisi brand"), "un errore brand deve poter essere ritentato senza rifare il crawler");
 assert.ok(source.includes("async function retryBrandAnalysis()"), "la pagina Sito deve avere un retry brand dedicato");
 const retryBrandBlock = source.slice(source.indexOf("async function retryBrandAnalysis()"), source.indexOf("async function startScan"));
-assert.ok(retryBrandBlock.includes('fetch("/api/onboarding-analyze"'), "il retry brand deve richiamare direttamente l'analisi persistita");
+assert.ok(retryBrandBlock.includes("requestBrandAnalysis"), "il retry brand deve usare la chiamata autenticata dedicata");
 assert.equal(retryBrandBlock.includes("runFullWebsiteScan"), false, "il retry brand non deve rilanciare la scansione completa");
 assert.ok(source.includes("setBrandVisualHints(storedVisualHints(brandRow))"), "il retry deve preservare i segnali visivi già persistiti");
+assert.ok(source.includes("setBrandAnalyzedAt(brandAnalysisTimestamp(brandRow))"), "la pagina deve persistere logicamente lo stato brand confrontando analyzedAt con lo scan");
+assert.match(source, /function brandNeedsAnalysis\([\s\S]*COMPLETE_WITH_WARNINGS[\s\S]*brandTime < scanTime/, "il retry deve restare visibile dopo refresh finché il brand non è aggiornato rispetto all'ultimo scan");
+assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare uno stato persistente quando il crawler è finito ma il brand è ancora vecchio");
+assert.ok(source.includes("Completa analisi brand"), "lo stato persistente deve offrire il retry senza rifare il crawler");
+assert.match(source, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/, "AUTH_REQUIRED deve avere un solo retry automatico con token fresco");
+assert.match(source, /response\.status === 401 \|\| body\.error === "AUTH_REQUIRED"/, "il retry automatico deve scattare solo sul boundary auth");
+assert.match(source, /const crawlToken = await authenticatedApiToken\(\)[\s\S]*runFullWebsiteScan[\s\S]*requestBrandAnalysis/, "dopo una scansione lunga il brand deve ottenere un token fresco invece di riusare quello iniziale");
 
 const batchPending = { state: "PARTIAL", error: "BATCH_PENDING", discovered_pages: 113, analyzed_pages: 63, skipped_pages: 0, failed_pages: 0 };
 assert.equal(websiteScanUiState(batchPending), "IN_PROGRESS", "BATCH_PENDING non deve mai essere un failure");
