@@ -16,6 +16,8 @@ for (const [name, source] of [["Brand", brand], ["Sito", site]]) {
   assert.match(source, /fetch\("\/api\/onboarding-analyze"/);
 }
 
+assert.match(site, /async function requestBrandAnalysis\([\s\S]*authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/onboarding-analyze"/, "brand analysis must obtain a fresh Managed Auth token at request time");
+assert.match(site, /attempt < 2[\s\S]*AUTH_REQUIRED/, "brand analysis must retry auth once before surfacing session expiry");
 assert.match(fullScan, /fetch\("\/api\/website-scan"/, "the shared full-site scanner must call the same-origin website-scan endpoint");
 assert.match(fullScan, /authorization:\s*`Bearer \$\{input\.token\}`/, "the shared scanner must forward the Managed Auth bearer on every batch");
 assert.doesNotMatch(fullScan, /getJWTToken/, "the shared scanner must not obtain or decode auth independently");
