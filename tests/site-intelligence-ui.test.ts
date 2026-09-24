@@ -66,7 +66,11 @@ assert.equal(retryBrandBlock.includes("runFullWebsiteScan"), false, "il retry br
 assert.ok(source.includes("setBrandVisualHints(storedVisualHints(brandRow))"), "il retry deve preservare i segnali visivi già persistiti");
 assert.ok(source.includes("setBrandAnalyzedAt(brandAnalysisTimestamp(brandRow))"), "la pagina deve persistere logicamente lo stato brand confrontando analyzedAt con lo scan");
 assert.match(source, /function brandNeedsAnalysis\([\s\S]*COMPLETE_WITH_WARNINGS[\s\S]*brandTime < scanTime/, "il retry deve restare visibile dopo refresh finché il brand non è aggiornato rispetto all'ultimo scan");
-assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare uno stato persistente quando il crawler è finito ma il brand è ancora vecchio");
+assert.match(source, /\(scan\.analyzed_pages \?\? 0\) > pageInsightCount/, "un brand con meno pageInsights delle pagine analizzate deve risultare incompleto anche se il timestamp è aggiornato");
+assert.match(retryBrandBlock, /forceRefresh = Boolean\(scan && intelligence\.pageInsightCount < scan\.analyzed_pages\)/, "il retry deve forzare un nuovo provider pass solo quando il cache brand è incompleto");
+assert.match(retryBrandBlock, /requestBrandAnalysis\(selectedProfile\.id, brandVisualHints, undefined, forceRefresh\)/, "il brand-only repair non deve rilanciare il crawler");
+assert.match(source, /JSON\.stringify\(\{ profileId, visualHints, forceRefresh \}\)/, "la richiesta brand deve dichiarare esplicitamente il refresh del cache incompleto");
+assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare uno stato persistente quando il crawler è finito ma il brand è ancora vecchio o incompleto");
 assert.ok(source.includes("Completa analisi brand"), "lo stato persistente deve offrire il retry senza rifare il crawler");
 assert.match(source, /IGNORABLE_PAGE_ERROR/, "la UI deve riconoscere gli errori tecnici/inaccessibili già salvati dai vecchi scan");
 assert.match(source, /visiblePages = pages\.filter\(\(page\) => !isAutomaticallyIgnoredPage\(page\)\)/, "le pagine irrilevanti devono essere escluse dalla lista utente");
