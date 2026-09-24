@@ -88,8 +88,11 @@ export function BrandPage() {
       website_url: draft.website,
       industry: draft.industry,
     });
-    const current = await neonClient.from("brand_profiles").select("profile_id").eq("profile_id", profileId).maybeSingle();
+    const current = await neonClient.from("brand_profiles").select("profile_id,visual_identity").eq("profile_id", profileId).maybeSingle();
     if (current.error) throw new Error("Salvataggio del brand non riuscito. Riprova.");
+    const existingVisualIdentity = current.data?.visual_identity && typeof current.data.visual_identity === "object"
+      ? current.data.visual_identity as Record<string, unknown>
+      : {};
     const payload = {
       profile_id: profileId,
       description: draft.description.trim() || null,
@@ -103,7 +106,11 @@ export function BrandPage() {
       differentiators: draft.differentiators,
       value_propositions: draft.valuePropositions,
       user_context: draft.userContext.trim() || null,
-      visual_identity: { observedColors: concreteColors(draft.colors), summary: draft.visualSummary },
+      visual_identity: {
+        ...existingVisualIdentity,
+        observedColors: concreteColors(draft.colors),
+        summary: draft.visualSummary,
+      },
       updated_at: new Date().toISOString(),
     };
     const write = current.data
