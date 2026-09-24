@@ -35,7 +35,7 @@ export class BrandAnalysisMetering {
     this.sql = neon(databaseUrl);
   }
 
-  async reserve(input: { profileId: string; scanId: string }): Promise<BrandAnalysisReservation> {
+  async reserve(input: { profileId: string; scanId: string; forceRefresh?: boolean }): Promise<BrandAnalysisReservation> {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const operationKey = deriveBrandAnalysisAttemptOperationKey(input.profileId, input.scanId, attempt);
       const reserved = await this.usage.reserveUsage({
@@ -62,7 +62,10 @@ export class BrandAnalysisMetering {
       if (!existing) throw new Error("METERING_FAILED");
       const metadata = existing.metadata && typeof existing.metadata === "object" ? existing.metadata as Record<string, unknown> : {};
       const cached = metadata.cached_result && typeof metadata.cached_result === "object" ? metadata.cached_result as CachedResult : null;
-      if (existing.state === "COMMITTED" && cached) return { status: "COMPLETED", eventId, operationKey, cached };
+      if (existing.state === "COMMITTED" && cached) {
+        if (input.forceRefresh) continue;
+        return { status: "COMPLETED", eventId, operationKey, cached };
+      }
       if (existing.state === "RESERVED") {
         const createdAt = Date.parse(existing.created_at);
         const stale = Number.isFinite(createdAt) && Date.now() - createdAt > 10 * 60 * 1000;

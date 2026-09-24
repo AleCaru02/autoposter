@@ -89,22 +89,23 @@ function brandAnalysisTimestamp(row: BrandRow | null) {
   return typeof visual.analyzedAt === "string" && visual.analyzedAt.trim() ? visual.analyzedAt : null;
 }
 
-function brandNeedsAnalysis(scan: Scan | null, analyzedAt: string | null) {
+function brandNeedsAnalysis(scan: Scan | null, analyzedAt: string | null, pageInsightCount: number) {
   if (!scan || !["COMPLETE", "COMPLETE_WITH_WARNINGS"].includes(scan.state)) return false;
+  if ((scan.analyzed_pages ?? 0) > pageInsightCount) return true;
   const scanTime = Date.parse(scan.finished_at || scan.created_at);
   const brandTime = analyzedAt ? Date.parse(analyzedAt) : Number.NaN;
   if (!Number.isFinite(scanTime)) return !analyzedAt;
   return !Number.isFinite(brandTime) || brandTime < scanTime;
 }
 
-async function requestBrandAnalysis(profileId: string, visualHints: Partial<StoredVisualHints>, signal?: AbortSignal) {
+async function requestBrandAnalysis(profileId: string, visualHints: Partial<StoredVisualHints>, signal?: AbortSignal, forceRefresh = false) {
   let lastBody: AnalysisResponse = {};
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await authenticatedApiToken();
     const response = await fetch("/api/onboarding-analyze", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ profileId, visualHints }),
+      body: JSON.stringify({ profileId, visualHints, forceRefresh }),
       signal,
     });
     const body = await response.json().catch(() => ({})) as AnalysisResponse;
@@ -214,7 +215,8 @@ export function WebsiteScanPage() {
     setBrandRetrying(true);
     setError(null);
     try {
-      await requestBrandAnalysis(selectedProfile.id, brandVisualHints);
+      const forceRefresh = Boolean(scan && intelligence.pageInsightCount < scan.analyzed_pages);
+      await requestBrandAnalysis(selectedProfile.id, brandVisualHints, undefined, forceRefresh);
       await reload();
       await load(true);
       setError(null);
@@ -287,7 +289,7 @@ export function WebsiteScanPage() {
 
   if (!selectedProfile) return null;
   const isDemo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
-  const brandAnalysisPending = !isDemo && brandNeedsAnalysis(scan, brandAnalyzedAt);
+  const brandAnalysisPending = !isDemo && brandNeedsAnalysis(scan, brandAnalyzedAt, intelligence.pageInsightCount);
   const visiblePages = pages.filter((page) => !isAutomaticallyIgnoredPage(page));
   const meaningfulFailures = visiblePages.filter((page) => page.status === "FAILED").length;
   const usefulPages = Math.max(0, (scan?.analyzed_pages ?? 0) + meaningfulFailures);

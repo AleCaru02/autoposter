@@ -89,6 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authUserId) return res.status(401).json({ error: "AUTH_REQUIRED" });
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
   if (!profileId) return res.status(400).json({ error: "PROFILE_REQUIRED" });
+  const forceRefresh = req.body?.forceRefresh === true;
   const visualHints = sanitizeVisualHints(req.body?.visualHints);
 
   let activeMeter: BrandAnalysisMetering | null = null;
@@ -105,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const meter = new BrandAnalysisMetering(process.env.DATABASE_URL);
     activeMeter = meter;
-    const reservation = await meter.reserve({ profileId, scanId: scan.id });
+    const reservation = await meter.reserve({ profileId, scanId: scan.id, forceRefresh });
     if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
     if (reservation.status === "COMPLETED") {
       await completeOnboardingProfile(process.env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
