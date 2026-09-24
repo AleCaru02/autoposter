@@ -9,7 +9,9 @@ const deletionGuard = await readFile(new URL("../db/migrations/20260915_fase7j_p
 
 assert.doesNotMatch(profileContext, /\.from\("profiles"\)\.delete\(/, "customer UI must not directly delete a profile");
 assert.doesNotMatch(profilesPage, /deleteProfile|Eliminare definitivamente|Trash2/, "unsafe profile deletion must not be exposed");
-assert.match(profilesPage, /La cancellazione definitiva non è ancora disponibile/, "customer must see an honest non-technical status");
+assert.doesNotMatch(profilesPage, /Cancellazione attività|cancellazione definitiva non è ancora disponibile/i, "activities page must not show a dead deletion panel with no available action");
+assert.match(profilesPage, /Nuova attività/, "activities page must expose real new-profile creation");
+assert.match(profilesPage, /profile-active-badge/, "activities page must clearly identify the active profile");
 assert.match(settingsPage, /authClient\.updateUser\(\{ name \}\)/, "account name must be editable through the auth provider");
 assert.match(settingsPage, /Dati account aggiornati\./, "account update must provide a clear success state");
 assert.match(settingsPage, /Piano e utilizzo/, "settings must expose plan and usage in customer language");
