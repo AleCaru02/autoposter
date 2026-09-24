@@ -84,11 +84,45 @@ function storedVisualHints(row: BrandRow | null): StoredVisualHints {
   };
 }
 
+function brandAnalysisTimestamp(row: BrandRow | null) {
+  const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
+  return typeof visual.analyzedAt === "string" && visual.analyzedAt.trim() ? visual.analyzedAt : null;
+}
+
+function brandNeedsAnalysis(scan: Scan | null, analyzedAt: string | null) {
+  if (!scan || !["COMPLETE", "COMPLETE_WITH_WARNINGS"].includes(scan.state)) return false;
+  const scanTime = Date.parse(scan.finished_at || scan.created_at);
+  const brandTime = analyzedAt ? Date.parse(analyzedAt) : Number.NaN;
+  if (!Number.isFinite(scanTime)) return !analyzedAt;
+  return !Number.isFinite(brandTime) || brandTime < scanTime;
+}
+
+async function requestBrandAnalysis(profileId: string, visualHints: StoredVisualHints, signal?: AbortSignal) {
+  let lastBody: AnalysisResponse = {};
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await authenticatedApiToken();
+    const response = await fetch("/api/onboarding-analyze", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ profileId, visualHints }),
+      signal,
+    });
+    const body = await response.json().catch(() => ({})) as AnalysisResponse;
+    lastBody = body;
+    if (response.ok) return body;
+    if (attempt === 0 && (response.status === 401 || body.error === "AUTH_REQUIRED")) continue;
+    throw new Error(readableApiError(body, "Analisi brand non riuscita."));
+  }
+  throw new Error(readableApiError(lastBody, "Analisi brand non riuscita."));
+}
+
 function isBrandRetryableError(error: string | null) {
   if (!error) return false;
   return error === "Analisi brand non riuscita."
     || error.startsWith("L’analisi AI")
-    || error.startsWith("L’analisi non è disponibile");
+    || error.startsWith("L’analisi non è disponibile")
+    || error.startsWith("Sessione scaduta")
+    || error.startsWith("Sessione non valida");
 }
 
 function IntelligencePanel({ intelligence, demo = false }: { intelligence: SiteIntelligenceView; demo?: boolean }) {
@@ -115,6 +149,7 @@ export function WebsiteScanPage() {
   const [running, setRunning] = useState(false);
   const [brandRetrying, setBrandRetrying] = useState(false);
   const [brandVisualHints, setBrandVisualHints] = useState<StoredVisualHints>(() => storedVisualHints(null));
+  const [brandAnalyzedAt, setBrandAnalyzedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const runnerInFlightRef = useRef(false);
   const pollInFlightRef = useRef(false);
@@ -136,6 +171,7 @@ export function WebsiteScanPage() {
     const brandRow = (brandResult.data?.[0] ?? null) as BrandRow | null;
     setIntelligence(siteIntelligenceView(brandRow));
     setBrandVisualHints(storedVisualHints(brandRow));
+    setBrandAnalyzedAt(brandAnalysisTimestamp(brandRow));
     const latest = (scanResult.data?.[0] ?? null) as Scan | null;
     setScan(latest);
     if (!latest) { setPages([]); if (!background) setLoading(false); return null; }
@@ -171,14 +207,7 @@ export function WebsiteScanPage() {
     setBrandRetrying(true);
     setError(null);
     try {
-      const token = await authenticatedApiToken();
-      const analysisResponse = await fetch("/api/onboarding-analyze", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: brandVisualHints }),
-      });
-      const analysisBody = await analysisResponse.json() as AnalysisResponse;
-      if (!analysisResponse.ok) throw new Error(readableApiError(analysisBody, "Analisi brand non riuscita."));
+      await requestBrandAnalysis(selectedProfile.id, brandVisualHints);
       await reload();
       await load(true);
       setError(null);
@@ -197,10 +226,10 @@ export function WebsiteScanPage() {
     const controller = new AbortController();
     scanAbortRef.current = controller;
     try {
-      const token = await authenticatedApiToken();
+      const crawlToken = await authenticatedApiToken();
       const body = await runFullWebsiteScan({
         profileId: selectedProfile.id,
-        token,
+        token: crawlToken,
         forceNew: !automatic,
         signal: controller.signal,
         onProgress: (batch) => {
@@ -221,14 +250,7 @@ export function WebsiteScanPage() {
       });
 
       if (controller.signal.aborted) return;
-      const analysisResponse = await fetch("/api/onboarding-analyze", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ profileId: selectedProfile.id, visualHints: body.visualHints }),
-        signal: controller.signal,
-      });
-      const analysisBody = await analysisResponse.json() as AnalysisResponse;
-      if (!analysisResponse.ok) throw new Error(readableApiError(analysisBody, "Analisi brand non riuscita."));
+      await requestBrandAnalysis(selectedProfile.id, body.visualHints, controller.signal);
 
       await reload();
       await load(true);
@@ -259,6 +281,7 @@ export function WebsiteScanPage() {
 
   if (!selectedProfile) return null;
   const isDemo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
+  const brandAnalysisPending = !isDemo && brandNeedsAnalysis(scan, brandAnalyzedAt);
   const analysisCoverage = scan?.discovered_pages ? Math.round((scan.analyzed_pages / scan.discovered_pages) * 100) : 0;
   const stateLabel = scanUiState === "COMPLETED" ? "Completata"
     : scanUiState === "COMPLETED_WITH_WARNINGS" ? "Completata con avvisi"
@@ -268,6 +291,7 @@ export function WebsiteScanPage() {
 
   return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : scanUiState === "FAILED" ? "Riprova analisi" : "Ripeti analisi"}</button>}</header>
     {error && scanUiState !== "IN_PROGRESS" && <div className="form-error" role="alert"><span>{error}</span>{isBrandRetryableError(error) && !isDemo && <button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? "Analisi brand in corso…" : "Riprova solo analisi brand"}</button>}</div>}
+    {!error && brandAnalysisPending && scanUiState !== "IN_PROGRESS" && <div className="coverage-warning" role="status"><AlertTriangle size={16} /><span><strong>Analisi brand da completare.</strong> La scansione del sito è salvata; non serve analizzare di nuovo le pagine.</span><button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? "Analisi brand in corso…" : "Completa analisi brand"}</button></div>}
     {!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section>
       : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section>
         : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non ancora disponibile</h2><p>L’analisi parte automaticamente dal sito configurato.</p></section>
