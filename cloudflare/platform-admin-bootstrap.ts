@@ -79,6 +79,9 @@ export async function handleInitialSuperAdminBootstrap(request: Request, env: Bo
         count(*)::int as profile_count
       from public.profiles p
       join neon_auth.user nu on nu.id::text = p.owner_auth_user_id
+      left join public.profile_tenant_modes mode on mode.profile_id = p.id
+      where coalesce(mode.tenant_type, 'CUSTOMER_REAL') = 'CUSTOMER_REAL'
+        and p.archived_at is null
     ` as CandidateRow[];
     const candidate = candidates[0];
     if (!candidate || candidate.profile_count < 1 || candidate.owner_identity_count !== 1 || !candidate.candidate_auth_user_id) {
@@ -110,7 +113,7 @@ export async function handleInitialSuperAdminBootstrap(request: Request, env: Bo
           'INITIAL_SUPER_ADMIN_BOOTSTRAP',
           'AUTH_USER',
           ${authUserId},
-          ${JSON.stringify({ source: "unique_existing_profile_owner", profileCount: candidate.profile_count })}::jsonb
+          ${JSON.stringify({ source: "unique_customer_real_profile_owner", profileCount: candidate.profile_count })}::jsonb
         )
       `;
     }
@@ -118,7 +121,7 @@ export async function handleInitialSuperAdminBootstrap(request: Request, env: Bo
     return json({
       configured: true,
       alreadyConfigured,
-      source: "unique_existing_profile_owner",
+      source: "unique_customer_real_profile_owner",
       ownerIdentityCount: candidate.owner_identity_count,
       profileCount: candidate.profile_count,
     });
