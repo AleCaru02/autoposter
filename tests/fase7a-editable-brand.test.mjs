@@ -11,6 +11,9 @@ for (const field of ["targetSegments", "toneTraits", "services", "differentiator
 }
 assert.match(page, /brand_profiles"\)\.update\(payload\)/, "existing brand intelligence must persist profile-scoped");
 assert.match(page, /brand_profiles"\)\.insert\(payload\)/, "a missing brand row must be creatable for the selected profile");
+assert.match(page, /select\("profile_id,visual_identity"\)/, "manual brand save must read the current visual intelligence before writing");
+assert.match(page, /const existingVisualIdentity = current\.data\?\.visual_identity/, "manual brand save must preserve previously analyzed site intelligence");
+assert.match(page, /visual_identity:\s*\{\s*\.\.\.existingVisualIdentity,[\s\S]*observedColors:[\s\S]*summary:/, "editing colors or summary must merge into, not replace, pageInsights/logo/contentPillars/pageSignals");
 assert.match(page, /autosave\.flush\(\)/, "the customer must have an explicit save action");
 assert.match(page, /aria-live="polite"/, "save status must be announced accessibly");
 assert.match(page, /Informazioni aggiuntive/, "the confirmed user context must have a clear heading");
