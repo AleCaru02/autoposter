@@ -6,12 +6,25 @@ const profilesPage = await readFile(new URL("../src/pages/profiles-page.tsx", im
 const profileContext = await readFile(new URL("../src/features/profiles/profile-context.tsx", import.meta.url), "utf8");
 const settingsPage = await readFile(new URL("../src/pages/settings-page.tsx", import.meta.url), "utf8");
 const deletionGuard = await readFile(new URL("../db/migrations/20260915_fase7j_profile_delete_guard.sql", import.meta.url), "utf8");
+const adminApi = await readFile(new URL("../cloudflare/admin-api.ts", import.meta.url), "utf8");
+const provisioningDefaults = await readFile(new URL("../db/migrations/20260922_z_onboarding_package_defaults.sql", import.meta.url), "utf8");
 
 assert.doesNotMatch(profileContext, /\.from\("profiles"\)\.delete\(/, "customer UI must not directly delete a profile");
-assert.doesNotMatch(profilesPage, /deleteProfile|Eliminare definitivamente|Trash2/, "unsafe profile deletion must not be exposed");
+assert.doesNotMatch(profileContext, /deleteProfile|\.delete\(/, "customer profile context must not expose direct deletion");
+assert.match(profilesPage, /adminRequest<\{ platformRole\?: string \}>\("\/api\/admin\/me"\)/, "activity deletion UI must be role-gated through the verified admin endpoint");
+assert.match(profilesPage, /Elimina attività/, "super admin must have an activity removal control");
+assert.match(profilesPage, /\/api\/admin\/activities\/\$\{encodeURIComponent\(selectedProfile\.id\)\}\/archive/, "activity removal must use the protected admin archive endpoint");
+assert.match(profilesPage, /window\.confirm/, "activity removal must require explicit confirmation");
 assert.doesNotMatch(profilesPage, /Cancellazione attività|cancellazione definitiva non è ancora disponibile/i, "activities page must not show a dead deletion panel with no available action");
 assert.match(profilesPage, /Nuova attività/, "activities page must expose real new-profile creation");
 assert.match(profilesPage, /profile-active-badge/, "activities page must clearly identify the active profile");
+assert.match(adminApi, /archiveActivityMatch/, "admin API must recognize the protected activity archive route");
+assert.match(adminApi, /request\.method !== "POST"/, "activity archive must require POST");
+assert.match(adminApi, /owner_auth_user_id = \$\{auth\.user\.authUserId\}/, "admin archive must be restricted to the authenticated admin's own activity from this customer-facing page");
+assert.match(adminApi, /set archived_at = now\(\), updated_at = now\(\)/, "activity removal must archive instead of hard-delete");
+assert.match(adminApi, /ADMIN_ACTIVITY_ARCHIVED/, "admin activity archive must be auditable");
+assert.doesNotMatch(adminApi, /delete from public\.profiles/i, "admin activity removal must not hard-delete profile rows");
+assert.doesNotMatch(provisioningDefaults, /PROFILE_LIMIT_REACHED|MAX_PROFILES|count\(\*\)[\s\S]{0,120}owner_auth_user_id/i, "current personal provisioning must not impose a numeric activity cap");
 assert.match(settingsPage, /authClient\.updateUser\(\{ name \}\)/, "account name must be editable through the auth provider");
 assert.match(settingsPage, /Dati account aggiornati\./, "account update must provide a clear success state");
 assert.match(settingsPage, /Piano e utilizzo/, "settings must expose plan and usage in customer language");
