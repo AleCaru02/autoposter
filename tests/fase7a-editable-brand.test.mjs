@@ -13,9 +13,13 @@ assert.match(page, /brand_profiles"\)\.update\(payload\)/, "existing brand intel
 assert.match(page, /brand_profiles"\)\.insert\(payload\)/, "a missing brand row must be creatable for the selected profile");
 assert.match(page, /autosave\.flush\(\)/, "the customer must have an explicit save action");
 assert.match(page, /aria-live="polite"/, "save status must be announced accessibly");
-assert.match(page, /Informazioni aggiuntive confermate da te/, "the confirmed user context must have a clear premium heading");
-assert.match(page, /Aggiungi dettagli che il sito non comunica ma che l’AI deve conoscere\./, "the helper copy must explain the purpose");
-assert.match(page, /Es\. servizi particolari, punti di forza, modalità di lavoro, informazioni importanti che non sono presenti sul sito\.\.\./, "the textarea must provide a useful placeholder");
+assert.match(page, /Informazioni aggiuntive/, "the confirmed user context must have a clear heading");
+assert.match(page, /Aggiungi dettagli non presenti sul sito che vuoi associare a questa attività\./, "the helper copy must explain the purpose without AI-template language");
+assert.match(page, /Es\. servizi particolari, aree servite, modalità di lavoro, punti di forza o informazioni che non compaiono sul sito\.\.\./, "the textarea must provide a useful placeholder");
+assert.match(page, /Identità rilevata dal sito/, "the detected brand section must use neutral product language");
+assert.doesNotMatch(page, /<Sparkles|\bSparkles\b/, "brand UI must not use decorative AI sparkle icons");
+assert.doesNotMatch(page, /l’AI deve conoscere/, "brand UI must not expose AI-template helper copy");
+assert.match(page, /brand-insight-list/, "long audience and service findings must use readable lists instead of only pill chips");
 assert.match(page, /Non inserire password, chiavi API o dati sensibili\./, "sensitive-data guidance must stay visible");
 assert.match(page, /Salvataggio automatico/, "the real autosave behavior must be visible");
 assert.match(page, /draft\.userContext\.length\}\/5000/, "the real database-backed character limit must be visible");

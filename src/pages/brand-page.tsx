@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, RefreshCw, Sparkles } from "lucide-react";
+import { Check, RefreshCw } from "lucide-react";
 import { neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { runFullWebsiteScan } from "../lib/full-website-scan";
@@ -63,6 +63,15 @@ function concreteColors(values: string[]) {
       && !/(?:var|calc|min|max|clamp)\(|--/.test(normalized)
       && !/^#(?:0000|00000000)$/.test(normalized);
   });
+}
+
+function professionalBrandSummary(value: string) {
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .filter((sentence) => !/(?:indizi tecnici|palette|\bfont\b|\blogo\b|\bcss\b|immagini|non è possibile attribuire uno stile visivo)/i.test(sentence));
+  return sentences.join(" ").trim();
 }
 
 export function BrandPage() {
@@ -148,11 +157,26 @@ export function BrandPage() {
     setAnalyzing(true); setPageError(null);
     try {
       await autosave.flush();
-      const token = await jwt();
-      const scanBody = await runFullWebsiteScan({ profileId, token, forceNew: true });
-      const analysisResponse = await fetch("/api/onboarding-analyze", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ profileId, visualHints: scanBody.visualHints }) });
-      const body = await analysisResponse.json() as { error?: string; detail?: string };
-      if (!analysisResponse.ok) throw new Error("Analisi brand non riuscita. Riprova tra poco.");
+      const scanToken = await jwt();
+      const scanBody = await runFullWebsiteScan({ profileId, token: scanToken, forceNew: true });
+
+      let analysisCompleted = false;
+      for (let attempt = 0; attempt < 2 && !analysisCompleted; attempt += 1) {
+        const analysisToken = await jwt();
+        const analysisResponse = await fetch("/api/onboarding-analyze", {
+          method: "POST",
+          headers: { authorization: `Bearer ${analysisToken}`, "content-type": "application/json" },
+          body: JSON.stringify({ profileId, visualHints: scanBody.visualHints }),
+        });
+        const body = await analysisResponse.json().catch(() => ({})) as { error?: string; detail?: string };
+        if (analysisResponse.ok) {
+          analysisCompleted = true;
+          break;
+        }
+        if (attempt === 0 && (analysisResponse.status === 401 || body.error === "AUTH_REQUIRED")) continue;
+        throw new Error("Analisi brand non riuscita. Riprova tra poco.");
+      }
+      if (!analysisCompleted) throw new Error("Analisi brand non riuscita. Riprova tra poco.");
       await reload();
       await load();
     } catch (reason) {
@@ -162,6 +186,7 @@ export function BrandPage() {
 
   const draft = autosave.draft;
   const goalOptions = useMemo(() => [...new Set([...STANDARD_GOALS, ...(draft?.goals ?? [])])], [draft?.goals]);
+  const visibleBrandSummary = professionalBrandSummary(draft?.visualSummary ?? "");
   if (!selectedProfile) return null;
   if (loading || !draft) return <div className="page-content"><section className="panel">Caricamento…</section></div>;
 
@@ -170,10 +195,10 @@ export function BrandPage() {
   const contextSaveLabel = autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Da salvare" : autosave.status === "ERROR" ? "Errore di salvataggio" : "Salvato";
   const contextSaveClass = autosave.status === "ERROR" ? "error" : autosave.status === "SAVING" ? "saving" : autosave.status === "WAITING" ? "waiting" : "saved";
 
-  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base e mantiene i dati associati a questa attività.</p></div><div className="header-actions">{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Analisi in corso…" : "Analizza di nuovo il sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
-    <section className="panel brand-intelligence"><div className="panel-heading"><div><h2>Brand rilevato</h2><p>Informazioni ricavate dalle pagine del sito e già associate a questa attività.</p></div><Sparkles size={19} /></div>{draft.colors.length > 0 && <div className="brand-colors">{draft.colors.slice(0, 8).map((color) => <span key={color} title={color} style={{ background: color }} />)}</div>}{draft.visualSummary && <p className="brand-summary">{draft.visualSummary}</p>}<div className="insight-groups">{draft.toneTraits.length > 0 && <div><small>Tono</small><div className="insight-chips">{draft.toneTraits.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.targetSegments.length > 0 && <div><small>Pubblico</small><div className="insight-chips">{draft.targetSegments.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.services.length > 0 && <div><small>Servizi</small><div className="insight-chips">{draft.services.map((item) => <span key={item}>{item}</span>)}</div></div>}</div></section>
-    <section className="panel brand-context-panel"><div className="panel-heading"><div><h2>Informazioni aggiuntive confermate da te</h2><p>Aggiungi dettagli che il sito non comunica ma che l’AI deve conoscere.</p></div><Sparkles size={19} /></div>
-      <label className="brand-context-field"><span>Dettagli aggiuntivi</span><textarea rows={7} maxLength={5000} aria-describedby="brand-context-helper" value={draft.userContext} placeholder="Es. servizi particolari, punti di forza, modalità di lavoro, informazioni importanti che non sono presenti sul sito..." onChange={(event) => patch("userContext", event.target.value)} onBlur={() => void autosave.flush().catch(() => undefined)} /></label>
+  return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base e mantiene i dati associati a questa attività.</p></div><div className="header-actions">{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Aggiornamento in corso…" : "Aggiorna dal sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
+    <section className="panel brand-intelligence"><div className="panel-heading"><div><h2>Identità rilevata dal sito</h2><p>Dati ricavati dal sito e associati a questa attività.</p></div></div>{draft.colors.length > 0 && <div className="brand-colors">{draft.colors.slice(0, 8).map((color) => <span key={color} title={color} style={{ background: color }} />)}</div>}{visibleBrandSummary && <p className="brand-summary">{visibleBrandSummary}</p>}<div className="insight-groups">{draft.toneTraits.length > 0 && <div><small>Tono</small><div className="insight-chips">{draft.toneTraits.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.targetSegments.length > 0 && <div><small>Pubblico</small><ul className="brand-insight-list">{draft.targetSegments.map((item) => <li key={item}>{item}</li>)}</ul></div>}{draft.services.length > 0 && <div><small>Servizi</small><ul className="brand-insight-list brand-insight-list-services">{draft.services.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div></section>
+    <section className="panel brand-context-panel"><div className="panel-heading"><div><h2>Informazioni aggiuntive</h2><p>Aggiungi dettagli non presenti sul sito che vuoi associare a questa attività.</p></div></div>
+      <label className="brand-context-field"><span>Dettagli aggiuntivi</span><textarea rows={7} maxLength={5000} aria-describedby="brand-context-helper" value={draft.userContext} placeholder="Es. servizi particolari, aree servite, modalità di lavoro, punti di forza o informazioni che non compaiono sul sito..." onChange={(event) => patch("userContext", event.target.value)} onBlur={() => void autosave.flush().catch(() => undefined)} /></label>
       <div className="brand-context-meta" id="brand-context-helper"><div><p>Non inserire password, chiavi API o dati sensibili.</p><span>{draft.userContext.length}/5000</span></div><div className={`autosave-mini ${contextSaveClass}`} role="status" aria-live="polite"><span>Salvataggio automatico</span><strong>{contextSaveLabel}</strong></div></div>
     </section>
     <section className="panel"><h2>Obiettivi</h2><p className="section-hint">Tocca un obiettivo per attivarlo o disattivarlo.</p><div className="goal-options">{goalOptions.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} onClick={() => toggleGoal(goal)}>{draft.goals.includes(goal) && <Check size={13} />}{goal}</button>)}</div></section>
