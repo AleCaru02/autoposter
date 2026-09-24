@@ -30,6 +30,8 @@ assert.match(shell, /<ProductBrand compact \/>/, "mobile product identity missin
 assert.match(shell, /\["Brand", "\/app\/brand", Palette\]/, "Brand navigation must use a neutral identity icon");
 assert.doesNotMatch(shell, /\["Brand", "\/app\/brand", Sparkles\]/, "Brand navigation must not use an AI-style sparkle icon");
 assert.match(brand, /Il tuo social team AI/, "customer-facing product promise missing");
+assert.match(brand, /import \{ Send \} from "lucide-react"/, "product mark must use a neutral publishing icon");
+assert.doesNotMatch(brand, /Sparkles/, "product mark must not use an AI-style sparkle icon");
 assert.match(auth, /Gestisci contenuti, calendario e risultati social con l’AI/, "auth value proposition missing");
 
 for (const forbidden of ["entitlement engine", "technical usage event", "internal capability key", "token budget"]) {
