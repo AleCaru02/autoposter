@@ -71,11 +71,11 @@ export function OnboardingPage() {
 
   async function analyzeProfile(profileId: string) {
     setError(null);
-    const token = await jwt();
+    const crawlToken = await jwt();
     setStage("CRAWL");
     const scanBody = await runFullWebsiteScan({
       profileId,
-      token,
+      token: crawlToken,
       onProgress: (batch) => setPagesAnalyzed(batch.analyzedPages ?? 0),
     });
     const hints = {
@@ -88,13 +88,20 @@ export function OnboardingPage() {
     setPagesAnalyzed(scanBody.analyzedPages ?? 0);
 
     setStage("ANALYZE");
-    const analysisResponse = await fetch("/api/onboarding-analyze", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ profileId, visualHints: hints }),
-    });
-    const analysisBody = await analysisResponse.json() as AnalysisResponse;
-    if (!analysisResponse.ok) throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
+    let analysisBody: AnalysisResponse | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const analysisToken = await jwt();
+      const analysisResponse = await fetch("/api/onboarding-analyze", {
+        method: "POST",
+        headers: { authorization: `Bearer ${analysisToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ profileId, visualHints: hints }),
+      });
+      analysisBody = await analysisResponse.json().catch(() => ({})) as AnalysisResponse;
+      if (analysisResponse.ok) break;
+      if (attempt === 0 && (analysisResponse.status === 401 || analysisBody.error === "AUTH_REQUIRED")) continue;
+      throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
+    }
+    if (!analysisBody) throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
     setAnalysis(analysisBody.analysis ?? null);
     setPagesAnalyzed(analysisBody.pagesAnalyzed ?? scanBody.analyzedPages ?? 0);
     const analyzedHints = analysisBody.visualHints ?? hints;
