@@ -71,6 +71,11 @@ assert.match(retryBrandBlock, /forceRefresh = Boolean\(scan && intelligence\.pag
 assert.match(retryBrandBlock, /requestBrandAnalysis\(selectedProfile\.id, brandVisualHints, undefined, forceRefresh\)/, "il brand-only repair non deve rilanciare il crawler");
 assert.match(source, /JSON\.stringify\(\{ profileId, visualHints, forceRefresh \}\)/, "la richiesta brand deve dichiarare esplicitamente il refresh del cache incompleto");
 assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare uno stato persistente quando il crawler è finito ma il brand è ancora vecchio o incompleto");
+assert.match(source, /const \[brandProgress, setBrandProgress\] = useState\(0\)/, "l'analisi brand deve esporre una percentuale visibile");
+assert.match(source, /current < 94 \? current \+ 1 : current/, "la percentuale brand deve avanzare un punto alla volta senza saltare direttamente al completamento");
+assert.match(source, /setBrandProgressExact\(100\)/, "la percentuale brand deve arrivare a 100 solo dopo reload e persistenza del risultato");
+assert.ok(source.includes("Avanzamento analisi brand"), "la UI deve mostrare una progress bar accessibile per l'analisi brand");
+assert.ok(source.includes("La percentuale è una stima di avanzamento"), "la UI non deve fingere che il progresso provider sia telemetria live");
 assert.ok(source.includes("Completa analisi brand"), "lo stato persistente deve offrire il retry senza rifare il crawler");
 assert.match(source, /IGNORABLE_PAGE_ERROR/, "la UI deve riconoscere gli errori tecnici/inaccessibili già salvati dai vecchi scan");
 assert.match(source, /visiblePages = pages\.filter\(\(page\) => !isAutomaticallyIgnoredPage\(page\)\)/, "le pagine irrilevanti devono essere escluse dalla lista utente");

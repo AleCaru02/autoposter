@@ -156,6 +156,9 @@ export function WebsiteScanPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [brandRetrying, setBrandRetrying] = useState(false);
+  const [brandProgress, setBrandProgress] = useState(0);
+  const brandProgressRef = useRef(0);
+  const brandProgressTimerRef = useRef<number | null>(null);
   const [brandVisualHints, setBrandVisualHints] = useState<StoredVisualHints>(() => storedVisualHints(null));
   const [brandAnalyzedAt, setBrandAnalyzedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -204,25 +207,61 @@ export function WebsiteScanPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  function stopBrandProgressTimer() {
+    if (brandProgressTimerRef.current !== null) {
+      window.clearInterval(brandProgressTimerRef.current);
+      brandProgressTimerRef.current = null;
+    }
+  }
+
+  function setBrandProgressExact(value: number) {
+    const next = Math.max(0, Math.min(100, Math.round(value)));
+    brandProgressRef.current = next;
+    setBrandProgress(next);
+  }
+
+  function startBrandProgress(initialPercent: number) {
+    stopBrandProgressTimer();
+    setBrandProgressExact(initialPercent);
+    brandProgressTimerRef.current = window.setInterval(() => {
+      setBrandProgress((current) => {
+        const next = current < 94 ? current + 1 : current;
+        brandProgressRef.current = next;
+        return next;
+      });
+    }, 420);
+  }
+
   useEffect(() => () => {
     scanAbortRef.current?.abort();
     scanAbortRef.current = null;
     runnerInFlightRef.current = false;
+    stopBrandProgressTimer();
   }, [selectedProfile?.id]);
 
   async function retryBrandAnalysis() {
     if (!selectedProfile?.id || brandRetrying || selectedProfile.tenant_type === "DEMO_PERSISTENT") return;
+    const analyzedPages = scan?.analyzed_pages ?? 0;
+    const currentCoverage = analyzedPages > 0 ? Math.floor((intelligence.pageInsightCount / analyzedPages) * 100) : 0;
+    const startingProgress = currentCoverage > 0 && currentCoverage < 100 ? currentCoverage : 10;
     setBrandRetrying(true);
+    startBrandProgress(startingProgress);
     setError(null);
     try {
       const forceRefresh = Boolean(scan && intelligence.pageInsightCount < scan.analyzed_pages);
       await requestBrandAnalysis(selectedProfile.id, brandVisualHints, undefined, forceRefresh);
+      stopBrandProgressTimer();
+      setBrandProgressExact(96);
       await reload();
       await load(true);
+      setBrandProgressExact(100);
       setError(null);
+      await new Promise((resolve) => window.setTimeout(resolve, 280));
     } catch (reason) {
+      stopBrandProgressTimer();
       setError(reason instanceof Error ? reason.message : "Analisi brand non riuscita.");
     } finally {
+      stopBrandProgressTimer();
       setBrandRetrying(false);
     }
   }
@@ -290,6 +329,7 @@ export function WebsiteScanPage() {
   if (!selectedProfile) return null;
   const isDemo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
   const brandAnalysisPending = !isDemo && brandNeedsAnalysis(scan, brandAnalyzedAt, intelligence.pageInsightCount);
+  const brandCoveragePercent = scan?.analyzed_pages ? Math.min(100, Math.round((intelligence.pageInsightCount / scan.analyzed_pages) * 100)) : 0;
   const visiblePages = pages.filter((page) => !isAutomaticallyIgnoredPage(page));
   const meaningfulFailures = visiblePages.filter((page) => page.status === "FAILED").length;
   const usefulPages = Math.max(0, (scan?.analyzed_pages ?? 0) + meaningfulFailures);
@@ -302,8 +342,9 @@ export function WebsiteScanPage() {
   const stateClass = effectiveScanUiState === "COMPLETED" ? "status-ok" : effectiveScanUiState === "FAILED" ? "status-error" : "status-wait";
 
   return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Sito · {selectedProfile.name}</p><h1>Analisi pagina per pagina</h1><p>{isDemo ? "Dati dimostrativi · SAMPLE DATA. Nessuna scansione esterna reale." : "L’analisi continua automaticamente a batch sicuri finché tutte le pagine rilevate sono state controllate."}</p></div>{scan && !isDemo && <button className="secondary-button" type="button" disabled={running} onClick={() => void startScan(false)}><RefreshCw size={16} className={running ? "spin" : ""} /> {running ? "Analisi in corso…" : scanUiState === "FAILED" ? "Riprova analisi" : "Ripeti analisi"}</button>}</header>
-    {error && scanUiState !== "IN_PROGRESS" && <div className="form-error" role="alert"><span>{error}</span>{isBrandRetryableError(error) && !isDemo && <button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? "Analisi brand in corso…" : "Riprova solo analisi brand"}</button>}</div>}
-    {!error && brandAnalysisPending && scanUiState !== "IN_PROGRESS" && <div className="coverage-warning" role="status"><AlertTriangle size={16} /><span><strong>Analisi brand da completare.</strong> La scansione del sito è salvata; non serve analizzare di nuovo le pagine.</span><button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? "Analisi brand in corso…" : "Completa analisi brand"}</button></div>}
+    {error && scanUiState !== "IN_PROGRESS" && <div className="form-error" role="alert"><span>{error}</span>{isBrandRetryableError(error) && !isDemo && <button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? `Analisi brand in corso… ${brandProgress}%` : "Riprova solo analisi brand"}</button>}</div>}
+    {!error && brandAnalysisPending && scanUiState !== "IN_PROGRESS" && <div className="coverage-warning" role="status"><AlertTriangle size={16} /><span><strong>Analisi brand da completare.</strong> La scansione del sito è salvata; non serve analizzare di nuovo le pagine.</span><button className="text-action" type="button" disabled={brandRetrying} onClick={() => void retryBrandAnalysis()}><RefreshCw size={14} className={brandRetrying ? "spin" : ""} /> {brandRetrying ? `Analisi brand in corso… ${brandProgress}%` : "Completa analisi brand"}</button></div>}
+    {brandRetrying && scanUiState !== "IN_PROGRESS" && <section className="scan-progress-panel" role="status" aria-live="polite"><div className="scan-progress-heading"><div><RefreshCw size={20} className="spin" /><div><h2>Analisi brand in corso</h2><p>Sto interpretando tutte le pagine già scansionate. La percentuale è una stima di avanzamento e arriva al 100% solo quando il risultato completo è stato salvato.</p></div></div><strong>{brandProgress}% completato</strong></div><div className="scan-progress-copy"><span>{intelligence.pageInsightCount} / {scan?.analyzed_pages ?? 0} pagine già interpretate all’avvio</span><span>Copertura iniziale {brandCoveragePercent}%</span></div><div className="scan-progress-track" role="progressbar" aria-label="Avanzamento analisi brand" aria-valuemin={0} aria-valuemax={100} aria-valuenow={brandProgress}><span style={{ width: `${brandProgress}%` }} /></div></section>}
     {!selectedProfile.website_url ? <section className="unavailable-panel"><Globe2 size={24} /><div><h2>Sito non configurato</h2><p>Inserisci il sito dell’attività: l’analisi partirà automaticamente.</p><NavLink className="text-link" to="/app/brand">Apri Brand</NavLink></div></section>
       : loading || running && !scan ? <section className="panel" role="status" aria-live="polite"><Globe2 size={22} /><h2>Sto analizzando il sito</h2><p>Controllo le pagine e i collegamenti interni senza fermarmi alla homepage.</p></section>
         : !scan ? <section className="panel empty-panel"><Globe2 size={26} /><h2>Analisi non ancora disponibile</h2><p>L’analisi parte automaticamente dal sito configurato.</p></section>
