@@ -10,6 +10,7 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const adminUi = readFileSync(new URL("../src/pages/admin-pages.tsx", import.meta.url), "utf8");
 const ownerMigration = readFileSync(new URL("../db/migrations/20260830_profile_owner_membership_contract.sql", import.meta.url), "utf8");
 const adminAuditMigration = readFileSync(new URL("../db/migrations/20260830_platform_admin_audit.sql", import.meta.url), "utf8");
+const adminBootstrapSource = readFileSync(new URL("../cloudflare/platform-admin-bootstrap.ts", import.meta.url), "utf8");
 
 assert.equal(normalizePlatformRole("admin"), "SUPER_ADMIN");
 assert.equal(normalizePlatformRole("ADMIN"), "SUPER_ADMIN");
@@ -51,5 +52,8 @@ assert.equal(adminUi.includes('adminRequest<AdminMe>("/api/admin/me")'), true, "
 assert.equal(adminUi.includes("authClient.useSession()"), false, "AdminBackoffice must not race a second client session check after RequireAuth");
 assert.equal(adminUi.includes("localStorage") || adminUi.includes("sessionStorage"), false, "admin authorization must not be stored in browser storage");
 assert.equal(adminUi.includes("SUPER_ADMIN") && adminUi.includes("OWNER"), false, "admin UI must not derive platform admin from workspace OWNER");
+assert.equal(adminBootstrapSource.includes("left join public.profile_tenant_modes mode on mode.profile_id = p.id"), true, "initial admin bootstrap must inspect tenant classification");
+assert.equal(adminBootstrapSource.includes("coalesce(mode.tenant_type, 'CUSTOMER_REAL') = 'CUSTOMER_REAL'"), true, "QA/demo tenants must not make the real customer owner ambiguous during initial admin bootstrap");
+assert.equal(adminBootstrapSource.includes("p.archived_at is null"), true, "archived customer profiles must not influence initial admin selection");
 
 console.log("platform RBAC regression: PASS");
