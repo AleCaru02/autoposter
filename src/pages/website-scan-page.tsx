@@ -97,7 +97,7 @@ function brandNeedsAnalysis(scan: Scan | null, analyzedAt: string | null) {
   return !Number.isFinite(brandTime) || brandTime < scanTime;
 }
 
-async function requestBrandAnalysis(profileId: string, visualHints: StoredVisualHints, signal?: AbortSignal) {
+async function requestBrandAnalysis(profileId: string, visualHints: Partial<StoredVisualHints>, signal?: AbortSignal) {
   let lastBody: AnalysisResponse = {};
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await authenticatedApiToken();
