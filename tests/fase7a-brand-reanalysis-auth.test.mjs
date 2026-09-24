@@ -18,11 +18,12 @@ for (const [name, source] of [["Brand", brand], ["Sito", site]]) {
 
 assert.match(site, /async function requestBrandAnalysis\([\s\S]*authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/onboarding-analyze"/, "brand analysis must obtain a fresh Managed Auth token at request time");
 assert.match(site, /attempt < 2[\s\S]*AUTH_REQUIRED/, "brand analysis must retry auth once before surfacing session expiry");
-assert.match(brand, /const scanToken = await jwt\(\)[\s\S]*runFullWebsiteScan\(\{ profileId, token: scanToken, forceNew: true \}\)/, "Brand reanalysis must use a dedicated token for the long crawler");
+assert.match(brand, /runFullWebsiteScan\(\{ profileId, getToken: jwt, forceNew: true \}\)/, "Brand reanalysis must refresh Managed Auth throughout the long crawler");
 assert.match(brand, /for \(let attempt = 0; attempt < 2 && !analysisCompleted; attempt \+= 1\)[\s\S]*const analysisToken = await jwt\(\)/, "Brand analysis must obtain a fresh token after the crawler and retry auth once");
 assert.match(brand, /analysisResponse\.status === 401 \|\| body\.error === "AUTH_REQUIRED"/, "Brand reanalysis auth retry must be limited to the authentication boundary");
 assert.match(fullScan, /fetch\("\/api\/website-scan"/, "the shared full-site scanner must call the same-origin website-scan endpoint");
-assert.match(fullScan, /authorization:\s*`Bearer \$\{input\.token\}`/, "the shared scanner must forward the Managed Auth bearer on every batch");
+assert.match(fullScan, /const token = input\.getToken \? await input\.getToken\(\) : input\.token/, "the shared scanner must obtain fresh Managed Auth for each batch attempt");
+assert.match(fullScan, /authorization:\s*`Bearer \$\{token\}`/, "the shared scanner must forward the current Managed Auth bearer on every batch");
 assert.doesNotMatch(fullScan, /getJWTToken/, "the shared scanner must not obtain or decode auth independently");
 
 console.log("FASE 7A brand reanalysis Auth regression: PASS");

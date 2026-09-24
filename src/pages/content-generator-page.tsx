@@ -70,18 +70,18 @@ export function ContentGeneratorPage() {
     setBootstrapPages(0);
     setError(null);
     try {
-      const token = await jwt();
       const scanBody = await runFullWebsiteScan({
         profileId: profile.id,
-        token,
+        getToken: jwt,
         onProgress: (batch) => setBootstrapPages(batch.analyzedPages ?? 0),
       });
       const hints = scanBody.visualHints;
       setBootstrapPages(scanBody.analyzedPages ?? 0);
 
+      const analysisToken = await jwt();
       const analysisResponse = await fetch("/api/onboarding-analyze", {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${analysisToken}`, "content-type": "application/json" },
         body: JSON.stringify({ profileId: profile.id, visualHints: hints }),
       });
       const analysisBody = await analysisResponse.json() as AnalysisResponse;

@@ -157,8 +157,7 @@ export function BrandPage() {
     setAnalyzing(true); setPageError(null);
     try {
       await autosave.flush();
-      const scanToken = await jwt();
-      const scanBody = await runFullWebsiteScan({ profileId, token: scanToken, forceNew: true });
+      const scanBody = await runFullWebsiteScan({ profileId, getToken: jwt, forceNew: true });
 
       let analysisCompleted = false;
       for (let attempt = 0; attempt < 2 && !analysisCompleted; attempt += 1) {

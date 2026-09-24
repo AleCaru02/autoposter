@@ -115,11 +115,11 @@ async function updateScan(scanId: string, payload: Record<string, unknown>, toke
   if (!response.ok) throw new Error(`DATA_API_FINISH_SCAN_${response.status}`);
 }
 
-async function failScan(scanId: string, token: string, error: string) {
+async function preserveScanForRetry(scanId: string, token: string) {
   await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
     method: "PATCH",
     headers: { prefer: "return=minimal" },
-    body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: error.slice(0, 500) }),
+    body: JSON.stringify({ state: "PARTIAL", finished_at: null, last_progress_at: new Date().toISOString(), error: "BATCH_RETRY_REQUIRED" }),
   }).catch(() => undefined);
 }
 
@@ -145,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let existingScan: ScanRow | null = null;
     if (!forceNew) {
       const reusableResponse = await dataApi(
-        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
         token,
       );
       if (!reusableResponse.ok) throw new Error(`DATA_API_REUSABLE_SCAN_${reusableResponse.status}`);
@@ -181,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       maxDepth: 12,
       maxDurationMs: 48_000,
       validateTarget: assertPublicTarget,
-      includeSitemap: true,
+      includeSitemap: pending.length === 0,
       maxSitemapFiles: SAFE_SCAN_MAX_SITEMAPS,
       maxStylesheets: SAFE_SCAN_MAX_STYLESHEETS,
       maxSitemapSeeds: SAFE_SCAN_MAX_SITEMAP_SEEDS,
@@ -238,7 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : "UNKNOWN_SCAN_ERROR";
-    if (scanId) await failScan(scanId, token, message);
+    if (scanId) await preserveScanForRetry(scanId, token);
     console.error("website-scan", { profileId, scanId, message });
     return res.status(500).json({ error: "SCAN_FAILED", message: "Non riesco a completare l'analisi del sito in questo momento. Riprova tra poco." });
   }

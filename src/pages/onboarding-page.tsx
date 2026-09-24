@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, Globe2, LoaderCircle, RefreshCw, Sparkles, WandSparkles } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authenticatedApiToken } from "../lib/auth-token";
-import { runFullWebsiteScan } from "../lib/full-website-scan";
+import { runFullWebsiteScan, websiteScanProgress, type WebsiteScanProgress } from "../lib/full-website-scan";
 import { useProfiles } from "../features/profiles/profile-context";
 import { clearNewActivityFlow, readNewActivityFlow, rememberNewActivityProfile } from "../lib/onboarding-flow";
 
@@ -47,6 +47,7 @@ export function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
   const [pagesAnalyzed, setPagesAnalyzed] = useState(0);
+  const [scanProgress, setScanProgress] = useState<WebsiteScanProgress>({ processed: 0, total: 0, percent: 0 });
   const [analysis, setAnalysis] = useState<AnalysisResponse["analysis"] | null>(null);
   const [visualHints, setVisualHints] = useState<VisualHints>({ colors: [], socialLinks: {}, logoUrl: null });
   const incompleteProfile = useMemo(() => profiles.find((profile) => !profile.onboarding_completed) ?? null, [profiles]);
@@ -96,12 +97,15 @@ export function OnboardingPage() {
 
   async function analyzeProfile(profileId: string) {
     setError(null);
-    const crawlToken = await jwt();
+    setScanProgress({ processed: 0, total: 0, percent: 0 });
     setStage("CRAWL");
     const scanBody = await runFullWebsiteScan({
       profileId,
-      token: crawlToken,
-      onProgress: (batch) => setPagesAnalyzed(batch.analyzedPages ?? 0),
+      getToken: jwt,
+      onProgress: (batch) => {
+        setPagesAnalyzed(batch.analyzedPages ?? 0);
+        setScanProgress(websiteScanProgress(batch));
+      },
     });
     const hints = {
       ...scanBody.visualHints,
@@ -111,6 +115,7 @@ export function OnboardingPage() {
     };
     setVisualHints({ colors: concreteColors(hints.colors), socialLinks: hints.socialLinks, logoUrl: hints.logoUrl });
     setPagesAnalyzed(scanBody.analyzedPages ?? 0);
+    setScanProgress(websiteScanProgress({ ...scanBody, hasMore: false }));
 
     setStage("ANALYZE");
     let analysisBody: AnalysisResponse | null = null;
@@ -211,7 +216,7 @@ export function OnboardingPage() {
 
     {stage === "FORM" && <div className="onboarding-copy"><span className="onboarding-icon"><WandSparkles size={22} /></span><h1>Crea il profilo della tua attività</h1><p>Dimmi l’essenziale. Se inserisci il sito, Post Automatici lo legge pagina per pagina e prepara automaticamente brand, tono, target, servizi e identità visiva.</p><form className="auth-form onboarding-form" onSubmit={submit}><label>Come si chiama l’attività?<input required autoFocus placeholder="Es. Il Tuo Property Manager" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Sito web<input type="url" placeholder="https://iltuosito.it" value={website} onChange={(event) => setWebsite(event.target.value)} /></label><label>Settore <span className="optional-label">opzionale</span><input placeholder="Se lo lasci vuoto provo a capirlo dal sito" value={industry} onChange={(event) => setIndustry(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="submit" disabled={submitting}>{submitting ? "Creazione…" : "Continua"} <span>→</span></button>{requestedNewActivity && !newActivityProfileId && <button className="text-action" type="button" onClick={() => { clearNewActivityFlow(); navigate("/app/profili", { replace: true }); }}>Annulla e torna alle attività</button>}</form></div>}
 
-    {stage === "CRAWL" && <div className="onboarding-loading"><span className="onboarding-icon"><Globe2 size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto leggendo il sito</h1><p>Controllo sitemap e collegamenti interni, poi salvo ogni pagina trovata. Non mi fermo alla homepage.</p><div className="analysis-pulse"><span /> <span /> <span /></div></div>}
+    {stage === "CRAWL" && <div className="onboarding-loading"><span className="onboarding-icon"><Globe2 size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto leggendo il sito</h1><p>Controllo sitemap e collegamenti interni, poi salvo ogni pagina trovata. Non mi fermo alla homepage.</p><div className="scan-progress-block" aria-live="polite"><div className="scan-progress-row"><strong>{scanProgress.percent}%</strong><span>{scanProgress.total > 0 ? `${scanProgress.processed} di ${scanProgress.total} pagine elaborate` : "Sto rilevando le pagine del sito…"}</span></div><div className="scan-progress-track" role="progressbar" aria-label="Avanzamento scansione sito" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scanProgress.percent}><span style={{ width: `${scanProgress.percent}%` }} /></div></div></div>}
 
     {stage === "ANALYZE" && <div className="onboarding-loading"><span className="onboarding-icon"><Sparkles size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto costruendo il brand</h1><p>{pagesAnalyzed > 0 ? `${pagesAnalyzed} pagine lette. ` : ""}Ora individuo tono, servizi, pubblico, messaggi ricorrenti, obiettivi e stile visivo osservato.</p><div className="analysis-pulse"><span /> <span /> <span /></div></div>}
 

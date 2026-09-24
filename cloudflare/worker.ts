@@ -332,7 +332,7 @@ async function handleWebsiteScan(request: Request) {
     let existingScan: ScanRow | null = null;
     if (!forceNew) {
       existingScan = (await rows<ScanRow>(
-        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
+        `website_scans?profile_id=eq.${encodeURIComponent(profileId)}&root_url=eq.${encodeURIComponent(rootUrl)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED)&select=id,state,root_url,discovered_pages,analyzed_pages,skipped_pages,failed_pages,error&order=created_at.desc&limit=1`,
         token,
       ))[0] ?? null;
       if (existingScan?.state === "COMPLETE" || existingScan?.state === "COMPLETE_WITH_WARNINGS") {
@@ -477,7 +477,12 @@ async function handleWebsiteScan(request: Request) {
       await dataApi(`website_scans?id=eq.${encodeURIComponent(scanId)}`, token, {
         method: "PATCH",
         headers: { prefer: "return=minimal" },
-        body: JSON.stringify({ state: "FAILED", finished_at: new Date().toISOString(), last_progress_at: new Date().toISOString(), error: detail.slice(0, 500) }),
+        body: JSON.stringify({
+          state: "PARTIAL",
+          finished_at: null,
+          last_progress_at: new Date().toISOString(),
+          error: "BATCH_RETRY_REQUIRED",
+        }),
       }).catch(() => undefined);
     }
     console.error("cloudflare-website-scan", { profileId, scanId, detail });
