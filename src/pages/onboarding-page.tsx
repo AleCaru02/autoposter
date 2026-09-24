@@ -52,7 +52,7 @@ export function OnboardingPage() {
   const incompleteProfile = useMemo(() => profiles.find((profile) => !profile.onboarding_completed) ?? null, [profiles]);
 
   useEffect(() => {
-    if (loading || stage !== "FORM") return;
+    if (loading || submitting || stage !== "FORM") return;
 
     if (newActivityProfileId) {
       const pendingNewProfile = profiles.find((profile) => profile.id === newActivityProfileId) ?? null;
@@ -78,7 +78,7 @@ export function OnboardingPage() {
     setCreatedProfileId(incompleteProfile.id);
     setError("La configurazione di questa attività non è ancora completa. Riprendi da dove si era interrotta.");
     setStage("ERROR");
-  }, [loading, stage, requestedNewActivity, newActivityProfileId, profiles, incompleteProfile?.id, navigate]);
+  }, [loading, submitting, stage, requestedNewActivity, newActivityProfileId, profiles, incompleteProfile?.id, navigate]);
 
   const steps = useMemo(() => [
     { key: "FORM", label: "Attività" },
