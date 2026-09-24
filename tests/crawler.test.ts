@@ -179,7 +179,7 @@ const workerSource = await import("node:fs/promises").then(({ readFile }) => rea
 const contentPage = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8"));
 assert.match(workerSource, /boundedScanPageLimit\(body\.pageLimit\)/, "the server, not only the UI, must enforce the safe crawl bound");
 assert.match(workerSource, /createPublicTargetValidator/, "DNS safety checks must be memoized per hostname inside one crawl");
-assert.match(workerSource, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING\)/, "an existing partial scan must be resumed instead of discarded");
+assert.match(workerSource, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED\)/, "an existing partial or legacy-failed scan must be resumed instead of discarded");
 assert.match(workerSource, /status !== "DISCOVERED"/, "terminal pages must be excluded from later crawl batches");
 assert.match(workerSource, /status === "DISCOVERED"/, "pending pages must seed the next crawl batch");
 assert.match(workerSource, /includeSitemap: pending\.length === 0/, "continuation must not re-fetch and reparse sitemap seeds already persisted in the frontier");
