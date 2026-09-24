@@ -48,11 +48,51 @@ export function OnboardingPage() {
   const [pagesAnalyzed, setPagesAnalyzed] = useState(0);
   const [scanProgress, setScanProgress] = useState<WebsiteScanProgress>({ processed: 0, total: 0, percent: 0 });
   const [brandProgress, setBrandProgress] = useState(0);
+  const brandProgressRef = useRef(0);
+  const brandProgressTimerRef = useRef<number | null>(null);
   const [brandStatus, setBrandStatus] = useState("Preparo i dati già letti dal sito");
   const [failedPhase, setFailedPhase] = useState<"CRAWL" | "ANALYZE" | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResponse["analysis"] | null>(null);
   const [visualHints, setVisualHints] = useState<WebsiteVisualHints>({ colors: [], socialLinks: {}, logoUrl: null });
   const incompleteProfile = useMemo(() => profiles.find((profile) => !profile.onboarding_completed) ?? null, [profiles]);
+
+  function stopBrandProgressTimer() {
+    if (brandProgressTimerRef.current !== null) {
+      window.clearInterval(brandProgressTimerRef.current);
+      brandProgressTimerRef.current = null;
+    }
+  }
+
+  function setBrandProgressExact(value: number) {
+    const next = Math.max(0, Math.min(100, Math.round(value)));
+    brandProgressRef.current = next;
+    setBrandProgress(next);
+  }
+
+  function startBrandProgressAnimation() {
+    stopBrandProgressTimer();
+    setBrandProgressExact(30);
+    brandProgressTimerRef.current = window.setInterval(() => {
+      setBrandProgress((current) => {
+        const next = current < 88 ? current + 1 : current;
+        brandProgressRef.current = next;
+        return next;
+      });
+    }, 320);
+  }
+
+  async function advanceBrandProgressTo(target: number, delayMs = 18) {
+    stopBrandProgressTimer();
+    const boundedTarget = Math.max(0, Math.min(100, Math.round(target)));
+    while (brandProgressRef.current < boundedTarget) {
+      const next = Math.min(boundedTarget, brandProgressRef.current + 1);
+      brandProgressRef.current = next;
+      setBrandProgress(next);
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+
+  useEffect(() => () => stopBrandProgressTimer(), []);
 
   useEffect(() => {
     if (loading || submitting || stage !== "FORM") return;
@@ -101,12 +141,11 @@ export function OnboardingPage() {
     setError(null);
     setFailedPhase(null);
     setStage("ANALYZE");
-    setBrandProgress(15);
+    startBrandProgressAnimation();
     setBrandStatus("Preparo i dati già letti dal sito");
 
     let analysisBody: AnalysisResponse | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      setBrandProgress(attempt === 0 ? 35 : 45 + attempt * 5);
       setBrandStatus(attempt === 0 ? "Analizzo identità, servizi, pubblico e tono" : "Riprendo l’analisi senza rileggere il sito");
 
       const analysisToken = await jwt();
@@ -140,7 +179,7 @@ export function OnboardingPage() {
     }
 
     if (!analysisBody?.analysis) throw new Error("Analisi del brand non riuscita. Riprova tra poco.");
-    setBrandProgress(85);
+    await advanceBrandProgressTo(90);
     setBrandStatus("Analisi completata. Salvo il profilo");
 
     setAnalysis(analysisBody.analysis);
@@ -148,14 +187,14 @@ export function OnboardingPage() {
     const analyzedHints = analysisBody.visualHints ?? hints;
     setVisualHints({ ...analyzedHints, colors: concreteColors(analyzedHints.colors ?? []) });
 
-    setBrandProgress(95);
+    await advanceBrandProgressTo(95);
     setBrandStatus("Salvo brand e configurazione dell’attività");
     await reload();
     clearNewActivityFlow();
     setNewActivityProfileId(null);
-    if (requestedNewActivity) navigate("/onboarding", { replace: true });
-    setBrandProgress(100);
     setBrandStatus("Brand pronto");
+    await advanceBrandProgressTo(100, 16);
+    if (requestedNewActivity) navigate("/onboarding", { replace: true });
     setStage("DONE");
   }
 
