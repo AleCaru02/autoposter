@@ -61,6 +61,47 @@ assert.ok(String(capturedBody?.input).includes("LocalBusiness"));
 assert.ok(String(capturedBody?.input).includes("https://example.test/servizi"));
 assert.equal(String(capturedBody?.body ?? "").includes("sk-test"), false);
 
+let fallbackCalls = 0;
+const fallbackPages = [
+  { url: "https://large.test/", title: "Home", text: "Homepage del sito." },
+  { url: "https://large.test/servizi", title: "Servizi", text: "Servizi principali per i clienti." },
+  { url: "https://large.test/faq", title: "FAQ", text: "Domande frequenti e risposte." },
+];
+const fallbackFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+  fallbackCalls += 1;
+  const request = JSON.parse(String(init?.body ?? "{}")) as Record<string, any>;
+  const pageInsights = fallbackCalls === 1
+    ? [{ url: fallbackPages[0].url, summary: "Homepage", topics: ["presentazione"], pageType: "homepage", intent: "presentazione", servicesMentioned: [] }]
+    : fallbackPages.slice(1).map((page) => ({ url: page.url, summary: page.title ?? "", topics: ["contenuto"], pageType: "pagina", intent: "informazione", servicesMentioned: [] }));
+  const payload = fallbackCalls === 1
+    ? { ...generated, pageInsights }
+    : { pageInsights };
+  if (fallbackCalls === 2) {
+    assert.equal(request.text?.format?.schema?.properties?.pageInsights?.minItems, 2, "il fallback deve richiedere esattamente le sole pagine mancanti");
+    assert.equal(request.text?.format?.schema?.properties?.pageInsights?.maxItems, 2, "il fallback deve essere bounded sul batch mancante");
+  }
+  return new Response(JSON.stringify({
+    id: `resp_fallback_${fallbackCalls}`,
+    model: "gpt-5.6-terra",
+    output: [{ content: [{ type: "output_text", text: JSON.stringify(payload) }] }],
+    usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+  }), { status: 200, headers: { "content-type": "application/json", "x-request-id": `req_fallback_${fallbackCalls}` } });
+}) as typeof fetch;
+
+const completed = await analyzeBrandFromWebsite({
+  apiKey: "sk-test",
+  profileName: "Large",
+  websiteUrl: "https://large.test",
+  industry: null,
+  pages: fallbackPages,
+  visualHints: { colors: [], socialLinks: {}, logoUrl: null },
+  fetcher: fallbackFetcher,
+});
+assert.equal(fallbackCalls, 2, "se il primo output omette pagine deve partire un solo fallback sulle mancanti");
+assert.deepEqual(completed.analysis.pageInsights.map((item) => item.url), fallbackPages.map((page) => page.url), "ogni pagina deve avere un insight AI e mantenere l'ordine del crawler");
+assert.equal(completed.usage.inputTokens, 200, "il metering deve sommare anche i token dei fallback");
+assert.equal(completed.usage.outputTokens, 100, "il metering deve sommare l'output di tutte le chiamate provider");
+
 const vercelSource = await readFile(new URL("../api/onboarding-analyze.ts", import.meta.url), "utf8");
 assert.ok(vercelSource.includes("observedFonts"));
 assert.ok(vercelSource.includes("pageInsights: result.analysis.pageInsights"));

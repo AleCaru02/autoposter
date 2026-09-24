@@ -60,11 +60,16 @@ export type BrandAnalysisResult = {
   usage: OpenAITextUsage;
 };
 
+type PageInsight = BrandAnalysis["pageInsights"][number];
+
 const MODEL = "gpt-5.6-terra";
 const MAX_CONTEXT_CHARS = 110_000;
 const MAX_PAGE_CHARS = 1_800;
 const MAX_PAGES = 160;
 const MAX_OUTPUT_TOKENS = 16_000;
+const PAGE_INSIGHT_BATCH_SIZE = 40;
+const PAGE_INSIGHT_PAGE_CHARS = 1_200;
+const PAGE_INSIGHT_OUTPUT_TOKENS = 8_000;
 
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -171,6 +176,151 @@ function validate(value: unknown): BrandAnalysis {
   return candidate as BrandAnalysis;
 }
 
+function openAIUsage(body: Record<string, unknown>): OpenAITextUsage {
+  const usageRaw = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
+  const inputDetails = usageRaw.input_tokens_details && typeof usageRaw.input_tokens_details === "object" ? usageRaw.input_tokens_details as Record<string, unknown> : {};
+  const inputTokens = typeof usageRaw.input_tokens === "number" ? usageRaw.input_tokens : null;
+  const outputTokens = typeof usageRaw.output_tokens === "number" ? usageRaw.output_tokens : null;
+  const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
+  const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
+  return {
+    inputTokens,
+    cachedInputTokens,
+    cacheWriteTokens,
+    outputTokens,
+    totalTokens: typeof usageRaw.total_tokens === "number" ? usageRaw.total_tokens : null,
+    webSearchCalls: 0,
+    estimatedCostUsd: inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null,
+  };
+}
+
+function mergeUsage(usages: OpenAITextUsage[]): OpenAITextUsage {
+  const allKnown = <K extends keyof OpenAITextUsage>(key: K) => usages.every((usage) => typeof usage[key] === "number");
+  const sum = <K extends keyof OpenAITextUsage>(key: K) => usages.reduce((total, usage) => total + Number(usage[key] ?? 0), 0);
+  return {
+    inputTokens: allKnown("inputTokens") ? sum("inputTokens") : null,
+    cachedInputTokens: sum("cachedInputTokens"),
+    cacheWriteTokens: sum("cacheWriteTokens"),
+    outputTokens: allKnown("outputTokens") ? sum("outputTokens") : null,
+    totalTokens: allKnown("totalTokens") ? sum("totalTokens") : null,
+    webSearchCalls: sum("webSearchCalls"),
+    estimatedCostUsd: allKnown("estimatedCostUsd") ? sum("estimatedCostUsd") : null,
+  };
+}
+
+function insightUrlKey(value: string) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    if (url.pathname !== "/" && url.pathname.endsWith("/")) url.pathname = url.pathname.replace(/\/+$/, "");
+    url.searchParams.sort();
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
+function pageInsightSchema(exactCount: number) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      pageInsights: {
+        type: "array",
+        minItems: exactCount,
+        maxItems: exactCount,
+        items: OUTPUT_SCHEMA.properties.pageInsights.items,
+      },
+    },
+    required: ["pageInsights"],
+  } as const;
+}
+
+function reconcilePageInsights(pages: BrandAnalysisInput["pages"], insights: PageInsight[]) {
+  const byUrl = new Map<string, PageInsight>();
+  for (const insight of insights) {
+    if (!insight || typeof insight.url !== "string") continue;
+    const key = insightUrlKey(insight.url);
+    if (!byUrl.has(key)) byUrl.set(key, insight);
+  }
+  const complete: PageInsight[] = [];
+  const missing: BrandAnalysisInput["pages"] = [];
+  for (const page of pages) {
+    const insight = byUrl.get(insightUrlKey(page.url));
+    if (insight) complete.push({ ...insight, url: page.url });
+    else missing.push(page);
+  }
+  return { complete, missing };
+}
+
+async function requestMissingPageInsights(options: BrandAnalysisInput, pages: BrandAnalysisInput["pages"], fetcher: typeof fetch) {
+  const insights: PageInsight[] = [];
+  const usages: OpenAITextUsage[] = [];
+
+  for (let offset = 0; offset < pages.length; offset += PAGE_INSIGHT_BATCH_SIZE) {
+    let pending = pages.slice(offset, offset + PAGE_INSIGHT_BATCH_SIZE);
+
+    for (let attempt = 0; attempt < 2 && pending.length; attempt += 1) {
+      const batch = pending;
+      const response = await fetcher("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: MODEL,
+          store: false,
+          reasoning: { effort: "low" },
+          instructions: [
+            "Interpreta individualmente tutte le pagine fornite per completare la brand intelligence di Post Automatici.",
+            `Restituisci ESATTAMENTE ${batch.length} pageInsights: uno per ogni pagina, nello stesso ordine e senza saltarne nessuna.`,
+            "Mantieni esattamente l'URL ricevuto per ciascuna pagina.",
+            "Ogni summary deve essere molto breve; massimo 4 topics e massimo 4 servicesMentioned.",
+            "Non inventare informazioni non presenti nella pagina.",
+            "Restituisci esclusivamente l'output strutturato richiesto.",
+          ].join("\n"),
+          input: JSON.stringify({
+            profile: { name: options.profileName, websiteUrl: options.websiteUrl, industryHint: options.industry },
+            pages: batch.map((page) => ({
+              url: page.url,
+              title: page.title,
+              content: page.text.replace(/\s+/g, " ").trim().slice(0, PAGE_INSIGHT_PAGE_CHARS),
+            })),
+          }),
+          text: { verbosity: "low", format: { type: "json_schema", name: "post_automatici_page_insights", strict: true, schema: pageInsightSchema(batch.length) } },
+          max_output_tokens: PAGE_INSIGHT_OUTPUT_TOKENS,
+        }),
+      });
+
+      const raw = await response.text();
+      if (!response.ok) {
+        let message = `OPENAI_HTTP_${response.status}`;
+        try {
+          const parsed = JSON.parse(raw) as { error?: { code?: string; message?: string } };
+          message = parsed.error?.code || parsed.error?.message || message;
+        } catch { /* keep status */ }
+        throw new Error(message);
+      }
+
+      const body = JSON.parse(raw) as Record<string, unknown>;
+      usages.push(openAIUsage(body));
+      if (body.status === "incomplete") {
+        if (attempt === 1) throw new Error("OPENAI_INCOMPLETE_PAGE_INSIGHTS");
+        continue;
+      }
+      const outputText = extractOutputText(body);
+      if (!outputText) throw new Error("OPENAI_EMPTY_PAGE_INSIGHTS");
+      const parsed = JSON.parse(outputText) as { pageInsights?: unknown };
+      const candidates = Array.isArray(parsed.pageInsights) ? parsed.pageInsights as PageInsight[] : [];
+      const reconciled = reconcilePageInsights(batch, candidates);
+      insights.push(...reconciled.complete);
+      pending = reconciled.missing;
+    }
+
+    if (pending.length) throw new Error("OPENAI_INCOMPLETE_PAGE_INSIGHTS");
+  }
+
+  return { insights, usages };
+}
+
 export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Promise<BrandAnalysisResult> {
   const fetcher = options.fetcher ?? fetch;
   const pagesContext = compactPages(options.pages);
@@ -225,27 +375,26 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
   if (body.status === "incomplete") throw new Error("OPENAI_INCOMPLETE_BRAND_ANALYSIS");
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_BRAND_ANALYSIS");
-  const analysis = validate(JSON.parse(outputText));
-  const usageRaw = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
-  const inputDetails = usageRaw.input_tokens_details && typeof usageRaw.input_tokens_details === "object" ? usageRaw.input_tokens_details as Record<string, unknown> : {};
-  const inputTokens = typeof usageRaw.input_tokens === "number" ? usageRaw.input_tokens : null;
-  const outputTokens = typeof usageRaw.output_tokens === "number" ? usageRaw.output_tokens : null;
-  const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
-  const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
+  let analysis = validate(JSON.parse(outputText));
+  const selectedPages = options.pages.filter((page) => Boolean(page.text.trim())).slice(0, MAX_PAGES);
+  const primaryCoverage = reconcilePageInsights(selectedPages, analysis.pageInsights);
+  const usages = [openAIUsage(body)];
+
+  if (primaryCoverage.missing.length > 0) {
+    const completion = await requestMissingPageInsights(options, primaryCoverage.missing, fetcher);
+    usages.push(...completion.usages);
+    const completedCoverage = reconcilePageInsights(selectedPages, [...primaryCoverage.complete, ...completion.insights]);
+    if (completedCoverage.missing.length > 0) throw new Error("OPENAI_INCOMPLETE_PAGE_INSIGHTS");
+    analysis = { ...analysis, pageInsights: completedCoverage.complete };
+  } else {
+    analysis = { ...analysis, pageInsights: primaryCoverage.complete };
+  }
 
   return {
     analysis,
     model: typeof body.model === "string" ? body.model : MODEL,
     responseId: typeof body.id === "string" ? body.id : "",
     requestId,
-    usage: {
-      inputTokens,
-      cachedInputTokens,
-      cacheWriteTokens,
-      outputTokens,
-      totalTokens: typeof usageRaw.total_tokens === "number" ? usageRaw.total_tokens : null,
-      webSearchCalls: 0,
-      estimatedCostUsd: inputTokens !== null && outputTokens !== null ? estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens) : null,
-    },
+    usage: mergeUsage(usages),
   };
 }
