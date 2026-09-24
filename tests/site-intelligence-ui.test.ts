@@ -49,7 +49,7 @@ assert.match(source, /Boolean\(intelligence\.logoUrl\) \|\| intelligence\.colors
 assert.ok(source.includes("Non vengono mostrati valori demo"), "la UI deve dichiarare la provenienza reale dei dati");
 assert.ok(source.includes("runFullWebsiteScan"), "la pagina Sito deve usare il runner condiviso di scansione completa");
 assert.ok(source.includes('scanUiState === "IN_PROGRESS"'), "una scansione parziale deve riprendere automaticamente");
-assert.match(fullScan, /pageLimit:\s*8/, "ogni singolo batch deve restare entro il limite Cloudflare sicuro");
+assert.match(fullScan, /pageLimit:\s*4/, "ogni singolo batch deve restare entro il limite Cloudflare CPU-safe verificato");
 assert.match(fullScan, /if \(!body\.hasMore\) return/, "il runner deve continuare finché il backend segnala pagine pendenti");
 assert.match(fullScan, /maxBatches = 260/, "deve esistere un limite fail-safe coerente con la copertura massima");
 assert.match(fullScan, /signal:\s*input\.signal/, "il runner deve poter essere cancellato allo smontaggio");
@@ -70,7 +70,7 @@ assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare 
 assert.ok(source.includes("Completa analisi brand"), "lo stato persistente deve offrire il retry senza rifare il crawler");
 assert.match(source, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/, "AUTH_REQUIRED deve avere un solo retry automatico con token fresco");
 assert.match(source, /response\.status === 401 \|\| body\.error === "AUTH_REQUIRED"/, "il retry automatico deve scattare solo sul boundary auth");
-assert.match(source, /const crawlToken = await authenticatedApiToken\(\)[\s\S]*runFullWebsiteScan[\s\S]*requestBrandAnalysis/, "dopo una scansione lunga il brand deve ottenere un token fresco invece di riusare quello iniziale");
+assert.match(source, /runFullWebsiteScan\([\s\S]*getToken: authenticatedApiToken[\s\S]*requestBrandAnalysis/, "la scansione lunga deve aggiornare il token per batch e il brand deve usare un token fresco separato");
 
 const batchPending = { state: "PARTIAL", error: "BATCH_PENDING", discovered_pages: 113, analyzed_pages: 63, skipped_pages: 0, failed_pages: 0 };
 assert.equal(websiteScanUiState(batchPending), "IN_PROGRESS", "BATCH_PENDING non deve mai essere un failure");
@@ -81,8 +81,10 @@ assert.equal(isWebsiteScanTerminal({ state: "COMPLETE", failed_pages: 0 }), true
 assert.equal(websiteScanUiState({ state: "FAILED", error: "HTTP_500" }), "FAILED", "un failure reale deve restare errore");
 assert.equal(websiteScanUiState({ state: "COMPLETE_WITH_WARNINGS", failed_pages: 2 }), "COMPLETED_WITH_WARNINGS");
 assert.match(scanApi, /state = hasMore \? "PARTIAL" : failedPages > 0 \? "COMPLETE_WITH_WARNINGS" : "COMPLETE"/, "il backend deve distinguere completamento con warning");
-assert.match(scanApi, /state: "FAILED", finished_at:/, "un errore runtime reale deve diventare FAILED");
-assert.match(worker, /state: "FAILED", finished_at:/, "il worker deve usare la stessa semantica terminale");
+assert.match(scanApi, /state: "PARTIAL"[\s\S]*error: "BATCH_RETRY_REQUIRED"/, "un errore batch transitorio deve lasciare il checkpoint Vercel riprendibile");
+assert.match(worker, /state: "PARTIAL"[\s\S]*error: "BATCH_RETRY_REQUIRED"/, "il Worker deve lasciare il checkpoint transitorio riprendibile");
+assert.match(scanApi, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED\)/, "Vercel deve poter recuperare anche scan FAILED creati dal runtime precedente");
+assert.match(worker, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED\)/, "Cloudflare deve poter recuperare anche scan FAILED creati dal runtime precedente");
 
 const originalFetch = globalThis.fetch;
 const requestBodies: Array<{ forceNew?: boolean }> = [];
