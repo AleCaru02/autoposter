@@ -34,6 +34,7 @@ type BrandDraft = {
   tone: string;
   toneTraits: string[];
   goals: string[];
+  detectedGoals: string[];
   services: string[];
   differentiators: string[];
   valuePropositions: string[];
@@ -63,6 +64,17 @@ function concreteColors(values: string[]) {
       && !/(?:var|calc|min|max|clamp)\(|--/.test(normalized)
       && !/^#(?:0000|00000000)$/.test(normalized);
   });
+}
+
+function cachedDetectedGoals(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") return [];
+  const cached = (metadata as Record<string, unknown>).cached_result;
+  if (!cached || typeof cached !== "object") return [];
+  const response = (cached as Record<string, unknown>).response;
+  if (!response || typeof response !== "object") return [];
+  const analysis = (response as Record<string, unknown>).analysis;
+  if (!analysis || typeof analysis !== "object") return [];
+  return stringList((analysis as Record<string, unknown>).goals);
 }
 
 function professionalBrandSummary(value: string) {
@@ -108,6 +120,7 @@ export function BrandPage() {
       user_context: draft.userContext.trim() || null,
       visual_identity: {
         ...existingVisualIdentity,
+        detectedGoals: draft.detectedGoals,
         observedColors: concreteColors(draft.colors),
         summary: draft.visualSummary,
       },
@@ -130,6 +143,20 @@ export function BrandPage() {
     if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
     const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
+    const activeGoals = stringList(row?.goals);
+    let detectedGoals = stringList(visual.detectedGoals);
+    if (!detectedGoals.length) {
+      const usage = await neonClient.from("capability_usage_events")
+        .select("metadata")
+        .eq("profile_id", profile.id)
+        .eq("capability_key", "brand.analyze")
+        .eq("state", "COMMITTED")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!usage.error) detectedGoals = cachedDetectedGoals(usage.data?.metadata);
+    }
+    if (!detectedGoals.length) detectedGoals = activeGoals.filter((goal) => !STANDARD_GOALS.includes(goal));
     autosave.replaceDraft({
       name: profile.name,
       description: row?.description ?? "",
@@ -142,7 +169,8 @@ export function BrandPage() {
       targetSegments: nestedList(row?.target_audience, "segments"),
       tone: summary(row?.tone_of_voice),
       toneTraits: nestedList(row?.tone_of_voice, "traits"),
-      goals: stringList(row?.goals),
+      goals: activeGoals,
+      detectedGoals,
       services: stringList(row?.services),
       differentiators: stringList(row?.differentiators),
       valuePropositions: stringList(row?.value_propositions),
@@ -192,7 +220,7 @@ export function BrandPage() {
 
   const draft = autosave.draft;
   const primaryGoals = useMemo(() => STANDARD_GOALS, []);
-  const specificGoals = useMemo(() => (draft?.goals ?? []).filter((goal) => !STANDARD_GOALS.includes(goal)), [draft?.goals]);
+  const specificGoals = useMemo(() => draft?.detectedGoals ?? [], [draft?.detectedGoals]);
   const visibleBrandSummary = professionalBrandSummary(draft?.visualSummary ?? "");
   if (!selectedProfile) return null;
   if (loading || !draft) return <div className="page-content"><section className="panel">Caricamento…</section></div>;
