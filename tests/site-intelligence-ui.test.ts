@@ -44,6 +44,8 @@ assert.ok(source.includes('from("brand_profiles")'), "la pagina deve leggere la 
 assert.ok(source.includes('.eq("profile_id", profileId)'), "ogni lettura deve restare vincolata all’attività selezionata");
 assert.ok(source.includes("siteIntelligenceView"), "la UI deve usare il parser fail-closed");
 assert.ok(source.includes("Cosa ho imparato dal sito"), "la site intelligence deve essere visibile all’utente");
+assert.doesNotMatch(source, /\(intelligence\.logoUrl \|\| intelligence\.colors\.length\) &&/, "la UI non deve renderizzare il valore numerico 0 quando logo e colori non sono presenti");
+assert.match(source, /Boolean\(intelligence\.logoUrl\) \|\| intelligence\.colors\.length > 0/, "la condizione della card identità visiva deve essere strettamente booleana");
 assert.ok(source.includes("Non vengono mostrati valori demo"), "la UI deve dichiarare la provenienza reale dei dati");
 assert.ok(source.includes("runFullWebsiteScan"), "la pagina Sito deve usare il runner condiviso di scansione completa");
 assert.ok(source.includes('scanUiState === "IN_PROGRESS"'), "una scansione parziale deve riprendere automaticamente");
