@@ -37,6 +37,10 @@ for (const source of [api, worker]) {
   assert.match(source, /BRAND_ANALYSIS_IN_PROGRESS/);
   assert.doesNotMatch(source, /dataApi\("ai_usage_events"/);
   assert.match(source, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, "brand analysis must accept terminal scans completed with page warnings");
+  assert.match(source, /detectedGoals = result\.analysis\.goals/, "brand analysis must persist the catalog of detected goals independently from active state");
+  assert.match(source, /hadPreviousAnalysis/, "brand refresh must distinguish first analysis from an existing user-configured brand");
+  assert.match(source, /activeDetectedGoals/, "brand refresh must preserve off states for previously detected goals");
+  assert.match(source, /goals: activeGoals/, "brand persistence must save active goals separately from detected goals");
 }
 
 assert.match(metering, /CAPABILITY_DISABLED/);

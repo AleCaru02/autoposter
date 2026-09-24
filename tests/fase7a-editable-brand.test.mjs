@@ -26,6 +26,11 @@ assert.match(page, /brand-insight-list/, "long audience and service findings mus
 assert.match(page, /Obiettivi principali/, "standard goals must be separated from detected goals");
 assert.match(page, /Obiettivi specifici rilevati/, "detected long-form goals must have their own readable section");
 assert.match(page, /specific-goal-row/, "detected goals must render as rows instead of pill chips");
+assert.match(page, /detectedGoals: string\[\]/, "detected goals must be stored separately from active goals");
+assert.match(page, /specificGoals = useMemo\(\(\) => draft\?\.detectedGoals \?\? \[\]/, "switching a detected goal off must not remove its row from the UI");
+assert.match(page, /cachedDetectedGoals/, "legacy profiles must recover detected goals from the committed brand-analysis cache without another OpenAI run");
+assert.match(page, /capability_usage_events/, "legacy detected-goal recovery must use the existing profile-scoped usage cache");
+assert.match(page, /detectedGoals: draft\.detectedGoals/, "manual saves must persist the detected-goal catalog independently from active state");
 assert.match(page, /Dati attività/, "the editor must group general activity fields");
 assert.match(page, /Pubblico e posizionamento/, "the editor must group audience and positioning fields");
 assert.match(page, /Identità visiva/, "the editor must group visual identity fields");
