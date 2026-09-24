@@ -20,6 +20,9 @@ assert.ok(
   analyzeBlock.indexOf("runFullWebsiteScan") < analyzeBlock.indexOf('fetch("/api/onboarding-analyze"'),
   "onboarding must complete the persisted site crawl before brand analysis",
 );
+assert.match(analyzeBlock, /const crawlToken = await jwt\(\)[\s\S]*runFullWebsiteScan\([\s\S]*token: crawlToken/, "new-activity onboarding must use a dedicated token for the long site crawl");
+assert.match(analyzeBlock, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)[\s\S]*const analysisToken = await jwt\(\)/, "brand analysis after onboarding crawl must obtain a fresh token and retry auth once");
+assert.match(analyzeBlock, /analysisResponse\.status === 401 \|\| analysisBody\.error === "AUTH_REQUIRED"/, "new-activity brand auth retry must be limited to AUTH_REQUIRED");
 assert.match(
   onboarding,
   /if \(!website\.trim\(\)\)[\s\S]*completeWithoutWebsite\(created\.id\)[\s\S]*await analyzeProfile\(created\.id\)/,
