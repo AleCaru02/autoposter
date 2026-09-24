@@ -68,6 +68,11 @@ assert.ok(source.includes("setBrandAnalyzedAt(brandAnalysisTimestamp(brandRow))"
 assert.match(source, /function brandNeedsAnalysis\([\s\S]*COMPLETE_WITH_WARNINGS[\s\S]*brandTime < scanTime/, "il retry deve restare visibile dopo refresh finché il brand non è aggiornato rispetto all'ultimo scan");
 assert.ok(source.includes("Analisi brand da completare."), "la UI deve mostrare uno stato persistente quando il crawler è finito ma il brand è ancora vecchio");
 assert.ok(source.includes("Completa analisi brand"), "lo stato persistente deve offrire il retry senza rifare il crawler");
+assert.match(source, /IGNORABLE_PAGE_ERROR/, "la UI deve riconoscere gli errori tecnici/inaccessibili già salvati dai vecchi scan");
+assert.match(source, /visiblePages = pages\.filter\(\(page\) => !isAutomaticallyIgnoredPage\(page\)\)/, "le pagine irrilevanti devono essere escluse dalla lista utente");
+assert.match(source, /effectiveScanUiState = scanUiState === "COMPLETED_WITH_WARNINGS" && meaningfulFailures === 0 \? "COMPLETED"/, "warning composti solo da pagine irrilevanti devono risultare completati");
+assert.ok(source.includes("Pagine utili"), "il riepilogo deve contare le sole pagine utili");
+assert.ok(source.includes("Copertura utile"), "la copertura non deve essere abbassata da URL tecniche ignorate");
 assert.match(source, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/, "AUTH_REQUIRED deve avere un solo retry automatico con token fresco");
 assert.match(source, /response\.status === 401 \|\| body\.error === "AUTH_REQUIRED"/, "il retry automatico deve scattare solo sul boundary auth");
 assert.match(source, /runFullWebsiteScan\([\s\S]*getToken: authenticatedApiToken[\s\S]*requestBrandAnalysis/, "la scansione lunga deve aggiornare il token per batch e il brand deve usare un token fresco separato");

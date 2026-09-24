@@ -34,6 +34,10 @@ assert.match(onboarding, /fetch\("\/api\/onboarding-complete"/, "no-website comp
 assert.match(onboarding, /navigate\("\/app\/dashboard"/, "completed onboarding must expose the dashboard transition");
 assert.match(onboarding, /authenticatedApiToken\(\)/, "analysis and completion must use the same reliable token boundary");
 assert.doesNotMatch(onboarding, /getJWTToken/);
+assert.match(onboarding, /setBrandProgressExact\(30\)/, "brand progress must enter the stage at 30 percent");
+assert.match(onboarding, /current < 88 \? current \+ 1 : current/, "brand progress must advance one percentage point at a time while AI analysis is running");
+assert.match(onboarding, /advanceBrandProgressTo\(100, 16\)/, "brand completion must finish smoothly to 100 before showing DONE");
+assert.doesNotMatch(onboarding, /setBrandProgress\((?:15|35|85|95|100)\)/, "brand progress must not jump between hard-coded percentages");
 assert.match(profiles, /PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = \[0, 250, 700\]/, "hard refresh must absorb the short auth/session warmup race automatically");
 assert.match(profiles, /for \(let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS\.length; attempt \+= 1\)/, "profile bootstrap must retry a bounded number of times");
 assert.match(profiles, /const token = await authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "every bootstrap attempt must obtain a fresh Managed Auth token before the same-origin server request");

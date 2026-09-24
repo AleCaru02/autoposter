@@ -93,6 +93,16 @@ export function normalizeCrawlUrl(input: string, root: URL): string | null {
   return url.toString();
 }
 
+const EXPECTED_INTERNAL_HTTP_STATUS = new Set([400, 401, 403, 404, 405, 410, 451]);
+
+function expectedInternalSkipReason(message: string, depth: number) {
+  if (depth <= 0) return null;
+  const httpMatch = /^HTTP_(\d{3})$/.exec(message);
+  if (httpMatch && EXPECTED_INTERNAL_HTTP_STATUS.has(Number(httpMatch[1]))) return `HTTP_${httpMatch[1]}_IGNORED`;
+  if (message === "CROSS_ORIGIN_REDIRECT" || message === "INVALID_REDIRECT_TARGET") return "REDIRECT_OUTSIDE_SITE";
+  return null;
+}
+
 function absoluteHttpUrl(value: string | undefined, base: URL) {
   if (!value) return null;
   try {
@@ -440,7 +450,10 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
         }
       }
     } catch (reason) {
-      pages.push({ ...baseSkipped, status: "FAILED", skipReason: null, error: reason instanceof Error ? reason.message : "UNKNOWN_ERROR" });
+      const message = reason instanceof Error ? reason.message : "UNKNOWN_ERROR";
+      const skipReason = expectedInternalSkipReason(message, item.depth);
+      if (skipReason) pages.push({ ...baseSkipped, status: "SKIPPED", skipReason, error: null });
+      else pages.push({ ...baseSkipped, status: "FAILED", skipReason: null, error: message });
     }
   }
 
