@@ -53,6 +53,30 @@ assert.equal(result.pages.some((page) => page.url.endsWith("brochure.pdf")), fal
 assert.ok(result.pages.find((page) => page.title === "FAQ"));
 assert.ok(result.pages.every((page) => page.status !== "ANALYZED" || page.contentHash?.length === 64));
 
+const inaccessibleFetcher = (async (input: string | URL | Request) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  if (url === "https://inaccessible.test/robots.txt") return new Response("User-agent: *", { headers: { "content-type": "text/plain" } });
+  if (url === "https://inaccessible.test/") return new Response(html("Home", '<a href="/missing">Missing</a><a href="/private-area">Private</a><a href="/broken">Broken</a>'), { headers: { "content-type": "text/html" } });
+  if (url === "https://inaccessible.test/missing") return new Response("missing", { status: 404, headers: { "content-type": "text/html" } });
+  if (url === "https://inaccessible.test/private-area") return new Response("forbidden", { status: 403, headers: { "content-type": "text/html" } });
+  if (url === "https://inaccessible.test/broken") return new Response("server error", { status: 500, headers: { "content-type": "text/html" } });
+  return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
+}) as typeof fetch;
+const inaccessibleResult = await crawlWebsite("https://inaccessible.test/", {
+  fetcher: inaccessibleFetcher,
+  validateTarget: () => undefined,
+  maxPages: 10,
+  maxDepth: 10,
+  maxDurationMs: 10_000,
+  includeSitemap: false,
+});
+assert.equal(inaccessibleResult.analyzedPages, 1, "la homepage valida deve restare analizzata");
+assert.equal(inaccessibleResult.skippedPages, 2, "404/403 interni attesi devono essere ignorati senza warning");
+assert.equal(inaccessibleResult.failedPages, 1, "un HTTP 500 interno deve restare un errore reale");
+assert.ok(inaccessibleResult.pages.some((page) => page.status === "SKIPPED" && page.skipReason === "HTTP_404_IGNORED"));
+assert.ok(inaccessibleResult.pages.some((page) => page.status === "SKIPPED" && page.skipReason === "HTTP_403_IGNORED"));
+assert.ok(inaccessibleResult.pages.some((page) => page.status === "FAILED" && page.error === "HTTP_500"));
+
 assert.ok(calls.includes("https://example.test/assets/site.css"), "deve leggere il CSS esterno per la brand identity");
 assert.ok(result.visualHints.colors.includes("#123456"), "deve estrarre colori anche dal CSS esterno");
 assert.ok(!result.visualHints.colors.some((color) => color.includes("var(")), "non deve esporre variabili CSS irrisolte come colori");
