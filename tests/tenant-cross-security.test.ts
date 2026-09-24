@@ -103,7 +103,9 @@ const onboarding = readFileSync("src/pages/onboarding-page.tsx", "utf8");
 assert.match(onboarding, /profiles\.length > 0 && !creatingAnother && stage === "FORM"/, "refreshing normal onboarding with an existing profile must redirect instead of creating another workspace");
 assert.match(onboarding, /const submitLock = useRef\(false\)/, "onboarding must use a synchronous submission lock against rapid duplicate submits");
 assert.match(onboarding, /if \(submitLock\.current\) return/, "a second concurrent submit must be rejected before createProfile runs");
-assert.match(onboarding, /if \(creatingAnother\) navigate\("\/onboarding", \{ replace: true \}\)/, "the explicit ?new=1 intent must be consumed after one profile creation so refresh cannot repeat it");
+assert.match(onboarding, /rememberNewActivityProfile\(created\.id\)/, "after explicit new-profile creation, refresh must bind to that exact created profile instead of reopening arbitrary creation");
+assert.match(onboarding, /if \(requestedNewActivity\) return;[\s\S]*if \(!incompleteProfile\) return;/, "fresh ?new=1 onboarding must ignore unrelated incomplete profiles");
+assert.match(onboarding, /clearNewActivityFlow\(\)/, "new-profile resume state must be cleared after successful completion");
 assert.match(onboarding, /disabled=\{submitting\}/, "the UI must expose a coherent disabled state while profile creation is running");
 
 console.log("tenant cross security regression: PASS");
