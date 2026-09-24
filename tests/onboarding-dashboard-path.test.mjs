@@ -8,6 +8,8 @@ const entry = fs.readFileSync("cloudflare/entry.ts", "utf8");
 const app = fs.readFileSync("src/App.tsx", "utf8");
 const profileBootstrap = fs.readFileSync("api/_lib/profile-bootstrap.ts", "utf8");
 const workerProfileBootstrap = fs.readFileSync("cloudflare/profile-bootstrap.ts", "utf8");
+const onboardingFlow = fs.readFileSync("src/lib/onboarding-flow.ts", "utf8");
+const profilesPage = fs.readFileSync("src/pages/profiles-page.tsx", "utf8");
 
 assert.match(token, /authClient\.token\(/, "authenticated API calls must use the Managed Auth token endpoint");
 assert.match(token, /"X-Force-Fetch": "1"/, "token retrieval must bypass stale SDK cache");
@@ -19,6 +21,14 @@ assert.match(onboarding, /const created = await createProfile[\s\S]*completeWith
 assert.match(onboarding, /const incompleteProfile = useMemo\(\(\) => profiles\.find\(\(profile\) => !profile\.onboarding_completed\)/, "saved incomplete profiles must be detected");
 assert.match(onboarding, /stage === "FORM" && !incompleteProfile\) return <Navigate to="\/app\/dashboard"/, "only completed existing profiles may skip onboarding");
 assert.match(onboarding, /setCreatedProfileId\(incompleteProfile\.id\)[\s\S]*setStage\("ERROR"\)/, "incomplete onboarding must resume the saved profile instead of creating another one");
+assert.match(profilesPage, /clearNewActivityFlow\(\); navigate\("\/onboarding\?new=1"\)/, "clicking Nuova attività must clear any stale resume target before entering onboarding");
+assert.match(onboardingFlow, /NEW_ACTIVITY_FLOW_KEY = "post-automatici\.new-activity-flow"/, "new-activity resume state must have its own scoped browser key");
+assert.match(onboardingFlow, /createdProfileId/, "new-activity resume state must remember only the exact created profile id");
+assert.match(onboarding, /if \(newActivityProfileId\)[\s\S]*profiles\.find\(\(profile\) => profile\.id === newActivityProfileId\)/, "new-activity retry must resume only its exact saved profile");
+assert.match(onboarding, /if \(requestedNewActivity\) return;[\s\S]*if \(!incompleteProfile\) return;/, "a fresh Nuova attività request must ignore unrelated incomplete profiles");
+assert.match(onboarding, /rememberNewActivityProfile\(created\.id\)/, "once a new activity is actually created its exact id must become the only resume target");
+assert.match(onboarding, /loading \|\| submitting \|\| stage !== "FORM"/, "the resume effect must not race an active profile creation");
+assert.match(onboarding, /Annulla e torna alle attività/, "fresh new-activity onboarding must allow leaving before creating anything");
 assert.match(onboarding, /profile\.website_url\?\.trim\(\)[\s\S]*analyzeProfile\(createdProfileId\)[\s\S]*completeWithoutWebsite\(createdProfileId\)/, "resume must choose website analysis or no-website completion from persisted state");
 assert.match(onboarding, /fetch\("\/api\/onboarding-complete"/, "no-website completion must remain server-owned");
 assert.match(onboarding, /navigate\("\/app\/dashboard"/, "completed onboarding must expose the dashboard transition");
