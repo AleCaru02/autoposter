@@ -48,7 +48,8 @@ assert.match(metering, /10 \* 60 \* 1000/, "stale reservation recovery must use 
 assert.match(analysisEngine, /const MAX_PAGES = 160/, "large sites must keep up to 160 analyzed pages in brand context");
 assert.match(analysisEngine, /maxItems: 160/, "structured page insights must support the large-site page count");
 assert.match(analysisEngine, /reasoning: \{ effort: "low" \}/, "brand extraction should use the faster low-reasoning path");
-assert.match(analysisEngine, /max_output_tokens: attempt === 0 \? MAX_OUTPUT_TOKENS : 18_000/, "incomplete structured output must have one larger bounded retry");
+assert.match(analysisEngine, /const MAX_OUTPUT_TOKENS = 16_000/, "large-site structured output must have enough bounded room without hidden provider retries");
+assert.match(analysisEngine, /max_output_tokens: MAX_OUTPUT_TOKENS/, "each endpoint attempt must make one explicitly bounded provider call");
 assert.match(analysisEngine, /parsedBody\.status === "incomplete"/, "incomplete OpenAI structured responses must be detected explicitly");
 assert.match(api, /order=depth\.asc&limit=160/, "Vercel brand endpoint must read all supported large-site pages");
 assert.match(worker, /order=depth\.asc&limit=160/, "Cloudflare brand endpoint must read all supported large-site pages");
