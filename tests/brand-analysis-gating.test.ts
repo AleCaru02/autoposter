@@ -48,8 +48,13 @@ assert.match(metering, /10 \* 60 \* 1000/, "stale reservation recovery must use 
 assert.match(analysisEngine, /const MAX_PAGES = 160/, "large sites must keep up to 160 analyzed pages in brand context");
 assert.match(analysisEngine, /maxItems: 160/, "structured page insights must support the large-site page count");
 assert.match(analysisEngine, /reasoning: \{ effort: "low" \}/, "brand extraction should use the faster low-reasoning path");
-assert.match(analysisEngine, /const MAX_OUTPUT_TOKENS = 16_000/, "large-site structured output must have enough bounded room without hidden provider retries");
-assert.match(analysisEngine, /max_output_tokens: MAX_OUTPUT_TOKENS/, "each endpoint attempt must make one explicitly bounded provider call");
+assert.match(analysisEngine, /const MAX_OUTPUT_TOKENS = 16_000/, "the primary large-site analysis must stay explicitly bounded");
+assert.match(analysisEngine, /max_output_tokens: MAX_OUTPUT_TOKENS/, "the primary provider call must stay explicitly bounded");
+assert.match(analysisEngine, /const PAGE_INSIGHT_BATCH_SIZE = 40/, "missing page insights must be repaired in bounded batches");
+assert.match(analysisEngine, /minItems: exactCount[\s\S]*maxItems: exactCount/, "fallback structured output must require one result per missing page");
+assert.match(analysisEngine, /requestMissingPageInsights/, "large-site partial pageInsights must trigger a dedicated OpenAI completion path");
+assert.match(analysisEngine, /mergeUsage\(usages\)/, "provider usage from fallback calls must be included in metering");
+assert.match(analysisEngine, /OPENAI_INCOMPLETE_PAGE_INSIGHTS/, "brand analysis must fail closed if OpenAI still omits pages after bounded retries");
 assert.match(analysisEngine, /body\.status === "incomplete"/, "incomplete OpenAI structured responses must be detected explicitly");
 assert.match(api, /order=depth\.asc&limit=160/, "Vercel brand endpoint must read all supported large-site pages");
 assert.match(worker, /order=depth\.asc&limit=160/, "Cloudflare brand endpoint must read all supported large-site pages");
