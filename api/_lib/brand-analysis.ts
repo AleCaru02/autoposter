@@ -196,35 +196,63 @@ export async function analyzeBrandFromWebsite(options: BrandAnalysisInput): Prom
     pages: pagesContext,
   });
 
-  const response = await fetcher("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL,
-      store: false,
-      reasoning: { effort: "low" },
-      instructions,
-      input,
-      text: { verbosity: "low", format: { type: "json_schema", name: "post_automatici_brand_analysis", strict: true, schema: OUTPUT_SCHEMA } },
-      max_output_tokens: MAX_OUTPUT_TOKENS,
-    }),
-  });
+  let body: Record<string, unknown> | null = null;
+  let requestId: string | null = null;
+  let analysis: BrandAnalysis | null = null;
+  let lastFailure: Error | null = null;
 
-  const requestId = response.headers.get("x-request-id");
-  const raw = await response.text();
-  if (!response.ok) {
-    let message = `OPENAI_HTTP_${response.status}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetcher("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL,
+        store: false,
+        reasoning: { effort: "low" },
+        instructions,
+        input,
+        text: { verbosity: "low", format: { type: "json_schema", name: "post_automatici_brand_analysis", strict: true, schema: OUTPUT_SCHEMA } },
+        max_output_tokens: attempt === 0 ? MAX_OUTPUT_TOKENS : 18_000,
+      }),
+    });
+
+    requestId = response.headers.get("x-request-id");
+    const raw = await response.text();
+    if (!response.ok) {
+      let message = `OPENAI_HTTP_${response.status}`;
+      try {
+        const parsed = JSON.parse(raw) as { error?: { code?: string; message?: string } };
+        message = parsed.error?.code || parsed.error?.message || message;
+      } catch { /* keep status */ }
+      lastFailure = new Error(message);
+      if (attempt === 0 && [408, 409, 425, 429, 500, 502, 503, 504].includes(response.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        continue;
+      }
+      throw lastFailure;
+    }
+
     try {
-      const parsed = JSON.parse(raw) as { error?: { code?: string; message?: string } };
-      message = parsed.error?.code || parsed.error?.message || message;
-    } catch { /* keep status */ }
-    throw new Error(message);
+      const parsedBody = JSON.parse(raw) as Record<string, unknown>;
+      const incomplete = parsedBody.status === "incomplete";
+      if (incomplete) throw new Error("OPENAI_INCOMPLETE_BRAND_ANALYSIS");
+      const outputText = extractOutputText(parsedBody);
+      if (!outputText) throw new Error("OPENAI_EMPTY_BRAND_ANALYSIS");
+      const parsedAnalysis = validate(JSON.parse(outputText));
+      body = parsedBody;
+      analysis = parsedAnalysis;
+      break;
+    } catch (reason) {
+      lastFailure = reason instanceof Error ? reason : new Error("OPENAI_INVALID_BRAND_ANALYSIS");
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      throw lastFailure;
+    }
   }
 
-  const body = JSON.parse(raw) as Record<string, unknown>;
-  const outputText = extractOutputText(body);
-  if (!outputText) throw new Error("OPENAI_EMPTY_BRAND_ANALYSIS");
-  const analysis = validate(JSON.parse(outputText));
+  if (!body || !analysis) throw lastFailure ?? new Error("OPENAI_EMPTY_BRAND_ANALYSIS");
   const usageRaw = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const inputDetails = usageRaw.input_tokens_details && typeof usageRaw.input_tokens_details === "object" ? usageRaw.input_tokens_details as Record<string, unknown> : {};
   const inputTokens = typeof usageRaw.input_tokens === "number" ? usageRaw.input_tokens : null;
