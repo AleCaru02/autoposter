@@ -11,6 +11,7 @@ const adminUi = readFileSync(new URL("../src/pages/admin-pages.tsx", import.meta
 const ownerMigration = readFileSync(new URL("../db/migrations/20260830_profile_owner_membership_contract.sql", import.meta.url), "utf8");
 const adminAuditMigration = readFileSync(new URL("../db/migrations/20260830_platform_admin_audit.sql", import.meta.url), "utf8");
 const adminBootstrapSource = readFileSync(new URL("../cloudflare/platform-admin-bootstrap.ts", import.meta.url), "utf8");
+const deployWorkflow = readFileSync(new URL("../.github/workflows/deploy-worker.yml", import.meta.url), "utf8");
 
 assert.equal(normalizePlatformRole("admin"), "SUPER_ADMIN");
 assert.equal(normalizePlatformRole("ADMIN"), "SUPER_ADMIN");
@@ -55,5 +56,7 @@ assert.equal(adminUi.includes("SUPER_ADMIN") && adminUi.includes("OWNER"), false
 assert.equal(adminBootstrapSource.includes("left join public.profile_tenant_modes mode on mode.profile_id = p.id"), true, "initial admin bootstrap must inspect tenant classification");
 assert.equal(adminBootstrapSource.includes("coalesce(mode.tenant_type, 'CUSTOMER_REAL') = 'CUSTOMER_REAL'"), true, "QA/demo tenants must not make the real customer owner ambiguous during initial admin bootstrap");
 assert.equal(adminBootstrapSource.includes("p.archived_at is null"), true, "archived customer profiles must not influence initial admin selection");
+assert.equal(deployWorkflow.includes("group: post-automatici-production-deploy"), true, "production deploys must share one concurrency group");
+assert.equal(deployWorkflow.includes("cancel-in-progress: false"), true, "privileged bootstrap deploys must never be cancelled or overlapped by another production deploy");
 
 console.log("platform RBAC regression: PASS");
