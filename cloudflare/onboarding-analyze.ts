@@ -94,6 +94,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
   try { body = await request.json() as Record<string, unknown>; } catch { /* validated below */ }
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+  const forceRefresh = body.forceRefresh === true;
   const visualHints = sanitizeVisualHints(body.visualHints);
 
   let activeMeter: BrandAnalysisMetering | null = null;
@@ -110,7 +111,7 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
 
     const meter = new BrandAnalysisMetering(env.DATABASE_URL);
     activeMeter = meter;
-    const reservation = await meter.reserve({ profileId, scanId: scan.id });
+    const reservation = await meter.reserve({ profileId, scanId: scan.id, forceRefresh });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
     if (reservation.status === "COMPLETED") {
       await completeOnboardingProfile(env.DATABASE_URL, authUserId, profileId, "BRAND_ANALYZED");
