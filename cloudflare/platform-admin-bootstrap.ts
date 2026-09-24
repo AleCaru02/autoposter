@@ -71,7 +71,7 @@ export async function handleInitialSuperAdminBootstrap(request: Request, env: Bo
 
     // No email or frontend constant is used. The bootstrap is allowed only when
     // production data proves one and only one Neon Auth identity owns all
-    // existing profiles. Otherwise it refuses to choose an account.
+    // existing customer profiles. Otherwise it refuses to choose an account.
     const candidates = await sql`
       select
         count(distinct p.owner_auth_user_id)::int as owner_identity_count,
