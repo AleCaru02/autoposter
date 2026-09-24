@@ -115,7 +115,12 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
   const url = new URL(request.url);
   const path = url.pathname;
   if (!path.startsWith("/api/admin/")) return null;
-  if (request.method !== "GET") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const archiveActivityMatch = path.match(/^\/api\/admin\/activities\/([0-9a-f-]{36})\/archive$/i);
+  if (archiveActivityMatch) {
+    if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  } else if (request.method !== "GET") {
+    return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  }
 
   const auth = await authorize(request, env);
   if (!auth.ok) return auth.response;
@@ -123,6 +128,33 @@ export async function handleAdminApi(request: Request, env: AdminEnv): Promise<R
   const sql = neon(env.DATABASE_URL);
 
   try {
+    if (archiveActivityMatch) {
+      const profileId = archiveActivityMatch[1];
+      const targets = await sql`
+        select id::text as id, name, owner_auth_user_id
+        from public.profiles
+        where id::text = ${profileId}
+          and owner_auth_user_id = ${auth.user.authUserId}
+          and archived_at is null
+        limit 1
+      ` as Array<{ id: string; name: string; owner_auth_user_id: string }>;
+      const target = targets[0];
+      if (!target) return json({ error: "ACTIVITY_NOT_FOUND" }, 404);
+
+      const archived = await sql`
+        update public.profiles
+        set archived_at = now(), updated_at = now()
+        where id::text = ${profileId}
+          and owner_auth_user_id = ${auth.user.authUserId}
+          and archived_at is null
+        returning id::text as id
+      ` as Array<{ id: string }>;
+      if (!archived[0]) return json({ error: "ACTIVITY_NOT_FOUND" }, 404);
+
+      await audit(env, auth.user.authUserId, "ADMIN_ACTIVITY_ARCHIVED", "PROFILE", profileId, { profileName: target.name });
+      return json({ archived: true, profileId });
+    }
+
     if (path === "/api/admin/me") {
       await audit(env, auth.user.authUserId, "ADMIN_ACCESS", "PLATFORM", "BACKOFFICE");
       return json({ platformRole: auth.user.platformRole });
