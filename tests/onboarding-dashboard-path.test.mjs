@@ -29,7 +29,7 @@ assert.match(onboarding, /if \(requestedNewActivity\) return;[\s\S]*if \(!incomp
 assert.match(onboarding, /rememberNewActivityProfile\(created\.id\)/, "once a new activity is actually created its exact id must become the only resume target");
 assert.match(onboarding, /loading \|\| submitting \|\| stage !== "FORM"/, "the resume effect must not race an active profile creation");
 assert.match(onboarding, /Annulla e torna alle attività/, "fresh new-activity onboarding must allow leaving before creating anything");
-assert.match(onboarding, /profile\.website_url\?\.trim\(\)[\s\S]*analyzeProfile\(createdProfileId\)[\s\S]*completeWithoutWebsite\(createdProfileId\)/, "resume must choose website analysis or no-website completion from persisted state");
+assert.match(onboarding, /!profile\.website_url\?\.trim\(\)[\s\S]*completeWithoutWebsite\(createdProfileId\)[\s\S]*failedPhase === "ANALYZE"[\s\S]*analyzeBrandOnly\(createdProfileId, visualHints, pagesAnalyzed\)[\s\S]*analyzeProfile\(createdProfileId\)/, "resume must choose no-website completion, brand-only retry, or full scan continuation from persisted state");
 assert.match(onboarding, /fetch\("\/api\/onboarding-complete"/, "no-website completion must remain server-owned");
 assert.match(onboarding, /navigate\("\/app\/dashboard"/, "completed onboarding must expose the dashboard transition");
 assert.match(onboarding, /authenticatedApiToken\(\)/, "analysis and completion must use the same reliable token boundary");
