@@ -20,7 +20,7 @@ assert.ok(
   analyzeBlock.indexOf("runFullWebsiteScan") < analyzeBlock.indexOf('fetch("/api/onboarding-analyze"'),
   "onboarding must complete the persisted site crawl before brand analysis",
 );
-assert.match(analyzeBlock, /const crawlToken = await jwt\(\)[\s\S]*runFullWebsiteScan\([\s\S]*token: crawlToken/, "new-activity onboarding must use a dedicated token for the long site crawl");
+assert.match(analyzeBlock, /runFullWebsiteScan\([\s\S]*getToken: jwt/, "new-activity onboarding must acquire fresh authentication throughout the long site crawl");
 assert.match(analyzeBlock, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)[\s\S]*const analysisToken = await jwt\(\)/, "brand analysis after onboarding crawl must obtain a fresh token and retry auth once");
 assert.match(analyzeBlock, /analysisResponse\.status === 401 \|\| analysisBody\.error === "AUTH_REQUIRED"/, "new-activity brand auth retry must be limited to AUTH_REQUIRED");
 assert.match(
@@ -48,8 +48,8 @@ const startScanEnd = site.indexOf("const scanUiState");
 const startScanBlock = site.slice(startScanStart, startScanEnd);
 assert.match(startScanBlock, /forceNew: !automatic/, "manual Ripeti analisi must request a fresh scan");
 assert.match(site, /onClick=\{\(\) => void startScan\(false\)\}/, "Ripeti analisi must remain available after onboarding");
-assert.match(fullScan, /forceNew: Boolean\(input\.forceNew && batchIndex === 0\)/,
-  "only the first batch of a manual re-scan may create a new scan");
+assert.match(fullScan, /forceNew: Boolean\(input\.forceNew && batchIndex === 0 && \(attempt === 0 \|\| previousStatus === 401\)\)/,
+  "only the initial logical batch may create a new scan; transient retries must resume safely");
 const scanHandlerStart = worker.indexOf("async function handleWebsiteScan");
 const scanHandlerEnd = worker.indexOf("async function routeApi", scanHandlerStart);
 const scanHandler = worker.slice(scanHandlerStart, scanHandlerEnd);
