@@ -101,8 +101,8 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
     const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token))[0] ?? null;
-    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
-    const pages = scan ? await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
+    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
+    const pages = scan ? await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=160`, token) : [];
     const context: BrandContext = {
       profileName: profile.name,
       industry: profile.industry,
