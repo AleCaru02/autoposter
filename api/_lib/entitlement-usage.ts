@@ -308,11 +308,11 @@ export class EntitlementUsageService {
 
   async getUsageEvent(eventId: string) {
     const rows = await this.sql`
-      select id, profile_id, capability_key, state, idempotency_key, metadata
+      select id, profile_id, capability_key, state, idempotency_key, metadata, created_at
       from public.capability_usage_events
       where id=${eventId}::uuid
       limit 1
-    ` as unknown as Array<{ id: string; profile_id: string; capability_key: string; state: "RESERVED"|"COMMITTED"|"RELEASED"; idempotency_key: string; metadata: unknown }>;
+    ` as unknown as Array<{ id: string; profile_id: string; capability_key: string; state: "RESERVED"|"COMMITTED"|"RELEASED"; idempotency_key: string; metadata: unknown; created_at: string }>;
     return rows[0] ?? null;
   }
 
