@@ -97,8 +97,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
     const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token);
     const brand = brands[0] ?? null;
-    const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
-    const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=60`, token) : [];
+    const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
+    const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=160`, token) : [];
 
     const context: BrandContext = {
       profileName: profile.name,

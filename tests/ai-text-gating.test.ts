@@ -36,6 +36,11 @@ assert.doesNotMatch(qa, /TextGenerationMetering|reserveUsage\(/);
 assert.doesNotMatch(manual, /limitValue\s*:\s*req\.body|remaining\s*:\s*req\.body/);
 assert.doesNotMatch(worker, /limitValue\s*:\s*body|remaining\s*:\s*body/);
 
+for (const [name, source] of [["Vercel", manual], ["Cloudflare", worker]] as const) {
+  assert.match(source, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, `${name} text generation must use the latest terminal scan even when it completed with real page warnings`);
+  assert.match(source, /website_pages\?scan_id=[\s\S]*order=depth\.asc&limit=160/, `${name} text generation must consider all supported analyzed pages before selecting the most relevant context`);
+}
+
 const keyA = await deriveTextGenerationOperationKey({
   profileId: "11111111-1111-1111-1111-111111111111",
   source: "MANUAL",
