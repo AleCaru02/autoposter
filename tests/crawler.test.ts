@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { crawlWebsite, parseWebsitePage } from "../api/_lib/crawler.js";
 import { boundedScanPageLimit, CLOUDFLARE_FREE_SUBREQUEST_LIMIT, estimatedScanSubrequests, SAFE_SCAN_MAX_PAGES } from "../api/_lib/website-scan-policy.js";
+import { runFullWebsiteScan, websiteScanProgress } from "../src/lib/full-website-scan.js";
 
 const html = (title: string, body: string, head = "") => `<!doctype html><html><head><title>${title}</title><meta name="description" content="Descrizione ${title}">${head}</head><body>${body}</body></html>`;
 
@@ -188,5 +189,71 @@ assert.match(workerSource, /error: hasMore \? "BATCH_PENDING"/, "pending continu
 assert.equal(workerSource.includes('return json({ error: "SCAN_FAILED", detail }'), false, "raw Worker failures must not reach the customer");
 assert.match(contentPage, /runFullWebsiteScan/, "legacy content bootstrap must complete the site through the shared batched scanner");
 assert.equal(contentPage.includes("scanBody.detail"), false, "the content page must not display raw Cloudflare details");
+
+
+
+const originalGlobalFetch = globalThis.fetch;
+const scanRequests: Array<{ token: string; forceNew: boolean }> = [];
+let scanAttempt = 0;
+globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+  scanAttempt += 1;
+  const headers = new Headers(init?.headers);
+  const payload = JSON.parse(String(init?.body || "{}")) as { forceNew?: boolean };
+  scanRequests.push({ token: headers.get("authorization") || "", forceNew: payload.forceNew === true });
+
+  if (scanAttempt === 1) {
+    return new Response(JSON.stringify({ error: "AUTH_REQUIRED" }), { status: 401, headers: { "content-type": "application/json" } });
+  }
+  if (scanAttempt === 2) {
+    return new Response(JSON.stringify({
+      scanId: "11111111-1111-4111-8111-111111111111",
+      state: "PARTIAL",
+      discoveredPages: 8,
+      analyzedPages: 4,
+      skippedPages: 0,
+      failedPages: 0,
+      pendingPages: 4,
+      hasMore: true,
+      visualHints: { colors: ["#123456"] },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  if (scanAttempt === 3) {
+    return new Response(JSON.stringify({ error: "SCAN_FAILED", message: "temporary" }), { status: 500, headers: { "content-type": "application/json" } });
+  }
+  return new Response(JSON.stringify({
+    scanId: "11111111-1111-4111-8111-111111111111",
+    state: "COMPLETE",
+    discoveredPages: 8,
+    analyzedPages: 8,
+    skippedPages: 0,
+    failedPages: 0,
+    pendingPages: 0,
+    hasMore: false,
+    visualHints: { colors: ["#123456"], fontFamilies: ["Inter"] },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}) as typeof fetch;
+
+try {
+  let tokenSequence = 0;
+  const progressSnapshots: number[] = [];
+  const full = await runFullWebsiteScan({
+    profileId: "22222222-2222-4222-8222-222222222222",
+    forceNew: true,
+    getToken: async () => `token-${++tokenSequence}`,
+    onProgress: (batch) => progressSnapshots.push(websiteScanProgress(batch).percent),
+  });
+  assert.equal(full.state, "COMPLETE", "transient batch failures must recover and finish the same scan");
+  assert.equal(full.batches, 2, "retries must not count as extra logical crawl batches");
+  assert.deepEqual(progressSnapshots, [50, 100], "progress must reflect persisted processed/discovered pages");
+  assert.equal(new Set(scanRequests.map((request) => request.token)).size, 4, "every batch attempt must request fresh auth");
+  assert.deepEqual(scanRequests.map((request) => request.forceNew), [true, true, false, false], "401 may safely retry initial forceNew, later transient retries must resume instead of creating a duplicate scan");
+  assert.equal(websiteScanProgress({ discoveredPages: 160, analyzedPages: 80, skippedPages: 10, failedPages: 0, pendingPages: 70, hasMore: true }).percent, 56);
+  assert.equal(websiteScanProgress({ discoveredPages: 160, analyzedPages: 153, skippedPages: 6, failedPages: 1, pendingPages: 0, hasMore: false }).percent, 100);
+} finally {
+  globalThis.fetch = originalGlobalFetch;
+}
+
+assert.match(workerSource, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL,RUNNING,FAILED\)/, "retry must be able to resume a scan that an older runtime marked FAILED");
+assert.match(workerSource, /state: "PARTIAL"[\s\S]*error: "BATCH_RETRY_REQUIRED"/, "transient Worker failure must preserve a resumable checkpoint instead of terminally failing the scan");
 
 console.log(`PASS crawler intelligence: ${result.analyzedPages} pagine, CSS/font/logo/immagini/headings/OG/schema estratti, robots e dominio rispettati.`);
