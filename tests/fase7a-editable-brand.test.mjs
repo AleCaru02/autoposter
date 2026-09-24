@@ -20,6 +20,14 @@ assert.match(page, /Identità rilevata dal sito/, "the detected brand section mu
 assert.doesNotMatch(page, /<Sparkles|\bSparkles\b/, "brand UI must not use decorative AI sparkle icons");
 assert.doesNotMatch(page, /l’AI deve conoscere/, "brand UI must not expose AI-template helper copy");
 assert.match(page, /brand-insight-list/, "long audience and service findings must use readable lists instead of only pill chips");
+assert.match(page, /Obiettivi principali/, "standard goals must be separated from detected goals");
+assert.match(page, /Obiettivi specifici rilevati/, "detected long-form goals must have their own readable section");
+assert.match(page, /specific-goal-row/, "detected goals must render as rows instead of pill chips");
+assert.match(page, /Dati attività/, "the editor must group general activity fields");
+assert.match(page, /Pubblico e posizionamento/, "the editor must group audience and positioning fields");
+assert.match(page, /Identità visiva/, "the editor must group visual identity fields");
+assert.match(brandCss, /\.specific-goals-list/, "detected goals need dedicated list styling");
+assert.match(brandCss, /\.brand-edit-grid/, "brand editor groups must keep a responsive grid");
 assert.match(page, /Non inserire password, chiavi API o dati sensibili\./, "sensitive-data guidance must stay visible");
 assert.match(page, /Salvataggio automatico/, "the real autosave behavior must be visible");
 assert.match(page, /draft\.userContext\.length\}\/5000/, "the real database-backed character limit must be visible");
