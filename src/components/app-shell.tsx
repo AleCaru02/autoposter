@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, LayoutDashboard, LogOut, Menu, Settings2, Share2, Sparkles, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, LayoutDashboard, LogOut, Menu, Palette, Settings2, Share2, X } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -9,7 +9,7 @@ import { ProductBrand } from "./product-brand";
 const links = [
   ["Dashboard", "/app/dashboard", LayoutDashboard],
   ["Attività", "/app/profili", Building2],
-  ["Brand", "/app/brand", Sparkles],
+  ["Brand", "/app/brand", Palette],
   ["Sito", "/app/sito", Globe2],
   ["Contenuti", "/app/contenuti", FileText],
   ["Revisioni", "/app/approvazioni", FileCheck2],
