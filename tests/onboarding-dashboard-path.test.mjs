@@ -24,7 +24,10 @@ assert.match(onboarding, /fetch\("\/api\/onboarding-complete"/, "no-website comp
 assert.match(onboarding, /navigate\("\/app\/dashboard"/, "completed onboarding must expose the dashboard transition");
 assert.match(onboarding, /authenticatedApiToken\(\)/, "analysis and completion must use the same reliable token boundary");
 assert.doesNotMatch(onboarding, /getJWTToken/);
-assert.match(profiles, /const token = await authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "hard refresh must bootstrap profiles from the verified same-origin server endpoint");
+assert.match(profiles, /PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = \[0, 250, 700\]/, "hard refresh must absorb the short auth/session warmup race automatically");
+assert.match(profiles, /for \(let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS\.length; attempt \+= 1\)/, "profile bootstrap must retry a bounded number of times");
+assert.match(profiles, /const token = await authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "every bootstrap attempt must obtain a fresh Managed Auth token before the same-origin server request");
+assert.match(profiles, /return body\.profiles/, "an authoritative successful empty profile list must return immediately instead of being retried");
 assert.match(profiles, /authorization: \`Bearer \$\{token\}\`/, "profile bootstrap request must carry the verified bearer token explicitly");
 assert.doesNotMatch(profiles, /authenticatedProfileRows|NEON_DATA_API_URL/, "profile existence must not be inferred from a direct client Data API read after hard refresh");
 assert.match(entry, /path === "\/api\/profile-bootstrap"\) return handleWorkerProfileBootstrap/, "Cloudflare production must route the profile bootstrap endpoint");
