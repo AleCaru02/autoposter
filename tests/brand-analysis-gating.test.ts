@@ -27,7 +27,8 @@ assert.notEqual(deriveBrandAnalysisAttemptOperationKey(profileA, scanA, 1), deri
 for (const source of [api, worker]) {
   assert.match(source, /DATABASE_NOT_CONFIGURED/);
   assert.match(source, /BrandAnalysisMetering/);
-  assert.match(source, /meter\.reserve\(\{ profileId, scanId: scan\.id \}\)/);
+  assert.match(source, /meter\.reserve\(\{ profileId, scanId: scan\.id, forceRefresh \}\)/);
+  assert.match(source, /forceRefresh = .*forceRefresh === true/, "brand endpoint must accept an explicit cache refresh only when requested");
   assert.ok(source.indexOf("await meter.reserve") < source.indexOf("await analyzeBrandFromWebsite"), "provider callable before entitlement reserve");
   assert.ok(source.indexOf("await meter.markProviderStarted") < source.indexOf("await analyzeBrandFromWebsite"), "provider start is not recorded");
   assert.ok(source.indexOf("await meter.persistTechnicalUsage") < source.indexOf("const write = existingRows[0]"), "technical usage must be durable before product persistence");
@@ -42,6 +43,8 @@ assert.match(metering, /CAPABILITY_DISABLED/);
 assert.match(metering, /CAPABILITY_LIMIT_REACHED/);
 assert.match(metering, /deriveBrandAnalysisAttemptOperationKey/);
 assert.match(metering, /existing\.state === "RESERVED"/);
+assert.match(metering, /forceRefresh\?: boolean/, "metering reserve must support a bounded refresh of a committed incomplete result");
+assert.match(metering, /if \(input\.forceRefresh\) continue;/, "force refresh must advance to the next deterministic retry key instead of mutating committed audit history");
 assert.match(metering, /retry_attempt: attempt/);
 assert.match(metering, /STALE_RESERVED_RECOVERY/, "stale brand reservations must recover instead of blocking retries forever");
 assert.match(metering, /10 \* 60 \* 1000/, "stale reservation recovery must use a conservative timeout");
