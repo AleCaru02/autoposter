@@ -84,48 +84,73 @@ const FACTCHECK_SCHEMA = {
   required: ["verdict", "checkedClaims"],
 } as const;
 
-function extractOutputText(body: Record<string, unknown>) {
-  if (typeof body.output_text === "string" && body.output_text.trim()) return body.output_text;
-  const output = Array.isArray(body.output) ? body.output : [];
+function extractGeminiOutputText(body: Record<string, unknown>) {
+  if (typeof body.output_text === "string" && body.output_text.trim()) return body.output_text.trim();
+  const steps = Array.isArray(body.steps) ? body.steps : [];
   const pieces: string[] = [];
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const content = Array.isArray((item as { content?: unknown }).content) ? (item as { content: unknown[] }).content : [];
-    for (const part of content) {
-      if (part && typeof part === "object" && (part as { type?: unknown }).type === "output_text" && typeof (part as { text?: unknown }).text === "string") pieces.push((part as { text: string }).text);
+  for (const step of steps) {
+    if (!step || typeof step !== "object" || (step as { type?: unknown }).type !== "model_output") continue;
+    const content = Array.isArray((step as { content?: unknown }).content) ? (step as { content: unknown[] }).content : [];
+    for (const block of content) {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text" && typeof (block as { text?: unknown }).text === "string") {
+        pieces.push((block as { text: string }).text);
+      }
     }
   }
   return pieces.join("\n").trim();
 }
 
-function sources(body: Record<string, unknown>) {
-  const output = Array.isArray(body.output) ? body.output : [];
+function geminiSources(body: Record<string, unknown>) {
   const urls = new Set<string>();
-  for (const item of output) {
-    if (!item || typeof item !== "object" || (item as { type?: unknown }).type !== "web_search_call") continue;
-    const action = (item as { action?: unknown }).action;
-    if (!action || typeof action !== "object") continue;
-    const candidates = Array.isArray((action as { sources?: unknown }).sources) ? (action as { sources: unknown[] }).sources : [];
-    for (const candidate of candidates) {
-      const value = candidate && typeof candidate === "object" ? (candidate as { url?: unknown }).url : null;
-      if (typeof value !== "string") continue;
-      try {
-        const url = new URL(value);
-        if (url.protocol === "http:" || url.protocol === "https:") urls.add(url.toString());
-      } catch { /* ignore invalid provider URLs */ }
+  const steps = Array.isArray(body.steps) ? body.steps : [];
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    const type = (step as { type?: unknown }).type;
+    if (type === "google_search_result") {
+      const result = (step as { result?: unknown }).result;
+      const values = Array.isArray(result) ? result : result ? [result] : [];
+      for (const item of values) {
+        if (!item || typeof item !== "object") continue;
+        for (const key of ["url", "uri"] as const) {
+          const candidate = (item as Record<string, unknown>)[key];
+          if (typeof candidate === "string") {
+            try { const url = new URL(candidate); if (url.protocol === "https:" || url.protocol === "http:") urls.add(url.toString()); } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+    if (type === "model_output") {
+      const content = Array.isArray((step as { content?: unknown }).content) ? (step as { content: unknown[] }).content : [];
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        const annotations = Array.isArray((block as { annotations?: unknown }).annotations) ? (block as { annotations: unknown[] }).annotations : [];
+        for (const annotation of annotations) {
+          if (!annotation || typeof annotation !== "object") continue;
+          const raw = annotation as Record<string, unknown>;
+          const candidate = typeof raw.uri === "string" ? raw.uri : typeof raw.url === "string" ? raw.url : typeof raw.source === "string" ? raw.source : null;
+          if (!candidate) continue;
+          try { const url = new URL(candidate); if (url.protocol === "https:" || url.protocol === "http:") urls.add(url.toString()); } catch { /* ignore */ }
+        }
+      }
     }
   }
   return [...urls].slice(0, 20);
 }
 
-function usage(body: Record<string, unknown>) {
-  const raw = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
-  const output = Array.isArray(body.output) ? body.output : [];
+function geminiUsage(body: Record<string, unknown>) {
+  const raw = body.usage && typeof body.usage === "object"
+    ? body.usage as Record<string, unknown>
+    : body.usage_metadata && typeof body.usage_metadata === "object"
+      ? body.usage_metadata as Record<string, unknown>
+      : {};
+  const steps = Array.isArray(body.steps) ? body.steps : [];
+  const inputTokens = Number(raw.input_tokens ?? raw.prompt_token_count ?? raw.inputTokenCount ?? 0) || 0;
+  const outputTokens = Number(raw.output_tokens ?? raw.candidates_token_count ?? raw.outputTokenCount ?? 0) || 0;
   return {
-    inputTokens: typeof raw.input_tokens === "number" ? raw.input_tokens : 0,
-    outputTokens: typeof raw.output_tokens === "number" ? raw.output_tokens : 0,
-    totalTokens: typeof raw.total_tokens === "number" ? raw.total_tokens : 0,
-    webSearchCalls: output.filter((item) => item && typeof item === "object" && (item as { type?: unknown }).type === "web_search_call").length,
+    inputTokens,
+    outputTokens,
+    totalTokens: Number(raw.total_tokens ?? raw.total_token_count ?? raw.totalTokenCount ?? inputTokens + outputTokens) || inputTokens + outputTokens,
+    webSearchCalls: steps.filter((step) => step && typeof step === "object" && (step as { type?: unknown }).type === "google_search_call").length,
   };
 }
 
@@ -134,31 +159,31 @@ async function callStructured(input: {
   instructions: string;
   payload: unknown;
   schema: typeof RESEARCH_SCHEMA | typeof FACTCHECK_SCHEMA;
-  schemaName: string;
   useWebSearch: boolean;
   fetcher?: typeof fetch;
 }) {
+  if (!input.apiKey) throw new Error("GEMINI_NOT_CONFIGURED");
   const fetcher = input.fetcher ?? fetch;
-  const response = await fetcher("https://api.openai.com/v1/responses", {
+  const response = await fetcher("https://generativelanguage.googleapis.com/v1beta/interactions", {
     method: "POST",
-    headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
+    headers: { "x-goog-api-key": input.apiKey, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-5.6-terra",
-      store: false,
-      reasoning: { effort: "medium" },
-      instructions: input.instructions,
-      input: JSON.stringify(input.payload),
-      ...(input.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
-      text: { verbosity: "low", format: { type: "json_schema", name: input.schemaName, strict: true, schema: input.schema } },
-      max_output_tokens: 2400,
+      model: "gemini-3.8-flash",
+      input: `${input.instructions}\n\nDATI DA ANALIZZARE:\n${JSON.stringify(input.payload)}`,
+      ...(input.useWebSearch ? { tools: [{ type: "google_search" }] } : {}),
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: input.schema,
+      },
     }),
   });
-  const requestId = response.headers.get("x-request-id");
+  const requestId = response.headers.get("x-request-id") || response.headers.get("x-goog-request-id");
   const raw = await response.text();
-  if (!response.ok) throw new Error(`OPENAI_AGENT_HTTP_${response.status}`);
+  if (!response.ok) throw new Error(`GEMINI_AGENT_HTTP_${response.status}`);
   const body = JSON.parse(raw) as Record<string, unknown>;
-  const output = extractOutputText(body);
-  if (!output) throw new Error("OPENAI_AGENT_EMPTY_OUTPUT");
+  const output = extractGeminiOutputText(body);
+  if (!output) throw new Error("GEMINI_AGENT_EMPTY_OUTPUT");
   return { parsed: JSON.parse(output) as Record<string, unknown>, body, requestId };
 }
 
@@ -202,11 +227,11 @@ export async function runOpenAIResearchAgent(input: {
     status: parsed.status,
     summary: parsed.summary,
     evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
-    sources: sources(result.body),
+    sources: geminiSources(result.body),
     responseId: typeof result.body.id === "string" ? result.body.id : "",
     requestId: result.requestId,
-    model: typeof result.body.model === "string" ? result.body.model : "gpt-5.6-terra",
-    usage: usage(result.body),
+    model: typeof result.body.model === "string" ? result.body.model : "gemini-3.8-flash",
+    usage: geminiUsage(result.body),
   };
 }
 
@@ -239,10 +264,10 @@ export async function runOpenAIFactCheckAgent(input: {
   return {
     verdict: parsed.verdict,
     checkedClaims: Array.isArray(parsed.checkedClaims) ? parsed.checkedClaims : [],
-    sources: [...new Set([...input.existingSources, ...sources(result.body)])].slice(0, 20),
+    sources: [...new Set([...input.existingSources, ...geminiSources(result.body)])].slice(0, 20),
     responseId: typeof result.body.id === "string" ? result.body.id : "",
     requestId: result.requestId,
-    model: typeof result.body.model === "string" ? result.body.model : "gpt-5.6-terra",
-    usage: usage(result.body),
+    model: typeof result.body.model === "string" ? result.body.model : "gemini-3.8-flash",
+    usage: geminiUsage(result.body),
   };
 }
