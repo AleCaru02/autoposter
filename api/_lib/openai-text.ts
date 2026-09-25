@@ -1,4 +1,5 @@
 import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
+import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, type ResearchAgentResult } from "./openai-research-factcheck.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -362,6 +363,13 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_OUTPUT");
   const content = validateResult(JSON.parse(outputText), options.providers, options.formats);
+  const brain = brainDecision({
+    spendEur: 0,
+    task: "COPY_FINAL",
+    importance: "STANDARD",
+    researchMode: research.mode,
+    text: JSON.stringify(content),
+  });
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === "object" ? usage.input_tokens_details as Record<string, unknown> : {};
   const mainInputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : null;
@@ -373,7 +381,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const combinedSources = [...new Set([...(dedicatedResearch?.sources ?? []), ...mainSources])].slice(0, 20);
 
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
-  if (contentNeedsFactCheck(content, research.mode)) {
+  if (brain.factCheckRequired || contentNeedsFactCheck(content, research.mode)) {
     factCheck = await runOpenAIFactCheckAgent({
       apiKey: options.apiKey,
       topic: options.topic,
@@ -411,6 +419,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const factCheckCostUsd = factCheck ? agentCost(factCheck) : null;
   const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + (factCheckCostUsd ?? 0);
   const externalSources = [...new Set([...combinedSources, ...(factCheck?.sources ?? [])])].slice(0, 20);
+  const externalClaimPresent = content.variants.some((variant) => variant.factualBasis.some((basis) => /BASE ESTERNA/i.test(basis)));
   const technicalEvents: OpenAITextTechnicalEvent[] = [
     {
       operation: "GENERATE_SOCIAL_TEXT",
@@ -458,6 +467,10 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
 
   if (factCheck && factCheck.verdict !== "PASS") {
     throw new OpenAITextPipelineError(`OPENAI_FACTCHECK_${factCheck.verdict}`, technicalEvents);
+  }
+  if ((externalClaimPresent || research.mode === "NEWS") && brain.minimumIndependentSources > 0
+      && independentSourceCount(externalSources) < brain.minimumIndependentSources) {
+    throw new OpenAITextPipelineError("AI_BRAIN_INSUFFICIENT_SOURCES", technicalEvents);
   }
 
   return {
