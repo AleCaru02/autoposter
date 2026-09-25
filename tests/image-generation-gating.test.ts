@@ -40,7 +40,7 @@ assert.match(autopilot, /source:"AUTOPILOT"/);
 assert.match(autopilot, /GEMINI_3_1_FLASH_IMAGE/);
 assert.match(autopilot, /GEMINI_3_PRO_IMAGE/);
 assert.match(autopilot, /ActivityBudgetEngine/);
-assert.doesNotMatch(autopilot, /OPENAI_IMAGE_MONTHLY_LIMIT/);
+assert.doesNotMatch(autopilot, /function imageLimit\(|currentImageCount\(|budget\.imagesUsed|budget\.imageLimit/, "legacy fixed image-count quota may remain an env compatibility field but must not gate Autopilot visuals");
 assert.doesNotMatch(autopilot, /insert into public\.ai_usage_events/);
 assert.match(meter, /quantity:\s*1/);
 assert.match(meter, /CAPABILITY_DISABLED/);
