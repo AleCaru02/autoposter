@@ -6,6 +6,7 @@ import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
+import { generateGeminiImage } from "./gemini-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./image-generation-metering.js";
 import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAiEvent } from "./text-generation-metering.js";
 import type { ContentType } from "./content-agents.js";
@@ -131,13 +132,17 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
         imageEventId=imageReservation.eventId;
-        const imageBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25});
+        const imageBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.08});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
+        const imageRoute=routeAiTask({task:"IMAGE_STANDARD",importance:"STANDARD",budget:imageBudget,env:{OPENAI_API_KEY:env.OPENAI_API_KEY,GEMINI_API_KEY:env.GEMINI_API_KEY}});
+        if(imageRoute.status!=="READY"||!imageRoute.model?.apiModelId){await imageMeter.release(imageEventId,"BLOCKED_PROVIDER");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_PROVIDER_BLOCKED");}
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateOpenAIImage({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
+        const image=imageRoute.model.provider==="GOOGLE"
+          ?await generateGeminiImage({apiKey:env.GEMINI_API_KEY??"",model:imageRoute.model.apiModelId as "gemini-3.1-flash-image"|"gemini-3-pro-image",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption})
+          :await generateOpenAIImage({apiKey:env.OPENAI_API_KEY??"",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
-        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'OPENAI_GPT_IMAGE_2','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({model:image.model,quality:image.quality,size:image.size,openai_request_id:image.requestId,media_manager:image.mediaManager,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
+        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,${image.model.startsWith("gemini-")?"GOOGLE_GEMINI_IMAGE":"OPENAI_IMAGE"},'IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({model:image.model,quality:image.quality,size:image.size,openai_request_id:image.requestId,media_manager:image.mediaManager,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
       }
     }catch(reason){if(imageEventId&&reason instanceof OpenAIImagePipelineError)await imageMeter.persistTechnicalEvents(profile.id,imageEventId,reason.technicalEvents).catch(()=>undefined);if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}
   }
