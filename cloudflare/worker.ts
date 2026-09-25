@@ -5,6 +5,7 @@ import type { ImageSocialFormat, ImageSocialProvider } from "../api/_lib/openai-
 import { generateRoutedImage } from "../api/_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
+import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -244,6 +245,36 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
+    const requestedAspectRatio = format === "STORY" ? "9:16" : "1:1";
+    const assetCandidates = await rows<ReusableAssetCandidate>(
+      `assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`,
+      token,
+    );
+    const reusable = await findReusableAsset({ visualBrief, aspectRatio: requestedAspectRatio, candidates: assetCandidates });
+    if (reusable) {
+      const asset = reusable.asset;
+      if (savedVariant) {
+        const now = new Date().toISOString();
+        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }),
+        });
+        if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
+        await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }),
+        });
+      }
+      return json({
+        image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, provider: "REUSE", aspectRatio: requestedAspectRatio },
+        asset: { id: asset.id },
+        reused: true,
+        reuseReason: reusable.reason,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostUsd: 0 },
+      });
+    }
     const meter = new ImageGenerationMetering(env.DATABASE_URL);
     activeMeter = meter;
     const reservation = await meter.reserve({
@@ -288,7 +319,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
-      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: result.provider === "GOOGLE" ? "GOOGLE_GEMINI_IMAGE" : "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
+      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: result.provider === "GOOGLE" ? "GOOGLE_GEMINI_IMAGE" : "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
@@ -299,7 +330,10 @@ async function handleGenerateImage(request: Request, env: Env) {
         throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
       }
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
-      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
+      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) {
+        const references = await rows<{ id: string }>(`content_variants?profile_id=eq.${encodeURIComponent(profileId)}&image_asset_id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&select=id&limit=1`, token);
+        if (!references.length) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
+      }
     }
     const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
     const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
