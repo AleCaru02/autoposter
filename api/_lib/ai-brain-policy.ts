@@ -119,6 +119,17 @@ export function brainDecision(input: {
   };
 }
 
+export function independentSourceCount(urls: string[]) {
+  const hosts = new Set<string>();
+  for (const value of urls) {
+    try {
+      const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+      if (hostname) hosts.add(hostname);
+    } catch { /* invalid sources do not count */ }
+  }
+  return hosts.size;
+}
+
 export function publicationGate(input: {
   qaVerdict: "PASS" | "BLOCK";
   factCheckRequired: boolean;
