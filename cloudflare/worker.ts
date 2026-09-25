@@ -3,6 +3,7 @@ import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
+import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -11,14 +12,12 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const VALID_IMAGE_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_IMAGE_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
-const DEFAULT_MONTHLY_IMAGE_LIMIT = 20;
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
-  OPENAI_IMAGE_MONTHLY_LIMIT?: string;
 }
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
@@ -27,7 +26,6 @@ type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
-type UsageRow = { id: string };
 type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
 type AssetRow = { id: string };
 
@@ -85,11 +83,6 @@ function monthlyTextBudgetUsd(env: Env) {
   return Math.min(Math.max(configured, 0.1), 100);
 }
 
-function monthlyImageLimit(env: Env) {
-  const parsed = Number(env.OPENAI_IMAGE_MONTHLY_LIMIT ?? DEFAULT_MONTHLY_IMAGE_LIMIT);
-  if (!Number.isFinite(parsed)) return DEFAULT_MONTHLY_IMAGE_LIMIT;
-  return Math.min(Math.max(Math.floor(parsed), 1), 200);
-}
 
 async function ownerTextSpendUsd(token: string) {
   const spendRows = await rows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
@@ -265,11 +258,15 @@ async function handleGenerateImage(request: Request, env: Env) {
     if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
     const eventId = reservation.eventId;
     activeEventId = eventId;
-    const limit = monthlyImageLimit(env);
-    const used = await rows<UsageRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
-    if (used.length >= limit) {
-      await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
-      return json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } }, 429);
+    const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL).preflight({
+      profileId,
+      task: "IMAGE_STANDARD",
+      importance: "STANDARD",
+      projectedOperationCostUsd: 0.25,
+    });
+    if (!activityBudget.allowed) {
+      await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
+      return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
     await meter.markProviderStarted(eventId);
     const result = await generateOpenAIImage({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summaryField(brands[0]?.tone_of_voice), provider, format, visualBrief, caption, additionalDirection });
@@ -290,8 +287,8 @@ async function handleGenerateImage(request: Request, env: Env) {
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
     }
-    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } };
-    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: responseBody.quota, duplicate: true };
+    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
+    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
     await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
     await meter.commit(eventId);
     logicalCommitted = true;

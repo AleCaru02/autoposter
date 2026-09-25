@@ -1,17 +1,16 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
+import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 
 export const config = { maxDuration: 60 };
 
 const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
-const DEFAULT_MONTHLY_IMAGE_LIMIT = 20;
 
 type ProfileRow = { id: string; name: string; industry: string | null };
 type BrandRow = { tone_of_voice: unknown };
-type UsageRow = { id: string };
 type VariantRow = {
   id: string;
   content_id: string;
@@ -55,16 +54,6 @@ function summary(value: unknown) {
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
 }
 
-function monthStartIso() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-}
-
-function monthlyImageLimit() {
-  const parsed = Number(process.env.OPENAI_IMAGE_MONTHLY_LIMIT ?? DEFAULT_MONTHLY_IMAGE_LIMIT);
-  if (!Number.isFinite(parsed)) return DEFAULT_MONTHLY_IMAGE_LIMIT;
-  return Math.min(Math.max(Math.floor(parsed), 1), 200);
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
@@ -118,11 +107,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const eventId = reservation.eventId;
     activeEventId = eventId;
 
-    const limit = monthlyImageLimit();
-    const used = await readRows<UsageRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(monthStartIso())}&operation=eq.GENERATE_SOCIAL_IMAGE&select=id&limit=${limit + 1}`, token);
-    if (used.length >= limit) {
-      await meter.release(eventId, "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED");
-      return res.status(429).json({ error: "OPENAI_IMAGE_MONTHLY_LIMIT_REACHED", message: "Limite mensile immagini raggiunto. Nessuna chiamata OpenAI è stata eseguita.", quota: { used: used.length, limit, remaining: 0 } });
+    const activityBudget = await new ActivityBudgetEngine(process.env.DATABASE_URL).preflight({
+      profileId,
+      task: "IMAGE_STANDARD",
+      importance: "STANDARD",
+      projectedOperationCostUsd: 0.25,
+    });
+    if (!activityBudget.allowed) {
+      await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
+      return res.status(429).json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget });
     }
 
     await meter.markProviderStarted(eventId);
@@ -174,8 +167,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: { used: used.length + 1, limit, remaining: Math.max(limit - used.length - 1, 0) } };
-    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, quota: responseBody.quota, duplicate: true };
+    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
+    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
     await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
     await meter.commit(eventId);
     logicalCommitted = true;

@@ -3,6 +3,7 @@ import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-d
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
+import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 
 export const config = { maxDuration: 60 };
@@ -10,13 +11,12 @@ export const config = { maxDuration: 60 };
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
-const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
 type ScanRow = { id: string };
 type PageRow = { url: string; title: string | null; content_text: string | null };
-type CostRow = { cost_usd: number | string | null };
+
 type RecentItemRow = { id: string; topic: string; title: string | null };
 type RecentVariantRow = { content_id: string; hook: string | null; caption: string | null };
 
@@ -41,21 +41,6 @@ function summaryField(value: unknown) {
   return typeof summary === "string" && summary.trim() ? summary.trim() : null;
 }
 
-function monthlyBudgetUsd() {
-  const configured = Number(process.env.OPENAI_TEXT_MONTHLY_BUDGET_USD ?? DEFAULT_MONTHLY_TEXT_BUDGET_USD);
-  if (!Number.isFinite(configured)) return DEFAULT_MONTHLY_TEXT_BUDGET_USD;
-  return Math.min(Math.max(configured, 0.1), 100);
-}
-
-function currentMonthStartIso() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-}
-
-async function currentOwnerTextSpendUsd(profileId: string, token: string) {
-  const rows = await readJsonRows<CostRow>(`ai_usage_events?profile_id=eq.${encodeURIComponent(profileId)}&created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=in.(GENERATE_SOCIAL_TEXT,AGENT_RESEARCH,AGENT_FACTCHECK,AGENT_EDITORIAL_QA)&select=cost_usd&limit=5000`, token);
-  return rows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
-}
 
 async function recentContentForDedupe(profileId: string, token: string): Promise<ContentDedupeCandidate[]> {
   const items = await readJsonRows<RecentItemRow>(`content_items?profile_id=eq.${encodeURIComponent(profileId)}&select=id,topic,title&order=created_at.desc&limit=40`, token);
@@ -131,17 +116,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const eventId = reservation.eventId;
     activeEventId = eventId;
 
-    const budgetUsd = monthlyBudgetUsd();
-    const spentBeforeUsd = await currentOwnerTextSpendUsd(profileId, token);
     const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
-    if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + requestUpperBoundUsd > budgetUsd) {
-      await meter.release(eventId, "AI_BUDGET_EXCEEDED");
-      return res.status(429).json({ error: "AI_BUDGET_EXCEEDED" });
+    const activityBudget = await new ActivityBudgetEngine(process.env.DATABASE_URL).preflight({
+      profileId,
+      task: "COPY_FINAL",
+      importance: "STANDARD",
+      projectedOperationCostUsd: requestUpperBoundUsd,
+    });
+    if (!activityBudget.allowed) {
+      await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
+      return res.status(429).json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget });
     }
 
     await meter.markProviderStarted(eventId);
     const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
-    const actualCostUsd = result.usage.estimatedCostUsd;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
       requested_topic: topic,
@@ -159,7 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (duplicate && (!bestDuplicate || duplicate.score > bestDuplicate.score)) bestDuplicate = duplicate;
     }
 
-    const spentAfterUsd = spentBeforeUsd + (actualCostUsd ?? 0);
+
     if (bestDuplicate) {
       await meter.release(eventId, "DUPLICATE_CONTENT");
       return res.status(409).json({
@@ -175,7 +163,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       responseId: result.responseId,
       research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
-      budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) },
+      budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
     };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
