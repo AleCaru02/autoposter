@@ -2,7 +2,7 @@ import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/cont
 import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "../api/_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
-import { preflightActivityBudget } from "../api/_lib/activity-budget-engine.js";
+import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -121,8 +121,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     activeEventId = eventId;
 
     const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
-    const activityBudget = await preflightActivityBudget({
-      databaseUrl: env.DATABASE_URL!,
+    const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({
       profileId,
       task: "COPY_FINAL",
       importance: "STANDARD",
