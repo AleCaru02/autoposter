@@ -4,6 +4,7 @@ import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.j
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
+import { routeAiTask } from "./_lib/model-router.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 
 export const config = { maxDuration: 60 };
@@ -127,9 +128,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return res.status(429).json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget });
     }
+    const modelRoute = routeAiTask({
+      task: "COPY_DRAFT",
+      importance: "STANDARD",
+      budget: activityBudget,
+      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY },
+    });
+    if (modelRoute.status !== "READY" || !modelRoute.model?.apiModelId) {
+      await meter.release(eventId, "BLOCKED_PROVIDER");
+      return res.status(503).json({ error: "BLOCKED_PROVIDER", provider: modelRoute.model?.provider ?? null, reason: modelRoute.reason });
+    }
 
     await meter.markProviderStarted(eventId);
-    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, geminiApiKey: process.env.GEMINI_API_KEY, model: modelRoute.model.apiModelId, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
       requested_topic: topic,
