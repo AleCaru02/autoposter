@@ -46,7 +46,7 @@ async function run() {
     const serializedSource = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
     assert.match(serializedSource, /pg_advisory_lock/, "autopilot runs must acquire a PostgreSQL advisory lock");
     assert.match(serializedSource, /pg_advisory_unlock/, "autopilot runs must release a PostgreSQL advisory lock");
-    assert.match(serializedSource, /runContentAutopilot\(scopedEnv,\s*\{\s*profileId,\s*maxGenerations:\s*profileGenerationCap\s*\}\)/, "serialized wrapper must execute canonical autopilot one profile at a time");
+    assert.match(serializedSource, /runContentAutopilot\(env,\{profileId,maxGenerations:profileGenerationCap,allowImageGeneration\}\)/, "serialized wrapper must execute canonical autopilot one profile at a time with explicit image-spend policy");
     assert.match(serializedSource, /profileAiEconomicsPolicy/, "autopilot must retain per-profile operational policy for cadence and image deferral");
     assert.match(serializedSource, /ActivityBudgetEngine/, "autopilot must use the canonical per-activity EUR budget engine");
     assert.match(serializedSource, /budgetEngine\.snapshot\(profileId\)/, "autopilot must read the selected activity budget independently");
