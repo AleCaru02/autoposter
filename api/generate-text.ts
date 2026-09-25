@@ -163,7 +163,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       responseId: result.responseId,
       research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
-      budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, accountedEur: activityBudget.accountedEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
+      budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
     };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
