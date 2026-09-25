@@ -11,9 +11,10 @@ import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAi
 import type { ContentType } from "./content-agents.js";
 import { buildAutopilotLearningInstruction, learnedFormatPreference, type PersistedLearningInsight } from "./learning-guidance.js";
 import { ActivityBudgetEngine } from "./activity-budget.js";
+import { routeAiTask } from "./model-router.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; GEMINI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
@@ -111,10 +112,12 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const logicalEventId=reservation.eventId;let logicalCommitted=false;const imageMeter=new ImageGenerationMetering(env.DATABASE_URL!);let imageEventId:string|null=null;let imageCommitted=false;let imageAssetId:string|null=null;
   try{
   const upper=estimateTextRequestUpperBoundUsd({topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode});const qaReserve=approvalMode==="AUTOMATIC"?AUTO_QA_RESERVE_USD:0;
-  const activityBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
+  const activityBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"COPY_DRAFT",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
   if(!activityBudget.allowed){await meter.release(logicalEventId,activityBudget.reason??"AI_BUDGET_HARD_STOP");throw new Error("AUTOPILOT_ACTIVITY_BUDGET_STOP");}
+  const modelRoute=routeAiTask({task:"COPY_DRAFT",importance:"STANDARD",budget:activityBudget,env:{OPENAI_API_KEY:env.OPENAI_API_KEY,GEMINI_API_KEY:env.GEMINI_API_KEY}});
+  if(modelRoute.status!=="READY"||!modelRoute.model?.apiModelId){await meter.release(logicalEventId,"BLOCKED_PROVIDER");throw new Error("AUTOPILOT_MODEL_ROUTER_BLOCKED");}
   await meter.markProviderStarted(logicalEventId);
-  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
+  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,geminiApiKey:env.GEMINI_API_KEY,model:modelRoute.model.apiModelId,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
   await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
   const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},await recentContentForDedupe(sql,profile.id));if(duplicate)throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
