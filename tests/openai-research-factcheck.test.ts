@@ -15,24 +15,24 @@ let researchCalls = 0;
 const researchFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
   researchCalls += 1;
   const request = JSON.parse(String(init?.body)) as Record<string, any>;
-  assert.equal(request.model, "gpt-5.6-terra");
-  assert.equal(request.store, false);
-  assert.equal(request.max_tool_calls, 1);
-  assert.equal(request.tools[0].type, "web_search");
+  assert.equal(request.model, "gemini-3.8-flash");
+  assert.equal(request.tools[0].type, "google_search");
+  assert.equal(request.response_format.mime_type, "application/json");
   const output = {
     status: "READY",
     summary: "Evidenza recente disponibile.",
     evidence: [{ claim: "Aggiornamento confermato", evidenceSummary: "La fonte ufficiale conferma l'aggiornamento.", sourceType: "OFFICIAL", datedAt: "2026-08-29", reliability: "HIGH" }],
   };
   return new Response(JSON.stringify({
-    id: "resp_research",
-    model: "gpt-5.6-terra",
-    output: [
-      { type: "web_search_call", action: { sources: [{ url: "https://example.org/official-update" }] } },
-      { type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] },
+    id: "int_research",
+    model: "gemini-3.8-flash",
+    steps: [
+      { type: "google_search_call", arguments: { queries: ["aggiornamento settore"] } },
+      { type: "google_search_result", result: [{ url: "https://example.org/official-update" }] },
+      { type: "model_output", content: [{ type: "text", text: JSON.stringify(output), annotations: [{ uri: "https://example.org/official-update" }] }] },
     ],
     usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
-  }), { status: 200, headers: { "x-request-id": "req_research" } });
+  }), { status: 200, headers: { "x-goog-request-id": "req_research" } });
 }) as typeof fetch;
 
 const research = await runOpenAIResearchAgent({
@@ -55,11 +55,11 @@ const factCheckFetcher = (async (_url: string | URL | Request, init?: RequestIni
   factCheckBody = JSON.parse(String(init?.body));
   const output = { verdict: "PASS", checkedClaims: [{ claim: "Aggiornamento confermato", status: "VERIFIED", reason: "Supportato dall'evidenza ufficiale." }] };
   return new Response(JSON.stringify({
-    id: "resp_factcheck",
-    model: "gpt-5.6-terra",
-    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }],
+    id: "int_factcheck",
+    model: "gemini-3.8-flash",
+    steps: [{ type: "model_output", content: [{ type: "text", text: JSON.stringify(output) }] }],
     usage: { input_tokens: 80, output_tokens: 40, total_tokens: 120 },
-  }), { status: 200, headers: { "x-request-id": "req_factcheck" } });
+  }), { status: 200, headers: { "x-goog-request-id": "req_factcheck" } });
 }) as typeof fetch;
 
 const checked = await runOpenAIFactCheckAgent({
@@ -73,6 +73,8 @@ const checked = await runOpenAIFactCheckAgent({
 });
 assert.equal(checked.verdict, "PASS");
 assert.equal(checked.checkedClaims[0].status, "VERIFIED");
-assert.equal(factCheckBody && "tools" in factCheckBody, false, "Fact-check must reuse existing evidence instead of paying for another web search");
+assert.equal(factCheckBody && "tools" in factCheckBody, false, "Fact-check must reuse existing evidence instead of paying for another Google search");
+assert.equal(research.model, "gemini-3.8-flash");
+assert.equal(checked.model, "gemini-3.8-flash");
 
-console.log("OpenAI Research + Fact-check agents regression: PASS");
+console.log("Gemini Grounding Research + Fact-check agents regression: PASS");
