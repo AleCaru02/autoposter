@@ -3,6 +3,7 @@ import type { ImageSocialFormat, ImageSocialProvider } from "./_lib/openai-image
 import { generateRoutedImage } from "./_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
+import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
 
 export const config = { maxDuration: 60 };
 
@@ -19,7 +20,7 @@ type VariantRow = {
   format: ImageSocialFormat;
   image_asset_id: string | null;
 };
-type AssetRow = { id: string };
+type AssetRow = ReusableAssetCandidate;
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -91,6 +92,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (savedVariant.provider !== requestedProvider || savedVariant.format !== requestedFormat) return res.status(409).json({ error: "CONTENT_VARIANT_MISMATCH" });
     }
 
+    // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
+    const aspectRatio = requestedFormat === "STORY" ? "2:3" : "1:1";
+    const candidates = await readRows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
+    const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
+    if (reusable) {
+      const asset = reusable.asset;
+      if (savedVariant) {
+        const now = new Date().toISOString();
+        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+        if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
+        await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
+      }
+      return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
+    }
+
     const meter = new ImageGenerationMetering(process.env.DATABASE_URL);
     activeMeter = meter;
     const reservation = await meter.reserve({
@@ -151,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           storage_url: dataUrl,
           mime_type: result.mimeType,
           tags: [requestedProvider, requestedFormat, "AI_GENERATED"],
-          metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+          metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
         }),
       });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);

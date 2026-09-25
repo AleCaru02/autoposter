@@ -12,6 +12,7 @@ import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAi
 import type { ContentType } from "./content-agents.js";
 import { buildAutopilotLearningInstruction, learnedFormatPreference, type PersistedLearningInsight } from "./learning-guidance.js";
 import { ActivityBudgetEngine } from "./activity-budget.js";
+import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
@@ -124,7 +125,11 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${now}::timestamptz)`;
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,approval_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},'PENDING',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
-    try{
+    const aspectRatio=format==="STORY"?"2:3":"1:1";
+    const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+    const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
+    if(reusable){imageAssetId=reusable.asset.id;}
+    if(!imageAssetId)try{
       const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption}});
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
@@ -135,7 +140,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
-        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
+        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
       }
     }catch(reason){if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}
   }
