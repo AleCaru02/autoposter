@@ -13,6 +13,7 @@ import {
 import "../approvals.css";
 import { NavLink } from "react-router-dom";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
+import { buildEditorialDecisionRecord } from "../../api/_lib/editorial-decision-record";
 
 type DraftFields = {
   hook: string;
@@ -263,6 +264,7 @@ export function ApprovalsPage() {
             {itemVariants.map((variant) => {
               const draft = drafts[variant.id] ?? draftFromVariant(variant);
               const asset = variant.image_asset_id ? assetMap.get(variant.image_asset_id) : undefined;
+              const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset });
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
                 <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
@@ -275,6 +277,7 @@ export function ApprovalsPage() {
                   <label className="full">Alt text<input value={draft.altText} onChange={(event) => setDraftField(variant, "altText", event.target.value)} /></label>
                 </div>
                 {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
                   <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>

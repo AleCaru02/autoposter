@@ -100,6 +100,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const asset = reusable.asset;
       if (savedVariant) {
         const now = new Date().toISOString();
+        const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
+        const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now } }) });
+        if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
         const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
         if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });

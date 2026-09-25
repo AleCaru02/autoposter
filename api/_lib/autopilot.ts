@@ -128,7 +128,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     const aspectRatio=format==="STORY"?"2:3":"1:1";
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
-    if(reusable){imageAssetId=reusable.asset.id;}
+    if(reusable){imageAssetId=reusable.asset.id;await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;}
     if(!imageAssetId)try{
       const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption}});
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}

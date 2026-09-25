@@ -73,6 +73,7 @@ jobs:
       - { name: Per-activity budget migration regression, run: "npm run test:activity-budget-migration" }
       - { name: OpenAI-only model router regression, run: "npm run test:model-router" }
       - { name: Asset Intelligence reuse regression, run: "npm run test:asset-intelligence" }
+      - { name: Editorial decision record regression, run: "npm run test:editorial-decision-record" }
       - { name: OpenAI Research and Fact-check regression, run: "npm run test:openai-research-factcheck" }
       - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
       - { name: OpenAI editorial QA regression, run: "npm run test:openai-editorial-qa" }

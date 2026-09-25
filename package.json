@@ -90,6 +90,7 @@
     "test:activity-budget": "tsx tests/activity-budget.test.ts",
     "test:model-router": "tsx tests/model-router.test.ts",
     "test:asset-intelligence": "tsx tests/asset-intelligence.test.ts",
+    "test:editorial-decision-record": "tsx tests/editorial-decision-record.test.ts",
     "test:activity-budget-migration": "tsx tests/activity-budget-migration.test.ts"
   },
   "dependencies": {
