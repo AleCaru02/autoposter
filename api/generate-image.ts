@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
-import { preflightActivityBudget } from "./_lib/activity-budget-engine.js";
+import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 
 export const config = { maxDuration: 60 };
 
@@ -107,8 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const eventId = reservation.eventId;
     activeEventId = eventId;
 
-    const activityBudget = await preflightActivityBudget({
-      databaseUrl: process.env.DATABASE_URL,
+    const activityBudget = await new ActivityBudgetEngine(process.env.DATABASE_URL).preflight({
       profileId,
       task: "IMAGE_STANDARD",
       importance: "STANDARD",
