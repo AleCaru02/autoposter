@@ -10,7 +10,7 @@ import { ImageGenerationMetering, technicalEventsFromImageResult } from "./image
 import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAiEvent } from "./text-generation-metering.js";
 import type { ContentType } from "./content-agents.js";
 import { buildAutopilotLearningInstruction, learnedFormatPreference, type PersistedLearningInsight } from "./learning-guidance.js";
-import { preflightActivityBudget } from "./activity-budget-engine.js";
+import { ActivityBudgetEngine } from "./activity-budget.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
@@ -116,7 +116,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const logicalEventId=reservation.eventId;let logicalCommitted=false;const imageMeter=new ImageGenerationMetering(env.DATABASE_URL!);let imageEventId:string|null=null;let imageCommitted=false;let imageAssetId:string|null=null;
   try{
   const upper=estimateTextRequestUpperBoundUsd({topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode});const qaReserve=approvalMode==="AUTOMATIC"?AUTO_QA_RESERVE_USD:0;
-  const activityBudget=await preflightActivityBudget({databaseUrl:env.DATABASE_URL!,profileId:profile.id,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
+  const activityBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
   if(!activityBudget.allowed){await meter.release(logicalEventId,activityBudget.reason??"AI_BUDGET_HARD_STOP");throw new Error("AUTOPILOT_ACTIVITY_BUDGET_STOP");}
   await meter.markProviderStarted(logicalEventId);
   const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
@@ -133,7 +133,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
         imageEventId=imageReservation.eventId;
-        const imageBudget=await preflightActivityBudget({databaseUrl:env.DATABASE_URL!,profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25});
+        const imageBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateOpenAIImage({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
