@@ -8,7 +8,7 @@ const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
   requestBody = JSON.parse(String(init?.body ?? "{}"));
   return new Response(JSON.stringify({
     id: "resp_qa",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     output_text: JSON.stringify({
       verdict: "PASS",
       reasons: [],
@@ -34,9 +34,9 @@ const qa = await runOpenAIEditorialQA({
 });
 
 assert.equal(qa.verdict, "PASS");
-assert.equal(qa.model, "gpt-5.6-terra");
+assert.equal(qa.model, "gpt-6-sol");
 assert.equal(qa.requestId, "req_qa");
-assert.equal(requestBody?.model, "gpt-5.6-terra");
+assert.equal(requestBody?.model, "gpt-6-sol");
 assert.equal(requestBody?.store, false);
 assert.equal(requestBody?.reasoning.effort, "low");
 assert.equal("tools" in (requestBody ?? {}), false, "Editorial QA must not use web search");
