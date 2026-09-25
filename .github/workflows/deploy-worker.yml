@@ -79,6 +79,7 @@ jobs:
         shell: bash
         env:
           OPENAI_API_KEY_SOURCE: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY_SOURCE: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -euo pipefail
           if [ -z "$OPENAI_API_KEY_SOURCE" ]; then
@@ -94,6 +95,11 @@ jobs:
             process.exit(1);
           }
           const secrets = { OPENAI_API_KEY: openai };
+          const gemini = process.env.GEMINI_API_KEY_SOURCE?.trim();
+          if (gemini) {
+            secrets.GEMINI_API_KEY = gemini;
+            fs.appendFileSync(process.env.GITHUB_ENV, 'GEMINI_SECRET_EXPECTED=1\n');
+          }
           const bootstrap = process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE?.trim();
           if (bootstrap) secrets.ADMIN_BOOTSTRAP_TOKEN = bootstrap;
           fs.writeFileSync('worker-secrets.json', JSON.stringify(secrets), { mode: 0o600 });
@@ -120,6 +126,10 @@ jobs:
           const names = new Set(Array.isArray(secrets) ? secrets.map((item) => item?.name).filter(Boolean) : []);
           if (!names.has('OPENAI_API_KEY')) {
             console.error('Cloudflare Worker secret OPENAI_API_KEY was not provisioned');
+            process.exit(1);
+          }
+          if (process.env.GEMINI_SECRET_EXPECTED === '1' && !names.has('GEMINI_API_KEY')) {
+            console.error('Cloudflare Worker secret GEMINI_API_KEY was expected but was not provisioned');
             process.exit(1);
           }
           if (process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE && !names.has('ADMIN_BOOTSTRAP_TOKEN')) {

@@ -49,7 +49,7 @@ assert.match(autopilot, /approvalMode==="AUTOMATIC"&&variant\.eligible/, "OpenAI
 assert.match(autopilot, /runOpenAIEditorialQA/, "automatic Autopilot must call the QA agent");
 assert.match(autopilot, /AUTOPILOT_EDITORIAL_QA_BLOCKED/, "QA BLOCK must stop the automatic path");
 assert.match(autopilot, /AUTO_QA_RESERVE_USD/, "automatic QA cost must be reserved before generation");
-assert.ok(autopilot.indexOf("runOpenAIEditorialQA") < autopilot.indexOf("generateOpenAIImage({"), "QA must run before Media Manager/gpt-image-2 spend");
+assert.ok(autopilot.indexOf("runOpenAIEditorialQA") < autopilot.indexOf("generateGeminiImage({"), "QA must run before any routed visual provider spend");
 assert.match(autopilot, /'AGENT_EDITORIAL_QA'/, "QA usage must be persisted per profile");
 
-console.log("OpenAI Editorial QA regression: PASS — automatic-only, fail-closed, no web, before media spend.");
+console.log("Editorial QA regression: PASS — automatic-only, fail-closed, no web, before routed media spend.");
