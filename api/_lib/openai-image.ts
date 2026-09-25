@@ -34,12 +34,14 @@ export class OpenAIImagePipelineError extends Error {
 }
 
 export type OpenAIImageResult = {
+  provider: "OPENAI";
   model: "gpt-image-2";
   mimeType: "image/png";
   base64: string;
   revisedPrompt: string | null;
   requestId: string | null;
   size: ImageSize;
+  aspectRatio: "1:1" | "2:3";
   quality: "high";
   mediaManager: {
     model: "gpt-5.6-terra";
@@ -171,12 +173,14 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     metadata: { openai_request_id: requestId, quality: "high", size },
   };
   return {
+    provider: "OPENAI",
     model: "gpt-image-2",
     mimeType: "image/png",
     base64,
     revisedPrompt: first && typeof first.revised_prompt === "string" ? first.revised_prompt : null,
     requestId,
     size,
+    aspectRatio: options.format === "STORY" ? "2:3" : "1:1",
     quality: "high",
     mediaManager: {
       model: mediaManager.model,

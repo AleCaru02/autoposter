@@ -89,7 +89,6 @@
     "test:ai-brain-policy": "tsx tests/ai-brain-policy.test.ts",
     "test:activity-budget": "tsx tests/activity-budget.test.ts",
     "test:model-router": "tsx tests/model-router.test.ts",
-    "test:gemini-image": "tsx tests/gemini-image.test.ts",
     "test:activity-budget-migration": "tsx tests/activity-budget-migration.test.ts"
   },
   "dependencies": {

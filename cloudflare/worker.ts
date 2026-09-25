@@ -18,7 +18,6 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
-  GEMINI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 }
 
@@ -138,7 +137,7 @@ async function handleHealth(env: Env) {
   try {
     const sql = neon(env.DATABASE_URL);
     await sql`select 1 as ok`;
-    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare", aiProviders: { openai: env.OPENAI_API_KEY ? "configured" : "blocked_provider", gemini: env.GEMINI_API_KEY ? "configured" : "blocked_provider" } });
+    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare", aiProviders: { openai: env.OPENAI_API_KEY ? "configured" : "blocked_provider" } });
   } catch (reason) {
     console.error("health-db", reason instanceof Error ? reason.message : "unknown");
     return json({ service: "post-automatici", ready: false, database: "unreachable", provider: "cloudflare" }, 503);
@@ -272,7 +271,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
     await meter.markProviderStarted(eventId);
     const result = await generateRoutedImage({
-      env: { OPENAI_API_KEY: env.OPENAI_API_KEY, GEMINI_API_KEY: env.GEMINI_API_KEY },
+      env: { OPENAI_API_KEY: env.OPENAI_API_KEY },
       budget: activityBudget,
       importance: routeImportance,
       profileName: profile.name,
@@ -288,7 +287,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
-      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: result.provider === "GOOGLE" ? "GOOGLE_GEMINI_IMAGE" : "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
+      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: "OPENAI", model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
@@ -312,8 +311,8 @@ async function handleGenerateImage(request: Request, env: Env) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
-    if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("GEMINI_NOT_CONFIGURED")) return json({ error: "BLOCKED_PROVIDER" }, 503);
-    const status = detail.startsWith("GEMINI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return json({ error: "BLOCKED_PROVIDER" }, 503);
+    const status = detail.startsWith("METERING_FAILED") ? 503 : 500;
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" }, status);
   }
 }

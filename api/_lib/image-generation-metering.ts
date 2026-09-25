@@ -1,7 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { OpenAIImageResult, OpenAIImageTechnicalEvent } from "./openai-image.js";
-import type { GeminiImageResult, GeminiImageTechnicalEvent } from "./gemini-image.js";
 
 export const AI_IMAGE_GENERATE_CAPABILITY = "ai.image.generate" as const;
 export const IMAGE_TECHNICAL_OPERATIONS = ["AGENT_MEDIA_MANAGER", "GENERATE_SOCIAL_IMAGE"] as const;
@@ -88,7 +87,7 @@ export class ImageGenerationMetering {
     return this.usage.markProviderStarted(eventId);
   }
 
-  async persistTechnicalEvents(profileId: string, eventId: string, events: Array<OpenAIImageTechnicalEvent | GeminiImageTechnicalEvent>) {
+  async persistTechnicalEvents(profileId: string, eventId: string, events: OpenAIImageTechnicalEvent[]) {
     if (!events.length) return;
     const payload = events.map((event) => ({
       operation: event.operation,
@@ -149,6 +148,6 @@ export class ImageGenerationMetering {
   }
 }
 
-export function technicalEventsFromImageResult(result: OpenAIImageResult | GeminiImageResult, metadata: Record<string, unknown> = {}) {
+export function technicalEventsFromImageResult(result: OpenAIImageResult, metadata: Record<string, unknown> = {}) {
   return result.technicalEvents.map((event) => ({ ...event, metadata: { ...metadata, ...event.metadata } }));
 }

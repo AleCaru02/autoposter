@@ -14,7 +14,7 @@ import { buildAutopilotLearningInstruction, learnedFormatPreference, type Persis
 import { ActivityBudgetEngine } from "./activity-budget.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; GEMINI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
@@ -132,10 +132,10 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const imageBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY,GEMINI_API_KEY:env.GEMINI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
+        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
-        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,${image.provider==='GOOGLE'?'GOOGLE_GEMINI_IMAGE':'AI_IMAGE'},'IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:image.provider,model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
+        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
       }
     }catch(reason){if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}
   }

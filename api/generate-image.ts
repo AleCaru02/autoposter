@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const routeImportance = req.body?.importance === "PREMIUM" || req.body?.importance === "CRITICAL" ? req.body.importance : "STANDARD";
     await meter.markProviderStarted(eventId);
     const result = await generateRoutedImage({
-      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY },
+      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY },
       budget: activityBudget,
       importance: routeImportance,
       profileName: profile.name,
@@ -145,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: { prefer: "return=representation" },
         body: JSON.stringify({
           profile_id: profileId,
-          source: result.provider === "GOOGLE" ? "GOOGLE_GEMINI_IMAGE" : "AI_IMAGE",
+          source: "AI_IMAGE",
           kind: "IMAGE",
           name: `${requestedProvider}-${requestedFormat}-${savedVariant.id}.png`,
           storage_url: dataUrl,
@@ -191,8 +191,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
-    if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("GEMINI_NOT_CONFIGURED")) return res.status(503).json({ error: "BLOCKED_PROVIDER" });
-    const status = detail.startsWith("GEMINI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return res.status(503).json({ error: "BLOCKED_PROVIDER" });
+    const status = detail.startsWith("METERING_FAILED") ? 503 : 500;
     return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" });
   }
 }
