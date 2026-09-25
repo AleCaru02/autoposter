@@ -12,14 +12,12 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const VALID_IMAGE_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_IMAGE_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
-const DEFAULT_MONTHLY_IMAGE_LIMIT = 20;
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
-  OPENAI_IMAGE_MONTHLY_LIMIT?: string;
 }
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
@@ -28,7 +26,6 @@ type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type CostRow = { cost_usd: number | string | null };
-type UsageRow = { id: string };
 type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
 type AssetRow = { id: string };
 
@@ -86,11 +83,6 @@ function monthlyTextBudgetUsd(env: Env) {
   return Math.min(Math.max(configured, 0.1), 100);
 }
 
-function monthlyImageLimit(env: Env) {
-  const parsed = Number(env.OPENAI_IMAGE_MONTHLY_LIMIT ?? DEFAULT_MONTHLY_IMAGE_LIMIT);
-  if (!Number.isFinite(parsed)) return DEFAULT_MONTHLY_IMAGE_LIMIT;
-  return Math.min(Math.max(Math.floor(parsed), 1), 200);
-}
 
 async function ownerTextSpendUsd(token: string) {
   const spendRows = await rows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
