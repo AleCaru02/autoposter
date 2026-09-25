@@ -84,6 +84,7 @@ export type OpenAITextResult = {
 
 export type GenerateOptions = {
   apiKey: string;
+  geminiApiKey?: string;
   topic: string;
   objective?: string | null;
   providers: SocialProvider[];
@@ -99,6 +100,13 @@ const TERRA_INPUT_PER_MILLION_USD = 2;
 const TERRA_CACHED_INPUT_PER_MILLION_USD = 0.2;
 const TERRA_CACHE_WRITE_PER_MILLION_USD = 2.5;
 const TERRA_OUTPUT_PER_MILLION_USD = 12;
+const GPT6_PRICING: Record<string, { input: number; output: number }> = {
+  "gpt-6-luna": { input: 0.1, output: 0.5 },
+  "gpt-6-sol": { input: 2, output: 10 },
+  "gpt-6-astra": { input: 10, output: 50 },
+};
+const GEMINI_38_FLASH_INPUT_PER_MILLION_USD = 0.75;
+const GEMINI_38_FLASH_OUTPUT_PER_MILLION_USD = 3.75;
 const WEB_SEARCH_PER_RUN_USD = 0.01;
 export const MAX_TEXT_OUTPUT_TOKENS = 5_000;
 const MAX_WEBSITE_CONTEXT_CHARS = 40_000;
@@ -238,24 +246,41 @@ export function estimateTerraCostUsd(inputTokens: number, outputTokens: number, 
   return (uncachedInput * TERRA_INPUT_PER_MILLION_USD + safeCached * TERRA_CACHED_INPUT_PER_MILLION_USD + safeWrite * TERRA_CACHE_WRITE_PER_MILLION_USD + Math.max(outputTokens, 0) * TERRA_OUTPUT_PER_MILLION_USD) / 1_000_000;
 }
 
+export function estimateTextModelCostUsd(model: string, inputTokens: number, outputTokens: number, cachedInputTokens = 0, cacheWriteTokens = 0) {
+  if (model === "gpt-5.6-terra") return estimateTerraCostUsd(inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens);
+  const pricing = GPT6_PRICING[model];
+  if (!pricing) throw new Error("OPENAI_TEXT_MODEL_NOT_ALLOWED");
+  const safeCached = Math.min(Math.max(cachedInputTokens, 0), inputTokens);
+  const safeWrite = Math.min(Math.max(cacheWriteTokens, 0), Math.max(inputTokens - safeCached, 0));
+  const uncachedInput = Math.max(inputTokens - safeCached - safeWrite, 0);
+  // Cache-specific GPT-6 rates are intentionally not assumed here; count cached/write tokens at normal input price for a conservative budget estimate.
+  return ((uncachedInput + safeCached + safeWrite) * pricing.input + Math.max(outputTokens, 0) * pricing.output) / 1_000_000;
+}
+
+function estimateGeminiAgentCostUsd(inputTokens: number, outputTokens: number, webSearchCalls = 0) {
+  return (Math.max(inputTokens, 0) * GEMINI_38_FLASH_INPUT_PER_MILLION_USD + Math.max(outputTokens, 0) * GEMINI_38_FLASH_OUTPUT_PER_MILLION_USD) / 1_000_000 + Math.max(webSearchCalls, 0) * WEB_SEARCH_PER_RUN_USD;
+}
+
 export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, "topic" | "objective" | "providers" | "formats" | "brand" | "researchMode">) {
   const selected = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
   const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 7_000;
   const approximateInputTokens = Math.ceil(approximateInputChars / 3.5);
   const research = buildSectorResearchInstruction({ industry: options.brand.industry, description: options.brand.description, businessModel: options.brand.businessModel, target: options.brand.target, mode: options.researchMode ?? "BALANCED" });
-  const agentReserve = research.mode === "NEWS" ? estimateTerraCostUsd(6_000, 2_400) * 2 : 0;
-  return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0) + agentReserve;
+  const agentReserve = research.mode === "NEWS" ? estimateGeminiAgentCostUsd(6_000, 2_400, 1) * 2 : 0;
+  return estimateTextModelCostUsd("gpt-6-luna", approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + agentReserve;
 }
 
 function agentCost(result: ResearchAgentResult | { usage: { inputTokens: number; outputTokens: number; webSearchCalls: number } } | null) {
   if (!result) return 0;
-  return estimateTerraCostUsd(result.usage.inputTokens, result.usage.outputTokens) + result.usage.webSearchCalls * WEB_SEARCH_PER_RUN_USD;
+  return result.model === "gemini-3.8-flash"
+    ? estimateGeminiAgentCostUsd(result.usage.inputTokens, result.usage.outputTokens, result.usage.webSearchCalls)
+    : estimateTextModelCostUsd(result.model, result.usage.inputTokens, result.usage.outputTokens) + result.usage.webSearchCalls * WEB_SEARCH_PER_RUN_USD;
 }
 
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
   const fetcher = options.fetcher ?? fetch;
-  const model = options.model ?? "gpt-5.6-terra";
-  if (model !== "gpt-5.6-terra") throw new Error("OPENAI_TEXT_MODEL_NOT_ALLOWED");
+  const model = options.model ?? "gpt-6-luna";
+  if (!["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"].includes(model)) throw new Error("OPENAI_TEXT_MODEL_NOT_ALLOWED");
   const websiteContext = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
   const research = buildSectorResearchInstruction({
     industry: options.brand.industry,
@@ -268,7 +293,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   let dedicatedResearch: ResearchAgentResult | null = null;
   if (shouldRunResearchAgent(research.mode)) {
     dedicatedResearch = await runOpenAIResearchAgent({
-      apiKey: options.apiKey,
+      apiKey: options.geminiApiKey ?? "",
       topic: options.topic,
       industry: options.brand.industry,
       businessDescription: options.brand.description,
@@ -295,7 +320,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     }
   }
 
-  const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
+  const copyUsesWebSearch = false;
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
     "Genera contenuti social distinti per piattaforma e formato, mantenendo il tono del brand e una qualità professionale pronta per revisione umana.",
@@ -383,7 +408,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
   if (brain.factCheckRequired || contentNeedsFactCheck(content, research.mode)) {
     factCheck = await runOpenAIFactCheckAgent({
-      apiKey: options.apiKey,
+      apiKey: options.geminiApiKey ?? "",
       topic: options.topic,
       content: {
         generated: content,
@@ -413,7 +438,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
   const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + (factCheck?.usage.outputTokens ?? 0);
   const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + (factCheck?.usage.webSearchCalls ?? 0);
-  const mainTokenCost = mainInputTokens !== null && mainOutputTokens !== null ? estimateTerraCostUsd(mainInputTokens, mainOutputTokens, cachedInputTokens, cacheWriteTokens) : null;
+  const mainTokenCost = mainInputTokens !== null && mainOutputTokens !== null ? estimateTextModelCostUsd(model, mainInputTokens, mainOutputTokens, cachedInputTokens, cacheWriteTokens) : null;
   const mainCostUsd = mainTokenCost === null ? null : mainTokenCost + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
   const researchCostUsd = dedicatedResearch ? agentCost(dedicatedResearch) : null;
   const factCheckCostUsd = factCheck ? agentCost(factCheck) : null;
