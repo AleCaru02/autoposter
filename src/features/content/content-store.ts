@@ -180,7 +180,16 @@ export async function deleteContent(profileId: string, contentId: string) {
   const result = await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", profileId).select("id");
   if (result.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   if (assetIds.length) {
-    const assetDelete = await neonClient.from("assets").delete().eq("profile_id", profileId).in("id", assetIds);
-    if (assetDelete.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
+    for (const assetId of assetIds) {
+      const references = await neonClient.from("content_variants")
+        .select("id")
+        .eq("profile_id", profileId)
+        .eq("image_asset_id", assetId)
+        .limit(1);
+      if (references.error) throw new Error("Impossibile verificare gli asset condivisi. Riprova.");
+      if ((references.data ?? []).length) continue;
+      const assetDelete = await neonClient.from("assets").delete().eq("profile_id", profileId).eq("id", assetId);
+      if (assetDelete.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
+    }
   }
 }
