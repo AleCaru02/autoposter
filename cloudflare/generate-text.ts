@@ -3,6 +3,7 @@ import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intellige
 import { normalizeEditorialResearchMode } from "../api/_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
+import { routeAiTask } from "../api/_lib/model-router.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -12,6 +13,7 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 type Env = {
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
+  GEMINI_API_KEY?: string;
 };
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
@@ -130,9 +132,19 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
+    const modelRoute = routeAiTask({
+      task: "COPY_DRAFT",
+      importance: "STANDARD",
+      budget: activityBudget,
+      env: { OPENAI_API_KEY: env.OPENAI_API_KEY, GEMINI_API_KEY: env.GEMINI_API_KEY },
+    });
+    if (modelRoute.status !== "READY" || !modelRoute.model?.apiModelId) {
+      await meter.release(eventId, "BLOCKED_PROVIDER");
+      return json({ error: "BLOCKED_PROVIDER", provider: modelRoute.model?.provider ?? null, reason: modelRoute.reason }, 503);
+    }
 
     await meter.markProviderStarted(eventId);
-    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, geminiApiKey: env.GEMINI_API_KEY, model: modelRoute.model.apiModelId, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
       requested_topic: topic,
