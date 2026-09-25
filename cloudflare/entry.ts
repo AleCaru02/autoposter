@@ -1,5 +1,6 @@
 import worker from "./worker.js";
 import { handleWorkerGenerateText } from "./generate-text.js";
+import { handleWorkerGenerateImage, type GeminiImageEnv } from "./generate-image.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerOnboardingProvision } from "./onboarding-provision.js";
 import { handleWorkerOnboardingComplete } from "./onboarding-complete.js";
@@ -25,7 +26,7 @@ import { runLearningRuntime } from "../api/_lib/learning-runtime.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
-type Env = AutopilotEnv & SocialEnv & {
+type Env = AutopilotEnv & SocialEnv & GeminiImageEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
 };
@@ -164,6 +165,7 @@ export default {
     if (path === "/api/learning/run") return handleLearningRun(request, env);
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
+    if (path === "/api/generate-image") return handleWorkerGenerateImage(request, env);
     if (path === "/api/profile-bootstrap") return handleWorkerProfileBootstrap(request, env);
     if (path === "/api/profile-archive") return handleWorkerProfileArchive(request, env);
     if (path === "/api/onboarding-provision") return handleWorkerOnboardingProvision(request, env);
