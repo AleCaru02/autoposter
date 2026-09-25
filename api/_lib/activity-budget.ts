@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { ACTIVITY_BUDGET_EUR, activityBudgetBand, type ActivityBudgetBand } from "./ai-brain-policy.js";
+import { ACTIVITY_BUDGET_EUR, activityBudgetBand, brainDecision, type ActivityBudgetBand, type BrainTask, type ContentImportance } from "./ai-brain-policy.js";
 
 type BudgetRow = {
   hard_cap_eur: number | string;
@@ -34,6 +34,15 @@ export type ActivityBudgetSnapshot = {
   futureScheduledJobs: number;
   forecastExceedsTarget: boolean;
   forecastRisksHardCap: boolean;
+};
+
+export type ActivityBudgetPreflight = ActivityBudgetSnapshot & {
+  allowed: boolean;
+  reason: "AI_BUDGET_HARD_STOP" | "AI_BUDGET_OPERATION_TOO_EXPENSIVE" | null;
+  projectedOperationCostEur: number;
+  projectedAfterEur: number;
+  preferReuse: boolean;
+  allowPremium: boolean;
 };
 
 function n(value: unknown, fallback = 0) {
@@ -120,6 +129,35 @@ export class ActivityBudgetEngine {
       futureScheduledJobs: Math.max(0, Math.floor(n(jobRows[0]?.count))),
       forecastExceedsTarget: forecast.forecastEndOfMonthEur > ordinaryTargetEur,
       forecastRisksHardCap: forecast.forecastEndOfMonthEur >= hardCapEur,
+    };
+  }
+
+  async preflight(input: {
+    profileId: string;
+    task: BrainTask;
+    importance?: ContentImportance;
+    projectedOperationCostUsd?: number | null;
+    now?: Date;
+  }): Promise<ActivityBudgetPreflight> {
+    const snapshot = await this.snapshot(input.profileId, input.now ?? new Date());
+    const projectedOperationCostEur = Math.max(0, input.projectedOperationCostUsd ?? 0) * snapshot.usdToEurRate;
+    const projectedAfterEur = snapshot.spendEur + projectedOperationCostEur;
+    const brain = brainDecision({
+      spendEur: snapshot.spendEur,
+      task: input.task,
+      importance: input.importance,
+      forecastEndOfMonthEur: Math.max(snapshot.forecastEndOfMonthEur, projectedAfterEur),
+    });
+    const hardStopped = snapshot.band === "HARD_STOP";
+    const tooExpensive = projectedAfterEur > snapshot.hardCapEur;
+    return {
+      ...snapshot,
+      allowed: !hardStopped && !tooExpensive,
+      reason: hardStopped ? "AI_BUDGET_HARD_STOP" : tooExpensive ? "AI_BUDGET_OPERATION_TOO_EXPENSIVE" : null,
+      projectedOperationCostEur,
+      projectedAfterEur,
+      preferReuse: brain.preferReuse,
+      allowPremium: brain.allowPremium,
     };
   }
 }
