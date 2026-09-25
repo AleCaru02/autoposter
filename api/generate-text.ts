@@ -3,7 +3,7 @@ import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-d
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
-import { preflightActivityBudget } from "./_lib/activity-budget-engine.js";
+import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 
 export const config = { maxDuration: 60 };
@@ -117,8 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     activeEventId = eventId;
 
     const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
-    const activityBudget = await preflightActivityBudget({
-      databaseUrl: process.env.DATABASE_URL,
+    const activityBudget = await new ActivityBudgetEngine(process.env.DATABASE_URL).preflight({
       profileId,
       task: "COPY_FINAL",
       importance: "STANDARD",
