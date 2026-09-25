@@ -1,7 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
-import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
+import type { ImageSocialFormat, ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { generateRoutedImage } from "../api/_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
@@ -17,6 +18,7 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 }
 
@@ -136,7 +138,7 @@ async function handleHealth(env: Env) {
   try {
     const sql = neon(env.DATABASE_URL);
     await sql`select 1 as ok`;
-    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare" });
+    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare", aiProviders: { openai: env.OPENAI_API_KEY ? "configured" : "blocked_provider", gemini: env.GEMINI_API_KEY ? "configured" : "blocked_provider" } });
   } catch (reason) {
     console.error("health-db", reason instanceof Error ? reason.message : "unknown");
     return json({ service: "post-automatici", ready: false, database: "unreachable", provider: "cloudflare" }, 503);
@@ -214,7 +216,6 @@ async function handleGenerateImage(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   const token = bearer(request);
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
-  if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
   if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
@@ -268,13 +269,26 @@ async function handleGenerateImage(request: Request, env: Env) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
+    const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
     await meter.markProviderStarted(eventId);
-    const result = await generateOpenAIImage({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summaryField(brands[0]?.tone_of_voice), provider, format, visualBrief, caption, additionalDirection });
+    const result = await generateRoutedImage({
+      env: { OPENAI_API_KEY: env.OPENAI_API_KEY, GEMINI_API_KEY: env.GEMINI_API_KEY },
+      budget: activityBudget,
+      importance: routeImportance,
+      profileName: profile.name,
+      industry: profile.industry,
+      tone: summaryField(brands[0]?.tone_of_voice),
+      provider,
+      format,
+      visualBrief,
+      caption,
+      additionalDirection,
+    });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
-      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: "OPENAI_GPT_IMAGE_2", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { model: result.model, quality: result.quality, size: result.size, openai_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
+      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: result.provider === "GOOGLE" ? "GOOGLE_GEMINI_IMAGE" : "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
@@ -287,19 +301,19 @@ async function handleGenerateImage(request: Request, env: Env) {
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
     }
-    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
-    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, revisedPrompt: result.revisedPrompt }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
+    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
+    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
     await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
     await meter.commit(eventId);
     logicalCommitted = true;
     return json(responseBody);
   } catch (reason) {
-    if (activeMeter && activeEventId && reason instanceof OpenAIImagePipelineError) await activeMeter.persistTechnicalEvents(profileId, activeEventId, reason.technicalEvents).catch(() => undefined);
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
-    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("GEMINI_NOT_CONFIGURED")) return json({ error: "BLOCKED_PROVIDER" }, 503);
+    const status = detail.startsWith("GEMINI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" }, status);
   }
 }

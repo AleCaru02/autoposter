@@ -14,7 +14,7 @@ assert.deepEqual(IMAGE_TECHNICAL_OPERATIONS, ["AGENT_MEDIA_MANAGER", "GENERATE_S
 for (const source of [manual, worker, autopilot]) {
   assert.match(source, /ImageGenerationMetering/);
   const reserveAt = source.indexOf("imageMeter.reserve") >= 0 ? source.indexOf("imageMeter.reserve") : source.indexOf("meter.reserve");
-  assert.ok(reserveAt >= 0 && reserveAt < source.indexOf("await generateOpenAIImage"), "image provider callable before entitlement reserve");
+  assert.ok(reserveAt >= 0 && reserveAt < source.indexOf("await generateRoutedImage"), "image provider callable before entitlement reserve");
   assert.match(source, /persistTechnicalEvents/);
   assert.match(source, /meter\.release|imageMeter\.release/);
 }
@@ -42,6 +42,12 @@ assert.match(meter, /PENDING_RECONCILIATION/);
 assert.match(meter, /logical_usage_event_id/);
 assert.match(meter, /where not exists/);
 assert.match(image, /OpenAIImagePipelineError/);
+assert.match(manual, /generateRoutedImage/);
+assert.match(worker, /generateRoutedImage/);
+assert.match(autopilot, /generateRoutedImage/);
+assert.doesNotMatch(manual, /generateOpenAIImage/);
+assert.doesNotMatch(worker, /generateOpenAIImage/);
+assert.doesNotMatch(autopilot, /generateOpenAIImage/);
 assert.match(image, /technicalEvents: \[mediaManagerEvent, imageEvent\]/);
 assert.match(ui, /x-post-automatici-operation-id/);
 
