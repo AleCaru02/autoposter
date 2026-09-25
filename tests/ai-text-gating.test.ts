@@ -20,14 +20,15 @@ assert.match(meter, /PENDING_RECONCILIATION/);
 
 for (const source of [manual, worker, autopilot]) {
   assert.match(source, /TextGenerationMetering/);
-  assert.match(source, /AI_BUDGET_EXCEEDED|AUTOPILOT_TEXT_BUDGET_REACHED/);
+  assert.match(source, /ActivityBudgetEngine/, "all text generation paths must use the canonical per-activity budget engine");
+  assert.match(source, /\.preflight\(/, "billable text generation must preflight the activity budget");
 }
 assert.ok(manual.indexOf("meter.reserve") < manual.indexOf("await generateSocialText"), "manual provider callable before entitlement reserve");
 assert.ok(worker.indexOf("meter.reserve") < worker.indexOf("await generateSocialText"), "worker provider callable before entitlement reserve");
 assert.ok(autopilot.indexOf("meter.reserve") < autopilot.indexOf("await generateSocialText"), "autopilot provider callable before entitlement reserve");
-assert.match(manual, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
-assert.match(worker, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
-assert.match(autopilot, /OPENAI_TEXT_MONTHLY_BUDGET_USD/);
+assert.doesNotMatch(manual, /OPENAI_TEXT_MONTHLY_BUDGET_USD|monthlyBudgetUsd|currentOwnerTextSpendUsd/, "Vercel manual generation must not use a separate text-only monthly budget");
+assert.doesNotMatch(worker, /monthlyBudgetUsd|currentOwnerTextSpendUsd/, "Worker manual generation must not use a separate text-only monthly budget");
+assert.doesNotMatch(autopilot, /textBudget\(|AUTOPILOT_TEXT_BUDGET_REACHED/, "Autopilot must not use the retired split text budget");
 assert.match(manual, /x-post-automatici-operation-id/);
 assert.match(worker, /x-post-automatici-operation-id/);
 assert.match(autopilot, /autopilot:\$\{profile\.id\}:\$\{provider\}:\$\{scheduledAt\}/);
