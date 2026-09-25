@@ -16,7 +16,7 @@ import type { ContentType } from "./content-agents.js";
 import { buildAutopilotLearningInstruction, learnedFormatPreference, type PersistedLearningInsight } from "./learning-guidance.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; GEMINI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; GEMINI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
