@@ -51,7 +51,7 @@ export type PlanItem = {
 export type OpenAIEditorialPlan = { horizonDays: number; planningSummary: string; items: PlanItem[] };
 export type OpenAIStrategyPlannerResponse = { strategy: OpenAIStrategy; plan: OpenAIEditorialPlan; generatedAt: string; model: string };
 
-const MODEL = "gpt-5.6-terra";
+const MODEL = "gpt-6-sol";
 const STRATEGY_SCHEMA = {
   type: "object", additionalProperties: false,
   properties: {
