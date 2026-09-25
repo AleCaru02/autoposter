@@ -20,7 +20,7 @@ for (const source of [manual, worker, autopilot]) {
   const reserveAt = source.indexOf("imageMeter.reserve") >= 0 ? source.indexOf("imageMeter.reserve") : source.indexOf("meter.reserve");
   assert.ok(reserveAt >= 0 && reserveAt < source.indexOf("await generateGeminiImage"), "Gemini image provider callable before entitlement reserve");
   assert.match(source, /persistTechnicalEvents/);
-  assert.match(source, /meter\.release|imageMeter\.release/);
+  assert.match(source, /(?:activeMeter|meter|imageMeter)\.release/, "reserved image usage must be released on provider/persistence failure");
   assert.match(source, /routeAiTask/);
   assert.match(source, /visualFingerprint/);
   assert.match(source, /findReusableAsset/, "asset reuse must be checked before a new image call");
