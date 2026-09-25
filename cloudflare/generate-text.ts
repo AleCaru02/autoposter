@@ -156,7 +156,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       return json({ error: "DUPLICATE_CONTENT", duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null } }, 409);
     }
 
-    const responseBody = { content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, accountedEur: activityBudget.accountedEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
+    const responseBody = { content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
     logicalCommitted = true;
