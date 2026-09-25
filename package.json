@@ -85,7 +85,11 @@
     "test:release-candidate-migration": "node tests/release-candidate-migration-safety.test.mjs",
     "qa:final-readiness": "node --import tsx tests/final-personal-readiness.mjs",
     "test:user-error-boundary": "node --import tsx tests/user-facing-error-boundary.test.ts",
-    "test:recovery-neon-endpoints": "tsx tests/recovery-neon-endpoints.test.ts"
+    "test:recovery-neon-endpoints": "tsx tests/recovery-neon-endpoints.test.ts",
+    "test:ai-brain-policy": "tsx tests/ai-brain-policy.test.ts",
+    "test:activity-budget": "tsx tests/activity-budget.test.ts",
+    "test:model-router": "tsx tests/model-router.test.ts",
+    "test:activity-budget-migration": "tsx tests/activity-budget-migration.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
