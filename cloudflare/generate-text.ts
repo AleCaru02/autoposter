@@ -12,7 +12,6 @@ const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 type Env = {
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
-  OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 };
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
