@@ -26,10 +26,14 @@ for (const source of [manual, worker]) {
 }
 assert.match(autopilot, /source:"AUTOPILOT"/);
 assert.match(autopilot, /autopilot:\$\{profile\.id\}:\$\{provider\}:\$\{scheduledAt\}:\$\{variantId\}/);
-assert.match(autopilot, /currentImageCount\(sql,profile\.id\)/);
-assert.match(autopilot, /where profile_id=\$\{profileId\}::uuid and created_at/);
+assert.match(manual, /ActivityBudgetEngine/);
+assert.match(worker, /ActivityBudgetEngine/);
+assert.match(autopilot, /ActivityBudgetEngine/);
+assert.match(manual, /task: "IMAGE_STANDARD"/);
+assert.match(worker, /task: "IMAGE_STANDARD"/);
+assert.match(autopilot, /task:"IMAGE_STANDARD"/);
 assert.doesNotMatch(autopilot, /insert into public\.ai_usage_events/);
-for (const source of [manual, worker]) assert.match(source, /ai_usage_events\?profile_id=eq\.\$\{encodeURIComponent\(profileId\)\}/);
+for (const source of [manual, worker]) assert.doesNotMatch(source, /monthlyImageLimit\(|OPENAI_IMAGE_MONTHLY_LIMIT_REACHED/, "manual image paths must use the unified activity budget instead of a separate image quota");
 assert.match(meter, /quantity:\s*1/);
 assert.match(meter, /CAPABILITY_DISABLED/);
 assert.match(meter, /CAPABILITY_LIMIT_REACHED/);
