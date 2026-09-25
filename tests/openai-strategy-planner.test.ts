@@ -6,7 +6,7 @@ const calls: Array<Record<string, unknown>> = [];
 const responses = [
   {
     id: "resp_strategy",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     output_text: JSON.stringify({
       summary: "Strategia locale educativa e orientata ai lead",
       primaryObjective: "Generare richieste qualificate",
@@ -24,7 +24,7 @@ const responses = [
   },
   {
     id: "resp_plan",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     output_text: JSON.stringify({
       horizonDays: 14,
       planningSummary: "Piano bilanciato su due settimane",
@@ -58,7 +58,7 @@ assert.equal(plan.output.items[1]?.contentType, "SINGLE_POST");
 
 assert.equal(calls.length, 2);
 for (const call of calls) {
-  assert.equal(call.model, "gpt-5.6-terra");
+  assert.equal(call.model, "gpt-6-sol");
   assert.equal(call.store, false);
   assert.equal("tools" in call, false, "Strategist/Planner must not silently use web search; Research Agent owns web research");
   const text = call.text as Record<string, unknown>;
@@ -68,7 +68,7 @@ for (const call of calls) {
 }
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "STRATEGIST")?.mayUseOpenAI, true);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "PLANNER")?.mayUseOpenAI, true);
-assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseOpenAI, true, "Fact-checker is now a real OpenAI-backed runtime stage");
+assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseOpenAI, true, "Fact-checker remains a real provider-backed runtime stage");
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseWeb, true, "Fact-checker may use web only when existing evidence is insufficient");
 
 console.log("OpenAI strategist/planner regression: PASS");
