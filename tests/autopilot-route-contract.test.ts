@@ -47,20 +47,26 @@ async function run() {
     assert.match(serializedSource, /pg_advisory_lock/, "autopilot runs must acquire a PostgreSQL advisory lock");
     assert.match(serializedSource, /pg_advisory_unlock/, "autopilot runs must release a PostgreSQL advisory lock");
     assert.match(serializedSource, /runContentAutopilot\(scopedEnv,\s*\{\s*profileId,\s*maxGenerations:\s*profileGenerationCap\s*\}\)/, "serialized wrapper must execute canonical autopilot one profile at a time");
-    assert.match(serializedSource, /profileAiEconomicsPolicy/, "autopilot must load per-profile AI economics policy before generation");
-    assert.match(serializedSource, /usage\.profileTotalUsd\s*>=\s*policy\.monthlyAiBudgetUsd/, "autopilot must hard-block a profile at its monthly AI limit");
+    assert.match(serializedSource, /profileAiEconomicsPolicy/, "autopilot must retain per-profile operational policy for cadence and image deferral");
+    assert.match(serializedSource, /ActivityBudgetEngine/, "autopilot must use the canonical per-activity EUR budget engine");
+    assert.match(serializedSource, /budgetEngine\.snapshot\(profileId\)/, "autopilot must read the selected activity budget independently");
+    assert.match(serializedSource, /ACTIVITY_HARD_STOP/, "only the activity at 30 EUR must be hard-stopped");
+    assert.match(serializedSource, /budgetEngine\.preflight\(\{profileId,task:"STRATEGY"/, "paid planner refresh must pass the same activity budget preflight");
     assert.match(serializedSource, /maxGenerationsPerDay/);
     assert.match(serializedSource, /maxGenerationsPerWeek/);
-    assert.match(serializedSource, /policy\.generateImagesAfterApproval\s*===\s*false/, "manual-review profiles must be able to defer image spend until approval");
+    assert.match(serializedSource, /policy\.generateImagesAfterApproval===false/, "manual-review profiles must keep the existing defer-image-until-approval policy");
+    assert.match(serializedSource, /allowImageGeneration/, "image deferral must be passed explicitly instead of abusing an image quota");
     assert.match(serializedSource, /profile_id=\$1::uuid/, "usage accounting must be profile-isolated");
     assert.match(serializedSource, /strategyPlannerRefreshDecision/, "Autopilot must decide whether Strategist\/Planner refresh is needed before generation");
     assert.match(serializedSource, /ensureOpenAIStrategyPlannerFresh/, "stale Strategy\/Plan must be refreshed through OpenAI before content generation");
-    assert.match(serializedSource, /PLANNER_REFRESH_RESERVE/, "planning refresh must reserve budget before making OpenAI calls");
-    assert.match(serializedSource, /usage=await usageSnapshot\(client,profileId\)/, "usage must be read again after a paid planning refresh");
+    assert.match(serializedSource, /usage=await usageSnapshot\(client,profileId\)/, "daily\/weekly usage must be read again after a paid planning refresh");
 
     const canonicalAutopilotSource = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
-    assert.match(canonicalAutopilotSource, /Math\.min\(Math\.max\(Math\.floor\(parsed\),0\),500\)/, "a scoped zero image allowance must stay zero; manual review must not silently spend one image");
-    assert.match(canonicalAutopilotSource, /budget\.imagesUsed<budget\.imageLimit/, "image generation must remain gated by the scoped image allowance");
+    assert.match(canonicalAutopilotSource, /ActivityBudgetEngine/, "canonical autopilot must use the activity budget engine for text and images");
+    assert.match(canonicalAutopilotSource, /allowImageGeneration/, "canonical autopilot must preserve approval-aware image deferral");
+    assert.match(canonicalAutopilotSource, /task:"COPY_FINAL"/, "text generation must be budget-preflighted");
+    assert.match(canonicalAutopilotSource, /task:"IMAGE_STANDARD"/, "image generation must be budget-preflighted");
+    assert.doesNotMatch(canonicalAutopilotSource, /textBudget\(|imageLimit\(/, "legacy split text/image budgets must be retired");
     for (const provider of ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const) {
       assert.deepEqual(AUTOPILOT_PUBLISH_FORMATS[provider], providerCapabilities(provider).publish, `${provider} autopilot formats must match the real publisher`);
     }
