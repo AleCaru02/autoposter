@@ -1,4 +1,4 @@
-import { estimateTerraCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
+import { estimateTextModelCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
 
 export type EditorialQAResult = {
   verdict: "PASS" | "BLOCK";
@@ -13,7 +13,7 @@ export type EditorialQAResult = {
   };
   responseId: string;
   requestId: string | null;
-  model: "gpt-5.6-terra";
+  model: "gpt-6-sol";
   usage: { inputTokens: number; outputTokens: number; totalTokens: number; estimatedCostUsd: number };
 };
 
@@ -73,7 +73,7 @@ export async function runOpenAIEditorialQA(input: {
     method: "POST",
     headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-5.6-terra",
+      model: "gpt-6-sol",
       store: false,
       reasoning: { effort: "low" },
       instructions: [
@@ -112,7 +112,7 @@ export async function runOpenAIEditorialQA(input: {
     ...parsed,
     responseId: typeof body.id === "string" ? body.id : "",
     requestId,
-    model: "gpt-5.6-terra",
-    usage: { inputTokens, outputTokens, totalTokens: n(rawUsage.total_tokens) || inputTokens + outputTokens, estimatedCostUsd: estimateTerraCostUsd(inputTokens, outputTokens) },
+    model: "gpt-6-sol",
+    usage: { inputTokens, outputTokens, totalTokens: n(rawUsage.total_tokens) || inputTokens + outputTokens, estimatedCostUsd: estimateTextModelCostUsd("gpt-6-sol", inputTokens, outputTokens) },
   };
 }
