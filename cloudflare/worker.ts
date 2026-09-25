@@ -138,7 +138,7 @@ async function handleHealth(env: Env) {
   try {
     const sql = neon(env.DATABASE_URL);
     await sql`select 1 as ok`;
-    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare" });
+    return json({ service: "post-automatici", ready: true, database: "reachable", provider: "cloudflare", aiProviders: { openai: env.OPENAI_API_KEY ? "configured" : "blocked_provider", gemini: env.GEMINI_API_KEY ? "configured" : "blocked_provider" } });
   } catch (reason) {
     console.error("health-db", reason instanceof Error ? reason.message : "unknown");
     return json({ service: "post-automatici", ready: false, database: "unreachable", provider: "cloudflare" }, 503);
