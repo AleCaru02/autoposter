@@ -4,6 +4,7 @@ import {
   activityBudgetBand,
   brainDecision,
   detectClaimRisk,
+  independentSourceCount,
   publicationGate,
 } from "../api/_lib/ai-brain-policy.js";
 
@@ -15,6 +16,7 @@ assert.equal(activityBudgetBand(20), "RESERVE");
 assert.equal(activityBudgetBand(25), "PROTECTED_RESERVE");
 assert.equal(activityBudgetBand(28), "EMERGENCY_ONLY");
 assert.equal(activityBudgetBand(30), "HARD_STOP");
+assert.equal(independentSourceCount(["https://www.airbnb.com/help/x", "https://airbnb.com/terms/y", "https://www.comune.milano.it/z"]), 2);
 
 const legal = detectClaimRisk("Dal 2027 cambia questa legge e la commissione sale al 15%.");
 assert.equal(legal.timeSensitive, true);
