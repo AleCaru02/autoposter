@@ -148,10 +148,12 @@ jobs:
           NODE
       - name: Gemini provider configured
         if: steps.gemini_ready.outputs.configured == 'true'
-        run: echo "Gemini provider readiness: READY"
+        run: |
+          echo "Gemini provider readiness: READY"
       - name: Gemini provider BLOCKED_PROVIDER
         if: steps.gemini_ready.outputs.configured != 'true'
-        run: echo "Gemini provider readiness: BLOCKED_PROVIDER"
+        run: |
+          echo "Gemini provider readiness: BLOCKED_PROVIDER"
       - name: Production application smoke
         shell: bash
         run: |
