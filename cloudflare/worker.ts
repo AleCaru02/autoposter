@@ -2,6 +2,8 @@ import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { generateGeminiImage } from "../api/_lib/gemini-image.js";
+import { routeAiTask } from "../api/_lib/model-router.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
@@ -17,6 +19,7 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 }
 
@@ -214,7 +217,6 @@ async function handleGenerateImage(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   const token = bearer(request);
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
-  if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED" }, 503);
   if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
@@ -262,19 +264,52 @@ async function handleGenerateImage(request: Request, env: Env) {
       profileId,
       task: "IMAGE_STANDARD",
       importance: "STANDARD",
-      projectedOperationCostUsd: 0.25,
+      projectedOperationCostUsd: 0.08,
     });
     if (!activityBudget.allowed) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
+    const modelRoute = routeAiTask({
+      task: "IMAGE_STANDARD",
+      importance: "STANDARD",
+      budget: activityBudget,
+      env: { OPENAI_API_KEY: env.OPENAI_API_KEY, GEMINI_API_KEY: env.GEMINI_API_KEY },
+    });
+    if (modelRoute.status !== "READY" || !modelRoute.model?.apiModelId) {
+      await meter.release(eventId, "BLOCKED_PROVIDER");
+      return json({ error: "BLOCKED_PROVIDER", provider: modelRoute.model?.provider ?? null, reason: modelRoute.reason }, 503);
+    }
     await meter.markProviderStarted(eventId);
-    const result = await generateOpenAIImage({ apiKey: env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summaryField(brands[0]?.tone_of_voice), provider, format, visualBrief, caption, additionalDirection });
+    const result = modelRoute.model.provider === "GOOGLE"
+      ? await generateGeminiImage({
+          apiKey: env.GEMINI_API_KEY ?? "",
+          model: modelRoute.model.apiModelId as "gemini-3.1-flash-image" | "gemini-3-pro-image",
+          profileName: profile.name,
+          industry: profile.industry,
+          tone: summaryField(brands[0]?.tone_of_voice),
+          provider,
+          format,
+          visualBrief,
+          caption,
+          additionalDirection,
+        })
+      : await generateOpenAIImage({
+          apiKey: env.OPENAI_API_KEY ?? "",
+          profileName: profile.name,
+          industry: profile.industry,
+          tone: summaryField(brands[0]?.tone_of_voice),
+          provider,
+          format,
+          visualBrief,
+          caption,
+          additionalDirection,
+        });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
-      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: "OPENAI_GPT_IMAGE_2", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { model: result.model, quality: result.quality, size: result.size, openai_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
+      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: result.model.startsWith("gemini-") ? "GOOGLE_GEMINI_IMAGE" : "OPENAI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { model: result.model, provider: result.model.startsWith("gemini-") ? "GOOGLE" : "OPENAI", quality: result.quality, size: result.size, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
