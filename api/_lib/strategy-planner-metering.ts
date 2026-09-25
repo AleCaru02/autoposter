@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { EntitlementUsageService } from "./entitlement-usage.js";
-import { estimateTerraCostUsd } from "./openai-text.js";
+import { estimateTextModelCostUsd } from "./openai-text.js";
 
 export const STRATEGY_GENERATE_CAPABILITY = "ai.strategy.generate" as const;
 export const STRATEGY_TECHNICAL_OPERATIONS = ["AGENT_STRATEGIST", "AGENT_PLANNER"] as const;
@@ -81,7 +81,7 @@ export class StrategyPlannerMetering {
 
   async persistTechnicalUsage(profileId: string, eventId: string, result: StrategyPlannerTechnicalResult) {
     const costUsd = result.inputTokens !== null && result.outputTokens !== null
-      ? estimateTerraCostUsd(result.inputTokens, result.outputTokens)
+      ? estimateTextModelCostUsd(result.model, result.inputTokens, result.outputTokens)
       : null;
     const event = {
       operation: result.operation,
