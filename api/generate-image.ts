@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { generateOpenAIImage, OpenAIImagePipelineError, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
+import { generateGeminiImage } from "./_lib/gemini-image.js";
+import { routeAiTask } from "./_lib/model-router.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 
@@ -59,7 +61,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   const token = bearer(req);
   if (!token) return res.status(401).json({ error: "AUTH_REQUIRED" });
-  if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
   if (!process.env.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
 
   const profileId = typeof req.body?.profileId === "string" ? req.body.profileId : "";
@@ -111,15 +112,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileId,
       task: "IMAGE_STANDARD",
       importance: "STANDARD",
-      projectedOperationCostUsd: 0.25,
+      projectedOperationCostUsd: 0.08,
     });
     if (!activityBudget.allowed) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return res.status(429).json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget });
     }
+    const modelRoute = routeAiTask({
+      task: "IMAGE_STANDARD",
+      importance: "STANDARD",
+      budget: activityBudget,
+      env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY },
+    });
+    if (modelRoute.status !== "READY" || !modelRoute.model?.apiModelId) {
+      await meter.release(eventId, "BLOCKED_PROVIDER");
+      return res.status(503).json({ error: "BLOCKED_PROVIDER", provider: modelRoute.model?.provider ?? null, reason: modelRoute.reason });
+    }
 
     await meter.markProviderStarted(eventId);
-    const result = await generateOpenAIImage({ apiKey: process.env.OPENAI_API_KEY, profileName: profile.name, industry: profile.industry, tone: summary(brands[0]?.tone_of_voice), provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection });
+    const result = modelRoute.model.provider === "GOOGLE"
+      ? await generateGeminiImage({
+          apiKey: process.env.GEMINI_API_KEY ?? "",
+          model: modelRoute.model.apiModelId as "gemini-3.1-flash-image" | "gemini-3-pro-image",
+          profileName: profile.name,
+          industry: profile.industry,
+          tone: summary(brands[0]?.tone_of_voice),
+          provider: requestedProvider,
+          format: requestedFormat,
+          visualBrief,
+          caption,
+          additionalDirection,
+        })
+      : await generateOpenAIImage({
+          apiKey: process.env.OPENAI_API_KEY ?? "",
+          profileName: profile.name,
+          industry: profile.industry,
+          tone: summary(brands[0]?.tone_of_voice),
+          provider: requestedProvider,
+          format: requestedFormat,
+          visualBrief,
+          caption,
+          additionalDirection,
+        });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, {
       source: "MANUAL", provider: requestedProvider, format: requestedFormat,
@@ -132,13 +166,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: { prefer: "return=representation" },
         body: JSON.stringify({
           profile_id: profileId,
-          source: "OPENAI_GPT_IMAGE_2",
+          source: result.model.startsWith("gemini-") ? "GOOGLE_GEMINI_IMAGE" : "OPENAI_IMAGE",
           kind: "IMAGE",
           name: `${requestedProvider}-${requestedFormat}-${savedVariant.id}.png`,
           storage_url: dataUrl,
           mime_type: result.mimeType,
           tags: [requestedProvider, requestedFormat, "AI_GENERATED"],
-          metadata: { model: result.model, quality: result.quality, size: result.size, openai_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+          metadata: { model: result.model, provider: result.model.startsWith("gemini-") ? "GOOGLE" : "OPENAI", quality: result.quality, size: result.size, provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
         }),
       });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
