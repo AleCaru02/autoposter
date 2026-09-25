@@ -34,15 +34,15 @@ export class OpenAIImagePipelineError extends Error {
 }
 
 export type OpenAIImageResult = {
-  model: "gpt-image-2";
+  model: string;
   mimeType: "image/png";
   base64: string;
   revisedPrompt: string | null;
   requestId: string | null;
   size: ImageSize;
-  quality: "high";
+  quality: "high" | "standard" | "premium";
   mediaManager: {
-    model: "gpt-5.6-terra";
+    model: string;
     responseId: string;
     requestId: string | null;
     visualIntent: string;
