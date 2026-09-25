@@ -227,7 +227,12 @@ export function ApprovalsPage() {
         }),
       });
       const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
+      if (!response.ok) {
+        if (body.error === "BLOCKED_PROVIDER") throw new Error(body.message || "Generazione immagini non disponibile: configura il provider Gemini.");
+        if (body.error === "AI_BUDGET_HARD_STOP") throw new Error("Budget AI mensile dell'attività raggiunto. Nessuna nuova immagine è stata generata.");
+        throw new Error(body.message || "Immagine non salvata. Riprova tra poco.");
+      }
+      if (!body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
       await reload();
     });
   }
