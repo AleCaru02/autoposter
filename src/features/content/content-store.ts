@@ -46,6 +46,7 @@ export type AssetRow = {
   metadata: Record<string, unknown>;
   created_at: string;
 };
+export type StoredMasterDecision = { contentId?: string; rationale?: string; channels?: unknown };
 
 export type SavedGeneration = {
   contentId: string;
@@ -118,7 +119,7 @@ export async function loadContentWorkflow(profileId: string) {
     .limit(50);
   if (itemsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
   const items = (itemsResult.data ?? []) as ContentItemRow[];
-  if (!items.length) return { items: [], variants: [] as ContentVariantRow[], assets: [] as AssetRow[] };
+  if (!items.length) return { items: [], variants: [] as ContentVariantRow[], assets: [] as AssetRow[], masterDecisions: {} as Record<string, StoredMasterDecision> };
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
@@ -141,7 +142,11 @@ export async function loadContentWorkflow(profileId: string) {
     assets = (assetsResult.data ?? []) as AssetRow[];
   }
 
-  return { items, variants, assets };
+  const strategyResult = await neonClient.from("content_strategies").select("platform_strategy").eq("profile_id", profileId).maybeSingle();
+  const platformStrategy = strategyResult.data?.platform_strategy;
+  const rawDecisions = platformStrategy && typeof platformStrategy === "object" && !Array.isArray(platformStrategy) ? (platformStrategy as Record<string, unknown>).masterEditorialDecisions : null;
+  const masterDecisions = rawDecisions && typeof rawDecisions === "object" && !Array.isArray(rawDecisions) ? Object.values(rawDecisions as Record<string, StoredMasterDecision>).reduce<Record<string, StoredMasterDecision>>((map, decision) => { if (decision && typeof decision.contentId === "string") map[decision.contentId] = decision; return map; }, {}) : {};
+  return { items, variants, assets, masterDecisions };
 }
 
 export async function reviewVariant(input: {

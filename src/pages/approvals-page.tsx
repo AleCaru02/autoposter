@@ -9,6 +9,7 @@ import {
   type AssetRow,
   type ContentItemRow,
   type ContentVariantRow,
+  type StoredMasterDecision,
 } from "../features/content/content-store";
 import "../approvals.css";
 import { NavLink } from "react-router-dom";
@@ -64,6 +65,7 @@ export function ApprovalsPage() {
   const [items, setItems] = useState<ContentItemRow[]>([]);
   const [variants, setVariants] = useState<ContentVariantRow[]>([]);
   const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [masterDecisions, setMasterDecisions] = useState<Record<string, StoredMasterDecision>>({});
   const [drafts, setDrafts] = useState<Record<string, DraftFields>>({});
   const [saveStatus, setSaveStatus] = useState<Record<string, DraftSaveStatus>>({});
   const [loading, setLoading] = useState(true);
@@ -85,6 +87,7 @@ export function ApprovalsPage() {
       setVariants(workflow.variants);
       variantsRef.current = workflow.variants;
       setAssets(workflow.assets);
+      setMasterDecisions(workflow.masterDecisions);
       setDrafts(nextDrafts);
       draftsRef.current = nextDrafts;
       dirtyVariantIdsRef.current.clear();
@@ -264,7 +267,7 @@ export function ApprovalsPage() {
             {itemVariants.map((variant) => {
               const draft = drafts[variant.id] ?? draftFromVariant(variant);
               const asset = variant.image_asset_id ? assetMap.get(variant.image_asset_id) : undefined;
-              const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset });
+              const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset, masterDecision: masterDecisions[item.id] });
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
                 <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
