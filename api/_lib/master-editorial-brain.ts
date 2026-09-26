@@ -7,6 +7,7 @@ export type MasterEditorialDecision = {
   funnelStage: FunnelStage; pillar: string | null; contentType: ContentType; intent: EditorialIntent;
   rationale: string; urgency: "LOW" | "NORMAL" | "HIGH"; requiredSources: string[]; visualStrategy: string;
   selectedProvider: SocialProvider | null; channels: ChannelEditorialDecision[]; status: "READY" | "SKIP_PUBLICATION";
+  timing?: { scheduledAt: string; source: "USER_CONFIG" | "LEARNING" | "STRATEGY" | "DEFAULT" };
   skipReason?: string; retryCondition?: string; contentId?: string;
 };
 

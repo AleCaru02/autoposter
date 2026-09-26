@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildFeedbackLoopRecords, type MetricSnapshotRecord } from "../api/_lib/feedback-loop.js";
-import { buildAutopilotLearningInstruction, learnedFormatPreference, learningContext, type PersistedLearningInsight } from "../api/_lib/learning-guidance.js";
+import { buildAutopilotLearningInstruction, learnedFormatPreference, learnedTimingPreference, learningContext, type PersistedLearningInsight } from "../api/_lib/learning-guidance.js";
+import { candidateSlots } from "../api/_lib/autopilot.js";
 import { generateOpenAIPlan, type OpenAIStrategy } from "../api/_lib/openai-strategy-planner.js";
 
 const profileId = "11111111-1111-4111-8111-111111111111";
@@ -38,6 +39,13 @@ assert.equal(context.some((row) => row.value === "SEGRETO ALTRO TENANT"), false,
 assert.equal(context.some((row) => row.value === "SEGNALE DEBOLE"), false, "LOW confidence must not affect future decisions");
 assert.equal(learnedFormatPreference(profileId, "INSTAGRAM", ["POST", "STORY"], allRows), "STORY", "real results must change the next supported format decision");
 assert.match(buildAutopilotLearningInstruction(profileId, "INSTAGRAM", allRows) ?? "", /Case study proprietari/);
+const timing = learnedTimingPreference(profileId, "INSTAGRAM", allRows);
+assert.equal(timing?.source, "LEARNING");
+const now = new Date("2026-09-20T08:00:00.000Z");
+const learnedSlots = candidateSlots({ provider: "INSTAGRAM", timezone: "Europe/Rome", posts_per_week: 1, preferred_slots: [], auto_choose: true, enabled: true }, now, timing);
+assert.equal(learnedSlots[0]?.timingSource, "LEARNING", "verified timing must alter the next schedule when user slots are absent");
+const userSlots = candidateSlots({ provider: "INSTAGRAM", timezone: "Europe/Rome", posts_per_week: 1, preferred_slots: [{ day: 1, time: "07:30" }], auto_choose: true, enabled: true }, now, timing);
+assert.equal(userSlots[0]?.timingSource, "USER_CONFIG", "explicit user slots must override learning");
 
 const strategy: OpenAIStrategy = {
   summary: "Strategia", primaryObjective: "Lead", audience: "Proprietari", positioning: "Competenza",

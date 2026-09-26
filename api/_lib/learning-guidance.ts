@@ -27,6 +27,12 @@ export type LearningDecision = {
   observedTo: string;
 };
 
+export type LearnedTimingPreference = {
+  weekday: number | null;
+  time: string | null;
+  source: "LEARNING";
+};
+
 const confidenceRank = { HIGH: 2, MEDIUM: 1 } as const;
 
 function finite(value: unknown) {
@@ -77,6 +83,19 @@ export function learnedFormatPreference(
   const providerIsSupported = decisions.some((row) => row.dimension === "PROVIDER" && row.value === provider);
   const format = decisions.find((row) => row.dimension === "FORMAT" && supported.includes(row.value as SocialFormat));
   return providerIsSupported && format ? format.value as SocialFormat : null;
+}
+
+const WEEKDAY_NUMBER: Record<string, number> = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
+
+export function learnedTimingPreference(profileId: string, provider: SocialProvider, rows: PersistedLearningInsight[]): LearnedTimingPreference | null {
+  const decisions = usableLearningDecisions(profileId, rows);
+  if (!decisions.some((row) => row.dimension === "PROVIDER" && row.value === provider)) return null;
+  const weekday = decisions.find((row) => row.dimension === "WEEKDAY");
+  const hour = decisions.find((row) => row.dimension === "HOUR");
+  const weekdayNumber = weekday ? WEEKDAY_NUMBER[weekday.value.trim().slice(0, 3).toLowerCase()] ?? null : null;
+  const hourNumber = hour ? Number(hour.value) : Number.NaN;
+  const time = Number.isInteger(hourNumber) && hourNumber >= 0 && hourNumber <= 23 ? `${String(hourNumber).padStart(2, "0")}:00` : null;
+  return weekdayNumber || time ? { weekday: weekdayNumber, time, source: "LEARNING" } : null;
 }
 
 export function buildAutopilotLearningInstruction(profileId: string, provider: SocialProvider, rows: PersistedLearningInsight[]) {
