@@ -20,6 +20,7 @@ type ProviderStatus = {
   candidates: Candidate[];
   accountType: string | null;
   capabilities: { publish: string[]; note: string };
+  readiness: { state: "PASS_REAL" | "USER_ACTION_REQUIRED" | "BLOCKED_PROVIDER" | "NOT_SUPPORTED_BY_PROVIDER" | "FAIL"; detail: string };
 };
 type StatusResponse = {
   providers: ProviderStatus[];
@@ -43,6 +44,8 @@ const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
   LINKEDIN: "Profilo LinkedIn oppure Pagina aziendale quando l’accesso Community Management è abilitato.",
   GBP: "Sede Google Business Profile che gestisci.",
 };
+
+const READINESS_LABELS: Record<ProviderStatus["readiness"]["state"], string> = { PASS_REAL: "PASS REAL", USER_ACTION_REQUIRED: "AZIONE RICHIESTA", BLOCKED_PROVIDER: "BLOCCATO PROVIDER", NOT_SUPPORTED_BY_PROVIDER: "NON SUPPORTATO", FAIL: "ERRORE REALE" };
 
 function readableError(value: string) {
   if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
@@ -251,7 +254,7 @@ export function SocialPage() {
             const analyticsMissing = active && analyticsPermissionMissing(provider);
             const accountPresent = Boolean(provider.accountName || provider.accountId);
             return <article className={`panel social-card ${active ? "connected" : reconnect ? "reconnect" : providerError ? "provider-error" : ""}`} key={provider.provider}>
-              <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${uiState.toLowerCase()}`}>{socialProviderUiLabel(uiState)}</span></div>
+              <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${uiState.toLowerCase()}`}>{READINESS_LABELS[provider.readiness.state]}</span></div>
 
               {accountPresent && (active || reconnect || providerError) && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
 
@@ -259,6 +262,7 @@ export function SocialPage() {
 
               {connecting && provider.status !== "PENDING_SELECTION" && <p className="social-config-info"><LoaderCircle className="spin" size={15} /> Connessione in corso. Lo stato si aggiornerà al termine dell’autorizzazione.</p>}
               {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
+              <p className={provider.readiness.state === "PASS_REAL" ? "social-config-info" : provider.readiness.state === "FAIL" ? "social-config-error" : "social-config-warning"}>{provider.readiness.detail}</p>
               {unavailable && <p className="social-config-info"><Link2 size={15} /> Questo provider deve essere configurato sul server prima di poterlo collegare.</p>}
               {reconnect && <p className="social-config-warning"><AlertTriangle size={15} /> L’autorizzazione non è più valida. Ricollega l’account per continuare.</p>}
               {providerError && <p className="social-config-error"><AlertTriangle size={15} /> Il provider ha restituito un errore reale. Ricollega l’account o riprova dopo aver verificato il servizio.</p>}

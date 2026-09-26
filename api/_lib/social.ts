@@ -11,6 +11,7 @@ const META_SCOPES = {
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/business.manage";
 
 export type SocialProvider = typeof PROVIDERS[number];
+export type SocialReadiness = "PASS_REAL" | "USER_ACTION_REQUIRED" | "BLOCKED_PROVIDER" | "NOT_SUPPORTED_BY_PROVIDER" | "FAIL";
 export type SocialEnv = {
   DATABASE_URL?: string;
   APP_BASE_URL?: string;
@@ -325,6 +326,20 @@ export function providerCapabilities(provider: SocialProvider) {
   if (provider === "FACEBOOK") return { publish: ["POST"], note: "Storie e caroselli non vengono simulati finché il contenuto non ha gli asset richiesti dalle API." };
   if (provider === "LINKEDIN") return { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." };
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
+}
+
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
+  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
+  const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
+  const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
+  if (status === "ACTIVE") {
+    if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : input.provider === "LINKEDIN" && input.accountType !== "ORGANIZATION" ? "r_member_postAnalytics" : null;
+    if (analyticsPermission && !permissions.includes(analyticsPermission)) return { state: "USER_ACTION_REQUIRED", detail: `Manca il consenso ${analyticsPermission} richiesto per Analytics.` };
+    return { state: "PASS_REAL", detail: "Account attivo con credenziali cifrate e validazione reale del provider." };
+  }
+  if (["NOT_CONNECTED", "DISCONNECTED", "PENDING", "CONNECTING", "PENDING_SELECTION", "OAUTH_PENDING", "RECONNECT_REQUIRED", "TOKEN_EXPIRED", "EXPIRED", "TOKEN_INVALID"].includes(status)) return { state: "USER_ACTION_REQUIRED", detail: status === "PENDING_SELECTION" ? "Scegli l’account restituito dal provider per completare il collegamento." : "È necessario completare o ripetere l’autorizzazione OAuth." };
+  return { state: "FAIL", detail: "Il provider ha restituito uno stato di errore reale; non viene trattato come collegato." };
 }
 
 function toBase64Url(bytes: Uint8Array) {
@@ -864,6 +879,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         candidates: row?.status === "PENDING_SELECTION" ? safeCandidates(metadata.candidates) : [],
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
+        readiness: socialReadiness({ provider, configured: providerConfigured(provider, env), status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),
