@@ -70,7 +70,7 @@ const runtime = fs.readFileSync("api/_lib/learning-runtime.ts", "utf8");
 assert.match(runtime, /distinct on \(snapshot\.provider,snapshot\.external_post_id\)/, "hourly captures must not inflate evidence");
 assert.match(runtime, /order by latest\.published_at desc,latest\.provider,latest\.external_post_id/, "the bounded learning window must keep the latest unique posts rather than arbitrary provider IDs");
 assert.match(runtime, /snapshot\.source='PROVIDER_API'/, "only real provider snapshots may feed learning");
-assert.match(runtime, /snapshot\.provider in \('FACEBOOK','INSTAGRAM'\)/, "personal learning must use only analytics-ready providers");
+assert.match(runtime, /snapshot\.provider in \('FACEBOOK','INSTAGRAM','LINKEDIN'\)/, "personal learning must include every analytics-ready post-level provider");
 assert.match(runtime, /result\.errors\.push\("LEARNING_REFRESH_FAILED"\)/, "customer runtime response must not expose raw database errors");
 assert.equal(runtime.includes("result.errors.push(`${profile.id}"), false, "profile ids and raw errors must not be returned to the browser");
 const entry = fs.readFileSync("cloudflare/entry.ts", "utf8");

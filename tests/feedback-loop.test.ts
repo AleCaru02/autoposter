@@ -35,16 +35,17 @@ for (const provider of ["LINKEDIN", "GBP"] as const) rows.push({
   provider,
   external_post_id: `${provider.toLowerCase()}-externally-blocked`,
   format: "POST",
-  topic: "Provider esterno escluso",
+  topic: "Provider con analytics verificabili",
   published_at: "2026-08-22T10:00:00.000Z",
   captured_at: "2026-08-23T10:00:00.000Z",
   metrics: { reach: 1000, likes: 1000 },
 });
 
 const samples = snapshotsToPerformanceSamples(profileId, rows);
-assert.equal(samples.length, 12);
+assert.equal(samples.length, 13);
 assert.ok(samples.every((sample) => sample.profileId === profileId));
-assert.ok(samples.every((sample) => sample.provider === "FACEBOOK" || sample.provider === "INSTAGRAM"), "externally blocked analytics providers must not enter personal learning");
+assert.ok(samples.some((sample) => sample.provider === "LINKEDIN"), "LinkedIn with real post-level metrics must enter personal learning");
+assert.equal(samples.some((sample) => sample.provider === "GBP"), false, "GBP location metrics are not post-level learning samples");
 
 const repeatedCaptures: MetricSnapshotRecord[] = Array.from({ length: 10 }, (_, index) => ({
   ...rows[0]!,
@@ -69,7 +70,7 @@ const output = buildFeedbackLoopRecords(profileId, rows, {
   generatedAt: "2026-08-29T00:00:00.000Z",
 });
 assert.equal(output.result.profileId, profileId);
-assert.equal(output.result.profileSamples, 12);
+assert.equal(output.result.profileSamples, 13);
 assert.equal(output.result.ignoredOtherProfiles, 0, "adapter must remove foreign-profile rows before the engine sees them");
 assert.equal(output.result.status, "READY");
 assert.ok(output.records.length > 0);

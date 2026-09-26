@@ -40,7 +40,7 @@ export function snapshotsToPerformanceSamples(profileId: string, rows: MetricSna
     .filter((row) => validIso(row.published_at))
     .filter((row) => validIso(row.captured_at))
     .filter((row) => row.external_post_id.trim().length > 0)
-    .filter((row) => row.provider === "INSTAGRAM" || row.provider === "FACEBOOK")) {
+    .filter((row) => row.provider === "INSTAGRAM" || row.provider === "FACEBOOK" || row.provider === "LINKEDIN")) {
     const key = `${row.provider}\u0000${row.external_post_id}`;
     const previous = latestByRemotePost.get(key);
     if (!previous || new Date(row.captured_at).getTime() > new Date(previous.captured_at).getTime()) latestByRemotePost.set(key, row);
