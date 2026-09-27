@@ -256,6 +256,8 @@ function publicOAuthErrorCode(provider: SocialProvider, detail: string) {
     "AUTH_DENIED", "AUTH_CODE_MISSING", "OAUTH_CALLBACK_IN_PROGRESS", "OAUTH_CALLBACK_ALREADY_USED",
     "GBP_API_NOT_ENABLED", "GBP_NO_ACCESSIBLE_ACCOUNT", "GBP_ACCOUNT_WITHOUT_LOCATIONS",
     "GBP_LOCATION_DISCOVERY_DEFECT", "GBP_OAUTH_ACCOUNT_MISMATCH", "GBP_RATE_LIMITED", "GBP_ACCESS_DENIED",
+    "LINKEDIN_CLIENT_CREDENTIALS_INVALID", "LINKEDIN_REDIRECT_URI_MISMATCH", "LINKEDIN_AUTHORIZATION_CODE_INVALID",
+    "LINKEDIN_PROFILE_ACCESS_DENIED", "LINKEDIN_TOKEN_REJECTED", "LINKEDIN_USERINFO_REJECTED",
   ]);
   if (safeCodes.has(detail)) return detail;
   if (detail.startsWith("MISSING_PERMISSIONS:")) return "MISSING_PERMISSIONS";
@@ -263,6 +265,15 @@ function publicOAuthErrorCode(provider: SocialProvider, detail: string) {
   if (detail === "NESSUNA_PAGINA_FACEBOOK_GESTIBILE") return detail;
   if (detail === "NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO") return detail;
   return `${provider}_OAUTH_FAILED`;
+}
+
+function linkedinFailureCode(stage: "TOKEN" | "USERINFO", status: number, detail: unknown) {
+  const message = typeof detail === "string" ? detail.toLowerCase() : "";
+  if (message.includes("redirect_uri") || message.includes("redirect uri")) return "LINKEDIN_REDIRECT_URI_MISMATCH";
+  if (message.includes("invalid_client") || message.includes("client authentication") || message.includes("client secret")) return "LINKEDIN_CLIENT_CREDENTIALS_INVALID";
+  if (message.includes("authorization code") || message.includes("invalid_grant") || message.includes("code has expired")) return "LINKEDIN_AUTHORIZATION_CODE_INVALID";
+  if (message.includes("insufficient") || message.includes("permission") || message.includes("scope")) return stage === "USERINFO" ? "LINKEDIN_PROFILE_ACCESS_DENIED" : "MISSING_PERMISSIONS:LINKEDIN";
+  return `LINKEDIN_${stage}_REJECTED_${status}`;
 }
 
 function bearer(request: Request) {
@@ -658,8 +669,8 @@ async function linkedinExchange(code: string, callbackUri: string, env: SocialEn
     redirect_uri: callbackUri,
   });
   const response = await fetch("https://www.linkedin.com/oauth/v2/accessToken", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
-  const body = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string; scope?: string; error_description?: string };
-  if (!response.ok || !body.access_token) throw new Error(body.error_description || `LINKEDIN_TOKEN_${response.status}`);
+  const body = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string; scope?: string; error?: string; error_description?: string };
+  if (!response.ok || !body.access_token) throw new Error(linkedinFailureCode("TOKEN", response.status, body.error_description || body.error));
   return body;
 }
 
@@ -670,8 +681,8 @@ export function linkedinGrantedPermissions(scope: string | undefined, requested:
 
 async function linkedinUserInfo(accessToken: string) {
   const response = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { authorization: `Bearer ${accessToken}` } });
-  const body = await response.json() as { sub?: string; name?: string; given_name?: string; family_name?: string; error_description?: string };
-  if (!response.ok || !body.sub) throw new Error(body.error_description || `LINKEDIN_USERINFO_${response.status}`);
+  const body = await response.json() as { sub?: string; name?: string; given_name?: string; family_name?: string; message?: string; error_description?: string };
+  if (!response.ok || !body.sub) throw new Error(linkedinFailureCode("USERINFO", response.status, body.error_description || body.message));
   return { id: body.sub, name: body.name || [body.given_name, body.family_name].filter(Boolean).join(" ") || "Profilo LinkedIn" };
 }
 

@@ -150,6 +150,7 @@ async function run() {
   assert.equal(socialSource.includes('accountUrl.searchParams.set("pageSize", "20")'), true, "GBP accounts.list must respect Google's maximum page size");
   assert.equal(socialSource.includes('url.searchParams.set("prompt", "consent select_account")'), true, "GBP OAuth must force an explicit Google-account choice");
   for (const code of ["GBP_API_NOT_ENABLED", "GBP_NO_ACCESSIBLE_ACCOUNT", "GBP_ACCOUNT_WITHOUT_LOCATIONS", "GBP_LOCATION_DISCOVERY_DEFECT", "GBP_OAUTH_ACCOUNT_MISMATCH"]) assert.equal(socialUiSource.includes(code), true, `${code} must have a customer-safe explanation`);
+  for (const code of ["LINKEDIN_CLIENT_CREDENTIALS_INVALID", "LINKEDIN_REDIRECT_URI_MISMATCH", "LINKEDIN_AUTHORIZATION_CODE_INVALID", "LINKEDIN_PROFILE_ACCESS_DENIED"]) assert.equal(socialUiSource.includes(code), true, `${code} must have a customer-safe LinkedIn explanation`);
   assert.equal(socialSource.includes("claimOAuthCallback"), true, "OAuth callback must be claimed before provider exchange or discovery");
   assert.equal(socialSource.includes("social_oauth_callbacks"), true, "OAuth callback idempotency must be durable");
   assert.equal(socialUiSource.includes("GBP_RATE_LIMITED"), true, "GBP quota errors must be understandable to customers");
