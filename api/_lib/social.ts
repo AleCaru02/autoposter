@@ -23,6 +23,7 @@ export type SocialEnv = {
   LINKEDIN_CLIENT_SECRET?: string;
   LINKEDIN_API_VERSION?: string;
   LINKEDIN_ORGANIZATION_ACCESS?: string;
+  LINKEDIN_POST_ANALYTICS_ACCESS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
 };
@@ -310,6 +311,10 @@ function linkedinOrganizationMode(env: SocialEnv) {
   return env.LINKEDIN_ORGANIZATION_ACCESS?.trim().toLowerCase() === "true";
 }
 
+function linkedinPostAnalyticsEnabled(env: SocialEnv) {
+  return env.LINKEDIN_POST_ANALYTICS_ACCESS?.trim().toLowerCase() === "true";
+}
+
 export function missingProviderConfiguration(provider: SocialProvider, env: SocialEnv) {
   const missing: string[] = [];
   if (!env.DATABASE_URL) missing.push("DATABASE_URL");
@@ -346,7 +351,7 @@ export function socialReadiness(input: { provider: SocialProvider; configured: b
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
     if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
-    const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : input.provider === "LINKEDIN" && input.accountType !== "ORGANIZATION" ? "r_member_postAnalytics" : null;
+    const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : null;
     if (analyticsPermission && !permissions.includes(analyticsPermission)) return { state: "USER_ACTION_REQUIRED", detail: `Manca il consenso ${analyticsPermission} richiesto per Analytics.` };
     return { state: "PASS_REAL", detail: "Account attivo con credenziali cifrate e validazione reale del provider." };
   }
@@ -551,7 +556,7 @@ function providerScopes(provider: SocialProvider, env: SocialEnv) {
   if (provider === "GBP") return [GOOGLE_SCOPE];
   return linkedinOrganizationMode(env)
     ? ["openid", "profile", "rw_organization_admin", "w_organization_social"]
-    : ["openid", "profile", "w_member_social", "r_member_postAnalytics"];
+    : ["openid", "profile", "w_member_social", ...(linkedinPostAnalyticsEnabled(env) ? ["r_member_postAnalytics"] : [])];
 }
 
 function buildAuthorizationUrl(provider: SocialProvider, env: SocialEnv, state: string, callbackUri: string) {
@@ -805,7 +810,7 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
   try { state = await verifyOAuthState(stateValue, env.SOCIAL_TOKEN_KEY!); }
   catch (reason) { return socialJson({ error: reason instanceof Error ? reason.message : "OAUTH_STATE_INVALID" }, 400); }
   if (state.provider !== provider) return socialJson({ error: "OAUTH_PROVIDER_MISMATCH" }, 400);
-  if (url.searchParams.get("error")) return oauthRedirect(state, { social_error: "AUTH_DENIED" });
+  if (url.searchParams.get("error")) return oauthRedirect(state, { social_error: url.searchParams.get("error") === "unauthorized_scope_error" ? "MISSING_PERMISSIONS" : "AUTH_DENIED" });
   const code = url.searchParams.get("code");
   if (!code) return oauthRedirect(state, { social_error: "AUTH_CODE_MISSING" });
   const sql = neon(env.DATABASE_URL!);
