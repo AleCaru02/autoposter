@@ -11,6 +11,7 @@ type Candidate = { id: string; name: string; accountId?: string; accountType?: s
 type ProviderStatus = {
   provider: Provider;
   configured: boolean;
+  configurationIssues: string[];
   status: string;
   accountId: string | null;
   accountName: string | null;
@@ -20,6 +21,7 @@ type ProviderStatus = {
   candidates: Candidate[];
   accountType: string | null;
   capabilities: { publish: string[]; note: string };
+  lastError: string | null;
   readiness: { state: "PASS_REAL" | "USER_ACTION_REQUIRED" | "BLOCKED_PROVIDER" | "NOT_SUPPORTED_BY_PROVIDER" | "FAIL"; detail: string };
 };
 type StatusResponse = {
@@ -262,7 +264,8 @@ export function SocialPage() {
 
               {connecting && provider.status !== "PENDING_SELECTION" && <p className="social-config-info"><LoaderCircle className="spin" size={15} /> Connessione in corso. Lo stato si aggiornerà al termine dell’autorizzazione.</p>}
               {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
-              <p className={provider.readiness.state === "PASS_REAL" ? "social-config-info" : provider.readiness.state === "FAIL" ? "social-config-error" : "social-config-warning"}>{provider.readiness.detail}</p>
+              <p className={provider.readiness.state === "PASS_REAL" ? "social-config-info" : provider.readiness.state === "FAIL" ? "social-config-error" : "social-config-warning"}>{provider.lastError ? readableError(provider.lastError) : provider.readiness.detail}</p>
+              {unavailable && provider.configurationIssues.length > 0 && <p className="social-config-error">Configurazione mancante: {provider.configurationIssues.join(", ")}</p>}
               {unavailable && <p className="social-config-info"><Link2 size={15} /> Questo provider deve essere configurato sul server prima di poterlo collegare.</p>}
               {reconnect && <p className="social-config-warning"><AlertTriangle size={15} /> L’autorizzazione non è più valida. Ricollega l’account per continuare.</p>}
               {providerError && <p className="social-config-error"><AlertTriangle size={15} /> Il provider ha restituito un errore reale. Ricollega l’account o riprova dopo aver verificato il servizio.</p>}

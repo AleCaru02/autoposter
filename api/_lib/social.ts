@@ -328,9 +328,10 @@ export function providerCapabilities(provider: SocialProvider) {
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
 
-export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
   if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
+  if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
     if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
@@ -477,6 +478,16 @@ async function upsertConnection(sql: Sql, input: {
       last_validated_at = now(),
       updated_at = now()
   `;
+}
+
+async function persistOAuthFailure(sql: Sql, state: OAuthState, publicError: string) {
+  const existing = await storedConnection(sql, state.profileId, state.provider);
+  const metadata = { ...connectionMetadata(existing?.metadata), lastOAuthError: publicError, lastOAuthErrorAt: new Date().toISOString() };
+  if (existing) {
+    await sql`update public.social_connections set metadata=${JSON.stringify(metadata)}::jsonb, updated_at=now() where profile_id=${state.profileId}::uuid and provider=${state.provider}`;
+    return;
+  }
+  await upsertConnection(sql, { profileId: state.profileId, provider: state.provider, status: "PROVIDER_ERROR", metadata });
 }
 
 async function claimOAuthCallback(sql: Sql, state: OAuthState): Promise<OAuthCallbackClaim> {
@@ -841,9 +852,11 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     return oauthRedirect(state, result);
   } catch (reason) {
     const errorCode = reason instanceof Error ? reason.message : "SOCIAL_OAUTH_FAILED";
+    const publicError = publicOAuthErrorCode(provider, errorCode);
     await finishOAuthCallback(sql, state, "FAILED", {}, errorCode).catch(() => undefined);
+    await persistOAuthFailure(sql, state, publicError).catch(() => undefined);
     console.error("social-oauth-callback", { provider, errorCode });
-    return oauthRedirect(state, { social_error: publicOAuthErrorCode(provider, errorCode) });
+    return oauthRedirect(state, { social_error: publicError });
   }
 }
 
@@ -867,9 +880,13 @@ async function handleStatus(request: Request, env: SocialEnv) {
     providers: PROVIDERS.map((provider) => {
       const row = byProvider.get(provider);
       const metadata = connectionMetadata(row?.metadata);
+      const configured = providerConfigured(provider, env);
+      const configurationIssues = missingProviderConfiguration(provider, env);
+      const lastError = typeof metadata.lastOAuthError === "string" ? metadata.lastOAuthError : null;
       return {
         provider,
-        configured: providerConfigured(provider, env),
+        configured,
+        configurationIssues,
         status: row?.status ?? "NOT_CONNECTED",
         accountId: row?.provider_account_id ?? null,
         accountName: row?.account_name ?? null,
@@ -879,7 +896,8 @@ async function handleStatus(request: Request, env: SocialEnv) {
         candidates: row?.status === "PENDING_SELECTION" ? safeCandidates(metadata.candidates) : [],
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
-        readiness: socialReadiness({ provider, configured: providerConfigured(provider, env), status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null }),
+        lastError,
+        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),

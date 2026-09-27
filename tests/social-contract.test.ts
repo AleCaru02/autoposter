@@ -55,6 +55,7 @@ async function run() {
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "PASS_REAL");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: [] }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "PROVIDER_ERROR" }).state, "FAIL");
+  assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "NOT_CONNECTED", lastError: "GBP_API_NOT_ENABLED" }).state, "FAIL", "a stored OAuth failure must remain visible after redirect");
 
   const grantedMeta = await metaGrantedPermissions("meta-token", { META_GRAPH_VERSION: "v26.0" }, (async (input) => {
     const url = new URL(String(input));
@@ -144,6 +145,7 @@ async function run() {
   assert.equal(socialUiSource.includes("Collega almeno un account per iniziare a pubblicare."), true, "0/4 must explain the next action");
   assert.equal(socialUiSource.includes("Collega account"), true, "a disconnected provider must expose the correct CTA");
   assert.equal(socialUiSource.includes("PASS REAL"), true, "the UI must expose a truthful provider readiness matrix");
+  assert.equal(socialUiSource.includes("provider.lastError ? readableError(provider.lastError)"), true, "the last safe OAuth error must remain visible after the callback redirect");
   assert.equal(socialUiSource.includes("Stato temporaneamente non disponibile"), false, "the UI must not fabricate unavailable provider states for 0/4");
   assert.equal(socialSource.includes('accountUrl.searchParams.set("pageSize", "20")'), true, "GBP accounts.list must respect Google's maximum page size");
   assert.equal(socialSource.includes('url.searchParams.set("prompt", "consent select_account")'), true, "GBP OAuth must force an explicit Google-account choice");
