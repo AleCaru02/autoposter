@@ -856,7 +856,7 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
     await finishOAuthCallback(sql, state, "FAILED", {}, errorCode).catch(() => undefined);
     await persistOAuthFailure(sql, state, publicError).catch(() => undefined);
     console.error("social-oauth-callback", { provider, errorCode });
-    return oauthRedirect(state, { social_error: publicError });
+    return oauthRedirect(state, { social_error: publicOAuthErrorCode(provider, errorCode) });
   }
 }
 
