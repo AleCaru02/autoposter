@@ -21,7 +21,7 @@ for (const path of [
   "../api/_lib/image-generation-metering.ts",
 ]) {
   const source = readFileSync(new URL(path, import.meta.url), "utf8");
-  assert.match(source, /return this\.usage\.markProviderStarted\(eventId\)/, `${path} bypasses central provider budget`);
+  assert.match(source, /return this\.usage\.markProviderStarted\(eventId(?:,\s*providerCostReserveUsd)?\)/, `${path} bypasses central provider budget`);
   assert.match(source, /reconcileProviderCostAttempt\(eventId\)/, `${path} does not reconcile known technical cost`);
 }
 
