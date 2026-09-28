@@ -173,6 +173,7 @@ export async function buildPersonalBrandEditorialContext(
     verified_at: new Date().toISOString(),
   }];
   return {
+    visualIdentity: identity.visualIdentity,
     brand: {
       ...identity.brand,
       confirmedWebsiteContent: source.brand.confirmedWebsiteContent,
