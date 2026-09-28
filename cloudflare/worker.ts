@@ -286,7 +286,7 @@ async function handleGenerateImage(request: Request, env: Env) {
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
     const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
-    await meter.markProviderStarted(eventId);
+    await meter.markProviderStarted(eventId, 0.25);
     const result = await generateRoutedImage({
       env: { OPENAI_API_KEY: env.OPENAI_API_KEY },
       budget: activityBudget,
