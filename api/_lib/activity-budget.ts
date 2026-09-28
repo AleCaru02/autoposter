@@ -147,6 +147,8 @@ export class ActivityBudgetEngine {
       task: input.task,
       importance: input.importance,
       forecastEndOfMonthEur: Math.max(snapshot.forecastEndOfMonthEur, projectedAfterEur),
+      budgetBand: snapshot.band,
+      ordinaryTargetEur: snapshot.ordinaryTargetEur,
     });
     const hardStopped = snapshot.band === "HARD_STOP";
     const tooExpensive = projectedAfterEur > snapshot.hardCapEur;
