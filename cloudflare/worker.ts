@@ -6,6 +6,7 @@ import { generateRoutedImage } from "../api/_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
+import { AiBudgetRecommendationEngine } from "../api/_lib/ai-budget-recommendation.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 
@@ -140,6 +141,24 @@ async function handleAuthAccountExists(request: Request, env: Env) {
   } catch (reason) {
     console.error("auth-account-exists", reason instanceof Error ? reason.message : "unknown");
     return json({ error: "ACCOUNT_CHECK_FAILED" }, 503);
+  }
+}
+
+async function handleAiBudgetRecommendation(request: Request, env: Env) {
+  if (request.method !== "GET") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const token = bearer(request);
+  if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
+  const profileId = new URL(request.url).searchParams.get("profileId") || "";
+  if (!profileId) return json({ error: "PROFILE_REQUIRED" }, 400);
+  try {
+    const profiles = await rows<Pick<ProfileRow, "id">>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, token);
+    if (!profiles[0]) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+    const recommendation = await new AiBudgetRecommendationEngine(env.DATABASE_URL).recommend(profileId);
+    return json({ recommendation });
+  } catch (reason) {
+    console.error("ai-budget-recommendation", reason instanceof Error ? reason.message : "unknown");
+    return json({ error: "AI_BUDGET_RECOMMENDATION_FAILED" }, 500);
   }
 }
 
@@ -550,6 +569,7 @@ async function routeApi(request: Request, env: Env) {
   const path = new URL(request.url).pathname;
   if (path === "/api/health") return handleHealth(env);
   if (path === "/api/auth/account-exists") return handleAuthAccountExists(request, env);
+  if (path === "/api/ai-budget-recommendation") return handleAiBudgetRecommendation(request, env);
   if (path === "/api/generate-text") return handleGenerateText(request, env);
   if (path === "/api/generate-image") return handleGenerateImage(request, env);
   if (path === "/api/website-scan") return handleWebsiteScan(request);
