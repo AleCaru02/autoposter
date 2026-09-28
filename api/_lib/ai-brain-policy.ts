@@ -91,15 +91,17 @@ export function brainDecision(input: {
   researchMode?: EditorialResearchMode;
   text?: string;
   forecastEndOfMonthEur?: number | null;
+  budgetBand?: ActivityBudgetBand;
+  ordinaryTargetEur?: number | null;
 }): AiBrainDecision {
-  const budgetBand = activityBudgetBand(input.spendEur);
+  const budgetBand = input.budgetBand ?? activityBudgetBand(input.spendEur);
   const importance = input.importance ?? "STANDARD";
   const risk = detectClaimRisk(input.text ?? "");
   const explicitResearch = input.task === "RESEARCH" || input.task === "FACT_CHECK";
   const modeRequiresResearch = input.researchMode !== "WEBSITE_ONLY" && input.researchMode !== undefined;
   const researchRequired = explicitResearch || risk.timeSensitive || (modeRequiresResearch && input.researchMode === "NEWS");
   const factCheckRequired = input.task === "FACT_CHECK" || risk.material;
-  const forecastRisk = (input.forecastEndOfMonthEur ?? 0) > ACTIVITY_BUDGET_EUR.ordinaryTargetStart;
+  const forecastRisk = (input.forecastEndOfMonthEur ?? 0) > (input.ordinaryTargetEur ?? ACTIVITY_BUDGET_EUR.ordinaryTargetStart);
   const allowBillableAi = budgetBand !== "HARD_STOP";
   const allowPremium = allowBillableAi
     && budgetBand !== "EMERGENCY_ONLY"

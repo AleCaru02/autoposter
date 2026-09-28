@@ -83,8 +83,8 @@ export class ImageGenerationMetering {
     return { status: "RELEASED", eventId, operationKey };
   }
 
-  async markProviderStarted(eventId: string) {
-    return this.usage.markProviderStarted(eventId);
+  async markProviderStarted(eventId: string, providerCostReserveUsd?: number | null) {
+    return this.usage.markProviderStarted(eventId, providerCostReserveUsd);
   }
 
   async persistTechnicalEvents(profileId: string, eventId: string, events: OpenAIImageTechnicalEvent[]) {

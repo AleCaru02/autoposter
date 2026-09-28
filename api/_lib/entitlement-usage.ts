@@ -295,7 +295,12 @@ export class EntitlementUsageService {
     return rows[0] ?? null;
   }
 
-  async markProviderStarted(eventId: string) {
+  async markProviderStarted(eventId: string, providerCostReserveUsd?: number | null) {
+    if (providerCostReserveUsd != null) {
+      const reserve = Number(providerCostReserveUsd);
+      if (!Number.isFinite(reserve) || reserve <= 0) throw new Error("INVALID_PROVIDER_COST_RESERVE");
+      await this.mergeUsageEventMetadata(eventId, { provider_cost_reserve_usd: reserve });
+    }
     const budget = await this.beginProviderCostAttempt(eventId);
     if (!budget.allowed) throw new Error("PROVIDER_COST_BUDGET_REACHED");
     await this.mergeUsageEventMetadata(eventId, {

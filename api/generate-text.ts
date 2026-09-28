@@ -128,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget });
     }
 
-    await meter.markProviderStarted(eventId);
+    await meter.markProviderStarted(eventId, requestUpperBoundUsd);
     const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
