@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { neonClient } from "../../lib/neon-client";
 import { authenticatedApiToken } from "../../lib/auth-token";
 import type { ProfileType } from "../../../api/_lib/onboarding-provisioning";
+export type { ProfileType } from "../../../api/_lib/onboarding-provisioning";
 
 export type Profile = {
   id: string;
