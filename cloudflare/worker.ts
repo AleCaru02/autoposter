@@ -4,6 +4,7 @@ import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext
 import type { ImageSocialFormat, ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { generateRoutedImage } from "../api/_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
+import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
@@ -13,13 +14,11 @@ const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKE
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 const VALID_IMAGE_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_IMAGE_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
-const DEFAULT_MONTHLY_TEXT_BUDGET_USD = 5;
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
-  OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
 }
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
@@ -27,7 +26,6 @@ type BrandRow = { description: string | null; business_model: string | null; loc
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
-type CostRow = { cost_usd: number | string | null };
 type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
 
@@ -72,23 +70,6 @@ function summaryField(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const summary = (value as Record<string, unknown>).summary;
   return typeof summary === "string" && summary.trim() ? summary.trim() : null;
-}
-
-function currentMonthStartIso() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-}
-
-function monthlyTextBudgetUsd(env: Env) {
-  const configured = Number(env.OPENAI_TEXT_MONTHLY_BUDGET_USD ?? DEFAULT_MONTHLY_TEXT_BUDGET_USD);
-  if (!Number.isFinite(configured)) return DEFAULT_MONTHLY_TEXT_BUDGET_USD;
-  return Math.min(Math.max(configured, 0.1), 100);
-}
-
-
-async function ownerTextSpendUsd(token: string) {
-  const spendRows = await rows<CostRow>(`ai_usage_events?created_at=gte.${encodeURIComponent(currentMonthStartIso())}&operation=eq.GENERATE_SOCIAL_TEXT&select=cost_usd&limit=5000`, token);
-  return spendRows.reduce((total, row) => total + (Number(row.cost_usd) || 0), 0);
 }
 
 function privateIp(address: string) {
@@ -167,15 +148,21 @@ async function handleGenerateText(request: Request, env: Env) {
   const token = bearer(request);
   if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
   if (!env.OPENAI_API_KEY) return json({ error: "OPENAI_NOT_CONFIGURED", message: "Configura OPENAI_API_KEY nel deployment Cloudflare." }, 503);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const topic = typeof body.topic === "string" ? body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof body.objective === "string" ? body.objective.trim().slice(0, 500) : null;
   const providers = Array.isArray(body.providers) ? body.providers.filter((value): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
   const formats = Array.isArray(body.formats) ? body.formats.filter((value): value is SocialFormat => typeof value === "string" && VALID_FORMATS.has(value as SocialFormat)) : [];
+  const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
   if (!profileId || !topic) return json({ error: "PROFILE_AND_TOPIC_REQUIRED" }, 400);
   if (!providers.length || !formats.length) return json({ error: "PROVIDERS_AND_FORMATS_REQUIRED" }, 400);
 
+  let activeMeter: TextGenerationMetering | null = null;
+  let activeEventId: string | null = null;
+  let logicalCommitted = false;
   try {
     const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
     const profile = profiles[0];
@@ -197,18 +184,60 @@ async function handleGenerateText(request: Request, env: Env) {
       goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
       confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
     };
-    const budgetUsd = monthlyTextBudgetUsd(env);
-    const spentBeforeUsd = await ownerTextSpendUsd(token);
+    const meter = new TextGenerationMetering(env.DATABASE_URL);
+    activeMeter = meter;
+    const reservation = await meter.reserve({
+      profileId,
+      source: "MANUAL",
+      operationIdentity,
+      requestFingerprint: { topic, objective, providers, formats },
+    });
+    if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
+    if (reservation.status === "COMPLETED") return json(reservation.cached.response);
+    if (reservation.status === "IN_PROGRESS") return json({ error: "GENERATION_IN_PROGRESS" }, 409);
+    if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
+    const eventId = reservation.eventId;
+    activeEventId = eventId;
+
     const upperUsd = estimateTextRequestUpperBoundUsd({ topic, objective, providers, formats, brand: context });
-    if (spentBeforeUsd >= budgetUsd || spentBeforeUsd + upperUsd > budgetUsd) return json({ error: "OPENAI_TEXT_BUDGET_REACHED", message: "Budget mensile testi raggiunto. Nessuna chiamata OpenAI è stata eseguita.", budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentBeforeUsd.toFixed(6)), estimatedNextMaxUsd: Number(upperUsd.toFixed(6)) } }, 429);
+    const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL).preflight({
+      profileId,
+      task: "COPY_FINAL",
+      importance: "STANDARD",
+      projectedOperationCostUsd: upperUsd,
+    });
+    if (!activityBudget.allowed) {
+      await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
+      return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
+    }
+
+    await meter.markProviderStarted(eventId, upperUsd);
     const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic, objective, providers, formats, brand: context, cacheKey: `post-automatici:${profileId}` });
-    await dataApi("ai_usage_events", token, { method: "POST", headers: { prefer: "return=minimal" }, body: JSON.stringify({ profile_id: profileId, operation: "GENERATE_SOCIAL_TEXT", model: result.model, input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens, cost_usd: result.usage.estimatedCostUsd, metadata: { openai_response_id: result.responseId, openai_request_id: result.requestId, cached_input_tokens: result.usage.cachedInputTokens, cache_write_tokens: result.usage.cacheWriteTokens, topic } }) });
-    const spentAfterUsd = spentBeforeUsd + (result.usage.estimatedCostUsd ?? 0);
-    return json({ content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { monthlyUsd: budgetUsd, spentUsd: Number(spentAfterUsd.toFixed(6)), remainingUsd: Number(Math.max(budgetUsd - spentAfterUsd, 0).toFixed(6)) } });
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, { source: "MANUAL", topic }));
+    const responseBody = {
+      content: result.content,
+      model: result.model,
+      responseId: result.responseId,
+      usage: result.usage,
+      budget: {
+        currency: "EUR",
+        band: activityBudget.band,
+        hardCapEur: activityBudget.hardCapEur,
+        spendEur: activityBudget.spendEur,
+        remainingEur: activityBudget.remainingEur,
+        forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur,
+      },
+    };
+    await meter.storeResult(eventId, { response: responseBody });
+    await meter.commit(eventId);
+    logicalCommitted = true;
+    return json(responseBody);
   } catch (reason) {
+    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
-    return json({ error: "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : 500);
+    if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
+    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500);
   }
 }
 
