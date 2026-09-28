@@ -39,6 +39,7 @@ jobs:
       - { name: Admin Impersonation API regression, run: "npm run test:admin-impersonation-api" }
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
+      - { name: PROPERTY NETWORK profile isolation regression, run: "npm run test:profile-isolation" }
       - { name: Brand analysis server-side gating regression, run: "npm run test:brand-analysis-gating" }
       - { name: Crawler regression, run: "npm run test:crawler" }
       - { name: Site intelligence regression, run: "npm run test:site-intelligence" }
