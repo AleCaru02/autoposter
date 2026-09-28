@@ -23,6 +23,26 @@ type AiBudgetOverview = {
   activity_remaining_eur: number | string;
 };
 
+type AiBudgetRecommendation = {
+  mode: "ESTIMATED" | "DATA_DRIVEN";
+  activeSocials: number;
+  monthlyChannelSlots: number;
+  plannedImageOperations: number;
+  minimumOperationalEur: number;
+  recommendedEur: number;
+  intensiveEur: number;
+  breakdown: {
+    strategyPlanningEur: number;
+    copyAdaptationsEur: number;
+    researchFactCheckEur: number;
+    visualAiEur: number;
+    qaEur: number;
+    reserveEur: number;
+  };
+  explanation: string;
+  assumptions: string[];
+};
+
 export function SettingsPage() {
   const session = authClient.useSession();
   const { selectedProfile, updateProfile } = useProfiles();
@@ -47,6 +67,8 @@ export function SettingsPage() {
   const [budgetBusy, setBudgetBusy] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [budgetDone, setBudgetDone] = useState<string | null>(null);
+  const [budgetRecommendation, setBudgetRecommendation] = useState<AiBudgetRecommendation | null>(null);
+  const [budgetRecommendationOpen, setBudgetRecommendationOpen] = useState(false);
 
   useEffect(() => {
     setAccountName(session.data?.user?.name?.trim() ?? "");
@@ -125,6 +147,11 @@ export function SettingsPage() {
       setAiBudget(body[0]);
       setAccountBudgetInput(String(Number(body[0].account_hard_cap_eur)));
       setActivityBudgetInput(String(Number(body[0].activity_hard_cap_eur)));
+      const recommendationResponse = await fetch(`/api/ai-budget-recommendation?profileId=${encodeURIComponent(selectedProfile.id)}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const recommendationBody = await recommendationResponse.json().catch(() => ({})) as { recommendation?: AiBudgetRecommendation };
+      setBudgetRecommendation(recommendationResponse.ok ? recommendationBody.recommendation ?? null : null);
     } catch {
       setBudgetError("Non è stato possibile caricare il budget AI.");
     }
@@ -263,7 +290,23 @@ export function SettingsPage() {
           <div><span>Residuo account</span><strong>{Number(aiBudget.account_remaining_eur).toFixed(2)} €</strong></div>
           <div><span>Spesa attività questo mese</span><strong>{Number(aiBudget.activity_spend_eur).toFixed(2)} € / {Number(aiBudget.activity_hard_cap_eur).toFixed(2)} €</strong></div>
           <div><span>Residuo attività</span><strong>{Number(aiBudget.activity_remaining_eur).toFixed(2)} €</strong></div>
+          {budgetRecommendation && <div><span>Budget consigliato</span><strong>{budgetRecommendation.recommendedEur.toFixed(2)} €/mese</strong></div>}
         </div>}
+        {budgetRecommendation && <>
+          <p className="field-help full">Minimo operativo: <strong>{budgetRecommendation.minimumOperationalEur.toFixed(2)} €</strong> · Consigliato: <strong>{budgetRecommendation.recommendedEur.toFixed(2)} €</strong> · Intensivo: <strong>{budgetRecommendation.intensiveEur.toFixed(2)} €</strong> · {budgetRecommendation.mode === "DATA_DRIVEN" ? "basato sui dati reali" : "stima pre-storico"}</p>
+          {Number(activityBudgetInput.replace(",", ".")) < budgetRecommendation.recommendedEur && <p className="field-help full">Con il budget attuale il sistema deve ottimizzare riuso, varianti e volume. Veridicità, fact-check e sicurezza non vengono sacrificati; se necessario produrrà meno contenuti.</p>}
+          <div className="full"><button className="compact-action" type="button" onClick={() => setBudgetRecommendationOpen((value) => !value)}>{budgetRecommendationOpen ? "Nascondi calcolo" : "Perché questo budget?"}</button></div>
+          {budgetRecommendationOpen && <div className="full status-rows">
+            <div><span>Strategia e planning</span><strong>{budgetRecommendation.breakdown.strategyPlanningEur.toFixed(2)} €</strong></div>
+            <div><span>Copy e adattamenti</span><strong>{budgetRecommendation.breakdown.copyAdaptationsEur.toFixed(2)} €</strong></div>
+            <div><span>Research / fact-check</span><strong>{budgetRecommendation.breakdown.researchFactCheckEur.toFixed(2)} €</strong></div>
+            <div><span>Visual AI</span><strong>{budgetRecommendation.breakdown.visualAiEur.toFixed(2)} €</strong></div>
+            <div><span>QA</span><strong>{budgetRecommendation.breakdown.qaEur.toFixed(2)} €</strong></div>
+            <div><span>Riserva operativa</span><strong>{budgetRecommendation.breakdown.reserveEur.toFixed(2)} €</strong></div>
+            <p className="field-help">{budgetRecommendation.explanation}</p>
+            {budgetRecommendation.assumptions.map((item) => <p className="field-help" key={item}>{item}</p>)}
+          </div>}
+        </>}
         {budgetError && <p className="form-error full" role="alert">{budgetError}</p>}
         {budgetDone && <p className="field-help full" role="status">{budgetDone}</p>}
         <div className="full"><button className="compact-action" type="submit" disabled={budgetBusy}>{budgetBusy ? "Salvataggio…" : "Modifica budget"}</button></div>
