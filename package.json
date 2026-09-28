@@ -41,7 +41,7 @@
     "test:banned-user-rls": "tsx tests/banned-user-rls.test.ts",
     "test:tenant-security": "tsx tests/banned-user-rls.test.ts && tsx tests/tenant-security.test.ts",
     "test:tenant-cross-security": "tsx tests/tenant-cross-security.test.ts",
-    "test:profile-isolation": "tsx tests/profile-isolation-contract.test.ts",
+    "test:profile-isolation": "tsx tests/profile-isolation-contract.test.ts",\n    "test:personal-brand-profile": "tsx tests/personal-brand-profile.test.ts",
     "test:crawler": "tsx tests/crawler.test.ts",
     "test:site-intelligence": "tsx tests/site-intelligence.test.ts",
     "test:site-intelligence-ui": "tsx tests/site-intelligence-ui.test.ts",
