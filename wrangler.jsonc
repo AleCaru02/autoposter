@@ -3,16 +3,24 @@
   "name": "autoposter",
   "main": "./cloudflare/entry.ts",
   "compatibility_date": "2026-08-26",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "keep_vars": true,
   "vars": {
     "SAFE_MODE": "true",
     "APP_BASE_URL": "https://autoposter.02alessandrocaruso.workers.dev",
     "LINKEDIN_CLIENT_ID": "77gm5otb0kan9y",
-    "META_APP_ID": "900306149763443"
+    "META_APP_ID": "900306149763443",
+    "META_GRAPH_VERSION": "v26.0",
+    "LINKEDIN_API_VERSION": "202608",
+    "LINKEDIN_ORGANIZATION_ACCESS": "false"
   },
   "triggers": {
-    "crons": ["0 * * * *", "*/5 * * * *"]
+    "crons": [
+      "0 * * * *",
+      "*/5 * * * *"
+    ]
   },
   "assets": {
     "directory": "./dist",
