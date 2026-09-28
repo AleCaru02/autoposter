@@ -97,7 +97,8 @@
     "test:master-editorial-brain": "tsx tests/master-editorial-brain.test.ts",
     "test:activity-budget-migration": "tsx tests/activity-budget-migration.test.ts",
     "test:global-ai-budget": "tsx tests/global-ai-budget-hardening.test.ts",
-    "test:ai-budget-recommendation": "tsx tests/ai-budget-recommendation.test.ts"
+    "test:ai-budget-recommendation": "tsx tests/ai-budget-recommendation.test.ts",
+    "test:personal-brand-sources": "tsx tests/personal-brand-sources.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",

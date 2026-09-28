@@ -28,11 +28,22 @@ const generated = {
     { provider: "LINKEDIN", format: "POST", eligible: true, hook: "Una gestione migliore", caption: "Copy LinkedIn", cta: null, hashtags: [], visualBrief: "Professionista al lavoro", altText: "Professionista al lavoro", factualBasis: ["BASE BRAND/SITO"] },
   ],
 } as const;
+const editorialContext = {
+  profileType: "BUSINESS" as const,
+  pillar: null,
+  sourceProfileId: null,
+  sourceProfileIds: [],
+  sourceRefs: [],
+  audience: {},
+  factProvenance: [],
+  externalSources: [],
+};
 const result = await requestManualContent(baseRequest, "test-jwt", "operation-000000000001", async (url, init) => {
   captured = { url: String(url), init };
-  return new Response(JSON.stringify({ content: generated }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ content: generated, editorialContext }), { status: 200, headers: { "content-type": "application/json" } });
 });
-assert.equal(result.variants.length, 2);
+assert.equal(result.content.variants.length, 2);
+assert.deepEqual(result.editorialContext, editorialContext);
 assert.equal(captured.url, "/api/generate-text");
 assert.equal(captured.init?.method, "POST");
 const headers = new Headers(captured.init?.headers);

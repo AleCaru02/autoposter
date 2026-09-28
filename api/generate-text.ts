@@ -1,10 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { neon } from "@neondatabase/serverless";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
+import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
+import { buildPersonalBrandEditorialContext, loadEditorialProfile, loadProfileBrandContext, resolvePersonalBrandSource } from "./_lib/personal-brand-sources.js";
 
 export const config = { maxDuration: 60 };
 
@@ -12,10 +15,6 @@ const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 
-type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity: unknown; user_context: string | null };
-type ScanRow = { id: string };
-type PageRow = { url: string; title: string | null; content_text: string | null };
 
 type RecentItemRow = { id: string; topic: string; title: string | null };
 type RecentVariantRow = { content_id: string; hook: string | null; caption: string | null };
@@ -33,12 +32,6 @@ async function readJsonRows<T>(path: string, token: string): Promise<T[]> {
   const response = await dataApi(path, token);
   if (!response.ok) throw new Error(`DATA_API_${response.status}`);
   return response.json() as Promise<T[]>;
-}
-
-function summaryField(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  const summary = (value as Record<string, unknown>).summary;
-  return typeof summary === "string" && summary.trim() ? summary.trim() : null;
 }
 
 
@@ -65,6 +58,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const topic = typeof req.body?.topic === "string" ? req.body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof req.body?.objective === "string" ? req.body.objective.trim().slice(0, 500) : null;
   const researchMode = normalizeEditorialResearchMode(req.body?.researchMode);
+  const requestedSourceProfileId = typeof req.body?.sourceProfileId === "string" ? req.body.sourceProfileId.trim() || null : null;
+  const requestedPillar = typeof req.body?.pillar === "string" ? req.body.pillar.trim().slice(0, 160) || null : null;
   const operationIdentityHeader = req.headers["x-post-automatici-operation-id"];
   const operationIdentity = (Array.isArray(operationIdentityHeader) ? operationIdentityHeader[0] : operationIdentityHeader || "").trim();
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return res.status(400).json({ error: "OPERATION_ID_REQUIRED" });
@@ -77,29 +72,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let activeEventId: string | null = null;
   let logicalCommitted = false;
   try {
-    const profiles = await readJsonRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token);
-    const profile = profiles[0];
-    if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
-    const brands = await readJsonRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token);
-    const brand = brands[0] ?? null;
-    const scans = await readJsonRows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL)&select=id&order=created_at.desc&limit=1`, token);
-    const pages = scans[0] ? await readJsonRows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scans[0].id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=160`, token) : [];
-
-    const context: BrandContext = {
-      profileName: profile.name,
-      industry: profile.industry,
-      websiteUrl: profile.website_url,
-      description: brand?.description ?? null,
-      businessModel: brand?.business_model ?? null,
-      location: brand?.location ?? null,
-      serviceArea: brand?.service_area ?? null,
-      target: summaryField(brand?.target_audience),
-      tone: summaryField(brand?.tone_of_voice),
-      goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
-      userContext: brand?.user_context ?? null,
-      confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
+    const authUserId = await verifiedCustomerAuthUserId(token, process.env.DATABASE_URL);
+    if (!authUserId) return res.status(401).json({ error: "AUTH_REQUIRED" });
+    const sql = neon(process.env.DATABASE_URL);
+    const profile = await loadEditorialProfile(sql, profileId, authUserId);
+    const ownContext = await loadProfileBrandContext(sql, profile);
+    let context: BrandContext = ownContext.brand;
+    let editorialContext: {
+      profileType: "BUSINESS" | "PERSONAL_BRAND";
+      pillar: string | null;
+      sourceProfileId: string | null;
+      sourceProfileIds: string[];
+      sourceRefs: unknown[];
+      audience: Record<string, unknown>;
+      factProvenance: unknown[];
+    } = {
+      profileType: profile.profile_type,
+      pillar: null,
+      sourceProfileId: null,
+      sourceProfileIds: [],
+      sourceRefs: [],
+      audience: ownContext.audience,
+      factProvenance: [],
     };
-    const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
+
+    if (profile.profile_type === "PERSONAL_BRAND") {
+      if (!objective) return res.status(400).json({ error: "PERSONAL_BRAND_OBJECTIVE_REQUIRED" });
+      const relation = await resolvePersonalBrandSource(sql, profileId, requestedSourceProfileId, requestedPillar);
+      const resolved = await buildPersonalBrandEditorialContext(sql, profile, relation);
+      if (!Object.keys(resolved.audience).length) return res.status(400).json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" });
+      context = resolved.brand;
+      editorialContext = {
+        profileType: "PERSONAL_BRAND",
+        pillar: relation.pillar,
+        sourceProfileId: relation.source_profile_id,
+        sourceProfileIds: [relation.source_profile_id],
+        sourceRefs: resolved.sourceRefs,
+        audience: resolved.audience,
+        factProvenance: resolved.factProvenance,
+      };
+    }
+    const enriched = enrichRequestedTopicWithPillars(topic, ownContext.visualIdentity);
 
     const meter = new TextGenerationMetering(process.env.DATABASE_URL);
     activeMeter = meter;
@@ -107,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileId,
       source: "MANUAL",
       operationIdentity,
-      requestFingerprint: { topic, objective, providers, formats, researchMode },
+      requestFingerprint: { topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext.sourceProfileId, pillar: editorialContext.pillar },
     });
     if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
     if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
@@ -138,6 +151,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       editorial_angle: result.content.editorialAngle,
       external_sources: result.externalSources,
       verification: result.verification,
+      personal_brand_source_profile_id: editorialContext.sourceProfileId,
+      personal_brand_pillar: editorialContext.pillar,
     }));
 
     const recent = await recentContentForDedupe(profileId, token);
@@ -164,6 +179,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
       budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
+      editorialContext: {
+        ...editorialContext,
+        externalSources: result.externalSources,
+      },
     };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
@@ -175,6 +194,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("generate-text", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
+    if (detail === "PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED") return res.status(403).json({ error: detail });
+    if (detail === "PROFILE_NOT_FOUND") return res.status(404).json({ error: detail });
     const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
     return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" });
   }

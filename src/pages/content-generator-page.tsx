@@ -27,7 +27,7 @@ const RESEARCH_MODES: Array<{ value: EditorialResearchMode; title: string; descr
 ];
 
 export function ContentGeneratorPage() {
-  const { selectedProfile, reload: reloadProfiles } = useProfiles();
+  const { profiles, selectedProfile, reload: reloadProfiles } = useProfiles();
   const [overview, setOverview] = useState<AutopilotOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
@@ -164,7 +164,7 @@ export function ContentGeneratorPage() {
     <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
 
-    <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} researchMode={overview.settings.researchMode} />
+    <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} profileType={selectedProfile.profile_type} profiles={profiles} researchMode={overview.settings.researchMode} />
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
       <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>

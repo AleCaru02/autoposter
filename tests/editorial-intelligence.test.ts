@@ -48,8 +48,9 @@ assert.ok(instruction.instruction.includes("Scegli un sotto-tema specifico e un 
 assert.equal(instruction.instruction.includes("javascript:"), false);
 
 const vercel = await readFile(new URL("../api/generate-text.ts", import.meta.url), "utf8");
-assert.ok(vercel.includes("visual_identity"));
-assert.ok(vercel.includes("enrichRequestedTopicWithPillars(topic, brand?.visual_identity)"));
+const sourceRuntime = await readFile(new URL("../api/_lib/personal-brand-sources.ts", import.meta.url), "utf8");
+assert.ok(sourceRuntime.includes("visual_identity"), "shared editorial loader must still load persisted visual identity");
+assert.ok(vercel.includes("enrichRequestedTopicWithPillars(topic, ownContext.visualIdentity)"), "Vercel manual generation must enrich from the active profile visual identity");
 assert.ok(vercel.includes("topic: enriched.topic"));
 assert.ok(vercel.includes("editorial_pillars_used: enriched.pillarCount"));
 const worker = await readFile(new URL("../cloudflare/generate-text.ts", import.meta.url), "utf8");
@@ -59,7 +60,8 @@ assert.ok(worker.includes("topic: enriched.topic"));
 assert.ok(worker.includes("editorial_pillars_used: enriched.pillarCount"));
 
 const autopilot = await readFile(new URL("../api/_lib/autopilot.ts", import.meta.url), "utf8");
-assert.ok(autopilot.includes("select description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity"));
+assert.ok(sourceRuntime.includes("select description,business_model,location,service_area,target_audience,tone_of_voice,goals,user_context,visual_identity"), "autopilot shared loader must preserve full Brand Brain + visual identity context");
+assert.match(autopilot, /loadProfileBrandContext\(sql,profile\)/, "business autopilot must use the shared profile-scoped editorial loader");
 assert.match(autopilot, /buildAutopilotPillarInstruction\(loaded\.visualIdentity,\s*topics,\s*count\)/);
 assert.match(autopilot, /pillar\.instruction\|\|"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività\."/);
 assert.match(autopilot, /selectPlanItem\(strategy\?\.platform_strategy,provider,scheduledAt\)/, "il piano AI persistito deve avere priorità sulla rotazione locale");

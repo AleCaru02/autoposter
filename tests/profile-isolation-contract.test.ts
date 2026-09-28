@@ -28,6 +28,7 @@ assert.deepEqual(propertyContext.map((row) => row.value), ["PROPERTY_ONLY_SIGNAL
 assert.deepEqual(networkContext.map((row) => row.value), ["NETWORK_ONLY_SIGNAL"], "PROPERTY → NETWORK learning contamination must be impossible");
 
 const autopilot = fs.readFileSync("api/_lib/autopilot.ts", "utf8");
+const personalBrandSources = fs.readFileSync("api/_lib/personal-brand-sources.ts", "utf8");
 const social = fs.readFileSync("api/_lib/social.ts", "utf8");
 const analytics = fs.readFileSync("db/migrations/20260909_fase7h_analytics_ingestion.sql", "utf8");
 const learning = fs.readFileSync("db/migrations/20260917_fase7i_learning_runtime.sql", "utf8");
@@ -36,10 +37,14 @@ const activityBudget = fs.readFileSync("api/_lib/activity-budget.ts", "utf8");
 const tenantAudit = fs.readFileSync("cloudflare/tenant-security.ts", "utf8");
 const generateText = fs.readFileSync("cloudflare/generate-text.ts", "utf8");
 
+assert.match(autopilot, /loadProfileBrandContext\(sql,profile\)/, "autopilot must delegate profile-scoped brand/site loading through the Personal Brand Sources boundary");
 for (const [label, pattern] of [
-  ["Brand Brain", /brand_profiles where profile_id=\$\{profile\.id\}/],
-  ["website scan", /website_scans where profile_id=\$\{profile\.id\}/],
-  ["website pages", /website_pages where profile_id=\$\{profile\.id\}/],
+  ["Brand Brain", /brand_profiles[\s\S]*where profile_id=\$\{profile\.id\}::uuid/],
+  ["website scan", /website_scans[\s\S]*where profile_id=\$\{profile\.id\}::uuid/],
+  ["website pages", /website_pages[\s\S]*where profile_id=\$\{profile\.id\}::uuid[\s\S]*scan_id=\$\{scans\[0\]\.id\}::uuid/],
+] as const) assert.match(personalBrandSources, pattern, `${label} must remain profile-scoped in the shared editorial source loader`);
+
+for (const [label, pattern] of [
   ["recent topics", /content_items where profile_id=\$\{profileId\}/],
   ["semantic dedupe", /where ci\.profile_id=\$\{profileId\}/],
   ["assets", /assets where profile_id=\$\{profile\.id\}/],
