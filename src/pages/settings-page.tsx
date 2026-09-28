@@ -1,6 +1,6 @@
 import { CreditCard, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Share2, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { authClient, neonClient } from "../lib/neon-client";
+import { authClient, neonClient, NEON_DATA_API_URL } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -12,6 +12,15 @@ type SettingsDraft = {
   industry: string;
   timezone: string;
   locale: string;
+};
+
+type AiBudgetOverview = {
+  account_hard_cap_eur: number | string;
+  account_spend_eur: number | string;
+  account_remaining_eur: number | string;
+  activity_hard_cap_eur: number | string;
+  activity_spend_eur: number | string;
+  activity_remaining_eur: number | string;
 };
 
 export function SettingsPage() {
@@ -32,6 +41,12 @@ export function SettingsPage() {
   const [overview, setOverview] = useState<{ profileId: string; plan: CustomerPlan; social: ReturnType<typeof customerSocialState>[] } | null>(null);
   const [overviewBusy, setOverviewBusy] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [aiBudget, setAiBudget] = useState<AiBudgetOverview | null>(null);
+  const [accountBudgetInput, setAccountBudgetInput] = useState("");
+  const [activityBudgetInput, setActivityBudgetInput] = useState("");
+  const [budgetBusy, setBudgetBusy] = useState(false);
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [budgetDone, setBudgetDone] = useState<string | null>(null);
 
   useEffect(() => {
     setAccountName(session.data?.user?.name?.trim() ?? "");
@@ -90,6 +105,76 @@ export function SettingsPage() {
   }, [selectedProfile?.id]);
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
+
+  const loadAiBudget = useCallback(async () => {
+    if (!selectedProfile?.id) return;
+    setBudgetError(null);
+    try {
+      const token = await authenticatedApiToken();
+      const response = await fetch(`${NEON_DATA_API_URL}/rpc/customer_ai_budget_overview`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({ p_profile_id: selectedProfile.id }),
+      });
+      const body = await response.json().catch(() => null) as AiBudgetOverview[] | null;
+      if (!response.ok || !body?.[0]) throw new Error("AI_BUDGET_LOAD_FAILED");
+      setAiBudget(body[0]);
+      setAccountBudgetInput(String(Number(body[0].account_hard_cap_eur)));
+      setActivityBudgetInput(String(Number(body[0].activity_hard_cap_eur)));
+    } catch {
+      setBudgetError("Non è stato possibile caricare il budget AI.");
+    }
+  }, [selectedProfile?.id]);
+
+  useEffect(() => { void loadAiBudget(); }, [loadAiBudget]);
+
+  async function saveAiBudget(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedProfile?.id) return;
+    const accountCap = Number(accountBudgetInput.replace(",", "."));
+    const activityCap = Number(activityBudgetInput.replace(",", "."));
+    setBudgetError(null);
+    setBudgetDone(null);
+    if (!Number.isFinite(accountCap) || accountCap <= 0 || !Number.isFinite(activityCap) || activityCap <= 0) {
+      setBudgetError("Inserisci budget validi maggiori di 0 €.");
+      return;
+    }
+    if (activityCap > accountCap) {
+      setBudgetError("Il budget dell’attività non può superare il budget globale dell’account.");
+      return;
+    }
+    setBudgetBusy(true);
+    try {
+      const token = await authenticatedApiToken();
+      const callRpc = async (name: string, payload: Record<string, unknown>) => {
+        const response = await fetch(`${NEON_DATA_API_URL}/rpc/${name}`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(await response.text());
+      };
+      await callRpc("set_account_ai_budget", { p_hard_cap_eur: accountCap });
+      await callRpc("set_activity_ai_budget", { p_profile_id: selectedProfile.id, p_hard_cap_eur: activityCap });
+      await loadAiBudget();
+      setBudgetDone("Budget AI aggiornato. I nuovi hard cap sono già applicati server-side.");
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : "";
+      setBudgetError(detail.includes("ACTIVITY_AI_BUDGET_EXCEEDS_ACCOUNT_CAP")
+        ? "Il budget dell’attività non può superare il budget globale."
+        : "Non è stato possibile aggiornare il budget AI.");
+    } finally {
+      setBudgetBusy(false);
+    }
+  }
 
   async function changePassword(event: FormEvent) {
     event.preventDefault();
@@ -166,6 +251,22 @@ export function SettingsPage() {
       {passwordDone && <p className="field-help full" role="status">{passwordDone}</p>}
       <div className="full"><button className="compact-action" type="submit" disabled={passwordBusy}>{passwordBusy ? "Aggiornamento…" : "Aggiorna password"}</button></div>
     </form></section>
+
+    <section className="panel"><div className="panel-heading"><div><h2>Budget AI</h2><p>Limiti massimi mensili reali. Il sistema può spendere meno, ma non può superare questi valori.</p></div><CreditCard size={19} /></div>
+      <form className="form-grid" onSubmit={saveAiBudget}>
+        <label>Budget globale account (€)<input inputMode="decimal" value={accountBudgetInput} onChange={(event) => setAccountBudgetInput(event.target.value)} /></label>
+        <label>Budget attività (€)<input inputMode="decimal" value={activityBudgetInput} onChange={(event) => setActivityBudgetInput(event.target.value)} /></label>
+        {aiBudget && <div className="full status-rows">
+          <div><span>Spesa account questo mese</span><strong>{Number(aiBudget.account_spend_eur).toFixed(2)} € / {Number(aiBudget.account_hard_cap_eur).toFixed(2)} €</strong></div>
+          <div><span>Residuo account</span><strong>{Number(aiBudget.account_remaining_eur).toFixed(2)} €</strong></div>
+          <div><span>Spesa attività questo mese</span><strong>{Number(aiBudget.activity_spend_eur).toFixed(2)} € / {Number(aiBudget.activity_hard_cap_eur).toFixed(2)} €</strong></div>
+          <div><span>Residuo attività</span><strong>{Number(aiBudget.activity_remaining_eur).toFixed(2)} €</strong></div>
+        </div>}
+        {budgetError && <p className="form-error full" role="alert">{budgetError}</p>}
+        {budgetDone && <p className="field-help full" role="status">{budgetDone}</p>}
+        <div className="full"><button className="compact-action" type="submit" disabled={budgetBusy}>{budgetBusy ? "Salvataggio…" : "Modifica budget"}</button></div>
+      </form>
+    </section>
 
     <section className="panel"><div className="panel-heading"><div><h2>Piano e utilizzo</h2><p>Funzionalità e consumi dell’attività selezionata.</p></div><CreditCard size={19} /></div>
       {overviewBusy && !currentOverview ? <p>Caricamento piano…</p> : overviewError ? <div><p className="form-error" role="alert">{overviewError}</p><button className="compact-action" type="button" onClick={() => void loadOverview()}><RefreshCw size={15} /> Riprova</button></div> : currentOverview && <><p><strong>{currentOverview.plan.name}</strong></p><div className="status-rows">{currentOverview.plan.features.length ? currentOverview.plan.features.map((feature) => <div key={feature}><span>{feature}</span><strong className="status-ok">Disponibile</strong></div>) : <p className="field-help">Nessuna funzionalità attiva per questa attività.</p>}</div><div className="status-rows">{currentOverview.plan.usage.map((item) => <div key={item.label}><span>{item.label.charAt(0).toUpperCase() + item.label.slice(1)}</span><strong>{item.limit === null ? `${item.used} utilizzati ${item.periodLabel}` : `${item.used} di ${item.limit} utilizzati ${item.periodLabel}`}</strong></div>)}</div></>}
