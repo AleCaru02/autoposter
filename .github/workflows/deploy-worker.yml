@@ -56,6 +56,7 @@ jobs:
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
       - { name: FASE 7F safe publication engine regression, run: "npm run test:fase7f-publication-engine" }
       - { name: Social integration contract, run: "npm run test:social" }
+      - { name: Global social Safe Mode regression, run: "npm run test:safe-mode" }
       - { name: Social metrics contract, run: "npm run test:social-metrics" }
       - { name: FASE 7H analytics engine regression, run: "npm run test:fase7h-analytics-engine" }
       - { name: FASE 7J settings and account regression, run: "npm run test:fase7j-settings-account" }
