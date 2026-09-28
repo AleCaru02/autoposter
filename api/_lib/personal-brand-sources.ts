@@ -32,6 +32,7 @@ type BrandRow = {
   tone_of_voice: unknown;
   goals: unknown;
   user_context: string | null;
+  visual_identity: unknown;
 };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 
@@ -102,9 +103,9 @@ export async function resolvePersonalBrandSource(
   return rows[0];
 }
 
-export async function loadProfileBrandContext(sql: any, profile: EditorialProfileRow): Promise<{ brand: BrandContext; audience: Record<string, unknown> }> {
+export async function loadProfileBrandContext(sql: any, profile: EditorialProfileRow): Promise<{ brand: BrandContext; audience: Record<string, unknown>; visualIdentity: unknown }> {
   const brands = await sql\`
-    select description,business_model,location,service_area,target_audience,tone_of_voice,goals,user_context
+    select description,business_model,location,service_area,target_audience,tone_of_voice,goals,user_context,visual_identity
     from public.brand_profiles
     where profile_id=\${profile.id}::uuid
     limit 1
@@ -130,6 +131,7 @@ export async function loadProfileBrandContext(sql: any, profile: EditorialProfil
   const audience = asObject(row?.target_audience);
   return {
     audience,
+    visualIdentity: row?.visual_identity ?? null,
     brand: {
       profileName: profile.name,
       industry: profile.industry,
