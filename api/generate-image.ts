@@ -138,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const routeImportance = req.body?.importance === "PREMIUM" || req.body?.importance === "CRITICAL" ? req.body.importance : "STANDARD";
-    await meter.markProviderStarted(eventId);
+    await meter.markProviderStarted(eventId, 0.25);
     const result = await generateRoutedImage({
       env: { OPENAI_API_KEY: process.env.OPENAI_API_KEY },
       budget: activityBudget,
