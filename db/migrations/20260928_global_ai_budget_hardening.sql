@@ -57,6 +57,15 @@ BEGIN
   IF p_hard_cap_eur IS NULL OR p_hard_cap_eur<=0 OR p_hard_cap_eur>100000 THEN
     RAISE EXCEPTION 'INVALID_ACCOUNT_AI_BUDGET';
   END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.profiles p
+    JOIN public.activity_ai_budget_policies ap ON ap.profile_id=p.id AND ap.enabled=true
+    WHERE p.owner_user_id=v_user_id
+      AND ap.hard_cap_eur>p_hard_cap_eur
+  ) THEN
+    RAISE EXCEPTION 'ACCOUNT_AI_BUDGET_BELOW_ACTIVITY_CAPS';
+  END IF;
   INSERT INTO public.account_ai_budget_policies(user_id,hard_cap_eur,enabled,updated_at)
   VALUES (v_user_id,p_hard_cap_eur,true,now())
   ON CONFLICT (user_id) DO UPDATE SET
