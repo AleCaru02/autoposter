@@ -74,12 +74,26 @@ SET search_path=public,pg_temp
 AS $$
 DECLARE
   v_row public.activity_ai_budget_policies%ROWTYPE;
+  v_account_cap numeric;
 BEGIN
   IF NOT public.owns_profile(p_profile_id) THEN
     RAISE EXCEPTION 'PROFILE_ACCESS_DENIED' USING ERRCODE='42501';
   END IF;
   IF p_hard_cap_eur IS NULL OR p_hard_cap_eur<=0 OR p_hard_cap_eur>100000 THEN
     RAISE EXCEPTION 'INVALID_ACTIVITY_AI_BUDGET';
+  END IF;
+  SELECT ab.hard_cap_eur INTO v_account_cap
+  FROM public.account_ai_budget_policies ab
+  WHERE ab.user_id=public.current_app_user_id() AND ab.enabled=true;
+  IF v_account_cap IS NULL THEN
+    INSERT INTO public.account_ai_budget_policies(user_id)
+    VALUES(public.current_app_user_id()) ON CONFLICT(user_id) DO NOTHING;
+    SELECT ab.hard_cap_eur INTO v_account_cap
+    FROM public.account_ai_budget_policies ab
+    WHERE ab.user_id=public.current_app_user_id();
+  END IF;
+  IF p_hard_cap_eur>v_account_cap THEN
+    RAISE EXCEPTION 'ACTIVITY_AI_BUDGET_EXCEEDS_ACCOUNT_CAP';
   END IF;
   INSERT INTO public.activity_ai_budget_policies(
     profile_id,hard_cap_eur,ordinary_target_eur,reserve_start_eur,
