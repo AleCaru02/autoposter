@@ -52,14 +52,14 @@ export function policyList(value: unknown) {
 }
 
 export async function loadEditorialProfile(sql: any, profileId: string, ownerAuthUserId?: string | null): Promise<EditorialProfileRow> {
-  const rows = await sql\`
+  const rows = await sql`
     select id::text as id, name, website_url, industry, profile_type, owner_auth_user_id
     from public.profiles
-    where id=\${profileId}::uuid
+    where id=${profileId}::uuid
       and archived_at is null
-      \${ownerAuthUserId ? sql\`and owner_auth_user_id=\${ownerAuthUserId}\` : sql\`\`}
+      and (${ownerAuthUserId ?? null}::text is null or owner_auth_user_id=${ownerAuthUserId ?? null})
     limit 1
-  \` as unknown as EditorialProfileRow[];
+  ` as unknown as EditorialProfileRow[];
   if (!rows[0]) throw new Error("PROFILE_NOT_FOUND");
   return rows[0];
 }
@@ -72,7 +72,7 @@ export async function resolvePersonalBrandSource(
 ): Promise<PersonalBrandSourceRelation> {
   const sourceId = requestedSourceProfileId?.trim() || null;
   const pillar = requestedPillar?.trim() || null;
-  const rows = await sql\`
+  const rows = await sql`
     select
       s.source_profile_id::text as source_profile_id,
       source.name as source_name,
@@ -88,46 +88,46 @@ export async function resolvePersonalBrandSource(
     from public.personal_brand_sources s
     join public.profiles pb on pb.id=s.personal_brand_profile_id
     join public.profiles source on source.id=s.source_profile_id
-    where s.personal_brand_profile_id=\${personalBrandProfileId}::uuid
+    where s.personal_brand_profile_id=${personalBrandProfileId}::uuid
       and s.enabled=true
       and pb.profile_type='PERSONAL_BRAND'
       and source.profile_type='BUSINESS'
       and source.archived_at is null
       and source.owner_auth_user_id=pb.owner_auth_user_id
-      \${sourceId ? sql\`and s.source_profile_id=\${sourceId}::uuid\` : sql\`\`}
-      \${pillar ? sql\`and s.pillar=\${pillar}\` : sql\`\`}
+      and (${sourceId}::text is null or s.source_profile_id=${sourceId}::uuid)
+      and (${pillar}::text is null or s.pillar=${pillar})
     order by s.priority asc, s.weight desc, s.created_at asc
     limit 1
-  \` as unknown as PersonalBrandSourceRelation[];
+  ` as unknown as PersonalBrandSourceRelation[];
   if (!rows[0]) throw new Error("PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED");
   return rows[0];
 }
 
 export async function loadProfileBrandContext(sql: any, profile: EditorialProfileRow): Promise<{ brand: BrandContext; audience: Record<string, unknown>; visualIdentity: unknown }> {
-  const brands = await sql\`
+  const brands = await sql`
     select description,business_model,location,service_area,target_audience,tone_of_voice,goals,user_context,visual_identity
     from public.brand_profiles
-    where profile_id=\${profile.id}::uuid
+    where profile_id=${profile.id}::uuid
     limit 1
-  \` as unknown as BrandRow[];
+  ` as unknown as BrandRow[];
   const row = brands[0];
-  const scans = await sql\`
+  const scans = await sql`
     select id::text as id
     from public.website_scans
-    where profile_id=\${profile.id}::uuid
+    where profile_id=${profile.id}::uuid
       and state in ('COMPLETE','COMPLETE_WITH_WARNINGS','PARTIAL')
     order by created_at desc
     limit 1
-  \` as unknown as Array<{id:string}>;
-  const pages = scans[0] ? await sql\`
+  ` as unknown as Array<{id:string}>;
+  const pages = scans[0] ? await sql`
     select url,title,content_text
     from public.website_pages
-    where profile_id=\${profile.id}::uuid
-      and scan_id=\${scans[0].id}::uuid
+    where profile_id=${profile.id}::uuid
+      and scan_id=${scans[0].id}::uuid
       and status='ANALYZED'
     order by depth asc,url asc
     limit 160
-  \` as unknown as PageRow[] : [];
+  ` as unknown as PageRow[] : [];
   const audience = asObject(row?.target_audience);
   return {
     audience,
