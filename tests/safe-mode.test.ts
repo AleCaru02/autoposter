@@ -37,10 +37,17 @@ assert.deepEqual(active, {
 });
 
 const invalid = await processDuePublications({});
-assert.equal(invalid.blocked, true);
-assert.equal(invalid.safeMode, "INVALID");
-assert.equal(invalid.reason, "SAFE_MODE_UNDETERMINED");
-assert.equal(invalid.checked, 0);
+assert.deepEqual(invalid, {
+  ready: true,
+  blocked: true,
+  safeMode: "INVALID",
+  reason: "SAFE_MODE_UNDETERMINED",
+  checked: 0,
+  published: 0,
+  failed: 0,
+  retryScheduled: 0,
+  reviewRequired: 0,
+});
 
 const socialSource = readFileSync(new URL("../api/_lib/social.ts", import.meta.url), "utf8");
 const vercelSource = readFileSync(new URL("../api/social.ts", import.meta.url), "utf8");
