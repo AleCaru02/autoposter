@@ -127,6 +127,9 @@ DECLARE
   v_end timestamptz:=date_trunc('month',now())+interval '1 month';
   v_accounted numeric:=0;
 BEGIN
+  IF NOT public.owns_profile(p_profile_id) THEN
+    RAISE EXCEPTION 'PROFILE_ACCESS_DENIED' USING ERRCODE='42501';
+  END IF;
   SELECT owner_user_id INTO v_user_id FROM public.profiles WHERE id=p_profile_id;
   IF v_user_id IS NULL THEN RAISE EXCEPTION 'PROFILE_NOT_FOUND'; END IF;
   SELECT p.hard_cap_eur INTO v_cap FROM public.account_ai_budget_policies p
@@ -146,6 +149,37 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.account_ai_budget_snapshot(uuid) FROM PUBLIC,authenticated;
+
+CREATE OR REPLACE FUNCTION public.customer_ai_budget_overview(p_profile_id uuid)
+RETURNS TABLE (
+  account_hard_cap_eur numeric,
+  account_spend_eur numeric,
+  account_remaining_eur numeric,
+  activity_hard_cap_eur numeric,
+  activity_spend_eur numeric,
+  activity_remaining_eur numeric
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=public,pg_temp
+AS $
+DECLARE
+  a record;
+  p record;
+BEGIN
+  IF NOT public.owns_profile(p_profile_id) THEN
+    RAISE EXCEPTION 'PROFILE_ACCESS_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO a FROM public.account_ai_budget_snapshot(p_profile_id);
+  SELECT * INTO p FROM public.activity_ai_budget_snapshot(p_profile_id);
+  RETURN QUERY SELECT
+    a.hard_cap_eur,a.accounted_eur,a.remaining_eur,
+    p.hard_cap_eur,p.accounted_eur,p.remaining_eur;
+END;
+$;
+
+REVOKE ALL ON FUNCTION public.customer_ai_budget_overview(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.customer_ai_budget_overview(uuid) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.begin_provider_cost_attempt(p_logical_usage_event_id uuid)
 RETURNS TABLE (
