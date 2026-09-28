@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (reason) {
     const detail = reason instanceof Error ? reason.message : "ONBOARDING_PROVISIONING_FAILED";
     console.error("onboarding-provision", { authUserId, error: detail.slice(0, 120) });
-    if (detail === "ONBOARDING_INPUT_INVALID" || detail === "ONBOARDING_WEBSITE_INVALID") return res.status(400).json({ error: detail });
+    if (["ONBOARDING_INPUT_INVALID", "ONBOARDING_WEBSITE_INVALID", "ONBOARDING_PROFILE_TYPE_INVALID"].includes(detail)) return res.status(400).json({ error: detail });
     if (detail.includes("ONBOARDING_IDEMPOTENCY_CONFLICT")) return res.status(409).json({ error: "ONBOARDING_IDEMPOTENCY_CONFLICT" });
     if (detail.includes("PACKAGE_NOT_ACTIVE")) return res.status(503).json({ error: "ONBOARDING_PROVISIONING_FAILED" });
     return res.status(500).json({ error: "ONBOARDING_PROVISIONING_FAILED" });
