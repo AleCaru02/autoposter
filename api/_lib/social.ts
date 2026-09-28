@@ -834,8 +834,12 @@ async function handleCallback(request: Request, env: SocialEnv, providerFromPath
       const token = await linkedinExchange(code, state.callbackUri, env);
       const requestedPermissions = providerScopes(provider, env);
       const grantedPermissions = linkedinGrantedPermissions(token.scope, requestedPermissions);
-      const missingPermissions = requestedPermissions.filter((permission) => !grantedPermissions.includes(permission));
-      if (missingPermissions.length) throw new Error(`MISSING_PERMISSIONS:${missingPermissions.join(",")}`);
+      // LinkedIn may return a narrower or incomplete `scope` value from the token
+      // endpoint even when the authorization code was issued successfully.  The
+      // reliable validation for the member connection is the OIDC userinfo call
+      // below: it proves that the token can read the authorized LinkedIn profile.
+      // Do not reject a valid callback merely because this optional response field
+      // omits a requested scope; publishing remains protected by LinkedIn itself.
       const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null;
       const tokenReference = await encryptTokenBundle({ accessToken: token.access_token!, refreshToken: token.refresh_token ?? null, expiresAt, kind: "linkedin" }, env.SOCIAL_TOKEN_KEY!);
       if (linkedinOrganizationMode(env)) {

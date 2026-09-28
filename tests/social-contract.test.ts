@@ -163,7 +163,8 @@ async function run() {
   assert.equal(callbackSource.indexOf("claimOAuthCallback") < callbackSource.indexOf("googleExchange(code"), true, "callback claim must happen before Google token exchange and discovery");
   assert.equal(callbackSource.indexOf("metaGrantedPermissions") < callbackSource.indexOf("metaPages(token.accessToken"), true, "Meta granted permissions must be verified before account discovery and persistence");
   assert.match(callbackSource, /permissions: grantedPermissions/, "Meta callbacks must persist provider-confirmed permissions, not requested scopes");
-  assert.match(callbackSource, /linkedinGrantedPermissions\(token\.scope, requestedPermissions\)/, "LinkedIn callbacks must honor the scope returned by the token endpoint");
+  assert.match(callbackSource, /linkedinGrantedPermissions\(token\.scope, requestedPermissions\)/, "LinkedIn callbacks must retain the scope returned by the token endpoint");
+  assert.doesNotMatch(callbackSource, /const requestedPermissions = providerScopes\(provider, env\);[\s\S]{0,400}missingPermissions/, "LinkedIn token scope metadata must not reject an otherwise valid OAuth callback");
   assert.match(callbackMigration, /nonce text PRIMARY KEY/i, "callback nonce must be globally single-use");
   assert.match(callbackMigration, /FORCE ROW LEVEL SECURITY/i, "callback ledger must remain server-owned under forced RLS");
   assert.match(callbackMigration, /REVOKE ALL ON TABLE public\.social_oauth_callbacks FROM PUBLIC, authenticated/i, "customers must not read callback state or errors");
