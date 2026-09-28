@@ -27,3 +27,4 @@ assert.match(onboarding, /identità, voce, pubblico, obiettivi, strategia, calen
 assert.match(profiles, /profile\.profile_type === "PERSONAL_BRAND"/, "profile list must distinguish Personal Brand from business");
 
 console.log("Personal Brand first-class profile: PASS");
+
