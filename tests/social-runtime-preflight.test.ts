@@ -40,7 +40,7 @@ for (const sourceName of [
 }
 
 assert.match(deployWorkflow, /wrangler secret list --format json/, "deploy must verify the real Worker secret binding names after deployment");
-assert.match(socialSource, /const callbackUri = `${baseUrl\(env, request\.url\)}\/api\/social\/callback\/${provider\.toLowerCase\(\)}`;/, "OAuth callback URI must be generated from the canonical server base URL");
+assert.match(socialSource, /const callbackUri = `\$\{baseUrl\(env, request\.url\)\}\/api\/social\/callback\/\$\{provider\.toLowerCase\(\)\}`;/, "OAuth callback URI must be generated from the canonical server base URL");
 assert.match(socialSource, /if \(!await canAccessProfile\(profileId, token\)\) return socialJson\(\{ error: "PROFILE_NOT_FOUND" \}, 404\);/, "CONNECT must remain profile-isolated");
 assert.match(socialSource, /if \(!await canAccessProfile\(profileId, auth\)\) return socialJson\(\{ error: "PROFILE_NOT_FOUND" \}, 404\);/, "SELECT and DISCONNECT must remain profile-isolated");
 assert.match(socialSource, /insert into public\.social_oauth_callbacks \(nonce, profile_id, provider, status, expires_at\)/, "OAuth callbacks must retain durable single-use nonce claiming");
