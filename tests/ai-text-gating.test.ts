@@ -9,6 +9,7 @@ const autopilot = fs.readFileSync("api/_lib/autopilot.ts", "utf8");
 const meter = fs.readFileSync("api/_lib/text-generation-metering.ts", "utf8");
 const research = fs.readFileSync("api/_lib/openai-research-factcheck.ts", "utf8");
 const qa = fs.readFileSync("api/_lib/openai-editorial-qa.ts", "utf8");
+const personalBrandSources = fs.readFileSync("api/_lib/personal-brand-sources.ts", "utf8");
 
 assert.equal(AI_CONTENT_TEXT_CAPABILITY, "ai.content.generate_text");
 assert.match(meter, /quantity:\s*1/);
@@ -37,10 +38,11 @@ assert.doesNotMatch(qa, /TextGenerationMetering|reserveUsage\(/);
 assert.doesNotMatch(manual, /limitValue\s*:\s*req\.body|remaining\s*:\s*req\.body/);
 assert.doesNotMatch(worker, /limitValue\s*:\s*body|remaining\s*:\s*body/);
 
-for (const [name, source] of [["Vercel", manual], ["Cloudflare", worker]] as const) {
-  assert.match(source, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, `${name} text generation must use the latest terminal scan even when it completed with real page warnings`);
-  assert.match(source, /website_pages\?scan_id=[\s\S]*order=depth\.asc&limit=160/, `${name} text generation must consider all supported analyzed pages before selecting the most relevant context`);
-}
+assert.match(manual, /loadProfileBrandContext\(sql, profile\)/, "Vercel manual generation must use the shared profile-scoped brand/site loader");
+assert.match(personalBrandSources, /state in \('COMPLETE','COMPLETE_WITH_WARNINGS','PARTIAL'\)/, "Vercel text generation must use the latest terminal scan even when it completed with real page warnings");
+assert.match(personalBrandSources, /website_pages[\s\S]*scan_id=\$\{scans\[0\]\.id\}::uuid[\s\S]*limit 160/, "Vercel text generation must consider all supported analyzed pages before selecting the most relevant context");
+assert.match(worker, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, "Cloudflare text generation must use the latest terminal scan even when it completed with real page warnings");
+assert.match(worker, /website_pages\?scan_id=[\s\S]*order=depth\.asc&limit=160/, "Cloudflare text generation must consider all supported analyzed pages before selecting the most relevant context");
 
 const keyA = await deriveTextGenerationOperationKey({
   profileId: "11111111-1111-1111-1111-111111111111",
