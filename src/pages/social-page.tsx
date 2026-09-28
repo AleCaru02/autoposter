@@ -50,7 +50,7 @@ const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
 const READINESS_LABELS: Record<ProviderStatus["readiness"]["state"], string> = { PASS_REAL: "PASS REAL", USER_ACTION_REQUIRED: "AZIONE RICHIESTA", BLOCKED_PROVIDER: "BLOCCATO PROVIDER", NOT_SUPPORTED_BY_PROVIDER: "NON SUPPORTATO", FAIL: "ERRORE REALE" };
 
 function readableError(value: string) {
-  if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "Non hai autorizzato tutti i permessi richiesti. Premi Ricollega e accettali per attivare anche Analytics.";
+  if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "L’autorizzazione del provider è incompleta. Premi Ricollega e accetta i permessi richiesti per il collegamento.";
   const map: Record<string, string> = {
     PROVIDER_NOT_CONFIGURED: "Questo collegamento non è ancora disponibile. Contatta l’assistenza.",
     PROFILE_NOT_FOUND: "Non riesco a trovare l’attività selezionata. Ricarica la pagina e riprova.",

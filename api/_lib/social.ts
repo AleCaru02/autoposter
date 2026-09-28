@@ -23,7 +23,6 @@ export type SocialEnv = {
   LINKEDIN_CLIENT_SECRET?: string;
   LINKEDIN_API_VERSION?: string;
   LINKEDIN_ORGANIZATION_ACCESS?: string;
-  LINKEDIN_POST_ANALYTICS_ACCESS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
 };
@@ -311,10 +310,6 @@ function linkedinOrganizationMode(env: SocialEnv) {
   return env.LINKEDIN_ORGANIZATION_ACCESS?.trim().toLowerCase() === "true";
 }
 
-function linkedinPostAnalyticsEnabled(env: SocialEnv) {
-  return env.LINKEDIN_POST_ANALYTICS_ACCESS?.trim().toLowerCase() === "true";
-}
-
 export function missingProviderConfiguration(provider: SocialProvider, env: SocialEnv) {
   const missing: string[] = [];
   if (!env.DATABASE_URL) missing.push("DATABASE_URL");
@@ -556,7 +551,7 @@ function providerScopes(provider: SocialProvider, env: SocialEnv) {
   if (provider === "GBP") return [GOOGLE_SCOPE];
   return linkedinOrganizationMode(env)
     ? ["openid", "profile", "rw_organization_admin", "w_organization_social"]
-    : ["openid", "profile", "w_member_social", ...(linkedinPostAnalyticsEnabled(env) ? ["r_member_postAnalytics"] : [])];
+    : ["openid", "profile", "w_member_social"];
 }
 
 function buildAuthorizationUrl(provider: SocialProvider, env: SocialEnv, state: string, callbackUri: string) {
