@@ -189,8 +189,18 @@ export function SettingsPage() {
         });
         if (!response.ok) throw new Error(await response.text());
       };
-      await callRpc("set_account_ai_budget", { p_hard_cap_eur: accountCap });
-      await callRpc("set_activity_ai_budget", { p_profile_id: selectedProfile.id, p_hard_cap_eur: activityCap });
+      const currentAccountCap = Number(aiBudget?.account_hard_cap_eur ?? accountCap);
+      if (accountCap < currentAccountCap) {
+        // Lower the selected sub-limit first so the global setter never leaves
+        // this activity above the new account hard cap.
+        await callRpc("set_activity_ai_budget", { p_profile_id: selectedProfile.id, p_hard_cap_eur: activityCap });
+        await callRpc("set_account_ai_budget", { p_hard_cap_eur: accountCap });
+      } else {
+        // Raise the global ceiling first; the activity setter is not allowed
+        // to exceed the current account cap.
+        await callRpc("set_account_ai_budget", { p_hard_cap_eur: accountCap });
+        await callRpc("set_activity_ai_budget", { p_profile_id: selectedProfile.id, p_hard_cap_eur: activityCap });
+      }
       await loadAiBudget();
       setBudgetDone("Budget AI aggiornato. I nuovi hard cap sono già applicati server-side.");
     } catch (reason) {
