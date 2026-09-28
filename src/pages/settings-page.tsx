@@ -170,7 +170,9 @@ export function SettingsPage() {
       const detail = reason instanceof Error ? reason.message : "";
       setBudgetError(detail.includes("ACTIVITY_AI_BUDGET_EXCEEDS_ACCOUNT_CAP")
         ? "Il budget dell’attività non può superare il budget globale."
-        : "Non è stato possibile aggiornare il budget AI.");
+        : detail.includes("ACCOUNT_AI_BUDGET_BELOW_ACTIVITY_CAPS")
+          ? "Prima riduci i budget delle altre attività che superano il nuovo limite globale."
+          : "Non è stato possibile aggiornare il budget AI.");
     } finally {
       setBudgetBusy(false);
     }
