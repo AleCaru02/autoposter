@@ -42,6 +42,7 @@ jobs:
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: PROPERTY NETWORK profile isolation regression, run: "npm run test:profile-isolation" }
       - { name: Personal Brand first-class profile regression, run: "npm run test:personal-brand-profile" }
+      - { name: Personal Brand Sources FASE 5 regression, run: "npm run test:personal-brand-sources" }
       - { name: Canonical bootstrap regression, run: "npm run test:canonical-bootstrap" }
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }
