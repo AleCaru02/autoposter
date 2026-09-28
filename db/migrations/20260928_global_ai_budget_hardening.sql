@@ -185,7 +185,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path=public,pg_temp
-AS $
+AS $budget$
 DECLARE
   a record;
   p record;
@@ -199,7 +199,7 @@ BEGIN
     a.hard_cap_eur,a.accounted_eur,a.remaining_eur,
     p.hard_cap_eur,p.accounted_eur,p.remaining_eur;
 END;
-$;
+$budget$;
 
 REVOKE ALL ON FUNCTION public.customer_ai_budget_overview(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.customer_ai_budget_overview(uuid) TO authenticated;
