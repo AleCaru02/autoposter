@@ -69,6 +69,6 @@ export function customerSocialState(row: SettingsSocialStatus) {
   const connectionState = socialProviderUiState(row);
   if (connectionState !== "ACTIVE") return { label: SOCIAL_LABELS[row.provider], state: socialProviderUiLabel(connectionState) };
   if (row.provider === "INSTAGRAM" && !row.permissions.includes("instagram_manage_insights")) return { label: SOCIAL_LABELS[row.provider], state: "Permesso Analytics mancante" };
-  if (row.provider === "LINKEDIN" && !row.permissions.includes("r_member_postAnalytics") && !row.permissions.includes("rw_organization_admin")) return { label: SOCIAL_LABELS[row.provider], state: "Permesso Analytics mancante" };
+  if (row.provider === "LINKEDIN" && !row.permissions.includes("r_member_postAnalytics") && !row.permissions.includes("rw_organization_admin")) return { label: SOCIAL_LABELS[row.provider], state: "Collegato (analytics non disponibile)" };
   return { label: SOCIAL_LABELS[row.provider], state: "Collegato" };
 }

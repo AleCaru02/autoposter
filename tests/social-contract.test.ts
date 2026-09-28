@@ -131,7 +131,8 @@ async function run() {
   assert.equal(socialSource.includes("on conflict (profile_id, provider)"), true, "a profile must keep at most one connection per provider");
   assert.equal((socialSource.match(/status: \"PENDING_SELECTION\"/g) ?? []).length >= 3, true, "Meta, LinkedIn organization and GBP callbacks must persist explicit selection state");
   assert.equal(socialUiSource.includes("Puoi collegare un solo account a questa attività. Scegli quale usare:"), true, "the Social UI must explain single-account selection clearly");
-  assert.equal(socialUiSource.includes("Permesso Analytics mancante. Ricollega l’account"), true, "missing analytics consent must be visible without disconnecting the account");
+  assert.equal(socialUiSource.includes("Permesso Analytics mancante. Ricollega l’account"), true, "missing supported analytics consent must be visible without disconnecting the account");
+  assert.equal(socialUiSource.includes("Le Analytics del profilo personale LinkedIn non sono disponibili per questa app."), true, "a valid personal LinkedIn publishing connection must not be presented as reconnect-required for unavailable analytics");
   assert.equal(socialUiSource.includes("Ricollega</button>"), true, "an active provider must expose an explicit reconnect action");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "NOT_CONNECTED" }), "DISCONNECTED", "no connection record must render as disconnected");
   assert.equal(socialProviderUiLabel("DISCONNECTED"), "Non collegato");

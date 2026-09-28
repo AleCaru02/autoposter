@@ -89,9 +89,10 @@ function readableError(value: string) {
 
 function analyticsPermissionMissing(provider: ProviderStatus) {
   if (provider.provider === "INSTAGRAM") return !provider.permissions.includes("instagram_manage_insights");
-  if (provider.provider === "LINKEDIN") return provider.accountType === "ORGANIZATION"
-    ? !provider.permissions.includes("rw_organization_admin")
-    : !provider.permissions.includes("r_member_postAnalytics");
+  // Personal LinkedIn post analytics is a separately restricted provider product.
+  // Its absence must never be presented as a reconnection failure for a valid
+  // personal publishing connection.
+  if (provider.provider === "LINKEDIN") return provider.accountType === "ORGANIZATION" && !provider.permissions.includes("rw_organization_admin");
   return false;
 }
 
@@ -270,6 +271,7 @@ export function SocialPage() {
 
               {connecting && provider.status !== "PENDING_SELECTION" && <p className="social-config-info"><LoaderCircle className="spin" size={15} /> Connessione in corso. Lo stato si aggiornerà al termine dell’autorizzazione.</p>}
               {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
+              {active && provider.provider === "LINKEDIN" && provider.accountType === "MEMBER" && !provider.permissions.includes("r_member_postAnalytics") && <p className="social-config-info">La pubblicazione è attiva. Le Analytics del profilo personale LinkedIn non sono disponibili per questa app.</p>}
               <p className={provider.readiness.state === "PASS_REAL" ? "social-config-info" : provider.readiness.state === "FAIL" ? "social-config-error" : "social-config-warning"}>{provider.lastError ? readableError(provider.lastError) : provider.readiness.detail}</p>
               {unavailable && provider.configurationIssues.length > 0 && <p className="social-config-error">Configurazione mancante: {provider.configurationIssues.join(", ")}</p>}
               {unavailable && <p className="social-config-info"><Link2 size={15} /> Questo provider deve essere configurato sul server prima di poterlo collegare.</p>}

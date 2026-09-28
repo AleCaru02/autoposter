@@ -45,7 +45,7 @@ const plan = buildCustomerPlan([
 assert.deepEqual(plan, { name: "Piano personale", features: ["Creazione contenuti con AI", "Autopilot"], usage: [{ label: "contenuti AI", used: 18, limit: 50, periodLabel: "questo mese" }] });
 assert.equal(JSON.stringify(plan).includes("ai.content.generate_text"), false, "customer output must not expose capability keys");
 assert.deepEqual(customerSocialState({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_basic"] }), { label: "Instagram", state: "Permesso Analytics mancante" });
-assert.deepEqual(customerSocialState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", permissions: ["w_member_social"] }), { label: "LinkedIn", state: "Permesso Analytics mancante" });
+assert.deepEqual(customerSocialState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", permissions: ["w_member_social"] }), { label: "LinkedIn", state: "Collegato (analytics non disponibile)" });
 assert.deepEqual(customerSocialState({ provider: "FACEBOOK", configured: true, status: "ACTIVE", permissions: [] }), { label: "Facebook", state: "Collegato" });
 assert.deepEqual(customerSocialState({ provider: "GBP", configured: false, status: "NOT_CONNECTED", permissions: [] }), { label: "Google Business Profile", state: "Da configurare" });
 for (const [status, state] of [["NOT_CONNECTED", "Non collegato"], ["RECONNECT_REQUIRED", "Ricollega"], ["PROVIDER_ERROR", "Errore"], ["PENDING_SELECTION", "Connessione in corso"]]) {
