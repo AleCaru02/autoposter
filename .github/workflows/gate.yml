@@ -2,7 +2,7 @@ name: Post Automatici Gate
 
 on:
   push:
-    branches: [main]
+    branches: [main, "hardening-*"]
   pull_request:
     branches: [main]
 
@@ -41,6 +41,7 @@ jobs:
       - { name: Tenant security regression, run: "npm run test:tenant-security" }
       - { name: Cross-tenant security regression, run: "npm run test:tenant-cross-security" }
       - { name: PROPERTY NETWORK profile isolation regression, run: "npm run test:profile-isolation" }
+      - { name: Personal Brand first-class profile regression, run: "npm run test:personal-brand-profile" }
       - { name: Canonical bootstrap regression, run: "npm run test:canonical-bootstrap" }
       - { name: Entitlement domain regression, run: "npm run test:entitlements" }
       - { name: Entitlement migration/RLS/idempotency regression, run: "npm run test:entitlement-migration" }

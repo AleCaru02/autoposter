@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Building2, Check, Globe2, Layers3, LoaderCircle, RefreshCw } from "lucide-react";
+import { Building2, Check, Globe2, Layers3, LoaderCircle, RefreshCw, UserRound } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { runFullWebsiteScan, websiteScanProgress, type WebsiteScanProgress, type WebsiteVisualHints } from "../lib/full-website-scan";
 import { useProfiles } from "../features/profiles/profile-context";
+import type { ProfileType } from "../../api/_lib/onboarding-provisioning";
 import { clearNewActivityFlow, readNewActivityFlow, rememberNewActivityProfile } from "../lib/onboarding-flow";
 
 type AnalysisResponse = {
@@ -42,6 +43,7 @@ export function OnboardingPage() {
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [industry, setIndustry] = useState("");
+  const [profileType, setProfileType] = useState<ProfileType>("BUSINESS");
   const [stage, setStage] = useState<Stage>("FORM");
   const [error, setError] = useState<string | null>(null);
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
@@ -260,7 +262,7 @@ export function OnboardingPage() {
     setError(null);
     let profileId: string | null = null;
     try {
-      const created = await createProfile({ name, websiteUrl: website, industry });
+      const created = await createProfile({ name, websiteUrl: website, industry, profileType });
       profileId = created.id;
       setCreatedProfileId(created.id);
       if (creatingAnother) {
@@ -313,7 +315,7 @@ export function OnboardingPage() {
       return <div className={`onboarding-step ${done ? "done" : ""} ${active ? "active" : ""}`} key={step.key}><span>{done ? <Check size={14} /> : index + 1}</span><small>{step.label}</small></div>;
     })}</div>
 
-    {stage === "FORM" && <div className="onboarding-copy"><span className="onboarding-icon"><Building2 size={22} /></span><h1>Crea il profilo della tua attività</h1><p>Dimmi l’essenziale. Se inserisci il sito, Post Automatici lo legge pagina per pagina e prepara automaticamente brand, tono, target, servizi e identità visiva.</p><form className="auth-form onboarding-form" onSubmit={submit}><label>Come si chiama l’attività?<input required autoFocus placeholder="Es. Il Tuo Property Manager" value={name} onChange={(event) => setName(event.target.value)} /></label><label>Sito web<input type="url" placeholder="https://iltuosito.it" value={website} onChange={(event) => setWebsite(event.target.value)} /></label><label>Settore <span className="optional-label">opzionale</span><input placeholder="Se lo lasci vuoto provo a capirlo dal sito" value={industry} onChange={(event) => setIndustry(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="submit" disabled={submitting}>{submitting ? "Creazione…" : "Continua"} <span>→</span></button>{requestedNewActivity && !newActivityProfileId && <button className="text-action" type="button" onClick={() => { clearNewActivityFlow(); navigate("/app/profili", { replace: true }); }}>Annulla e torna alle attività</button>}</form></div>}
+    {stage === "FORM" && <div className="onboarding-copy"><span className="onboarding-icon">{profileType === "PERSONAL_BRAND" ? <UserRound size={22} /> : <Building2 size={22} />}</span><h1>{profileType === "PERSONAL_BRAND" ? "Crea il tuo Personal Brand" : "Crea il profilo della tua attività"}</h1><p>{profileType === "PERSONAL_BRAND" ? "Il Personal Brand avrà identità, voce, pubblico, obiettivi, strategia, calendario e apprendimento propri. Le attività sorgenti verranno collegate separatamente e in modo controllato." : "Dimmi l’essenziale. Se inserisci il sito, Post Automatici lo legge pagina per pagina e prepara automaticamente brand, tono, target, servizi e identità visiva."}</p><form className="auth-form onboarding-form" onSubmit={submit}><label>Tipo di profilo<select value={profileType} onChange={(event) => setProfileType(event.target.value as ProfileType)}><option value="BUSINESS">Attività / Business</option><option value="PERSONAL_BRAND">Personal Brand</option></select></label><label>{profileType === "PERSONAL_BRAND" ? "Nome del Personal Brand" : "Come si chiama l’attività?"}<input required autoFocus placeholder={profileType === "PERSONAL_BRAND" ? "Es. Alessandro Caruso" : "Es. Il Tuo Property Manager"} value={name} onChange={(event) => setName(event.target.value)} /></label><label>Sito web <span className="optional-label">opzionale</span><input type="url" placeholder="https://iltuosito.it" value={website} onChange={(event) => setWebsite(event.target.value)} /></label><label>{profileType === "PERSONAL_BRAND" ? "Ambito principale" : "Settore"} <span className="optional-label">opzionale</span><input placeholder={profileType === "PERSONAL_BRAND" ? "Es. Property Management, Network Marketing, AI" : "Se lo lasci vuoto provo a capirlo dal sito"} value={industry} onChange={(event) => setIndustry(event.target.value)} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button onboarding-cta" type="submit" disabled={submitting}>{submitting ? "Creazione…" : "Continua"} <span>→</span></button>{requestedNewActivity && !newActivityProfileId && <button className="text-action" type="button" onClick={() => { clearNewActivityFlow(); navigate("/app/profili", { replace: true }); }}>Annulla e torna alle attività</button>}</form></div>}
 
     {stage === "CRAWL" && <div className="onboarding-loading"><span className="onboarding-icon"><Globe2 size={24} /></span><LoaderCircle className="spin" size={30} /><h1>Sto leggendo il sito</h1><p>Controllo sitemap e collegamenti interni, poi salvo ogni pagina trovata. Non mi fermo alla homepage.</p><div className="scan-progress-block" aria-live="polite"><div className="scan-progress-row"><strong>{scanProgress.percent}%</strong><span>{scanProgress.total > 0 ? `${scanProgress.processed} di ${scanProgress.total} pagine elaborate` : "Sto rilevando le pagine del sito…"}</span></div><div className="scan-progress-track" role="progressbar" aria-label="Avanzamento scansione sito" aria-valuemin={0} aria-valuemax={100} aria-valuenow={scanProgress.percent}><span style={{ width: `${scanProgress.percent}%` }} /></div></div></div>}
 

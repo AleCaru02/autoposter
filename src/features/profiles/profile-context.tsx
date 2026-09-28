@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { neonClient } from "../../lib/neon-client";
 import { authenticatedApiToken } from "../../lib/auth-token";
+import type { ProfileType } from "../../../api/_lib/onboarding-provisioning";
 
 export type Profile = {
   id: string;
@@ -12,6 +13,7 @@ export type Profile = {
   locale: string;
   onboarding_completed: boolean;
   created_at: string;
+  profile_type: ProfileType;
   tenant_type: "CUSTOMER_REAL" | "QA_EPHEMERAL" | "DEMO_PERSISTENT";
   external_publishing_enabled: boolean;
 };
@@ -20,6 +22,7 @@ type CreateProfileInput = {
   name: string;
   websiteUrl?: string;
   industry?: string;
+  profileType?: ProfileType;
 };
 
 export type UpdateProfileInput = {
@@ -45,7 +48,7 @@ type ProfileContextValue = {
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 const ACTIVE_PROFILE_KEY = "post-automatici.active-profile";
 const ONBOARDING_OPERATION_KEY = "post-automatici.onboarding-operation";
-const PROFILE_COLUMNS = "id,name,slug,website_url,industry,timezone,locale,onboarding_completed,created_at";
+const PROFILE_COLUMNS = "id,name,slug,website_url,industry,timezone,locale,onboarding_completed,created_at,profile_type";
 
 type PendingOnboardingOperation = { operationId: string; fingerprint: string };
 
@@ -133,7 +136,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const createProfile = useCallback(async (input: CreateProfileInput) => {
     const name = input.name.trim();
     if (!name) throw new Error("Il nome dell’attività è obbligatorio.");
-    const normalized = { name, websiteUrl: input.websiteUrl?.trim() || null, industry: input.industry?.trim() || null };
+    const normalized = { name, websiteUrl: input.websiteUrl?.trim() || null, industry: input.industry?.trim() || null, profileType: input.profileType ?? "BUSINESS" };
     const fingerprint = JSON.stringify(normalized);
     const operationId = provisioningOperation(fingerprint);
     const token = await authenticatedApiToken();
