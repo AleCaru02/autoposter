@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import type { ProfileType } from "./onboarding-provisioning.js";
 
 export type BootstrappedProfile = {
   id: string;
@@ -10,6 +11,7 @@ export type BootstrappedProfile = {
   locale: string;
   onboarding_completed: boolean;
   created_at: string;
+  profile_type: ProfileType;
   tenant_type: "CUSTOMER_REAL" | "QA_EPHEMERAL" | "DEMO_PERSISTENT";
   external_publishing_enabled: boolean;
 };
@@ -29,6 +31,7 @@ export async function loadOwnedProfiles(databaseUrl: string, authUserId: string)
       p.locale,
       p.onboarding_completed,
       p.created_at::text as created_at,
+      p.profile_type,
       coalesce(mode.tenant_type, 'CUSTOMER_REAL') as tenant_type,
       coalesce(mode.external_publishing_enabled, true) as external_publishing_enabled
     from public.profiles p
