@@ -1,6 +1,7 @@
 import { neonClient } from "../../lib/neon-client";
 import { authenticatedApiToken } from "../../lib/auth-token";
 import type { GeneratedSocialContent } from "../../../api/_lib/openai-text";
+import type { ManualEditorialContext } from "./manual-content-generation";
 import { normalizeHashtags, variantKey, type ApprovalStatus } from "./content-workflow";
 
 export type { ApprovalStatus, ContentStatus } from "./content-workflow";
@@ -12,6 +13,14 @@ export type ContentItemRow = {
   objective: string | null;
   title: string | null;
   status: string;
+  pillar: string | null;
+  source_profile_id: string | null;
+  source_profile_ids: string[];
+  source_refs: unknown[];
+  audience: Record<string, unknown>;
+  fact_provenance: unknown[];
+  editorial_cta: string | null;
+  source_mix_approved: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -66,6 +75,7 @@ export async function saveGeneratedContent(input: {
   topic: string;
   objective: string | null;
   content: GeneratedSocialContent;
+  editorialContext?: ManualEditorialContext | null;
 }): Promise<SavedGeneration> {
   const contentId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -87,7 +97,17 @@ export async function saveGeneratedContent(input: {
     _key: variantKey(variant.provider, variant.format, index),
   }));
 
-  const item = await neonClient.from("content_items").insert({
+  const editorial = input.editorialContext;
+  const sourceRefs = editorial ? [
+    ...editorial.sourceRefs,
+    ...editorial.externalSources.map((url) => ({ type: "EXTERNAL_SOURCE", url })),
+  ] : [];
+  const factProvenance = editorial ? [
+    ...editorial.factProvenance,
+    ...editorial.externalSources.map((url) => ({ source_type: "EXTERNAL_SOURCE", url })),
+  ] : [];
+  const ctas = input.content.variants.map((variant) => variant.cta?.trim()).filter((value): value is string => Boolean(value));
+  const itemPayload = {
     id: contentId,
     profile_id: input.profileId,
     topic: input.topic.trim(),
@@ -95,7 +115,18 @@ export async function saveGeneratedContent(input: {
     title: input.content.strategySummary.slice(0, 240),
     status: "IN_REVIEW",
     updated_at: now,
-  }).select("id").single();
+    ...(editorial?.profileType === "PERSONAL_BRAND" ? {
+      pillar: editorial.pillar,
+      source_profile_id: editorial.sourceProfileId,
+      source_profile_ids: editorial.sourceProfileIds,
+      source_refs: sourceRefs,
+      audience: editorial.audience,
+      fact_provenance: factProvenance,
+      editorial_cta: ctas[0] ?? "NONE",
+      source_mix_approved: false,
+    } : {}),
+  };
+  const item = await neonClient.from("content_items").insert(itemPayload).select("id").single();
   if (item.error || !item.data) throw new Error("Impossibile salvare il contenuto. Riprova.");
 
   const payload = variantRows.map(({ _key, ...row }) => row);
@@ -113,7 +144,7 @@ export async function saveGeneratedContent(input: {
 
 export async function loadContentWorkflow(profileId: string) {
   const itemsResult = await neonClient.from("content_items")
-    .select("id,profile_id,topic,objective,title,status,created_at,updated_at")
+    .select("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,created_at,updated_at")
     .eq("profile_id", profileId)
     .order("updated_at", { ascending: false })
     .limit(50);
