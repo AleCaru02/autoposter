@@ -23,7 +23,8 @@ assert.match(workflow, /writeFileSync\('worker-secrets\.json', JSON\.stringify\(
 assert.match(workflow, /trap 'rm -f worker-secrets\.json' EXIT/, "Secrets file must be removed after deploy");
 assert.doesNotMatch(workflow, /wrangler secret put OPENAI_API_KEY/, "Deploy must not create a pre-deploy secret-only Worker version");
 assert.doesNotMatch(workflow, /wrangler secret put ADMIN_BOOTSTRAP_TOKEN/, "Bootstrap must not create a pre-deploy secret-only Worker version");
-assert.match(workflow, /names\.has\('OPENAI_API_KEY'\)/, "Deploy must verify the OpenAI Worker binding by name");
+assert.match(workflow, /const required = \[[\s\S]*['"]OPENAI_API_KEY['"][\s\S]*\];/, "Deploy must include the OpenAI Worker binding in the required binding set");
+assert.match(workflow, /required\.filter\(\(name\) => !names\.has\(name\)\)/, "Deploy must verify every required Worker binding by name");
 assert.doesNotMatch(workflow, /echo\s+"?\$OPENAI_API_KEY_SOURCE/, "Deploy must never echo the OpenAI secret value");
 
 console.log("Worker deploy trigger regression: PASS");
