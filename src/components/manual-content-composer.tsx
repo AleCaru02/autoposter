@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Check, LoaderCircle, Sparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import type { GeneratedSocialContent, GeneratedVariant, SocialFormat, SocialProvider } from "../../api/_lib/openai-text";
 import { saveGeneratedContent } from "../features/content/content-store";
-import { manualGenerationFingerprint, requestManualContent, type ManualGenerationRequest } from "../features/content/manual-content-generation";
+import { manualGenerationFingerprint, requestManualContent, type ManualEditorialContext, type ManualGenerationRequest } from "../features/content/manual-content-generation";
+import { loadPersonalBrandSources, type PersonalBrandSourceRow } from "../features/profiles/personal-brand-source-store";
+import type { Profile, ProfileType } from "../features/profiles/profile-context";
 import { authenticatedApiToken } from "../lib/auth-token";
 type ComposerStatus = "IDLE" | "GENERATING" | "READY" | "SAVING" | "SAVED";
 
@@ -19,33 +21,72 @@ function replaceVariant(content: GeneratedSocialContent, index: number, patch: P
   return { ...content, variants: content.variants.map((variant, current) => current === index ? { ...variant, ...patch } : variant) };
 }
 
-export function ManualContentComposer(props: { profileId: string; profileName: string; researchMode: EditorialResearchMode }) {
+export function ManualContentComposer(props: { profileId: string; profileName: string; profileType: ProfileType; profiles: Profile[]; researchMode: EditorialResearchMode }) {
   const [topic, setTopic] = useState("");
   const [objective, setObjective] = useState("");
   const [providers, setProviders] = useState<SocialProvider[]>(["INSTAGRAM"]);
   const [format, setFormat] = useState<SocialFormat>("POST");
   const [content, setContent] = useState<GeneratedSocialContent | null>(null);
+  const [editorialContext, setEditorialContext] = useState<ManualEditorialContext | null>(null);
+  const [sourceRows, setSourceRows] = useState<PersonalBrandSourceRow[]>([]);
+  const [sourceKey, setSourceKey] = useState("");
   const [status, setStatus] = useState<ComposerStatus>("IDLE");
   const [error, setError] = useState<string | null>(null);
   const operation = useRef<{ fingerprint: string; id: string } | null>(null);
+  const activeSources = useMemo(() => sourceRows.filter((row) => row.enabled), [sourceRows]);
+  const selectedSource = activeSources.find((row) => `${row.source_profile_id}::${row.pillar}` === sourceKey) ?? null;
+
+  useEffect(() => {
+    setContent(null);
+    setEditorialContext(null);
+    setStatus("IDLE");
+    if (props.profileType !== "PERSONAL_BRAND") { setSourceRows([]); setSourceKey(""); return; }
+    void loadPersonalBrandSources(props.profileId).then((rows) => {
+      const enabled = rows.filter((row) => row.enabled);
+      setSourceRows(rows);
+      setSourceKey(enabled[0] ? `${enabled[0].source_profile_id}::${enabled[0].pillar}` : "");
+    }).catch(() => {
+      setSourceRows([]);
+      setSourceKey("");
+      setError("Configura almeno una fonte autorizzata nella sezione Brand.");
+    });
+  }, [props.profileId, props.profileType]);
+
+  function clearGenerated() {
+    setContent(null);
+    setEditorialContext(null);
+    setStatus("IDLE");
+  }
 
   function toggleProvider(provider: SocialProvider) {
     setProviders((current) => current.includes(provider) ? current.filter((value) => value !== provider) : [...current, provider]);
-    setContent(null);
-    setStatus("IDLE");
+    clearGenerated();
   }
 
   async function generate() {
     if (!topic.trim()) { setError("Descrivi il tema del contenuto."); return; }
     if (!providers.length) { setError("Scegli almeno un social."); return; }
-    const request: ManualGenerationRequest = { profileId: props.profileId, topic, objective: objective || null, providers, format, researchMode: props.researchMode };
+    if (props.profileType === "PERSONAL_BRAND" && !objective.trim()) { setError("Per il Personal Brand indica l’obiettivo editoriale."); return; }
+    if (props.profileType === "PERSONAL_BRAND" && !selectedSource) { setError("Configura e scegli una fonte autorizzata per il Personal Brand."); return; }
+    const request: ManualGenerationRequest = {
+      profileId: props.profileId,
+      topic,
+      objective: objective || null,
+      providers,
+      format,
+      researchMode: props.researchMode,
+      sourceProfileId: selectedSource?.source_profile_id ?? null,
+      pillar: selectedSource?.pillar ?? null,
+    };
     const fingerprint = manualGenerationFingerprint(request);
     if (!operation.current || operation.current.fingerprint !== fingerprint) operation.current = { fingerprint, id: crypto.randomUUID() };
     setStatus("GENERATING");
     setError(null);
     try {
       const token = await authenticatedApiToken();
-      setContent(await requestManualContent(request, token, operation.current.id));
+      const generated = await requestManualContent(request, token, operation.current.id);
+      setContent(generated.content);
+      setEditorialContext(generated.editorialContext);
       setStatus("READY");
       operation.current = null;
     } catch (reason) {
@@ -59,7 +100,7 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     setStatus("SAVING");
     setError(null);
     try {
-      await saveGeneratedContent({ profileId: props.profileId, topic, objective: objective || null, content });
+      await saveGeneratedContent({ profileId: props.profileId, topic, objective: objective || null, content, editorialContext });
       setStatus("SAVED");
     } catch (reason) {
       setStatus("READY");
@@ -75,10 +116,11 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
   return <section className="panel manual-composer" aria-labelledby="manual-composer-title">
     <div className="manual-composer-heading"><div><p className="eyebrow">Creazione guidata</p><h2 id="manual-composer-title">Crea un contenuto ora</h2><p>Scegli tema, social e formato. Il copy userà il brand e le informazioni confermate del sito di {props.profileName}.</p></div><Sparkles size={23} /></div>
     <div className="manual-composer-form">
-      <label className="full">Di cosa vuoi parlare?<textarea rows={3} value={topic} maxLength={1000} placeholder="Es. Tre errori da evitare quando si affitta una casa" onChange={(event) => { setTopic(event.target.value); setContent(null); setStatus("IDLE"); }} /></label>
-      <label className="full">Obiettivo <span>(opzionale)</span><input value={objective} maxLength={500} placeholder="Es. Ricevere richieste di consulenza" onChange={(event) => { setObjective(event.target.value); setContent(null); setStatus("IDLE"); }} /></label>
+      {props.profileType === "PERSONAL_BRAND" && <label className="full">Fonte e pillar<select value={sourceKey} onChange={(event) => { setSourceKey(event.target.value); clearGenerated(); }}>{activeSources.length ? activeSources.map((row) => { const profile = props.profiles.find((item) => item.id === row.source_profile_id); const key = `${row.source_profile_id}::${row.pillar}`; return <option key={row.id} value={key}>{profile?.name ?? "Attività sorgente"} · {row.pillar}</option>; }) : <option value="">Nessuna fonte autorizzata</option>}</select></label>}
+      <label className="full">Di cosa vuoi parlare?<textarea rows={3} value={topic} maxLength={1000} placeholder="Es. Tre errori da evitare quando si affitta una casa" onChange={(event) => { setTopic(event.target.value); clearGenerated(); }} /></label>
+      <label className="full">Obiettivo <span>(opzionale)</span><input value={objective} maxLength={500} placeholder="Es. Ricevere richieste di consulenza" onChange={(event) => { setObjective(event.target.value); clearGenerated(); }} /></label>
       <fieldset className="full"><legend>Social</legend><div className="manual-choice-grid providers">{PROVIDERS.map((provider) => <label key={provider.value} className={providers.includes(provider.value) ? "selected" : ""}><input type="checkbox" checked={providers.includes(provider.value)} onChange={() => toggleProvider(provider.value)} /><span>{provider.label}</span></label>)}</div></fieldset>
-      <fieldset className="full"><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); setContent(null); setStatus("IDLE"); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); setContent(null); setStatus("IDLE"); }} /><span>Storia</span></label><label className="disabled" title="Richiede più visual distinti"><input type="radio" name="manual-format" disabled /><span>Carosello · in preparazione</span></label></div></fieldset>
+      <fieldset className="full"><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); clearGenerated(); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); clearGenerated(); }} /><span>Storia</span></label><label className="disabled" title="Richiede più visual distinti"><input type="radio" name="manual-format" disabled /><span>Carosello · in preparazione</span></label></div></fieldset>
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {!content && <button className="primary-button manual-generate" type="button" disabled={status === "GENERATING"} onClick={() => void generate()}>{status === "GENERATING" ? <><LoaderCircle className="spin" size={17} /> Creazione in corso…</> : <><Sparkles size={17} /> Genera contenuto</>}</button>}
@@ -96,7 +138,7 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
           <label className="full">Descrizione accessibile<input value={variant.altText} onChange={(event) => updateVariant(index, { altText: event.target.value })} /></label>
         </div>
       </article>)}</div>
-      <div className="manual-result-actions">{status === "SAVED" ? <><span className="manual-saved"><Check size={16} /> Salvato nelle Revisioni</span><NavLink className="primary-button" to="/app/approvazioni">Aggiungi immagine e approva <ArrowRight size={16} /></NavLink></> : <><button className="secondary-button" type="button" disabled={status === "SAVING"} onClick={() => { setContent(null); setStatus("IDLE"); }}>Cambia richiesta</button><button className="primary-button" type="button" disabled={status === "SAVING"} onClick={() => void save()}>{status === "SAVING" ? <><LoaderCircle className="spin" size={16} /> Salvataggio…</> : "Salva per la revisione"}</button></>}</div>
+      <div className="manual-result-actions">{status === "SAVED" ? <><span className="manual-saved"><Check size={16} /> Salvato nelle Revisioni</span><NavLink className="primary-button" to="/app/approvazioni">Aggiungi immagine e approva <ArrowRight size={16} /></NavLink></> : <><button className="secondary-button" type="button" disabled={status === "SAVING"} onClick={() => clearGenerated()}>Cambia richiesta</button><button className="primary-button" type="button" disabled={status === "SAVING"} onClick={() => void save()}>{status === "SAVING" ? <><LoaderCircle className="spin" size={16} /> Salvataggio…</> : "Salva per la revisione"}</button></>}</div>
     </div>}
   </section>;
 }
