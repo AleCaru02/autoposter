@@ -13,6 +13,7 @@ const GOOGLE_SCOPE = "https://www.googleapis.com/auth/business.manage";
 export type SocialProvider = typeof PROVIDERS[number];
 export type SocialReadiness = "PASS_REAL" | "USER_ACTION_REQUIRED" | "BLOCKED_PROVIDER" | "NOT_SUPPORTED_BY_PROVIDER" | "FAIL";
 export type SocialEnv = {
+  SAFE_MODE?: string | boolean;
   DATABASE_URL?: string;
   APP_BASE_URL?: string;
   SOCIAL_TOKEN_KEY?: string;
@@ -112,6 +113,25 @@ function publishError(code: string, options: { retryable?: boolean; outcomeUnkno
     options.outcomeUnknown === true,
     options.customerMessage || "La pubblicazione non è riuscita.",
   );
+}
+
+export type SocialSafeModeState = "ON" | "OFF" | "INVALID";
+
+export function socialSafeModeState(env: Pick<SocialEnv, "SAFE_MODE">): SocialSafeModeState {
+  const value = env.SAFE_MODE;
+  if (value === true || (typeof value === "string" && value.trim().toLowerCase() === "true")) return "ON";
+  if (value === false || (typeof value === "string" && value.trim().toLowerCase() === "false")) return "OFF";
+  return "INVALID";
+}
+
+export function assertSocialPublishingAllowed(env: Pick<SocialEnv, "SAFE_MODE">) {
+  const state = socialSafeModeState(env);
+  if (state === "OFF") return;
+  throw publishError(state === "ON" ? "SAFE_MODE_ACTIVE" : "SAFE_MODE_UNDETERMINED", {
+    customerMessage: state === "ON"
+      ? "La pubblicazione reale è bloccata dal Safe Mode."
+      : "La pubblicazione reale è bloccata perché il Safe Mode non è configurato in modo valido.",
+  });
 }
 
 type ProviderErrorNumbers = { providerCode?: number | undefined; providerSubcode?: number | undefined };
@@ -1169,6 +1189,7 @@ async function loadVariant(sql: Sql, variantId: string, profileId: string): Prom
 }
 
 async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  assertSocialPublishingAllowed(env);
   if (variant.approval_status !== "APPROVED" || !variant.eligible) throw new Error("CONTENT_NOT_APPROVED");
   const connection = await storedConnection(sql, variant.profile_id, variant.provider);
   if (!connection || connection.status !== "ACTIVE" || !connection.token_reference || !connection.provider_account_id) throw new Error("SOCIAL_NOT_CONNECTED");
@@ -1224,6 +1245,7 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
   try {
     const demoResult = await completeDemoPublication(sql, job);
     if (demoResult) return demoResult;
+    assertSocialPublishingAllowed(env);
     const meter = new EntitlementUsageService(env.DATABASE_URL!);
     const scheduled = await meter.canUseCapability(job.profile_id, "social.publish.scheduled");
     if (!scheduled.allowed) throw terminalPublishError("CAPABILITY_SCHEDULED_DISABLED");
@@ -1280,6 +1302,18 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
 }
 
 export async function processDuePublications(env: SocialEnv, limit = 20) {
+  const safeMode = socialSafeModeState(env);
+  if (safeMode !== "OFF") return {
+    ready: true,
+    blocked: true,
+    safeMode,
+    reason: safeMode === "ON" ? "SAFE_MODE_ACTIVE" : "SAFE_MODE_UNDETERMINED",
+    checked: 0,
+    published: 0,
+    failed: 0,
+    retryScheduled: 0,
+    reviewRequired: 0,
+  };
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return { ready: false, reason: "SOCIAL_SECURITY_NOT_CONFIGURED", checked: 0, published: 0, failed: 0 };
   const sql = neon(env.DATABASE_URL);
   const jobs = await sql`

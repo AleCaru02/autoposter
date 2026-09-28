@@ -45,6 +45,7 @@ function webRequest(req: VercelRequest) {
 
 function socialEnv(): SocialEnv {
   return {
+    SAFE_MODE: process.env.SAFE_MODE,
     DATABASE_URL: process.env.DATABASE_URL,
     APP_BASE_URL: process.env.APP_BASE_URL,
     SOCIAL_TOKEN_KEY: process.env.SOCIAL_TOKEN_KEY,
