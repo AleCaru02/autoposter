@@ -34,12 +34,6 @@ async function readJsonRows<T>(path: string, token: string): Promise<T[]> {
   return response.json() as Promise<T[]>;
 }
 
-function summaryField(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  const summary = (value as Record<string, unknown>).summary;
-  return typeof summary === "string" && summary.trim() ? summary.trim() : null;
-}
-
 
 async function recentContentForDedupe(profileId: string, token: string): Promise<ContentDedupeCandidate[]> {
   const items = await readJsonRows<RecentItemRow>(`content_items?profile_id=eq.${encodeURIComponent(profileId)}&select=id,topic,title&order=created_at.desc&limit=40`, token);
@@ -106,6 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!objective) return res.status(400).json({ error: "PERSONAL_BRAND_OBJECTIVE_REQUIRED" });
       const relation = await resolvePersonalBrandSource(sql, profileId, requestedSourceProfileId, requestedPillar);
       const resolved = await buildPersonalBrandEditorialContext(sql, profile, relation);
+      if (!Object.keys(resolved.audience).length) return res.status(400).json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" });
       context = resolved.brand;
       editorialContext = {
         profileType: "PERSONAL_BRAND",
