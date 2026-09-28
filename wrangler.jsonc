@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
   "vars": {
+    "SAFE_MODE": "true",
     "APP_BASE_URL": "https://autoposter.02alessandrocaruso.workers.dev",
     "LINKEDIN_CLIENT_ID": "77gm5otb0kan9y",
     "META_APP_ID": "900306149763443"
