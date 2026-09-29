@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { findReusableAsset } from "../api/_lib/asset-intelligence.js";
+import { findReusableAsset, visualFingerprint } from "../api/_lib/asset-intelligence.js";
 
+const visualBrief="ritratto professionale ufficio milano per consulente";
+const fingerprint=await visualFingerprint({visualBrief,aspectRatio:"1:1"});
 const base = {
   id:"11111111-1111-4111-8111-111111111111",
   source:"USER_UPLOAD",
@@ -10,19 +12,19 @@ const base = {
   storage_url:"data:image/png;base64,AAAA",
   mime_type:"image/png",
   tags:["ritratto","professionale","ufficio","milano"],
-  metadata:{aspect_ratio:"1:1",visual_brief:"ritratto professionale ufficio milano"},
+  metadata:{aspect_ratio:"1:1",visual_brief:visualBrief,visual_fingerprint:fingerprint},
   created_at:"2026-09-29T10:00:00Z",
 };
 
 const blocked = await findReusableAsset({
-  visualBrief:"ritratto professionale ufficio milano per consulente",
+  visualBrief,
   aspectRatio:"1:1",
   candidates:[{...base,quality_status:"BLOCK"}],
 });
 assert.equal(blocked,null,"blocked assets must never be reused");
 
 const pass = await findReusableAsset({
-  visualBrief:"ritratto professionale ufficio milano per consulente",
+  visualBrief,
   aspectRatio:"1:1",
   candidates:[{...base,quality_status:"PASS"}],
 });
