@@ -15,6 +15,12 @@ type BudgetRow = {
 
 type SpendRow = { spend_eur: number | string };
 type CountRow = { count: number | string };
+type BudgetSplitRow = {
+  higgsfield_cap_eur: number | string;
+  other_ai_cap_eur: number | string;
+  higgsfield_spend_eur: number | string;
+  other_ai_spend_eur: number | string;
+};
 
 export type ActivityBudgetSnapshot = {
   profileId: string;
@@ -26,6 +32,12 @@ export type ActivityBudgetSnapshot = {
   usdToEurRate: number;
   spendEur: number;
   remainingEur: number;
+  higgsfieldCapEur: number;
+  higgsfieldSpendEur: number;
+  higgsfieldRemainingEur: number;
+  otherAiCapEur: number;
+  otherAiSpendEur: number;
+  otherAiRemainingEur: number;
   band: ActivityBudgetBand;
   dailyAverageEur: number;
   trailing7DailyAverageEur: number;
@@ -38,9 +50,10 @@ export type ActivityBudgetSnapshot = {
 
 export type ActivityBudgetPreflight = ActivityBudgetSnapshot & {
   allowed: boolean;
-  reason: "AI_BUDGET_HARD_STOP" | "AI_BUDGET_OPERATION_TOO_EXPENSIVE" | null;
+  reason: "AI_BUDGET_HARD_STOP" | "AI_BUDGET_OPERATION_TOO_EXPENSIVE" | "AI_BUDGET_BUCKET_EXHAUSTED" | null;
   projectedOperationCostEur: number;
   projectedAfterEur: number;
+  costBucket: "HIGGSFIELD" | "OTHER_AI" | null;
   preferReuse: boolean;
   allowPremium: boolean;
 };
@@ -104,8 +117,31 @@ export class ActivityBudgetEngine {
         and scheduled_at<${end.toISOString()}::timestamptz
         and state in ('SCHEDULED','BLOCKED_APPROVAL','QUEUED')
     ` as unknown as CountRow[];
+    const splitRows = await this.sql`
+      select
+        policy.higgsfield_cap_eur::float8 as higgsfield_cap_eur,
+        policy.other_ai_cap_eur::float8 as other_ai_cap_eur,
+        coalesce(sum(
+          greatest(attempt.reserved_usd,coalesce(attempt.actual_usd,0))*attempt.fx_usd_to_eur_rate
+        ) filter (where attempt.cost_bucket='HIGGSFIELD'),0)::float8 as higgsfield_spend_eur,
+        coalesce(sum(
+          greatest(attempt.reserved_usd,coalesce(attempt.actual_usd,0))*attempt.fx_usd_to_eur_rate
+        ) filter (where attempt.cost_bucket='OTHER_AI'),0)::float8 as other_ai_spend_eur
+      from public.activity_ai_budget_policies policy
+      left join public.provider_cost_attempts attempt
+        on attempt.profile_id=policy.profile_id
+       and attempt.period_start=${start.toISOString()}::timestamptz
+       and attempt.period_end=${end.toISOString()}::timestamptz
+      where policy.profile_id=${profileId}::uuid
+      group by policy.higgsfield_cap_eur,policy.other_ai_cap_eur
+    ` as unknown as BudgetSplitRow[];
 
     const spendEur = n(row.accounted_eur);
+    const split = splitRows[0];
+    const higgsfieldCapEur = n(split?.higgsfield_cap_eur, 10);
+    const higgsfieldSpendEur = n(split?.higgsfield_spend_eur);
+    const otherAiCapEur = n(split?.other_ai_cap_eur, 20);
+    const otherAiSpendEur = n(split?.other_ai_spend_eur);
     const forecast = forecastActivityBudget({
       spendEur,
       trailing7SpendEur: n(trailingRows[0]?.spend_eur),
@@ -124,6 +160,12 @@ export class ActivityBudgetEngine {
       usdToEurRate: n(row.usd_to_eur_rate, 1),
       spendEur,
       remainingEur: n(row.remaining_eur, Math.max(hardCapEur - spendEur, 0)),
+      higgsfieldCapEur,
+      higgsfieldSpendEur,
+      higgsfieldRemainingEur: Math.max(higgsfieldCapEur - higgsfieldSpendEur, 0),
+      otherAiCapEur,
+      otherAiSpendEur,
+      otherAiRemainingEur: Math.max(otherAiCapEur - otherAiSpendEur, 0),
       band: row.band || activityBudgetBand(spendEur),
       ...forecast,
       futureScheduledJobs: Math.max(0, Math.floor(n(jobRows[0]?.count))),
@@ -137,6 +179,7 @@ export class ActivityBudgetEngine {
     task: BrainTask;
     importance?: ContentImportance;
     projectedOperationCostUsd?: number | null;
+    costBucket?: "HIGGSFIELD" | "OTHER_AI" | null;
     now?: Date;
   }): Promise<ActivityBudgetPreflight> {
     const snapshot = await this.snapshot(input.profileId, input.now ?? new Date());
@@ -152,12 +195,25 @@ export class ActivityBudgetEngine {
     });
     const hardStopped = snapshot.band === "HARD_STOP";
     const tooExpensive = projectedAfterEur > snapshot.hardCapEur;
+    const bucketRemaining = input.costBucket === "HIGGSFIELD"
+      ? snapshot.higgsfieldRemainingEur
+      : input.costBucket === "OTHER_AI"
+        ? snapshot.otherAiRemainingEur
+        : Number.POSITIVE_INFINITY;
+    const bucketExhausted = projectedOperationCostEur > bucketRemaining;
     return {
       ...snapshot,
-      allowed: !hardStopped && !tooExpensive,
-      reason: hardStopped ? "AI_BUDGET_HARD_STOP" : tooExpensive ? "AI_BUDGET_OPERATION_TOO_EXPENSIVE" : null,
+      allowed: !hardStopped && !tooExpensive && !bucketExhausted,
+      reason: hardStopped
+        ? "AI_BUDGET_HARD_STOP"
+        : tooExpensive
+          ? "AI_BUDGET_OPERATION_TOO_EXPENSIVE"
+          : bucketExhausted
+            ? "AI_BUDGET_BUCKET_EXHAUSTED"
+            : null,
       projectedOperationCostEur,
       projectedAfterEur,
+      costBucket: input.costBucket ?? null,
       preferReuse: brain.preferReuse,
       allowPremium: brain.allowPremium,
     };

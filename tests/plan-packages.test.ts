@@ -35,6 +35,8 @@ assert.match(personalMigration, /'autopilot\.manage'\s*,\s*true/);
 assert.doesNotMatch(personalMigration, /'UNLIMITED'/);
 
 const migration = readFileSync(new URL("../db/migrations/20260905_fase4e_plan_packaging.sql", import.meta.url), "utf8");
+const higgsfieldMigration = readFileSync(new URL("../db/migrations/20260929_z_higgsfield_personal_brand_image_engine.sql", import.meta.url), "utf8");
+const packageMigrationChain = `${migration}\n${higgsfieldMigration}`;
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.entitlement_packages/i);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.entitlement_package_capabilities/i);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.profile_entitlement_package_assignments/i);
@@ -43,7 +45,7 @@ assert.match(migration, /REVOKE ALL ON FUNCTION public\.apply_entitlement_packag
 assert.match(migration, /DROP TRIGGER IF EXISTS profile_entitlements_bootstrap_trigger/i);
 assert.match(migration, /WHERE package_key=p_package_key AND version=p_package_version AND lifecycle='ACTIVE'/i);
 for (const entry of packageDefinition.capabilities) {
-  assert.match(migration, new RegExp(`'${entry.capabilityKey.replaceAll(".", "\\.")}'`), `SQL package missing ${entry.capabilityKey}`);
+  assert.match(packageMigrationChain, new RegExp(`'${entry.capabilityKey.replaceAll(".", "\\.")}'`), `SQL package migration chain missing ${entry.capabilityKey}`);
 }
 
 console.log("FASE 4E plan packaging regression: PASS");

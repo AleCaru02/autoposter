@@ -128,7 +128,7 @@ assert.equal(auxiliary.ready, true, "all auxiliary profile-scoped tables must sa
 assert.equal(auxiliary.expectedTables, AUXILIARY_PROFILE_TABLES.length);
 assert.equal(auxiliary.forceRlsTables, AUXILIARY_PROFILE_TABLES.length);
 assert.equal(auxiliary.customerReadTables, 4);
-assert.equal(auxiliary.serverOwnedTables, 4);
+assert.equal(auxiliary.serverOwnedTables, 6);
 
 const auxForeignRead = safeAuxiliary.map((row) => row.access_mode === "SERVER_OWNED" && row.table_name === "social_oauth_callbacks"
   ? { ...row, authenticated_can_select: true }
