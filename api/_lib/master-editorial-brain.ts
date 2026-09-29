@@ -9,6 +9,11 @@ export type MasterEditorialDecision = {
   selectedProvider: SocialProvider | null; channels: ChannelEditorialDecision[]; status: "READY" | "SKIP_PUBLICATION";
   timing?: { scheduledAt: string; source: "USER_CONFIG" | "LEARNING" | "STRATEGY" | "DEFAULT" };
   skipReason?: string; retryCondition?: string; contentId?: string;
+  visualProvider?: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD";
+  visualModel?: string | null;
+  visualDecisionReason?: string;
+  estimatedVisualCostEur?: number | null;
+  actualVisualCostEur?: number | null;
 };
 
 type Input = { id?: string; now?: string; topic: string; angle?: string; objective?: string | null; audience?: string | null; funnelStage: FunnelStage; pillar?: string | null; contentType: ContentType; intent: EditorialIntent; preferredProvider: SocialProvider; format: SocialFormat; localBusinessRelevance: boolean; professionalRelevance: boolean; hasVerifiableContext: boolean };

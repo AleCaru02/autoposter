@@ -4,6 +4,7 @@ import { CAPABILITY_REGISTRY } from "../api/_lib/capabilities.js";
 import {
   IDENTITY_QA_DIMENSIONS,
   identityQaVerdict,
+  inferVisualIdentityIntent,
   routeVisualProvider,
 } from "../api/_lib/visual-provider-routing.js";
 
@@ -16,6 +17,21 @@ for (const key of [
 ] as const) {
   assert.equal(CAPABILITY_REGISTRY[key].status, "LIVE_NOT_RUNTIME_VERIFIED", `${key} must not be marked verified before live evidence`);
 }
+
+const personalIntent = inferVisualIdentityIntent({
+  profileName: "Bianca Lopes",
+  visualBrief: "Ritratto lifestyle di Bianca durante uno shooting professionale in una scena nuova",
+});
+assert.equal(personalIntent.personIsPrimarySubject, true);
+assert.equal(personalIntent.requiresIdentityConsistency, true);
+assert.equal(personalIntent.virtualShoot, true);
+
+const informationalIntent = inferVisualIdentityIntent({
+  profileName: "Bianca Lopes",
+  visualBrief: "Grafica informativa con tre punti chiave e icone, senza persone",
+});
+assert.equal(informationalIntent.personIsPrimarySubject, false);
+assert.equal(informationalIntent.requiresIdentityConsistency, false);
 
 const reuse = routeVisualProvider({
   profileType: "PERSONAL_BRAND",
@@ -40,6 +56,7 @@ const soul = routeVisualProvider({
   requiresNewScene: true,
   virtualShoot: true,
   higgsfieldConfigured: true,
+  higgsfieldRuntimeEnabled: true,
   soulIdentityState: "COMPLETED",
   higgsfieldBudgetRemainingEur: 10,
   estimatedHiggsfieldCostEur: 0.01,
@@ -72,6 +89,7 @@ const noBudget = routeVisualProvider({
   requiresNewScene: true,
   virtualShoot: false,
   higgsfieldConfigured: true,
+  higgsfieldRuntimeEnabled: true,
   soulIdentityState: "COMPLETED",
   higgsfieldBudgetRemainingEur: 0,
   estimatedHiggsfieldCostEur: 0.01,
@@ -79,6 +97,23 @@ const noBudget = routeVisualProvider({
 assert.equal(noBudget.provider, "OPENAI");
 assert.equal(noBudget.reasonCode, "HIGGSFIELD_BUDGET_EXHAUSTED");
 assert.equal(noBudget.mustAvoidSyntheticPerson, true);
+
+const runtimeBlocked = routeVisualProvider({
+  profileType: "PERSONAL_BRAND",
+  suitableRealAssetAvailable: false,
+  personIsPrimarySubject: true,
+  requiresIdentityConsistency: true,
+  requiresNewScene: true,
+  virtualShoot: true,
+  higgsfieldConfigured: true,
+  higgsfieldRuntimeEnabled: false,
+  soulIdentityState: "COMPLETED",
+  higgsfieldBudgetRemainingEur: 10,
+  estimatedHiggsfieldCostEur: 0.01,
+});
+assert.equal(runtimeBlocked.provider, "OPENAI");
+assert.equal(runtimeBlocked.reasonCode, "HIGGSFIELD_RUNTIME_NOT_CERTIFIED");
+assert.equal(runtimeBlocked.mustAvoidSyntheticPerson, true);
 
 const standard = routeVisualProvider({
   profileType: "BUSINESS",
@@ -129,6 +164,28 @@ assert.match(activityBudget, /higgsfieldRemainingEur/);
 assert.match(activityBudget, /otherAiRemainingEur/);
 assert.match(activityBudget, /AI_BUDGET_BUCKET_EXHAUSTED/);
 assert.match(activityBudget, /costBucket\?: "HIGGSFIELD" \| "OTHER_AI"/);
+
+const routingMigration = fs.readFileSync("db/migrations/20260929_zz_visual_routing_persistence.sql", "utf8");
+for (const column of [
+  "visual_provider",
+  "visual_model",
+  "visual_decision_reason",
+  "estimated_visual_cost_eur",
+  "actual_visual_cost_eur",
+  "visual_qa_status",
+  "visual_qa_details",
+]) assert.match(routingMigration, new RegExp(column), `routing migration must persist ${column}`);
+
+const autopilot = fs.readFileSync("api/_lib/autopilot.ts", "utf8");
+assert.match(autopilot, /routeVisualProvider\(/, "Autopilot must execute the visual provider router");
+assert.match(autopilot, /inferVisualIdentityIntent\(/, "Autopilot must infer whether Personal Brand identity is required");
+assert.match(autopilot, /personal_brand_visual_identities/, "Autopilot must read profile-scoped Soul ID state");
+assert.match(autopilot, /HIGGSFIELD_RUNTIME_ENABLED===["']true["']/, "Higgsfield execution must stay behind an explicit runtime certification gate");
+assert.match(autopilot, /HIGGSFIELD_RUNTIME_EXECUTION_REQUIRES_CERTIFICATION/, "uncertified Higgsfield execution must fail closed");
+assert.match(autopilot, /costBucket:"OTHER_AI"/, "OpenAI image generation must consume the OTHER_AI bucket");
+assert.match(autopilot, /visual_decision_reason/, "visual routing reason must be persisted");
+assert.match(autopilot, /actual_visual_cost_eur/, "actual visual cost must be persisted");
+assert.doesNotMatch(autopilot, /createHiggsfieldSoulId\(/, "Autopilot must not create a Soul ID implicitly");
 
 const wrangler = fs.readFileSync("wrangler.jsonc", "utf8");
 assert.match(wrangler, /"SAFE_MODE": "true"/);
