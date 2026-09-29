@@ -354,7 +354,8 @@ async function handleGenerateImage(request: Request, env: Env) {
     if (savedVariant) {
       const directSql = neon(env.DATABASE_URL);
       const actualRows = await directSql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${eventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
-      const actualEur = Number(actualRows[0]?.actual_eur ?? result.usage.estimatedCostUsd * activityBudget.usdToEurRate);
+      const estimatedCostUsd = Number(result.usage.estimatedCostUsd ?? 0.25);
+      const actualEur = Number(actualRows[0]?.actual_eur ?? estimatedCostUsd * activityBudget.usdToEurRate);
       const sizeMatch = /^(\\d+)x(\\d+)$/.exec(String(result.size ?? ""));
       const contentHash = await assetContentHashFromBase64(result.base64);
       const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({
