@@ -74,4 +74,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS assets_profile_content_hash_uidx
   ON public.assets(profile_id, content_hash)
   WHERE content_hash IS NOT NULL;
 
+CREATE OR REPLACE FUNCTION public.track_asset_publication_usage()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=public,pg_temp
+AS $
+DECLARE v_asset_id uuid;
+BEGIN
+  IF NEW.state='PUBLISHED' AND OLD.state IS DISTINCT FROM 'PUBLISHED' THEN
+    SELECT cv.image_asset_id INTO v_asset_id
+    FROM public.content_variants cv
+    WHERE cv.id=NEW.variant_id AND cv.profile_id=NEW.profile_id;
+    IF v_asset_id IS NOT NULL THEN
+      UPDATE public.assets
+      SET publication_usage=publication_usage+1,last_used_at=coalesce(NEW.published_at,now()),updated_at=now()
+      WHERE id=v_asset_id AND profile_id=NEW.profile_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$;
+
+DROP TRIGGER IF EXISTS publication_asset_usage ON public.publication_jobs;
+CREATE TRIGGER publication_asset_usage
+AFTER UPDATE OF state ON public.publication_jobs
+FOR EACH ROW EXECUTE FUNCTION public.track_asset_publication_usage();
+
+REVOKE ALL ON FUNCTION public.track_asset_publication_usage() FROM PUBLIC,authenticated;
+
 COMMIT;
