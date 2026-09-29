@@ -181,3 +181,47 @@ export function identityQaVerdict(scores: IdentityQaScores): IdentityQaResult {
   const verdict = identityScore >= 0.8 && qualityScore >= 0.76 && failedDimensions.length === 0 ? "PASS" : "BLOCK";
   return { verdict, identityScore, qualityScore, failedDimensions };
 }
+
+
+export type VisualIdentityRequirements = {
+  personIsPrimarySubject: boolean;
+  requiresIdentityConsistency: boolean;
+  requiresNewScene: boolean;
+  virtualShoot: boolean;
+};
+
+/**
+ * Conservative deterministic classifier for Personal Brand visuals.
+ * If the brief asks for a human subject in a Personal Brand context, that person
+ * is treated as identity-critical. This prevents OpenAI from inventing a fake
+ * version of the person when Soul ID is unavailable.
+ */
+export function inferVisualIdentityRequirements(input: {
+  profileType: ProfileVisualType;
+  profileName: string;
+  visualBrief: string;
+}): VisualIdentityRequirements {
+  if (input.profileType !== "PERSONAL_BRAND") {
+    return { personIsPrimarySubject: false, requiresIdentityConsistency: false, requiresNewScene: false, virtualShoot: false };
+  }
+  const value = `${input.profileName} ${input.visualBrief}`.normalize("NFKC").toLowerCase();
+  const personPattern = /\b(?:persona|personal brand|volto|viso|ritratto|portrait|selfie|creator|founder|fondatore|fondatrice|consulente|professionista|imprenditore|imprenditrice|donna|uomo|ragazza|ragazzo|modella|modello|face|human|person)\b/i;
+  const scenePattern = /\b(?:scena|ambientazione|location|studio|ufficio|evento|strada|città|casa|lifestyle|shooting|photoshoot|servizio fotografico|cinematic|editorial)\b/i;
+  const virtualShootPattern = /\b(?:shooting|photoshoot|servizio fotografico|editorial|fashion|lifestyle|studio fotografico)\b/i;
+  const personIsPrimarySubject = personPattern.test(value);
+  return {
+    personIsPrimarySubject,
+    requiresIdentityConsistency: personIsPrimarySubject,
+    requiresNewScene: personIsPrimarySubject && scenePattern.test(value),
+    virtualShoot: personIsPrimarySubject && virtualShootPattern.test(value),
+  };
+}
+
+export function safeVisualBriefForDecision(decision: VisualRoutingDecision, visualBrief: string) {
+  if (!decision.mustAvoidSyntheticPerson) return visualBrief;
+  return [
+    visualBrief,
+    "Fallback identità: NON raffigurare persone, volti, corpi o avatar sintetici.",
+    "Usa invece ambiente, oggetti, prodotto, dettaglio grafico o composizione editoriale senza esseri umani identificabili.",
+  ].join("\n");
+}
