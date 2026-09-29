@@ -68,6 +68,36 @@ BEFORE INSERT OR UPDATE OF profile_id,content_id,variant_id
 ON public.content_carousel_slides
 FOR EACH ROW EXECUTE FUNCTION public.validate_content_carousel_slide_scope();
 
+CREATE OR REPLACE FUNCTION public.guard_carousel_variant_approval()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path=public,pg_temp
+AS $carousel_approval$
+DECLARE
+  v_count integer;
+  v_ready integer;
+BEGIN
+  IF NEW.format='CAROUSEL' AND NEW.approval_status='APPROVED' AND OLD.approval_status IS DISTINCT FROM 'APPROVED' THEN
+    SELECT count(*)::int,
+           count(*) FILTER (WHERE asset_id IS NOT NULL AND qa_status='PASS')::int
+      INTO v_count,v_ready
+    FROM public.content_carousel_slides
+    WHERE variant_id=NEW.id AND profile_id=NEW.profile_id;
+
+    IF v_count < 4 OR v_count > 10 OR v_ready <> v_count THEN
+      RAISE EXCEPTION 'CAROUSEL_SLIDES_NOT_READY';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$carousel_approval$;
+
+DROP TRIGGER IF EXISTS content_variants_carousel_approval_guard ON public.content_variants;
+CREATE TRIGGER content_variants_carousel_approval_guard
+BEFORE UPDATE OF approval_status ON public.content_variants
+FOR EACH ROW EXECUTE FUNCTION public.guard_carousel_variant_approval();
+
 ALTER TABLE public.content_carousel_slides ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.content_carousel_slides FORCE ROW LEVEL SECURITY;
 
@@ -80,5 +110,6 @@ CREATE POLICY content_carousel_slides_owner ON public.content_carousel_slides
 REVOKE ALL ON TABLE public.content_carousel_slides FROM PUBLIC;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.content_carousel_slides TO authenticated;
 REVOKE ALL ON FUNCTION public.validate_content_carousel_slide_scope() FROM PUBLIC, authenticated;
+REVOKE ALL ON FUNCTION public.guard_carousel_variant_approval() FROM PUBLIC, authenticated;
 
 COMMIT;
