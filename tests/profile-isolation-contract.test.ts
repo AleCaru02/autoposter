@@ -54,8 +54,9 @@ for (const [label, pattern] of [
   ["OpenAI cache", /cacheKey:`post-automatici:\$\{profile\.id\}`/],
 ] as const) assert.match(autopilot, pattern, `${label} must remain profile-scoped`);
 
-assert.match(generateText, /brand_profiles\?profile_id=eq\.\$\{encodeURIComponent\(profileId\)\}/, "manual copy must load only the active activity Brand Brain/user_context");
-assert.match(generateText, /website_pages\?scan_id=eq\.\$\{encodeURIComponent\(scan\.id\)\}&profile_id=eq\.\$\{encodeURIComponent\(profileId\)\}/, "manual copy website context must require both scan and profile");
+assert.match(generateText, /loadEditorialProfile\(sql, profileId, authUserId\)/, "manual copy must verify the active profile owner server-side");
+assert.match(generateText, /loadProfileBrandContext\(sql, profile\)/, "manual copy must load Brand Brain and website context through the shared profile-scoped loader");
+assert.match(generateText, /verifiedCustomerAuthUserId\(token, env\.DATABASE_URL\)/, "manual copy must resolve a verified runtime identity before reading profile context");
 
 assert.match(social, /social_oauth_callbacks[\s\S]*profile_id[\s\S]*state\.profileId/, "OAuth callback ledger must persist the source profile");
 assert.match(social, /where nonce=\$\{state\.nonce\} and profile_id=\$\{state\.profileId\}::uuid and provider=\$\{state\.provider\}/, "OAuth callback claims must be profile/provider bound");
