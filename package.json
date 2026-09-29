@@ -103,7 +103,8 @@
     "test:higgsfield-personal-brand": "tsx tests/higgsfield-personal-brand-foundation.test.ts",
     "test:higgsfield-runtime": "tsx tests/higgsfield-runtime-boundary.test.ts",
     "test:personal-brand-reference": "tsx tests/personal-brand-reference-preflight.test.ts",
-    "test:visual-routing-persistence": "tsx tests/visual-routing-persistence.test.ts"
+    "test:visual-routing-persistence": "tsx tests/visual-routing-persistence.test.ts",
+    "test:identity-qa-runtime": "tsx tests/identity-qa-runtime.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
