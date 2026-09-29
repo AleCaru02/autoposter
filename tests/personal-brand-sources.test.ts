@@ -94,7 +94,7 @@ assert.match(migration, /PERSONAL_BRAND_SOURCE_MIX_REQUIRES_APPROVAL/);
 assert.match(migration, /PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED/);
 assert.match(migration, /PERSONAL_BRAND_CONTENT_SOURCES_REQUIRED/);
 assert.match(migration, /PERSONAL_BRAND_CONTENT_PROVENANCE_REQUIRED/);
-assert.match(contentStore, /\.select\("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,created_at,updated_at"\)/, "reload must include provenance fields");
+assert.match(contentStore, /\.select\("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,created_at,updated_at"\)/, "reload must include provenance fields and the first-class decision record");
 assert.match(generateText, /editorialContext:[\s\S]*externalSources: result\.externalSources/);
 assert.match(autopilot, /source_refs,audience,fact_provenance,editorial_cta,source_mix_approved/);
 
