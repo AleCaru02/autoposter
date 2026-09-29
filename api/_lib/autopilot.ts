@@ -92,7 +92,8 @@ function settingsFromStrategy(value:unknown){const strategy=asObject(value);retu
 async function ensureStrategy(sql:Sql,profileId:string){const defaults=JSON.stringify({autopilotEnabled:true,approvalMode:"MANUAL_REVIEW",researchMode:"BALANCED"});await sql`insert into public.content_strategies (profile_id,platform_strategy,updated_at) values (${profileId}::uuid,${defaults}::jsonb,now()) on conflict (profile_id) do nothing`;}
 async function ensureSchedules(sql:Sql,profile:ProfileRow){for(const item of DEFAULT_SCHEDULES){await sql`insert into public.schedules (profile_id,provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled,updated_at) select ${profile.id}::uuid,${item.provider},${profile.timezone||"Europe/Rome"},${item.posts},'[]'::jsonb,true,true,now() where not exists (select 1 from public.schedules where profile_id=${profile.id}::uuid and provider=${item.provider})`;}}
 type PersonalBrandEditorialContext = {
-  relation: PersonalBrandSourceRelation;
+  relation: PersonalBrandSourceRelation | null;
+  pillar: string;
   audience: Record<string, unknown>;
   sourceRefs: unknown[];
   factProvenance: unknown[];
@@ -100,10 +101,25 @@ type PersonalBrandEditorialContext = {
 
 async function loadBrandContext(sql:Sql,profile:ProfileRow):Promise<{context:BrandContext;visualIdentity:unknown;personalBrand:PersonalBrandEditorialContext|null}>{
   if(profile.profile_type==="PERSONAL_BRAND"){
+    const own=await loadProfileBrandContext(sql,profile);
+    if(!Object.keys(own.audience).length) throw new Error("PERSONAL_BRAND_AUDIENCE_REQUIRED");
     const relation=await resolvePersonalBrandSource(sql,profile.id);
-    const resolved=await buildPersonalBrandEditorialContext(sql,profile,relation);
-    if(!Object.keys(resolved.audience).length) throw new Error("PERSONAL_BRAND_AUDIENCE_REQUIRED");
-    return{context:resolved.brand,visualIdentity:resolved.visualIdentity,personalBrand:{relation,audience:resolved.audience,sourceRefs:resolved.sourceRefs,factProvenance:resolved.factProvenance}};
+    if(relation){
+      const resolved=await buildPersonalBrandEditorialContext(sql,profile,relation);
+      return{context:resolved.brand,visualIdentity:resolved.visualIdentity,personalBrand:{relation,pillar:relation.pillar,audience:resolved.audience,sourceRefs:resolved.sourceRefs,factProvenance:resolved.factProvenance}};
+    }
+    const pillar=profile.industry?.trim()||"Personal Brand";
+    return{
+      context:own.brand,
+      visualIdentity:own.visualIdentity,
+      personalBrand:{
+        relation:null,
+        pillar,
+        audience:own.audience,
+        sourceRefs:own.brand.confirmedWebsiteContent.map((page)=>({type:"OWN_WEBSITE_PAGE",url:page.url,title:page.title})),
+        factProvenance:[{source_type:"OWN_PROFILE",profile_id:profile.id,pillar,verified_at:new Date().toISOString()}],
+      },
+    };
   }
   const own=await loadProfileBrandContext(sql,profile);
   return{context:own.brand,visualIdentity:own.visualIdentity,personalBrand:null};
@@ -139,7 +155,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
   if(loaded.personalBrand){
-    const allowed=Array.isArray(loaded.personalBrand.relation.allowed_ctas)?loaded.personalBrand.relation.allowed_ctas.filter((item):item is string=>typeof item==="string"&&Boolean(item.trim())).map((item)=>item.trim().toLowerCase()):[];
+    const allowed=Array.isArray(loaded.personalBrand.relation?.allowed_ctas)?loaded.personalBrand.relation?.allowed_ctas.filter((item):item is string=>typeof item==="string"&&Boolean(item.trim())).map((item)=>item.trim().toLowerCase()):[];
     if(allowed.length&&variant.cta&&!allowed.includes(variant.cta.trim().toLowerCase()))throw new Error("AUTOPILOT_PERSONAL_BRAND_CTA_NOT_ALLOWED");
   }
   await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,timing_source:timingSource,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
@@ -150,7 +166,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   if(loaded.personalBrand){
     const sourceRefs=[...loaded.personalBrand.sourceRefs,...generated.externalSources.map((url)=>({type:"EXTERNAL_SOURCE",url}))];
     const factProvenance=[...loaded.personalBrand.factProvenance,...generated.externalSources.map((url)=>({source_type:"EXTERNAL_SOURCE",url}))];
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${loaded.personalBrand.relation.pillar},${loaded.personalBrand.relation.source_profile_id}::uuid,ARRAY[${loaded.personalBrand.relation.source_profile_id}::uuid],${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${loaded.personalBrand.pillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${now}::timestamptz)`;
   }else{
     await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${now}::timestamptz)`;
   }

@@ -55,7 +55,7 @@ assert.ok(vercel.includes("topic: enriched.topic"));
 assert.ok(vercel.includes("editorial_pillars_used: enriched.pillarCount"));
 const worker = await readFile(new URL("../cloudflare/generate-text.ts", import.meta.url), "utf8");
 assert.ok(worker.includes("visual_identity"));
-assert.ok(worker.includes("enrichRequestedTopicWithPillars(topic, brand?.visual_identity)"));
+assert.ok(worker.includes("enrichRequestedTopicWithPillars(topic, ownContext.visualIdentity)"));
 assert.ok(worker.includes("topic: enriched.topic"));
 assert.ok(worker.includes("editorial_pillars_used: enriched.pillarCount"));
 
