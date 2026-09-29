@@ -41,8 +41,8 @@ assert.doesNotMatch(worker, /limitValue\s*:\s*body|remaining\s*:\s*body/);
 assert.match(manual, /loadProfileBrandContext\(sql, profile\)/, "Vercel manual generation must use the shared profile-scoped brand/site loader");
 assert.match(personalBrandSources, /state in \('COMPLETE','COMPLETE_WITH_WARNINGS','PARTIAL'\)/, "Vercel text generation must use the latest terminal scan even when it completed with real page warnings");
 assert.match(personalBrandSources, /website_pages[\s\S]*scan_id=\$\{scans\[0\]\.id\}::uuid[\s\S]*limit 160/, "Vercel text generation must consider all supported analyzed pages before selecting the most relevant context");
-assert.match(worker, /state=in\.\(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL\)/, "Cloudflare text generation must use the latest terminal scan even when it completed with real page warnings");
-assert.match(worker, /website_pages\?scan_id=[\s\S]*order=depth\.asc&limit=160/, "Cloudflare text generation must consider all supported analyzed pages before selecting the most relevant context");
+assert.match(worker, /loadProfileBrandContext\(sql, profile\)/, "Cloudflare text generation must use the shared profile-scoped brand/site loader");
+assert.match(worker, /loadEditorialProfile\(sql, profileId, authUserId\)/, "Cloudflare text generation must verify the selected profile before loading editorial context");
 
 const keyA = await deriveTextGenerationOperationKey({
   profileId: "11111111-1111-1111-1111-111111111111",
