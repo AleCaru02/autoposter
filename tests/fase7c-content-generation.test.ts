@@ -86,7 +86,7 @@ assert.ok(store.indexOf('from("content_items").insert') < store.indexOf('from("c
 assert.match(store, /profile_id: input\.profileId/g, "content and variants must carry the selected profile id");
 assert.match(store, /from\("content_items"\)\.delete\(\)\.eq\("id", contentId\)\.eq\("profile_id", input\.profileId\)/, "failed variant persistence must clean up only the scoped parent");
 assert.match(workerText, /normalizeEditorialResearchMode\(body\.researchMode\)/, "Cloudflare manual generation must honor the selected editorial mode");
-assert.match(workerText, /requestFingerprint: \{ topic, objective, providers, formats, researchMode \}/, "research mode must be part of idempotency identity");
+assert.match(workerText, /requestFingerprint: \{ topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext\.sourceProfileId, pillar: editorialContext\.pillar \}/, "research mode and Personal Brand source context must be part of idempotency identity");
 assert.match(workerText, /brand: context, researchMode, cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
 assert.ok(entry.indexOf('path === "/api/generate-text"') < entry.indexOf("return worker.fetch(request, env)"), "canonical Worker entry must route generation before asset fallback");
 assert.match(approvals, /fetch\("\/api\/generate-image"/);
