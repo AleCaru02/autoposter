@@ -13,6 +13,43 @@ function identityFromRpcPayload(payload: unknown): string | null {
   return null;
 }
 
+function looksLikeJwt(token: string) {
+  return token.split(".").length === 3;
+}
+
+async function activeSessionAuthUserId(token: string, databaseUrl: string) {
+  if (!token || token.length > 512 || /\s/.test(token)) return null;
+  const sql = neon(databaseUrl);
+  const rows = await sql`
+    select s."userId"::text as id, coalesce(u.banned, false) as banned
+    from neon_auth.session s
+    join neon_auth.user u on u.id = s."userId"
+    where s.token = ${token}
+      and s."expiresAt" > now()
+    limit 1
+  ` as unknown as Array<{ id: string; banned: boolean }>;
+  return rows[0]?.id && rows[0].banned !== true ? rows[0].id : null;
+}
+
+async function jwtAuthUserId(token: string, databaseUrl: string) {
+  const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) return null;
+  const authUserId = identityFromRpcPayload(await response.json());
+  if (!authUserId) return null;
+  const sql = neon(databaseUrl);
+  const rows = await sql`
+    select id::text as id, coalesce(banned, false) as banned
+    from neon_auth.user
+    where id::text = ${authUserId}
+    limit 1
+  ` as unknown as Array<{ id: string; banned: boolean }>;
+  return rows[0]?.id && rows[0].banned !== true ? rows[0].id : null;
+}
+
 export function bearerValue(header: string | null | undefined) {
   if (!header?.startsWith("Bearer ")) return null;
   return header.slice(7).trim() || null;
@@ -20,22 +57,8 @@ export function bearerValue(header: string | null | undefined) {
 
 export async function verifiedCustomerAuthUserId(token: string, databaseUrl: string) {
   try {
-    const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" },
-      body: "{}",
-    });
-    if (!response.ok) return null;
-    const authUserId = identityFromRpcPayload(await response.json());
-    if (!authUserId) return null;
-    const sql = neon(databaseUrl);
-    const rows = await sql`
-      select id::text as id, coalesce(banned, false) as banned
-      from neon_auth.user
-      where id::text = ${authUserId}
-      limit 1
-    ` as unknown as Array<{ id: string; banned: boolean }>;
-    return rows[0]?.id && rows[0].banned !== true ? rows[0].id : null;
+    if (!looksLikeJwt(token)) return await activeSessionAuthUserId(token, databaseUrl);
+    return await jwtAuthUserId(token, databaseUrl);
   } catch {
     return null;
   }

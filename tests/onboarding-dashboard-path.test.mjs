@@ -10,6 +10,7 @@ const profileBootstrap = fs.readFileSync("api/_lib/profile-bootstrap.ts", "utf8"
 const workerProfileBootstrap = fs.readFileSync("cloudflare/profile-bootstrap.ts", "utf8");
 const onboardingFlow = fs.readFileSync("src/lib/onboarding-flow.ts", "utf8");
 const profilesPage = fs.readFileSync("src/pages/profiles-page.tsx", "utf8");
+const verifiedCustomerAuth = fs.readFileSync("api/_lib/verified-customer-auth.ts", "utf8");
 
 assert.match(token, /authClient\.token\(/, "authenticated API calls must retain the Managed Auth token endpoint fallback");
 assert.match(token, /tokenFromAuthSession/, "authenticated calls must be able to reuse the already verified browser session token");
@@ -52,6 +53,11 @@ assert.match(profiles, /authorization: \`Bearer \$\{token\}\`/, "profile bootstr
 assert.doesNotMatch(profiles, /authenticatedProfileRows|NEON_DATA_API_URL/, "profile existence must not be inferred from a direct client Data API read after hard refresh");
 assert.match(entry, /path === "\/api\/profile-bootstrap"\) return handleWorkerProfileBootstrap/, "Cloudflare production must route the profile bootstrap endpoint");
 assert.match(workerProfileBootstrap, /verifiedCustomerAuthUserId/, "profile bootstrap must verify the Managed Auth bearer server-side");
+assert.match(verifiedCustomerAuth, /if \(!looksLikeJwt\(token\)\) return await activeSessionAuthUserId\(token, databaseUrl\)/, "opaque Better Auth session tokens must use the server-side session verifier");
+assert.match(verifiedCustomerAuth, /where s\.token = \$\{token\}[\s\S]*s\."expiresAt" > now\(\)/, "opaque session verification must require the exact unexpired session token");
+assert.match(verifiedCustomerAuth, /join neon_auth\.user u on u\.id = s\."userId"/, "opaque session verification must resolve the owning auth user");
+assert.match(verifiedCustomerAuth, /rows\[0\]\?\.id && rows\[0\]\.banned !== true/, "opaque and JWT verification must reject banned users");
+assert.match(verifiedCustomerAuth, /rpc\/current_auth_user_id/, "JWT verification through the Data API RPC must remain supported");
 assert.match(profileBootstrap, /where p\.owner_auth_user_id = \$\{authUserId\}/, "server bootstrap must resolve profiles from the verified owner identity");
 assert.match(profileBootstrap, /left join public\.profile_tenant_modes/, "server bootstrap must return the tenant mode with the profile");
 assert.ok(
