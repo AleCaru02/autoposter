@@ -15,9 +15,11 @@ import { ActivityBudgetEngine } from "./activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
 import { decideMasterEditorial, type MasterEditorialDecision } from "./master-editorial-brain.js";
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
+import { resolveVisualProviderRuntime, visualDecisionPersistence } from "./visual-provider-runtime.js";
+import { inferVisualIdentityRequirements } from "./visual-provider-routing.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; HF_CREDENTIALS?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
