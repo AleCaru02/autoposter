@@ -69,7 +69,7 @@ export async function resolvePersonalBrandSource(
   personalBrandProfileId: string,
   requestedSourceProfileId?: string | null,
   requestedPillar?: string | null,
-): Promise<PersonalBrandSourceRelation> {
+): Promise<PersonalBrandSourceRelation | null> {
   const sourceId = requestedSourceProfileId?.trim() || null;
   const pillar = requestedPillar?.trim() || null;
   const rows = await sql`
@@ -99,8 +99,9 @@ export async function resolvePersonalBrandSource(
     order by s.priority asc, s.weight desc, s.created_at asc
     limit 1
   ` as unknown as PersonalBrandSourceRelation[];
-  if (!rows[0]) throw new Error("PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED");
-  return rows[0];
+  if (rows[0]) return rows[0];
+  if (sourceId || pillar) throw new Error("PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED");
+  return null;
 }
 
 export async function loadProfileBrandContext(sql: any, profile: EditorialProfileRow): Promise<{ brand: BrandContext; audience: Record<string, unknown>; visualIdentity: unknown }> {
