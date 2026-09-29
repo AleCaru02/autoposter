@@ -11,6 +11,7 @@
     "SAFE_MODE": "true",
     "APP_BASE_URL": "https://autoposter.02alessandrocaruso.workers.dev",
     "LINKEDIN_CLIENT_ID": "77gm5otb0kan9y",
+    "GOOGLE_CLIENT_ID": "822017806014-h145ls2fbbqq8ubglkgo0dedbrlihsnn.apps.googleusercontent.com",
     "META_APP_ID": "900306149763443",
     "META_GRAPH_VERSION": "v26.0",
     "LINKEDIN_API_VERSION": "202608",
