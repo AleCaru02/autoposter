@@ -287,6 +287,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry,profile_type&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+    const profileType = profile.profile_type === "PERSONAL_BRAND" ? "PERSONAL_BRAND" : "BUSINESS";
     const brands = await rows<Pick<BrandRow, "tone_of_voice">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice&limit=1`, token);
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -295,22 +296,94 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
+
     const aspectRatio = format === "STORY" ? "2:3" : "1:1";
+    const identityRequirements = inferVisualIdentityRequirements({ profileType, profileName: profile.name, visualBrief });
+    const identityCritical = identityRequirements.personIsPrimarySubject && identityRequirements.requiresIdentityConsistency;
     const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
-    const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
+    const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates, identityCritical });
     if (reusable) {
       const asset = reusable.asset;
       if (savedVariant) {
         const now = new Date().toISOString();
         const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
-        const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now } }) });
+        const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now } }),
+        });
         if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
-        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({
+            image_asset_id: asset.id,
+            approval_status: "PENDING",
+            visual_provider: "REAL_ASSET",
+            visual_model: null,
+            visual_decision_reason: "REUSE_SUITABLE_REAL_ASSET",
+            visual_estimated_cost_eur: 0,
+            visual_actual_cost_eur: 0,
+            identity_qa_status: "NOT_REQUIRED",
+            updated_at: now,
+          }),
+        });
         if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
-        await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
+        await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }),
+        });
       }
-      return json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
+      return json({
+        image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio },
+        asset,
+        reused: true,
+        reuseReason: reusable.reason,
+        visualDecision: { provider: "REAL_ASSET", reasonCode: "REUSE_SUITABLE_REAL_ASSET" },
+        usage: { estimatedCostUsd: 0 },
+        budget: { currency: "EUR", avoidedCostEur: 0.25 },
+      });
     }
+
+    const budgetEngine = new ActivityBudgetEngine(env.DATABASE_URL);
+    const budgetSnapshot = await budgetEngine.snapshot(profileId);
+    const visualRoute = await resolveVisualProviderRuntime({
+      sql: neon(env.DATABASE_URL),
+      profileId,
+      profileType,
+      profileName: profile.name,
+      visualBrief,
+      suitableRealAssetAvailable: false,
+      hfCredentials: env.HF_CREDENTIALS,
+      higgsfieldBudgetRemainingEur: budgetSnapshot.higgsfieldRemainingEur,
+      estimatedHiggsfieldCostEur: 0.25,
+    });
+
+    if (visualRoute.decision.provider === "HIGGSFIELD") {
+      if (savedVariant) {
+        const persistence = visualDecisionPersistence({
+          decision: visualRoute.decision,
+          model: "soul_2",
+          estimatedCostEur: 0.25,
+          actualCostEur: null,
+        });
+        const write = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+          method: "PATCH",
+          headers: { prefer: "return=minimal" },
+          body: JSON.stringify({ ...persistence, updated_at: new Date().toISOString() }),
+        });
+        if (!write.ok) throw new Error(`VISUAL_DECISION_WRITE_${write.status}`);
+      }
+      return json({
+        error: "HIGGSFIELD_RUNTIME_NOT_VERIFIED",
+        visualDecision: visualRoute.decision,
+        soulIdentityState: visualRoute.soulIdentityState,
+        providerCallExecuted: false,
+      }, 409);
+    }
+
+    const effectiveVisualBrief = visualRoute.safeVisualBrief;
     const meter = new ImageGenerationMetering(env.DATABASE_URL);
     activeMeter = meter;
     const reservation = await meter.reserve({
@@ -318,7 +391,17 @@ async function handleGenerateImage(request: Request, env: Env) {
       source: "MANUAL",
       operationIdentity,
       referenceId: savedVariant?.id ?? null,
-      requestFingerprint: { contentVariantId, provider, format, visualBrief, caption, additionalDirection },
+      requestFingerprint: {
+        contentVariantId,
+        provider,
+        format,
+        visualBrief,
+        effectiveVisualBrief,
+        caption,
+        additionalDirection,
+        visualProvider: visualRoute.decision.provider,
+        visualReason: visualRoute.decision.reasonCode,
+      },
     });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
     if (reservation.status === "COMPLETED") return json(reservation.cached.response);
@@ -326,16 +409,34 @@ async function handleGenerateImage(request: Request, env: Env) {
     if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
     const eventId = reservation.eventId;
     activeEventId = eventId;
-    const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL).preflight({
+
+    const activityBudget = await budgetEngine.preflight({
       profileId,
       task: "IMAGE_STANDARD",
       importance: "STANDARD",
       projectedOperationCostUsd: 0.25,
+      costBucket: "OTHER_AI",
     });
     if (!activityBudget.allowed) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
+
+    if (savedVariant) {
+      const persistence = visualDecisionPersistence({
+        decision: visualRoute.decision,
+        model: "gpt-image-2",
+        estimatedCostEur: activityBudget.projectedOperationCostEur,
+        actualCostEur: null,
+      });
+      const write = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({ ...persistence, updated_at: new Date().toISOString() }),
+      });
+      if (!write.ok) throw new Error(`VISUAL_DECISION_WRITE_${write.status}`);
+    }
+
     const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
     await meter.markProviderStarted(eventId, 0.25);
     const result = await generateRoutedImage({
@@ -347,35 +448,112 @@ async function handleGenerateImage(request: Request, env: Env) {
       tone: summaryField(brands[0]?.tone_of_voice),
       provider,
       format,
-      visualBrief,
+      visualBrief: effectiveVisualBrief,
       caption,
       additionalDirection,
     });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
-    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
+    await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, {
+      source: "MANUAL",
+      provider,
+      format,
+      visual_provider: visualRoute.decision.provider,
+      visual_decision_reason: visualRoute.decision.reasonCode,
+      identity_fallback: visualRoute.decision.mustAvoidSyntheticPerson,
+    }));
+    const actualUsd = result.technicalEvents.reduce((total, event) => total + (typeof event.costUsd === "number" ? event.costUsd : 0), 0);
+    const actualEur = actualUsd * activityBudget.usdToEurRate;
+
     let asset: AssetRow | null = null;
     if (savedVariant) {
-      const assetWrite = await dataApi("assets", token, { method: "POST", headers: { prefer: "return=representation" }, body: JSON.stringify({ profile_id: profileId, source: "AI_IMAGE", kind: "IMAGE", name: `${provider}-${format}-${savedVariant.id}.png`, storage_url: dataUrl, mime_type: result.mimeType, tags: [provider, format, "AI_GENERATED"], metadata: { provider: "OPENAI", model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" } }) });
+      const assetWrite = await dataApi("assets", token, {
+        method: "POST",
+        headers: { prefer: "return=representation" },
+        body: JSON.stringify({
+          profile_id: profileId,
+          source: "AI_IMAGE",
+          kind: "IMAGE",
+          name: `${provider}-${format}-${savedVariant.id}.png`,
+          storage_url: dataUrl,
+          mime_type: result.mimeType,
+          tags: [provider, format, "AI_GENERATED"],
+          metadata: {
+            provider: "OPENAI",
+            model: result.model,
+            quality: result.quality,
+            size: result.size,
+            aspect_ratio: result.aspectRatio,
+            visual_brief: visualBrief,
+            effective_visual_brief: effectiveVisualBrief,
+            visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }),
+            provider_request_id: result.requestId,
+            storage_mode: "DATABASE_DATA_URL_V1",
+            visual_decision_reason: visualRoute.decision.reasonCode,
+            identity_fallback: visualRoute.decision.mustAvoidSyntheticPerson,
+            estimated_cost_eur: activityBudget.projectedOperationCostEur,
+            actual_cost_eur: actualEur,
+          },
+        }),
+      });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
       const now = new Date().toISOString();
-      const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+      const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({
+          image_asset_id: asset.id,
+          approval_status: "PENDING",
+          visual_actual_cost_eur: actualEur,
+          updated_at: now,
+        }),
+      });
       if (!link.ok) {
         await deleteRow(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
         throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
       }
-      await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
-      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
+      await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }),
+      });
+      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) {
+        await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
+      }
     }
-    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
-    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
+
+    const responseBody = {
+      image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio },
+      asset,
+      visualDecision: visualRoute.decision,
+      usage: result.usage,
+      budget: {
+        currency: "EUR",
+        band: activityBudget.band,
+        hardCapEur: activityBudget.hardCapEur,
+        spendEur: activityBudget.spendEur,
+        remainingEur: activityBudget.remainingEur,
+        otherAiRemainingEur: activityBudget.otherAiRemainingEur,
+        forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur,
+      },
+    };
+    const cachedResponse = {
+      image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio },
+      asset,
+      visualDecision: visualRoute.decision,
+      usage: result.usage,
+      budget: responseBody.budget,
+      duplicate: true,
+    };
     await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
     await meter.commit(eventId);
     logicalCommitted = true;
     return json(responseBody);
   } catch (reason) {
-    if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
+    if (activeMeter && activeEventId && !logicalCommitted) {
+      await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
+    }
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
