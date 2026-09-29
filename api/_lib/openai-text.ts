@@ -35,6 +35,16 @@ export type BrandContext = {
   confirmedWebsiteContent: Array<{ url: string; title: string | null; text: string }>;
 };
 
+export type GeneratedCarouselSlide = {
+  position: number;
+  purpose: string;
+  headline: string;
+  body: string;
+  hierarchy: string;
+  visualBrief: string;
+  altText: string;
+};
+
 export type GeneratedVariant = {
   provider: SocialProvider;
   format: SocialFormat;
@@ -46,10 +56,12 @@ export type GeneratedVariant = {
   visualBrief: string;
   altText: string;
   factualBasis: string[];
+  carouselSlides?: GeneratedCarouselSlide[];
 };
 
 export type GeneratedSocialContent = {
   editorialTopic: string;
+  pillar?: string;
   editorialAngle: string;
   strategySummary: string;
   variants: GeneratedVariant[];
@@ -125,6 +137,7 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
   properties: {
     editorialTopic: { type: "string", minLength: 3, maxLength: 120 },
+    pillar: { type: "string", minLength: 2, maxLength: 120 },
     editorialAngle: { type: "string", minLength: 3, maxLength: 180 },
     strategySummary: { type: "string" },
     variants: {
@@ -144,12 +157,30 @@ const OUTPUT_SCHEMA = {
           visualBrief: { type: "string" },
           altText: { type: "string" },
           factualBasis: { type: "array", items: { type: "string" }, maxItems: 12 },
+          carouselSlides: {
+            type: "array",
+            maxItems: 10,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                position: { type: "integer", minimum: 1, maximum: 10 },
+                purpose: { type: "string", minLength: 2, maxLength: 160 },
+                headline: { type: "string", minLength: 1, maxLength: 140 },
+                body: { type: "string", maxLength: 600 },
+                hierarchy: { type: "string", minLength: 2, maxLength: 200 },
+                visualBrief: { type: "string", minLength: 3, maxLength: 1000 },
+                altText: { type: "string", minLength: 3, maxLength: 500 },
+              },
+              required: ["position", "purpose", "headline", "body", "hierarchy", "visualBrief", "altText"],
+            },
+          },
         },
-        required: ["provider", "format", "eligible", "hook", "caption", "cta", "hashtags", "visualBrief", "altText", "factualBasis"],
+        required: ["provider", "format", "eligible", "hook", "caption", "cta", "hashtags", "visualBrief", "altText", "factualBasis", "carouselSlides"],
       },
     },
   },
-  required: ["editorialTopic", "editorialAngle", "strategySummary", "variants"],
+  required: ["editorialTopic", "pillar", "editorialAngle", "strategySummary", "variants"],
 } as const;
 
 function terms(value: string) {
@@ -243,7 +274,28 @@ function validateResult(value: unknown, providers: SocialProvider[], formats: So
     }
   }
   if (keys.size !== variants.length) throw new Error("OPENAI_DUPLICATE_VARIANTS");
-  return { ...candidate, editorialTopic: candidate.editorialTopic.trim(), editorialAngle: candidate.editorialAngle.trim() } as GeneratedSocialContent;
+  const normalizedVariants = variants.map((variant) => {
+    const slides = Array.isArray(variant.carouselSlides) ? variant.carouselSlides : [];
+    if (variant.format === "CAROUSEL") {
+      if (slides.length < 4 || slides.length > 10) throw new Error("OPENAI_INVALID_CAROUSEL_SLIDES");
+      for (let index = 0; index < slides.length; index += 1) {
+        const slide = slides[index];
+        if (!slide || slide.position !== index + 1 || !slide.purpose?.trim() || !slide.headline?.trim() || !slide.hierarchy?.trim() || !slide.visualBrief?.trim() || !slide.altText?.trim()) {
+          throw new Error("OPENAI_INVALID_CAROUSEL_SLIDES");
+        }
+      }
+    } else if (slides.length) {
+      throw new Error("OPENAI_UNEXPECTED_CAROUSEL_SLIDES");
+    }
+    return { ...variant, carouselSlides: slides };
+  });
+  return {
+    ...candidate,
+    editorialTopic: candidate.editorialTopic.trim(),
+    pillar: typeof candidate.pillar === "string" && candidate.pillar.trim() ? candidate.pillar.trim() : candidate.editorialTopic.trim(),
+    editorialAngle: candidate.editorialAngle.trim(),
+    variants: normalizedVariants,
+  } as GeneratedSocialContent;
 }
 
 export function estimateTerraCostUsd(inputTokens: number, outputTokens: number, cachedInputTokens = 0, cacheWriteTokens = 0) {
@@ -324,10 +376,13 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Adatta davvero il copy a Instagram, Facebook, LinkedIn e Google Business Profile: non fare semplice copia-incolla cross-platform.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
     "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
+    "pillar deve indicare il pilastro editoriale concreto a cui appartiene il contenuto, non una categoria generica come 'social'.",
     "editorialAngle deve descrivere in modo conciso il punto di vista concreto usato per trattare quel tema; due copy sullo stesso tema ma con angoli realmente diversi devono avere angoli diversi.",
     "Non usare in editorialTopic o editorialAngle frasi come 'scegli', 'crea', 'evita di ripetere', 'contenuto destinato' o riferimenti alla richiesta tecnica.",
     "Per GBP imposta eligible=false quando il concept non ha utilità locale/aziendale coerente.",
-    "Per le storie scrivi copy breve; per i caroselli il caption deve indicare chiaramente una sequenza di slide; per i post usa una struttura completa ma non prolissa.",
+    "Per le storie scrivi copy breve; per i post usa una struttura completa ma non prolissa.",
+    "Per CAROUSEL crea un vero carosello nativo di 4-10 slide in carouselSlides: posizione sequenziale, scopo distinto, headline, body, gerarchia, visualBrief e altText per ogni slide. La prima slide apre con un hook forte, le centrali sviluppano un solo passaggio ciascuna, l'ultima chiude con CTA. Non creare un collage e non ripetere lo stesso testo tra slide.",
+    "Per POST e STORY carouselSlides deve essere un array vuoto.",
     "La qualità viene prima della brevità: elimina solo ridondanze e testo non utile, non dettagli sostanziali.",
     "Restituisci esclusivamente l'output strutturato richiesto.",
   ].filter(Boolean).join("\n");
