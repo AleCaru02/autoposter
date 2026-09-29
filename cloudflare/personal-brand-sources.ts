@@ -14,7 +14,7 @@ function uuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-async function auth(request: Request, env: Env) {
+async function auth(request: Request, env: Env): Promise<{ error: Response } | { sql: ReturnType<typeof neon>; authUserId: string }> {
   if (!env.DATABASE_URL) return { error: json({ error: "DATABASE_NOT_CONFIGURED" }, 503) } as const;
   const token = bearerValue(request.headers.get("authorization"));
   if (!token) return { error: json({ error: "UNAUTHENTICATED" }, 401) } as const;
