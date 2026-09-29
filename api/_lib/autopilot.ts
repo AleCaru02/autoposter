@@ -233,12 +233,32 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   if(approvalMode==="AUTOMATIC"&&variant.eligible){const qa=await runOpenAIEditorialQA({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider,format,objective,content:generated.content,variant,verification:generated.verification,externalSources:generated.externalSources});const qaEvent:TechnicalAiEvent={operation:"AGENT_EDITORIAL_QA",model:qa.model,inputTokens:qa.usage.inputTokens,outputTokens:qa.usage.outputTokens,costUsd:qa.usage.estimatedCostUsd,metadata:{openai_response_id:qa.responseId,openai_request_id:qa.requestId,source:"AUTOPILOT",provider,format,verdict:qa.verdict,reasons:qa.reasons,checks:qa.checks}};await meter.persistTechnicalEvents(profile.id,logicalEventId,[qaEvent]);if(qa.verdict!=="PASS")throw new Error(`AUTOPILOT_EDITORIAL_QA_BLOCKED:${qa.reasons.slice(0,2).join(" | ")||"material issue"}`);}
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
+  const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
+  const decisionRecord=JSON.stringify({
+    source:"AUTOPILOT",
+    masterDecisionId:master.id,
+    rationale:master.rationale,
+    context:master.context,
+    contextSignals:master.contextSignals,
+    channels:master.channels,
+    timing:master.timing??null,
+    provider,
+    format,
+    contentType:master.contentType,
+    intent:master.intent,
+    objective,
+    pillar:generatedPillar,
+    editorialTopic:generated.content.editorialTopic,
+    editorialAngle:generated.content.editorialAngle,
+    strategySummary:generated.content.strategySummary,
+    generatedAt:now,
+  });
   if(loaded.personalBrand){
     const sourceRefs=[...loaded.personalBrand.sourceRefs,...generated.externalSources.map((url)=>({type:"EXTERNAL_SOURCE",url}))];
     const factProvenance=[...loaded.personalBrand.factProvenance,...generated.externalSources.map((url)=>({source_type:"EXTERNAL_SOURCE",url}))];
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${loaded.personalBrand.pillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${decisionRecord}::jsonb,${now}::timestamptz)`;
   }else{
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${now}::timestamptz)`;
   }
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,approval_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},'PENDING',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
