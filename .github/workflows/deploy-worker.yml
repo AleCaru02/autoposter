@@ -85,7 +85,6 @@ jobs:
           SOCIAL_TOKEN_KEY_SOURCE: ${{ secrets.SOCIAL_TOKEN_KEY }}
           META_APP_SECRET_SOURCE: ${{ secrets.META_APP_SECRET }}
           LINKEDIN_CLIENT_SECRET_SOURCE: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
-          GOOGLE_CLIENT_ID_SOURCE: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET_SOURCE: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
@@ -105,7 +104,6 @@ jobs:
             SOCIAL_TOKEN_KEY: process.env.SOCIAL_TOKEN_KEY_SOURCE,
             META_APP_SECRET: process.env.META_APP_SECRET_SOURCE,
             LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET_SOURCE,
-            GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID_SOURCE,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET_SOURCE,
           };
           for (const [name, raw] of Object.entries(optionalSocialSecrets)) {
@@ -124,7 +122,7 @@ jobs:
           set -euo pipefail
           trap 'rm -f worker-secrets.json' EXIT
           npx wrangler deploy --secrets-file worker-secrets.json
-      - name: Verify Worker secret bindings
+      - name: Verify Worker secret bindings and public config
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -132,29 +130,45 @@ jobs:
         run: |
           set -euo pipefail
           npx wrangler secret list --format json > worker-secret-names.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/settings" \
+            > worker-settings.json
           node - <<'NODE'
           const fs = require('node:fs');
           const secrets = JSON.parse(fs.readFileSync('worker-secret-names.json', 'utf8'));
           const names = new Set(Array.isArray(secrets) ? secrets.map((item) => item?.name).filter(Boolean) : []);
-          const required = [
+          const requiredSecrets = [
             'OPENAI_API_KEY',
             'DATABASE_URL',
             'SOCIAL_TOKEN_KEY',
             'META_APP_SECRET',
             'LINKEDIN_CLIENT_SECRET',
-            'GOOGLE_CLIENT_ID',
             'GOOGLE_CLIENT_SECRET',
           ];
-          const missing = required.filter((name) => !names.has(name));
+          const missing = requiredSecrets.filter((name) => !names.has(name));
           if (missing.length) {
             console.error('Cloudflare Worker required secret bindings are missing:', missing.join(', '));
+            process.exit(1);
+          }
+          if (names.has('GOOGLE_CLIENT_ID')) {
+            console.error('GOOGLE_CLIENT_ID must be a public Worker var, not a Worker secret');
+            process.exit(1);
+          }
+          const settings = JSON.parse(fs.readFileSync('worker-settings.json', 'utf8'));
+          const bindings = settings?.result?.bindings;
+          const googleClientId = Array.isArray(bindings)
+            ? bindings.find((binding) => binding?.name === 'GOOGLE_CLIENT_ID' && binding?.type === 'plain_text')
+            : undefined;
+          if (typeof googleClientId?.text !== 'string' || !googleClientId.text.endsWith('.apps.googleusercontent.com')) {
+            console.error('Cloudflare Worker required public config is missing or invalid: GOOGLE_CLIENT_ID');
             process.exit(1);
           }
           if (process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE && !names.has('ADMIN_BOOTSTRAP_TOKEN')) {
             console.error('Cloudflare Worker bootstrap secret was not provisioned');
             process.exit(1);
           }
-          console.log('Worker secret bindings: PASS');
+          console.log('Worker secret bindings and public config: PASS');
           NODE
       - name: Production application smoke
         shell: bash
