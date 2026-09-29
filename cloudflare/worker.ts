@@ -293,14 +293,14 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
     const aspectRatio = format === "STORY" ? "2:3" : "1:1";
-    const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at&order=created_at.desc&limit=100`, token);
+    const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,reuse_count,created_at&order=created_at.desc&limit=100`, token);
     const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {
       const asset = reusable.asset;
       if (savedVariant) {
         const now = new Date().toISOString();
         const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
-        const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now }, reuse_count: Number((asset as ReusableAssetCandidate & { reuse_count?: number }).reuse_count ?? 0) + 1, last_used_at: now, updated_at: now }) });
+        const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now }, reuse_count: Number(asset.reuse_count ?? 0) + 1, last_used_at: now, updated_at: now }) });
         if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
         const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
         if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
