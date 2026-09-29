@@ -40,6 +40,12 @@ export type ContentVariantRow = {
   image_asset_id: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
+  visual_provider: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD" | null;
+  visual_model: string | null;
+  visual_decision_reason: string | null;
+  visual_estimated_cost_eur: number | null;
+  visual_actual_cost_eur: number | null;
+  identity_qa_status: "NOT_REQUIRED" | "PENDING" | "PASS" | "BLOCK";
   created_at: string;
   updated_at: string;
 };
@@ -154,7 +160,7 @@ export async function loadContentWorkflow(profileId: string) {
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
-    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,created_at,updated_at")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,visual_provider,visual_model,visual_decision_reason,visual_estimated_cost_eur,visual_actual_cost_eur,identity_qa_status,created_at,updated_at")
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
