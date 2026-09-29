@@ -147,9 +147,10 @@ jobs:
             'META_APP_SECRET',
             'LINKEDIN_CLIENT_SECRET',
             'GOOGLE_CLIENT_SECRET',
+            'HF_CREDENTIALS',
           ];
-          // Higgsfield remains optional until the Personal Brand runtime is live-certified.
-          // When HF_CREDENTIALS is configured it must be a Worker secret, never a public var.
+          // Higgsfield credentials are required for the Personal Brand image runtime.
+          // Only the binding name is verified here; the value is never read or printed.
           const missing = requiredSecrets.filter((name) => !names.has(name));
           if (missing.length) {
             console.error('Cloudflare Worker required secret bindings are missing:', missing.join(', '));
