@@ -123,6 +123,30 @@ ALTER TABLE public.personal_brand_visual_identities FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.personal_brand_reference_images FROM PUBLIC, authenticated;
 REVOKE ALL ON TABLE public.personal_brand_visual_identities FROM PUBLIC, authenticated;
 
+-- Keep package coverage complete: commercial_guarded knows these capabilities
+-- but leaves them disabled until a future commercial rollout.
+WITH rows(capability_key) AS (
+  VALUES
+    ('visual.higgsfield.api'),
+    ('visual.higgsfield.soul_id'),
+    ('visual.identity.qa')
+)
+INSERT INTO public.entitlement_package_capabilities(
+  package_key, package_version, capability_key, enabled, limit_type,
+  limit_value, period_type, provider_attempt_reserve_usd, metadata
+)
+SELECT 'commercial_guarded', 1, capability_key, false, 'COUNT_PER_MONTH',
+       NULL::numeric, 'NONE', NULL::numeric,
+       '{"provider":"HIGGSFIELD","runtimeVerified":false,"commercialEnabled":false}'::jsonb
+FROM rows
+ON CONFLICT (package_key, package_version, capability_key) DO UPDATE SET
+  enabled=false,
+  limit_type=EXCLUDED.limit_type,
+  limit_value=NULL,
+  period_type='NONE',
+  provider_attempt_reserve_usd=NULL,
+  metadata=EXCLUDED.metadata;
+
 -- Higgsfield is personal-first: only the personal_operator package gets real
 -- billable entitlements at this stage. Internal routing/identity capabilities
 -- remain registry-only and are not billable entitlements.
