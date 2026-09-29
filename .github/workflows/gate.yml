@@ -43,7 +43,8 @@ jobs:
       - { name: PROPERTY NETWORK profile isolation regression, run: "npm run test:profile-isolation" }
       - { name: Personal Brand first-class profile regression, run: "npm run test:personal-brand-profile" }
       - { name: Higgsfield Personal Brand foundation regression, run: "npm run test:higgsfield-personal-brand" }
-      - { name: Higgsfield runtime credential boundary, run: "npm run test:higgsfield-runtime" }\n      - { name: Personal Brand reference and Soul ID preflight, run: "npm run test:personal-brand-reference" }
+      - { name: Higgsfield runtime credential boundary, run: "npm run test:higgsfield-runtime" }
+      - { name: Personal Brand reference and Soul ID preflight, run: "npm run test:personal-brand-reference" }
       - { name: Personal Brand Sources FASE 5 regression, run: "npm run test:personal-brand-sources" }
       - { name: Higgsfield Personal Brand foundation, run: "npm run test:higgsfield-personal-brand" }
       - { name: Canonical bootstrap regression, run: "npm run test:canonical-bootstrap" }
