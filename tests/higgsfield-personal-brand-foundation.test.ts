@@ -40,6 +40,7 @@ const soul = routeVisualProvider({
   requiresNewScene: true,
   virtualShoot: true,
   higgsfieldConfigured: true,
+  higgsfieldRuntimeEnabled: true,
   soulIdentityState: "COMPLETED",
   higgsfieldBudgetRemainingEur: 10,
   estimatedHiggsfieldCostEur: 0.01,
@@ -72,13 +73,30 @@ const noBudget = routeVisualProvider({
   requiresNewScene: true,
   virtualShoot: false,
   higgsfieldConfigured: true,
-  soulIdentityState: "COMPLETED",
+  higgsfieldRuntimeEnabled: true,\n  soulIdentityState: "COMPLETED",
   higgsfieldBudgetRemainingEur: 0,
   estimatedHiggsfieldCostEur: 0.01,
 });
 assert.equal(noBudget.provider, "OPENAI");
 assert.equal(noBudget.reasonCode, "HIGGSFIELD_BUDGET_EXHAUSTED");
 assert.equal(noBudget.mustAvoidSyntheticPerson, true);
+
+const runtimeBlocked = routeVisualProvider({
+  profileType: "PERSONAL_BRAND",
+  suitableRealAssetAvailable: false,
+  personIsPrimarySubject: true,
+  requiresIdentityConsistency: true,
+  requiresNewScene: true,
+  virtualShoot: true,
+  higgsfieldConfigured: true,
+  higgsfieldRuntimeEnabled: false,
+  soulIdentityState: "COMPLETED",
+  higgsfieldBudgetRemainingEur: 10,
+  estimatedHiggsfieldCostEur: 0.01,
+});
+assert.equal(runtimeBlocked.provider, "OPENAI");
+assert.equal(runtimeBlocked.reasonCode, "HIGGSFIELD_RUNTIME_NOT_CERTIFIED");
+assert.equal(runtimeBlocked.mustAvoidSyntheticPerson, true);
 
 const standard = routeVisualProvider({
   profileType: "BUSINESS",
