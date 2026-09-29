@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { neonClient } from "../../lib/neon-client";
-import { authenticatedApiToken } from "../../lib/auth-token";
+import { authClient, neonClient } from "../../lib/neon-client";
+import { authenticatedApiToken, tokenFromAuthSession } from "../../lib/auth-token";
 import type { ProfileType } from "../../../api/_lib/onboarding-provisioning";
 export type { ProfileType } from "../../../api/_lib/onboarding-provisioning";
 
@@ -74,13 +74,13 @@ function profileIdFromUrl() {
 
 const PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = [0, 250, 700] as const;
 
-async function fetchBootstrappedProfiles(): Promise<Profile[]> {
+async function fetchBootstrappedProfiles(preferredToken?: string | null): Promise<Profile[]> {
   let lastError: unknown = new Error("PROFILE_BOOTSTRAP_FAILED");
   for (let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS.length; attempt += 1) {
     const delay = PROFILE_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
     if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay));
     try {
-      const token = await authenticatedApiToken();
+      const token = await authenticatedApiToken(attempt === 0 ? preferredToken : null);
       const response = await fetch("/api/profile-bootstrap", {
         method: "GET",
         headers: {
@@ -101,6 +101,8 @@ async function fetchBootstrappedProfiles(): Promise<Profile[]> {
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
+  const authSession = authClient.useSession();
+  const sessionToken = tokenFromAuthSession(authSession.data);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfileId, setSelectedProfileIdState] = useState<string | null>(() => profileIdFromUrl() || localStorage.getItem(ACTIVE_PROFILE_KEY));
   const [loading, setLoading] = useState(true);
@@ -110,7 +112,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const next = await fetchBootstrappedProfiles();
+      const next = await fetchBootstrappedProfiles(sessionToken);
       setProfiles(next);
       setSelectedProfileIdState((current) => {
         const urlProfileId = profileIdFromUrl();
@@ -125,7 +127,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sessionToken]);
 
   useEffect(() => { void reload(); }, [reload]);
 
