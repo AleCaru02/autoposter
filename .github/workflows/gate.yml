@@ -84,6 +84,7 @@ jobs:
       - { name: AI budget recommendation regression, run: "npm run test:ai-budget-recommendation" }
       - { name: OpenAI-only model router regression, run: "npm run test:model-router" }
       - { name: Asset Intelligence reuse regression, run: "npm run test:asset-intelligence" }
+      - { name: Asset library runtime regression, run: "npm run test:asset-library" }
       - { name: Editorial decision record regression, run: "npm run test:editorial-decision-record" }
       - { name: Master Editorial Brain regression, run: "npm run test:master-editorial-brain" }
       - { name: OpenAI Research and Fact-check regression, run: "npm run test:openai-research-factcheck" }

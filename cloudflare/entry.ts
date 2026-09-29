@@ -25,6 +25,7 @@ import { runLearningRuntime } from "../api/_lib/learning-runtime.js";
 import { handlePersonalBrandVisualIdentity } from "./personal-brand-visual.js";
 import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdPreflight } from "./personal-brand-reference.js";
 import { handlePersonalBrandSources } from "./personal-brand-sources.js";
+import { handleAssetLibrary } from "./asset-library.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -171,6 +172,7 @@ export default {
     if (path === "/api/personal-brand/reference-images") return handleReferenceImages(request, env);
     if (path === "/api/personal-brand/soul-id/preflight") return handleSoulIdPreflight(request, env);
     if (path === "/api/personal-brand/sources") return handlePersonalBrandSources(request, env);
+    if (path === "/api/assets") return handleAssetLibrary(request, env);
     if (path.startsWith("/api/personal-brand/reference-image/")) {
       const referenceId = path.slice("/api/personal-brand/reference-image/".length);
       return handleSignedReferenceImage(request, env, referenceId);

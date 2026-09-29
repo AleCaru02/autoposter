@@ -7,6 +7,15 @@ export type ReusableAssetCandidate = {
   mime_type: string | null;
   tags: unknown;
   metadata: unknown;
+  provider?: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD" | null;
+  model?: string | null;
+  cost_eur?: number | string | null;
+  width?: number | null;
+  height?: number | null;
+  format?: string | null;
+  quality_status?: "PENDING" | "PASS" | "BLOCK" | "FAILED";
+  identity_status?: "NOT_REQUIRED" | "PENDING" | "PASS" | "BLOCK";
+  reuse_count?: number;
   created_at?: string;
 };
 
@@ -45,6 +54,11 @@ export async function visualFingerprint(input: { visualBrief: string; aspectRati
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export async function assetContentHashFromBase64(base64: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(base64));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function textForAsset(asset: ReusableAssetCandidate) {
   const metadata = object(asset.metadata);
   return [asset.name, ...strings(asset.tags), metadata.visual_brief, metadata.alt_text, metadata.description]
@@ -71,6 +85,8 @@ export async function findReusableAsset(input: { visualBrief: string; aspectRati
 
   for (const asset of input.candidates) {
     if (asset.kind !== "IMAGE" || !asset.storage_url || !hasCompatibleAspect(asset, input.aspectRatio)) continue;
+    if (asset.quality_status && asset.quality_status !== "PASS") continue;
+    if (asset.identity_status === "BLOCK") continue;
     const metadata = object(asset.metadata);
     if (metadata.visual_fingerprint === fingerprint) {
       matches.push({ asset, score: 1, reason: "EXACT_VISUAL_FINGERPRINT" });

@@ -21,6 +21,7 @@ const SocialPage = lazy(() => import("./pages/social-page").then((module) => ({ 
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
 const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
 const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
+const AssetsPage = lazy(() => import("./pages/assets-page").then((module) => ({ default: module.AssetsPage })));
 const AdminBackoffice = lazy(() => import("./pages/admin-pages").then((module) => ({ default: module.AdminBackoffice })));
 
 function PageFallback() {
@@ -69,6 +70,7 @@ export default function App() {
       <Route path="social" element={<SocialPage />} />
       <Route path="analytics" element={<AnalyticsPage />} />
       <Route path="apprendimento" element={<LearningPage />} />
+      <Route path="libreria" element={<AssetsPage />} />
       <Route path="impostazioni" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />

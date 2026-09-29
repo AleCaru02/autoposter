@@ -17,6 +17,7 @@ import "./design-system.css";
 import "./dashboard.css";
 import "./workflow-journey.css";
 import "./decision-record.css";
+import "./assets.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

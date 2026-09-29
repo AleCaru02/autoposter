@@ -12,7 +12,7 @@ import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAi
 import type { ContentType } from "./content-agents.js";
 import { buildAutopilotLearningInstruction, learnedFormatPreference, learnedTimingPreference, type LearnedTimingPreference, type PersistedLearningInsight } from "./learning-guidance.js";
 import { ActivityBudgetEngine } from "./activity-budget.js";
-import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
+import { assetContentHashFromBase64, findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
 import { decideMasterEditorial, type MasterEditorialDecision } from "./master-editorial-brain.js";
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
 import { higgsfieldConfigured } from "./higgsfield.js";
@@ -175,7 +175,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,approval_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},'PENDING',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
     const aspectRatio=format==="STORY"?"2:3":"1:1";
-    const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+    const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
     const visualBudget=await budgetEngine.snapshot(profile.id);
@@ -204,7 +204,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
 
     if(reusable){
       imageAssetId=reusable.asset.id;
-      await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;
+      await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb,reuse_count=reuse_count+1,last_used_at=now(),updated_at=now() where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;
       await sql`update public.content_variants set visual_actual_cost_eur=0 where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
     }
 
@@ -223,9 +223,21 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:visualDecision.mustAvoidSyntheticPerson?"Do not depict or invent a synthetic person. Use objects, environment, typography or non-identifying visual elements only.":null});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
-        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb)`;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
         const actualEur=Number(actualRows[0]?.actual_eur??visualDecision.estimatedCostEur);
+        const sizeMatch=/^(\\d+)x(\\d+)$/.exec(String(image.size??""));
+        const contentHash=await assetContentHashFromBase64(image.base64);
+        await sql`insert into public.assets (
+          id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,
+          provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at
+        ) values (
+          ${imageAssetId}::uuid,${profile.id}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
+          ${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},
+          ${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,
+          ${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb,
+          'OPENAI',${image.model},${actualEur},${sizeMatch?Number(sizeMatch[1]):null},${sizeMatch?Number(sizeMatch[2]):null},
+          ${image.aspectRatio},'PENDING','NOT_REQUIRED',${contentHash},now()
+        )`;
         await sql`update public.content_variants set visual_model=${image.model},visual_actual_cost_eur=${actualEur} where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
       }
     }catch(reason){if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}

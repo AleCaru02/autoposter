@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, LayoutDashboard, LogOut, Menu, Palette, Settings2, Share2, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, Images, LayoutDashboard, LogOut, Menu, Palette, Settings2, Share2, X } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -14,20 +14,21 @@ const links = [
   ["Contenuti", "/app/contenuti", FileText],
   ["Revisioni", "/app/approvazioni", FileCheck2],
   ["Calendario", "/app/calendario", CalendarDays],
+  ["Libreria", "/app/libreria", Images],
   ["Social", "/app/social", Share2],
   ["Analytics", "/app/analytics", BarChart3],
   ["Apprendimento", "/app/apprendimento", Bot],
   ["Impostazioni", "/app/impostazioni", Settings2],
 ] as const;
 
-const mobilePrimaryLinks = [links[0], links[4], links[6], links[7]] as const;
-const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[8], links[9], links[10]] as const;
+const mobilePrimaryLinks = [links[0], links[4], links[6], links[8]] as const;
+const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[7], links[9], links[10], links[11]] as const;
 
 const navigationGroups = [
   { label: "Oggi", items: [links[0]] },
-  { label: "Crea e pubblica", items: [links[4], links[5], links[6]] },
-  { label: "Canali e risultati", items: [links[7], links[8], links[9]] },
-  { label: "La tua attività", items: [links[1], links[2], links[3], links[10]] },
+  { label: "Crea e pubblica", items: [links[4], links[5], links[6], links[7]] },
+  { label: "Canali e risultati", items: [links[8], links[9], links[10]] },
+  { label: "La tua attività", items: [links[1], links[2], links[3], links[11]] },
 ] as const;
 
 export function AppShell() {
