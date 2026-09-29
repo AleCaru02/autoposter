@@ -56,4 +56,10 @@ assert.doesNotMatch(route, /HF_CREDENTIALS.*json|keySecret.*json/i, "credentials
 const wrangler = fs.readFileSync("wrangler.jsonc", "utf8");
 assert.doesNotMatch(wrangler, /HF_CREDENTIALS/, "Higgsfield credentials must never be a public Worker var");
 
+const deployWorkflow = fs.readFileSync(".github/workflows/deploy-worker.yml", "utf8");
+assert.match(deployWorkflow, /'HF_CREDENTIALS'/, "production deploy must require the Higgsfield Worker secret binding");
+assert.match(deployWorkflow, /binding\?\.name === 'HF_CREDENTIALS' && binding\?\.type === 'plain_text'/, "production verifier must reject a plain_text Higgsfield binding");
+assert.match(deployWorkflow, /Higgsfield frontend secret absence regression/, "production build must scan frontend bundle and source maps for server-only Higgsfield identifiers");
+assert.match(deployWorkflow, /HF_CREDENTIALS\|hf-api-key\|hf-secret/, "frontend leak scan must cover the secret binding and provider auth header names");
+
 console.log("Higgsfield runtime credential boundary: PASS");
