@@ -99,18 +99,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (profile.profile_type === "PERSONAL_BRAND") {
       if (!objective) return res.status(400).json({ error: "PERSONAL_BRAND_OBJECTIVE_REQUIRED" });
       const relation = await resolvePersonalBrandSource(sql, profileId, requestedSourceProfileId, requestedPillar);
-      const resolved = await buildPersonalBrandEditorialContext(sql, profile, relation);
-      if (!Object.keys(resolved.audience).length) return res.status(400).json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" });
-      context = resolved.brand;
-      editorialContext = {
-        profileType: "PERSONAL_BRAND",
-        pillar: relation.pillar,
-        sourceProfileId: relation.source_profile_id,
-        sourceProfileIds: [relation.source_profile_id],
-        sourceRefs: resolved.sourceRefs,
-        audience: resolved.audience,
-        factProvenance: resolved.factProvenance,
-      };
+      if (relation) {
+        const resolved = await buildPersonalBrandEditorialContext(sql, profile, relation);
+        if (!Object.keys(resolved.audience).length) return res.status(400).json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" });
+        context = resolved.brand;
+        editorialContext = {
+          profileType: "PERSONAL_BRAND",
+          pillar: relation.pillar,
+          sourceProfileId: relation.source_profile_id,
+          sourceProfileIds: [relation.source_profile_id],
+          sourceRefs: resolved.sourceRefs,
+          audience: resolved.audience,
+          factProvenance: resolved.factProvenance,
+        };
+      } else {
+        if (!Object.keys(ownContext.audience).length) return res.status(400).json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" });
+        const ownPillar = profile.industry?.trim() || "Personal Brand";
+        editorialContext = {
+          profileType: "PERSONAL_BRAND",
+          pillar: ownPillar,
+          sourceProfileId: null,
+          sourceProfileIds: [],
+          sourceRefs: ownContext.brand.confirmedWebsiteContent.map((page) => ({
+            type: "OWN_WEBSITE_PAGE",
+            url: page.url,
+            title: page.title,
+          })),
+          audience: ownContext.audience,
+          factProvenance: [{
+            source_type: "OWN_PROFILE",
+            profile_id: profile.id,
+            pillar: ownPillar,
+            verified_at: new Date().toISOString(),
+          }],
+        };
+      }
     }
     const enriched = enrichRequestedTopicWithPillars(topic, ownContext.visualIdentity);
 
