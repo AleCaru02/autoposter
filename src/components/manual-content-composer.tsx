@@ -48,7 +48,6 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     }).catch(() => {
       setSourceRows([]);
       setSourceKey("");
-      setError("Configura almeno una fonte autorizzata nella sezione Brand.");
     });
   }, [props.profileId, props.profileType]);
 
@@ -67,7 +66,6 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     if (!topic.trim()) { setError("Descrivi il tema del contenuto."); return; }
     if (!providers.length) { setError("Scegli almeno un social."); return; }
     if (props.profileType === "PERSONAL_BRAND" && !objective.trim()) { setError("Per il Personal Brand indica l’obiettivo editoriale."); return; }
-    if (props.profileType === "PERSONAL_BRAND" && !selectedSource) { setError("Configura e scegli una fonte autorizzata per il Personal Brand."); return; }
     const request: ManualGenerationRequest = {
       profileId: props.profileId,
       topic,
@@ -116,9 +114,9 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
   return <section className="panel manual-composer" aria-labelledby="manual-composer-title">
     <div className="manual-composer-heading"><div><p className="eyebrow">Creazione guidata</p><h2 id="manual-composer-title">Crea un contenuto ora</h2><p>Scegli tema, social e formato. Il copy userà il brand e le informazioni confermate del sito di {props.profileName}.</p></div><Sparkles size={23} /></div>
     <div className="manual-composer-form">
-      {props.profileType === "PERSONAL_BRAND" && <label className="full">Fonte e pillar<select value={sourceKey} onChange={(event) => { setSourceKey(event.target.value); clearGenerated(); }}>{activeSources.length ? activeSources.map((row) => { const profile = props.profiles.find((item) => item.id === row.source_profile_id); const key = `${row.source_profile_id}::${row.pillar}`; return <option key={row.id} value={key}>{profile?.name ?? "Attività sorgente"} · {row.pillar}</option>; }) : <option value="">Nessuna fonte autorizzata</option>}</select></label>}
+      {props.profileType === "PERSONAL_BRAND" && <label className="full">Dati da usare <span>(opzionale)</span><select value={sourceKey} onChange={(event) => { setSourceKey(event.target.value); clearGenerated(); }}><option value="">Solo {props.profileName}: sito, brand e informazioni aggiuntive</option>{activeSources.map((row) => { const profile = props.profiles.find((item) => item.id === row.source_profile_id); const key = `${row.source_profile_id}::${row.pillar}`; return <option key={row.id} value={key}>Aggiungi fatti verificati da {profile?.name ?? "attività collegata"}</option>; })}</select></label>}
       <label className="full">Di cosa vuoi parlare?<textarea rows={3} value={topic} maxLength={1000} placeholder="Es. Tre errori da evitare quando si affitta una casa" onChange={(event) => { setTopic(event.target.value); clearGenerated(); }} /></label>
-      <label className="full">Obiettivo <span>(opzionale)</span><input value={objective} maxLength={500} placeholder="Es. Ricevere richieste di consulenza" onChange={(event) => { setObjective(event.target.value); clearGenerated(); }} /></label>
+      <label className="full">Obiettivo {props.profileType === "PERSONAL_BRAND" ? <span>(richiesto)</span> : <span>(opzionale)</span>}<input value={objective} maxLength={500} placeholder="Es. Ricevere richieste di consulenza" onChange={(event) => { setObjective(event.target.value); clearGenerated(); }} /></label>
       <fieldset className="full"><legend>Social</legend><div className="manual-choice-grid providers">{PROVIDERS.map((provider) => <label key={provider.value} className={providers.includes(provider.value) ? "selected" : ""}><input type="checkbox" checked={providers.includes(provider.value)} onChange={() => toggleProvider(provider.value)} /><span>{provider.label}</span></label>)}</div></fieldset>
       <fieldset className="full"><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); clearGenerated(); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); clearGenerated(); }} /><span>Storia</span></label><label className="disabled" title="Richiede più visual distinti"><input type="radio" name="manual-format" disabled /><span>Carosello · in preparazione</span></label></div></fieldset>
     </div>
