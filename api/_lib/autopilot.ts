@@ -10,7 +10,7 @@ import { generateRoutedImage } from "./routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./image-generation-metering.js";
 import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAiEvent } from "./text-generation-metering.js";
 import type { ContentType } from "./content-agents.js";
-import { buildAutopilotLearningInstruction, learnedFormatPreference, learnedTimingPreference, type LearnedTimingPreference, type PersistedLearningInsight } from "./learning-guidance.js";
+import { buildAutopilotLearningInstruction, learnedFormatPreference, learnedTimingPreference, usableLearningDecisions, type LearnedTimingPreference, type PersistedLearningInsight } from "./learning-guidance.js";
 import { ActivityBudgetEngine } from "./activity-budget.js";
 import { assetContentHashFromBase64, findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
 import { decideMasterEditorial, type MasterEditorialDecision } from "./master-editorial-brain.js";
@@ -54,6 +54,22 @@ export const AUTOPILOT_PUBLISH_FORMATS: Record<SocialProvider, SocialFormat[]> =
 function asObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function summary(value: unknown) { const text = asObject(value).summary; return typeof text === "string" && text.trim() ? text.trim() : null; }
 function strings(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : []; }
+function stringSignals(value: unknown, max = 16) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const visit = (current: unknown, depth: number) => {
+    if (result.length >= max || depth > 3 || current == null) return;
+    if (typeof current === "string") {
+      const cleaned = current.trim();
+      if (cleaned && !seen.has(cleaned)) { seen.add(cleaned); result.push(cleaned); }
+      return;
+    }
+    if (Array.isArray(current)) { for (const item of current) visit(item, depth + 1); return; }
+    if (typeof current === "object") { for (const item of Object.values(current as Record<string, unknown>)) visit(item, depth + 1); }
+  };
+  visit(value, 0);
+  return result;
+}
 function normalizeSlots(value: unknown): PreferredSlot[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>(); const slots: PreferredSlot[] = [];
@@ -139,7 +155,59 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const learning=await activeLearningInsights(sql,profile.id);const planItem=selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,AUTOPILOT_PUBLISH_FORMATS[provider],learning);const format=chooseAutopilotPublishFormat(provider,count,planItem?.format,learnedFormat);const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;const objective=planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   if(profile.profile_type==="PERSONAL_BRAND"&&!objective)throw new Error("PERSONAL_BRAND_OBJECTIVE_REQUIRED");
-  const configuredResearch=normalizeEditorialResearchMode(asObject(strategy?.platform_strategy).researchMode);const researchMode=planItem?.intent==="NEWS"?"NEWS":configuredResearch;const pillar=buildAutopilotPillarInstruction(loaded.visualIdentity,topics,count);const master=decideMasterEditorial({topic:planItem?.topicDirection||pillar.instruction||"",objective,funnelStage:planItem?.funnelStage??"AWARENESS",contentType:planItem?.contentType??chooseAutopilotContentType(format),intent:planItem?.intent??"TIP",preferredProvider:provider,format,localBusinessRelevance:Boolean(context.websiteUrl||context.description||context.serviceArea),professionalRelevance:/business|profession|azienda|b2b|property|immobil/i.test(`${profile.industry??""} ${context.description??""} ${context.target??""}`),hasVerifiableContext:Boolean(context.confirmedWebsiteContent.length)});master.timing={scheduledAt,source:timingSource};if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
+  const configuredResearch=normalizeEditorialResearchMode(asObject(strategy?.platform_strategy).researchMode);
+  const researchMode=planItem?.intent==="NEWS"?"NEWS":configuredResearch;
+  const pillar=buildAutopilotPillarInstruction(loaded.visualIdentity,topics,count);
+  const editorialBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).snapshot(profile.id);
+  const [connectionRows,calendarRows,metricRows,assetRows]=await Promise.all([
+    sql`select provider from public.social_connections where profile_id=${profile.id}::uuid and status='ACTIVE' and provider in ('INSTAGRAM','FACEBOOK','LINKEDIN','GBP') order by provider` as unknown as Array<{provider:SocialProvider}>,
+    sql`select count(*)::int as count from public.publication_jobs where profile_id=${profile.id}::uuid and scheduled_at>=now() and state in ('SCHEDULED','BLOCKED_APPROVAL','QUEUED')` as unknown as CountRow[],
+    sql`select count(*)::int as count from public.metric_snapshots where profile_id=${profile.id}::uuid and source='PROVIDER_API'` as unknown as CountRow[],
+    sql`select count(*)::int as count from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' and (quality_status is null or quality_status='PASS') and storage_url is not null` as unknown as CountRow[],
+  ]);
+  const audienceSignals=stringSignals([context.target,loaded.personalBrand?.audience]);
+  const pillarSignals=stringSignals([pillar.pillar?.name,loaded.personalBrand?.pillar]);
+  const relevantEvents=planItem&&(planItem.intent==="NEWS"||planItem.intent==="SEASONAL")?[planItem.topicDirection]:[];
+  const master=decideMasterEditorial({
+    topic:planItem?.topicDirection||pillar.instruction||"",
+    objective,
+    audience:audienceSignals[0]??null,
+    pillar:pillarSignals[0]??null,
+    funnelStage:planItem?.funnelStage??"AWARENESS",
+    contentType:planItem?.contentType??chooseAutopilotContentType(format),
+    intent:planItem?.intent??"TIP",
+    preferredProvider:provider,
+    format,
+    localBusinessRelevance:Boolean(context.websiteUrl||context.description||context.serviceArea),
+    professionalRelevance:/business|profession|azienda|b2b|property|immobil/i.test(`${profile.industry??""} ${context.description??""} ${context.target??""}`),
+    hasVerifiableContext:Boolean(context.confirmedWebsiteContent.length),
+    context:{
+      profileType:profile.profile_type,
+      personalBrand:Boolean(loaded.personalBrand),
+      brandSignalCount:stringSignals([context.description,context.businessModel,context.location,context.serviceArea,context.tone,context.userContext]).length,
+      sitePageCount:context.confirmedWebsiteContent.length,
+      sourceCount:context.confirmedWebsiteContent.length+(loaded.personalBrand?.sourceRefs.length??0),
+      industry:profile.industry,
+      goals:stringSignals([objective,...context.goals]),
+      audience:audienceSignals,
+      pillars:pillarSignals,
+      connectedProviders:connectionRows.map((row)=>row.provider),
+      recentContentCount:topics.length,
+      calendarScheduledCount:Number(calendarRows[0]?.count??0),
+      budget:{
+        band:editorialBudget.band,
+        remainingEur:editorialBudget.remainingEur,
+        higgsfieldRemainingEur:editorialBudget.higgsfieldRemainingEur,
+        otherAiRemainingEur:editorialBudget.otherAiRemainingEur,
+      },
+      relevantEvents,
+      analyticsSampleCount:Number(metricRows[0]?.count??0),
+      learningSignalCount:usableLearningDecisions(profile.id,learning).length,
+      reusableAssetCount:Number(assetRows[0]?.count??0),
+    },
+  });
+  master.timing={scheduledAt,source:timingSource};
+  if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
   const baseTopicRequest=effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);const topicRequest=[baseTopicRequest,learningInstruction].filter(Boolean).join(" ");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
   const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
