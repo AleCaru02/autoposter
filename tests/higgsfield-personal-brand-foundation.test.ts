@@ -5,6 +5,8 @@ import {
   IDENTITY_QA_DIMENSIONS,
   identityQaVerdict,
   routeVisualProvider,
+  inferVisualIdentityRequirements,
+  safeVisualBriefForDecision,
 } from "../api/_lib/visual-provider-routing.js";
 
 for (const key of [
@@ -95,6 +97,17 @@ const standard = routeVisualProvider({
 assert.equal(standard.provider, "OPENAI");
 assert.equal(standard.requiresIdentityQa, false);
 
+const inferred = inferVisualIdentityRequirements({
+  profileType: "PERSONAL_BRAND",
+  profileName: "Bianca Lopes",
+  visualBrief: "Ritratto lifestyle della persona in una nuova scena editoriale",
+});
+assert.equal(inferred.personIsPrimarySubject, true);
+assert.equal(inferred.requiresIdentityConsistency, true);
+assert.equal(inferred.requiresNewScene, true);
+const safeFallback = safeVisualBriefForDecision(noSoul, "Ritratto lifestyle");
+assert.match(safeFallback, /NON raffigurare persone/);
+
 const perfectScores = Object.fromEntries(IDENTITY_QA_DIMENSIONS.map((key) => [key, 0.95])) as Parameters<typeof identityQaVerdict>[0];
 assert.equal(identityQaVerdict(perfectScores).verdict, "PASS");
 const badHands = { ...perfectScores, hands: 0.2, fingers: 0.2 };
@@ -129,6 +142,30 @@ assert.match(activityBudget, /higgsfieldRemainingEur/);
 assert.match(activityBudget, /otherAiRemainingEur/);
 assert.match(activityBudget, /AI_BUDGET_BUCKET_EXHAUSTED/);
 assert.match(activityBudget, /costBucket\?: "HIGGSFIELD" \| "OTHER_AI"/);
+
+
+const routingMigration = fs.readFileSync("db/migrations/20260929_zz_visual_provider_routing.sql", "utf8");
+for (const column of ["visual_provider","visual_model","visual_decision_reason","visual_estimated_cost_eur","visual_actual_cost_eur","identity_qa_status"]) {
+  assert.match(routingMigration, new RegExp(`ADD COLUMN IF NOT EXISTS ${column}`), `${column} must be persisted`);
+}
+assert.match(routingMigration, /REAL_ASSET','OPENAI','HIGGSFIELD/);
+
+const worker = fs.readFileSync("cloudflare/worker.ts", "utf8");
+assert.match(worker, /resolveVisualProviderRuntime/);
+assert.match(worker, /costBucket: "OTHER_AI"/, "OpenAI images must be constrained by the €20 Other AI bucket");
+assert.match(worker, /HIGGSFIELD_RUNTIME_NOT_VERIFIED/);
+assert.match(worker, /providerCallExecuted: false/, "uncertified Higgsfield path must not make a provider call");
+assert.match(worker, /identity_fallback/);
+
+const autopilot = fs.readFileSync("api/_lib/autopilot.ts", "utf8");
+assert.match(autopilot, /resolveVisualProviderRuntime/);
+assert.match(autopilot, /costBucket:"OTHER_AI"/);
+assert.match(autopilot, /visual_provider='REAL_ASSET'/);
+assert.match(autopilot, /autopilot-image-higgsfield-pending/);
+
+const assets = fs.readFileSync("api/_lib/asset-intelligence.ts", "utf8");
+assert.match(assets, /identityCritical/);
+assert.match(assets, /metadata\.identity_fallback === true/, "identity fallback assets must not mask future identity-consistent routing");
 
 const wrangler = fs.readFileSync("wrangler.jsonc", "utf8");
 assert.match(wrangler, /"SAFE_MODE": "true"/);
