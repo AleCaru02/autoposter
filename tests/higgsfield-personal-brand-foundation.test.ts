@@ -73,7 +73,8 @@ const noBudget = routeVisualProvider({
   requiresNewScene: true,
   virtualShoot: false,
   higgsfieldConfigured: true,
-  higgsfieldRuntimeEnabled: true,\n  soulIdentityState: "COMPLETED",
+  higgsfieldRuntimeEnabled: true,
+  soulIdentityState: "COMPLETED",
   higgsfieldBudgetRemainingEur: 0,
   estimatedHiggsfieldCostEur: 0.01,
 });
