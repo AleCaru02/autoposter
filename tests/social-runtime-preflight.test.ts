@@ -16,6 +16,7 @@ assert.equal(vars.APP_BASE_URL, "https://autoposter.02alessandrocaruso.workers.d
 assert.equal(vars.META_GRAPH_VERSION, "v26.0", "Meta Graph version must be explicit in production config");
 assert.equal(vars.LINKEDIN_API_VERSION, "202608", "LinkedIn API version must be explicit in production config");
 assert.equal(vars.LINKEDIN_ORGANIZATION_ACCESS, "false", "organization mode must remain disabled until provider approval is explicitly available");
+assert.match(vars.GOOGLE_CLIENT_ID ?? "", /^[\w-]+\.apps\.googleusercontent\.com$/, "Google OAuth Client ID must be a public Worker var");
 assert.equal(config.keep_vars, true, "Cloudflare dashboard bindings not declared in wrangler must be preserved");
 
 for (const name of [
@@ -23,7 +24,6 @@ for (const name of [
   "SOCIAL_TOKEN_KEY",
   "META_APP_SECRET",
   "LINKEDIN_CLIENT_SECRET",
-  "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
 ]) {
   assert.match(deployWorkflow, new RegExp(`['"]${name}['"]`), `${name} must be part of the production binding preflight`);
@@ -33,13 +33,15 @@ for (const sourceName of [
   "SOCIAL_TOKEN_KEY_SOURCE",
   "META_APP_SECRET_SOURCE",
   "LINKEDIN_CLIENT_SECRET_SOURCE",
-  "GOOGLE_CLIENT_ID_SOURCE",
   "GOOGLE_CLIENT_SECRET_SOURCE",
 ]) {
   assert.match(deployWorkflow, new RegExp(sourceName), `${sourceName} must be optionally provisioned from GitHub secrets when available`);
 }
 
 assert.match(deployWorkflow, /wrangler secret list --format json/, "deploy must verify the real Worker secret binding names after deployment");
+assert.match(deployWorkflow, /workers\/scripts\/autoposter\/settings/, "deploy must verify the real Worker public config after deployment");
+assert.match(deployWorkflow, /GOOGLE_CLIENT_ID must be a public Worker var, not a Worker secret/, "deploy must reject a Google Client ID provisioned as a secret");
+assert.doesNotMatch(deployWorkflow, /GOOGLE_CLIENT_ID_SOURCE/, "Google Client ID must not be provisioned from a GitHub secret");
 assert.match(socialSource, /const callbackUri = `\$\{baseUrl\(env, request\.url\)\}\/api\/social\/callback\/\$\{provider\.toLowerCase\(\)\}`;/, "OAuth callback URI must be generated from the canonical server base URL");
 assert.match(socialSource, /if \(!await canAccessProfile\(profileId, token\)\) return socialJson\(\{ error: "PROFILE_NOT_FOUND" \}, 404\);/, "CONNECT must remain profile-isolated");
 assert.match(socialSource, /if \(!await canAccessProfile\(profileId, auth\)\) return socialJson\(\{ error: "PROFILE_NOT_FOUND" \}, 404\);/, "SELECT and DISCONNECT must remain profile-isolated");
