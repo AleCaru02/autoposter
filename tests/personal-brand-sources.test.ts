@@ -54,10 +54,13 @@ assert.match(sourceRuntime, /where s\.personal_brand_profile_id=\$\{personalBran
 assert.match(sourceRuntime, /source\.owner_auth_user_id=pb\.owner_auth_user_id/);
 assert.match(sourceRuntime, /source\.profile_type='BUSINESS'/);
 assert.match(sourceRuntime, /pb\.profile_type='PERSONAL_BRAND'/);
-assert.match(sourceRuntime, /throw new Error\("PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED"\)/);
+assert.match(sourceRuntime, /if \(sourceId \|\| pillar\) throw new Error\("PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED"\)/, "explicit unauthorized source requests must still fail");
+assert.match(sourceRuntime, /return null;/, "Personal Brand sources must be optional when none is explicitly requested");
 assert.match(generateText, /loadEditorialProfile\(sql, profileId, authUserId\)/, "manual API must verify profile ownership server-side");
 assert.match(generateText, /resolvePersonalBrandSource\(sql, profileId, requestedSourceProfileId, requestedPillar\)/, "manual API must resolve only authorized source relationships");
-assert.match(autopilot, /resolvePersonalBrandSource\(sql,profile\.id\)/, "autopilot must resolve an authorized source server-side");
+assert.match(autopilot, /resolvePersonalBrandSource\(sql,profile\.id\)/, "autopilot may resolve an authorized source server-side");
+assert.match(autopilot, /relation:null/, "autopilot must support own-profile Personal Brand context without a linked activity source");
+assert.match(autopilot, /OWN_PROFILE/, "autopilot must persist own-profile provenance when no external activity is linked");
 
 // Personal Brand identity stays independent; source contributes factual context.
 assert.match(sourceRuntime, /loadProfileBrandContext\(sql, personalBrand\)/);
@@ -69,6 +72,8 @@ assert.match(openaiText, /Non attribuire al Personal Brand servizi, sedi o risul
 
 // Manual UI/API use one shared source+pillar contract.
 assert.match(composer, /sourceProfileId: selectedSource\?\.source_profile_id \?\? null/);
+assert.doesNotMatch(composer, /Configura e scegli una fonte autorizzata/, "manual Personal Brand creation must not require a linked activity source");
+assert.match(composer, /Solo \{props\.profileName\}: sito, brand e informazioni aggiuntive/, "UI must default to own Personal Brand context");
 assert.match(composer, /pillar: selectedSource\?\.pillar \?\? null/);
 assert.match(manualGeneration, /sourceProfileId: input\.sourceProfileId \?\? null/);
 assert.match(manualGeneration, /pillar: input\.pillar \?\? null/);
