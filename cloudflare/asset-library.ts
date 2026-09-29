@@ -63,7 +63,7 @@ function text(value: unknown) {
   return typeof value === "string" ? value.normalize("NFKC").toLowerCase() : "";
 }
 
-async function authContext(request: Request, env: Env) {
+async function authContext(request: Request, env: Env): Promise<{ error: Response } | { sql: ReturnType<typeof neon>; authUserId: string }> {
   if (!env.DATABASE_URL) return { error: json({ error: "DATABASE_NOT_CONFIGURED" }, 503) } as const;
   const token = bearerValue(request.headers.get("authorization"));
   if (!token) return { error: json({ error: "UNAUTHENTICATED" }, 401) } as const;
