@@ -1,9 +1,12 @@
+import { neon } from "@neondatabase/serverless";
 import { findNearDuplicate, type ContentDedupeCandidate } from "../api/_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "../api/_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "../api/_lib/editorial-research.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
+import { verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
+import { buildPersonalBrandEditorialContext, loadEditorialProfile, loadProfileBrandContext, resolvePersonalBrandSource } from "../api/_lib/personal-brand-sources.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -72,6 +75,8 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   const topic = typeof body.topic === "string" ? body.topic.trim().slice(0, 1_000) : "";
   const objective = typeof body.objective === "string" ? body.objective.trim().slice(0, 500) : null;
   const researchMode = normalizeEditorialResearchMode(body.researchMode);
+  const requestedSourceProfileId = typeof body.sourceProfileId === "string" ? body.sourceProfileId.trim() || null : null;
+  const requestedPillar = typeof body.pillar === "string" ? body.pillar.trim().slice(0, 160) || null : null;
   const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
   const providers = Array.isArray(body.providers) ? body.providers.filter((value): value is SocialProvider => typeof value === "string" && VALID_PROVIDERS.has(value as SocialProvider)) : [];
@@ -83,26 +88,70 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
   let activeEventId: string | null = null;
   let logicalCommitted = false;
   try {
-    const profile = (await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,website_url,industry&limit=1`, token))[0];
-    if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-    const brand = (await rows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=description,business_model,location,service_area,target_audience,tone_of_voice,goals,visual_identity,user_context&limit=1`, token))[0] ?? null;
-    const scan = (await rows<ScanRow>(`website_scans?profile_id=eq.${encodeURIComponent(profileId)}&state=in.(COMPLETE,COMPLETE_WITH_WARNINGS,PARTIAL)&select=id&order=created_at.desc&limit=1`, token))[0];
-    const pages = scan ? await rows<PageRow>(`website_pages?scan_id=eq.${encodeURIComponent(scan.id)}&profile_id=eq.${encodeURIComponent(profileId)}&status=eq.ANALYZED&select=url,title,content_text&order=depth.asc&limit=160`, token) : [];
-    const context: BrandContext = {
-      profileName: profile.name,
-      industry: profile.industry,
-      websiteUrl: profile.website_url,
-      description: brand?.description ?? null,
-      businessModel: brand?.business_model ?? null,
-      location: brand?.location ?? null,
-      serviceArea: brand?.service_area ?? null,
-      target: summaryField(brand?.target_audience),
-      tone: summaryField(brand?.tone_of_voice),
-      goals: Array.isArray(brand?.goals) ? brand.goals.filter((value): value is string => typeof value === "string") : [],
-      userContext: brand?.user_context ?? null,
-      confirmedWebsiteContent: pages.filter((page) => Boolean(page.content_text)).map((page) => ({ url: page.url, title: page.title, text: page.content_text ?? "" })),
+    const authUserId = await verifiedCustomerAuthUserId(token, env.DATABASE_URL);
+    if (!authUserId) return json({ error: "AUTH_REQUIRED" }, 401);
+    const sql = neon(env.DATABASE_URL);
+    const profile = await loadEditorialProfile(sql, profileId, authUserId);
+    const ownContext = await loadProfileBrandContext(sql, profile);
+    let context: BrandContext = ownContext.brand;
+    let editorialContext: {
+      profileType: "BUSINESS" | "PERSONAL_BRAND";
+      pillar: string | null;
+      sourceProfileId: string | null;
+      sourceProfileIds: string[];
+      sourceRefs: unknown[];
+      audience: Record<string, unknown>;
+      factProvenance: unknown[];
+    } = {
+      profileType: profile.profile_type,
+      pillar: null,
+      sourceProfileId: null,
+      sourceProfileIds: [],
+      sourceRefs: [],
+      audience: ownContext.audience,
+      factProvenance: [],
     };
-    const enriched = enrichRequestedTopicWithPillars(topic, brand?.visual_identity);
+
+    if (profile.profile_type === "PERSONAL_BRAND") {
+      if (!objective) return json({ error: "PERSONAL_BRAND_OBJECTIVE_REQUIRED" }, 400);
+      const relation = await resolvePersonalBrandSource(sql, profileId, requestedSourceProfileId, requestedPillar);
+      if (relation) {
+        const resolved = await buildPersonalBrandEditorialContext(sql, profile, relation);
+        if (!Object.keys(resolved.audience).length) return json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" }, 400);
+        context = resolved.brand;
+        editorialContext = {
+          profileType: "PERSONAL_BRAND",
+          pillar: relation.pillar,
+          sourceProfileId: relation.source_profile_id,
+          sourceProfileIds: [relation.source_profile_id],
+          sourceRefs: resolved.sourceRefs,
+          audience: resolved.audience,
+          factProvenance: resolved.factProvenance,
+        };
+      } else {
+        if (!Object.keys(ownContext.audience).length) return json({ error: "PERSONAL_BRAND_AUDIENCE_REQUIRED" }, 400);
+        const ownPillar = profile.industry?.trim() || "Personal Brand";
+        editorialContext = {
+          profileType: "PERSONAL_BRAND",
+          pillar: ownPillar,
+          sourceProfileId: null,
+          sourceProfileIds: [],
+          sourceRefs: ownContext.brand.confirmedWebsiteContent.map((page) => ({
+            type: "OWN_WEBSITE_PAGE",
+            url: page.url,
+            title: page.title,
+          })),
+          audience: ownContext.audience,
+          factProvenance: [{
+            source_type: "OWN_PROFILE",
+            profile_id: profile.id,
+            pillar: ownPillar,
+            verified_at: new Date().toISOString(),
+          }],
+        };
+      }
+    }
+    const enriched = enrichRequestedTopicWithPillars(topic, ownContext.visualIdentity);
 
     const meter = new TextGenerationMetering(env.DATABASE_URL);
     activeMeter = meter;
@@ -110,7 +159,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       profileId,
       source: "MANUAL",
       operationIdentity,
-      requestFingerprint: { topic, objective, providers, formats, researchMode },
+      requestFingerprint: { topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext.sourceProfileId, pillar: editorialContext.pillar },
     });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
     if (reservation.status === "COMPLETED") return json(reservation.cached.response, 200);
@@ -141,6 +190,8 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       editorial_angle: result.content.editorialAngle,
       external_sources: result.externalSources,
       verification: result.verification,
+      personal_brand_source_profile_id: editorialContext.sourceProfileId,
+      personal_brand_pillar: editorialContext.pillar,
     }));
 
     const recent = await recentContentForDedupe(profileId, token);
@@ -156,7 +207,15 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       return json({ error: "DUPLICATE_CONTENT", duplicate: { score: Number(bestDuplicate.score.toFixed(3)), matchedContentId: bestDuplicate.candidate.id ?? null } }, 409);
     }
 
-    const responseBody = { content: result.content, model: result.model, responseId: result.responseId, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
+    const responseBody = {
+      content: result.content,
+      model: result.model,
+      responseId: result.responseId,
+      research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
+      usage: result.usage,
+      budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
+      editorialContext: { ...editorialContext, externalSources: result.externalSources },
+    };
     await meter.storeResult(eventId, { response: responseBody });
     await meter.commit(eventId);
     logicalCommitted = true;
@@ -167,6 +226,8 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_GENERATION_ERROR";
     console.error("cloudflare-generate-text", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
+    if (detail === "PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED") return json({ error: detail }, 403);
+    if (detail === "PROFILE_NOT_FOUND") return json({ error: detail }, 404);
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500);
   }
 }
