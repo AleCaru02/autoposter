@@ -14,6 +14,7 @@ export type VisualRoutingReasonCode =
   | "HIGGSFIELD_NOT_CONFIGURED"
   | "SOUL_ID_NOT_READY"
   | "HIGGSFIELD_BUDGET_EXHAUSTED"
+  | "HIGGSFIELD_RUNTIME_NOT_CERTIFIED"
   | "IDENTITY_NOT_REQUIRED_USE_OPENAI"
   | "BUSINESS_VISUAL_USE_OPENAI";
 
@@ -34,6 +35,7 @@ export type VisualRoutingInput = {
   requiresNewScene: boolean;
   virtualShoot: boolean;
   higgsfieldConfigured: boolean;
+  higgsfieldRuntimeEnabled?: boolean;
   soulIdentityState: SoulIdentityState;
   higgsfieldBudgetRemainingEur: number;
   estimatedHiggsfieldCostEur: number;
@@ -92,6 +94,17 @@ export function routeVisualProvider(input: VisualRoutingInput): VisualRoutingDec
       provider: "OPENAI",
       reasonCode: "SOUL_ID_NOT_READY",
       reason: "La Soul ID del Personal Brand non è pronta; uso un visual alternativo senza persona.",
+      requiresIdentityQa: false,
+      fallbackApplied: true,
+      mustAvoidSyntheticPerson: true,
+    };
+  }
+
+  if (input.higgsfieldRuntimeEnabled !== true) {
+    return {
+      provider: "OPENAI",
+      reasonCode: "HIGGSFIELD_RUNTIME_NOT_CERTIFIED",
+      reason: "Il runtime Higgsfield non è ancora certificato per richieste reali; uso un visual alternativo senza persona.",
       requiresIdentityQa: false,
       fallbackApplied: true,
       mustAvoidSyntheticPerson: true,
@@ -180,4 +193,35 @@ export function identityQaVerdict(scores: IdentityQaScores): IdentityQaResult {
 
   const verdict = identityScore >= 0.8 && qualityScore >= 0.76 && failedDimensions.length === 0 ? "PASS" : "BLOCK";
   return { verdict, identityScore, qualityScore, failedDimensions };
+}
+
+
+export type InferredVisualIdentityIntent = {
+  personIsPrimarySubject: boolean;
+  requiresIdentityConsistency: boolean;
+  virtualShoot: boolean;
+};
+
+function normalizedVisualText(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/**
+ * Deterministic classifier for routing only. It does not call an AI provider.
+ * False negatives prefer OpenAI/real assets; false positives still fail closed
+ * if Soul ID/runtime/budget are unavailable.
+ */
+export function inferVisualIdentityIntent(input: { profileName: string; visualBrief: string }): InferredVisualIdentityIntent {
+  const text = normalizedVisualText(`${input.profileName} ${input.visualBrief}`);
+  const nameTokens = normalizedVisualText(input.profileName).split(/[^a-z0-9]+/).filter((token) => token.length >= 3);
+  const nameMentioned = nameTokens.some((token) => normalizedVisualText(input.visualBrief).includes(token));
+  const personCue = /\b(persona|personaggio|volto|ritratto|selfie|creator|fondatric|imprenditor|consulent|professionist|donna|uomo|modella|modello|soggetto umano|personal brand)\b/.test(text);
+  const identityCue = /\b(coerent|identita|somiglianza|stessa persona|volto riconoscibile|personal brand|ritratto|selfie|shooting)\b/.test(text);
+  const virtualShoot = /\b(shooting|servizio fotografico|editorial|lifestyle|ambientazione|scena nuova|ritratto ambientato)\b/.test(text);
+  const personIsPrimarySubject = nameMentioned || personCue;
+  return {
+    personIsPrimarySubject,
+    requiresIdentityConsistency: personIsPrimarySubject && (nameMentioned || identityCue),
+    virtualShoot: personIsPrimarySubject && virtualShoot,
+  };
 }
