@@ -11,9 +11,14 @@ const workerProfileBootstrap = fs.readFileSync("cloudflare/profile-bootstrap.ts"
 const onboardingFlow = fs.readFileSync("src/lib/onboarding-flow.ts", "utf8");
 const profilesPage = fs.readFileSync("src/pages/profiles-page.tsx", "utf8");
 
-assert.match(token, /authClient\.token\(/, "authenticated API calls must use the Managed Auth token endpoint");
+assert.match(token, /authClient\.token\(/, "authenticated API calls must retain the Managed Auth token endpoint fallback");
+assert.match(token, /tokenFromAuthSession/, "authenticated calls must be able to reuse the already verified browser session token");
+assert.match(token, /if \(preferredToken\?\.trim\(\)\) return preferredToken\.trim\(\)/, "a valid session token must win before requesting a second token");
 assert.match(token, /"X-Force-Fetch": "1"/, "token retrieval must bypass stale SDK cache");
 assert.doesNotMatch(token, /getJWTToken/, "the failing legacy JWT helper must not return to onboarding");
+assert.match(profiles, /authClient\.useSession\(\)/, "profile bootstrap must observe the same authenticated session that guards the app route");
+assert.match(profiles, /tokenFromAuthSession\(authSession\.data\)/, "profile bootstrap must reuse the verified session token after reload");
+assert.match(profiles, /fetchBootstrappedProfiles\(sessionToken\)/, "profile reload must pass the session token into the bootstrap request");
 assert.match(profiles, /authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/onboarding-provision"/, "profile creation must authenticate before server provisioning");
 assert.doesNotMatch(profiles, /getJWTToken|from\(["']profiles["']\)\.insert/, "onboarding must neither use the legacy token helper nor insert profiles directly");
 assert.match(entry, /path === "\/api\/onboarding-provision"\) return handleWorkerOnboardingProvision/);
