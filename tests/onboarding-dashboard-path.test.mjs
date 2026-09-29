@@ -45,7 +45,8 @@ assert.match(onboarding, /advanceBrandProgressTo\(100, 16\)/, "brand completion 
 assert.doesNotMatch(onboarding, /setBrandProgress\((?:15|35|85|95|100)\)/, "brand progress must not jump between hard-coded percentages");
 assert.match(profiles, /PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = \[0, 250, 700\]/, "hard refresh must absorb the short auth/session warmup race automatically");
 assert.match(profiles, /for \(let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS\.length; attempt \+= 1\)/, "profile bootstrap must retry a bounded number of times");
-assert.match(profiles, /const token = await authenticatedApiToken\(\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "every bootstrap attempt must obtain a fresh Managed Auth token before the same-origin server request");
+assert.match(profiles, /authenticatedApiToken\(attempt === 0 \? preferredToken : null\)/, "the first bootstrap attempt must reuse the verified session token while retries obtain a fresh Managed Auth token");
+assert.match(profiles, /authenticatedApiToken\(attempt === 0 \? preferredToken : null\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "profile bootstrap must authenticate before every same-origin server request");
 assert.match(profiles, /return body\.profiles/, "an authoritative successful empty profile list must return immediately instead of being retried");
 assert.match(profiles, /authorization: \`Bearer \$\{token\}\`/, "profile bootstrap request must carry the verified bearer token explicitly");
 assert.doesNotMatch(profiles, /authenticatedProfileRows|NEON_DATA_API_URL/, "profile existence must not be inferred from a direct client Data API read after hard refresh");
