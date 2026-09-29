@@ -6,6 +6,7 @@ import { runFullWebsiteScan } from "../lib/full-website-scan";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
 import { PersonalBrandSourcesPanel } from "../components/personal-brand-sources-panel";
+import { PersonalBrandVisualIdentityPanel } from "../components/personal-brand-visual-identity-panel";
 
 type BrandRow = {
   profile_id: string;
@@ -237,7 +238,7 @@ export function BrandPage() {
       <label className="brand-context-field"><span>Dettagli aggiuntivi</span><textarea rows={7} maxLength={5000} aria-describedby="brand-context-helper" value={draft.userContext} placeholder="Es. servizi particolari, aree servite, modalità di lavoro, punti di forza o informazioni che non compaiono sul sito..." onChange={(event) => patch("userContext", event.target.value)} onBlur={() => void autosave.flush().catch(() => undefined)} /></label>
       <div className="brand-context-meta" id="brand-context-helper"><div><p>Non inserire password, chiavi API o dati sensibili.</p><span>{draft.userContext.length}/5000</span></div><div className={`autosave-mini ${contextSaveClass}`} role="status" aria-live="polite"><span>Salvataggio automatico</span><strong>{contextSaveLabel}</strong></div></div>
     </section>
-    {selectedProfile.profile_type === "PERSONAL_BRAND" && <PersonalBrandSourcesPanel personalBrandProfileId={selectedProfile.id} profiles={profiles} />}
+    {selectedProfile.profile_type === "PERSONAL_BRAND" && <><PersonalBrandVisualIdentityPanel profileId={selectedProfile.id} /><PersonalBrandSourcesPanel personalBrandProfileId={selectedProfile.id} profiles={profiles} /></>}
     <section className="panel brand-goals-panel"><h2>Obiettivi</h2><p className="section-hint">Seleziona gli obiettivi principali e, se serve, disattiva quelli specifici rilevati dal sito.</p>
       <div className="brand-goal-section"><small>Obiettivi principali</small><div className="goal-options">{primaryGoals.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} aria-pressed={draft.goals.includes(goal)} onClick={() => toggleGoal(goal)}>{goal}</button>)}</div></div>
       {specificGoals.length > 0 && <div className="brand-goal-section"><small>Obiettivi specifici rilevati</small><div className="specific-goals-list">{specificGoals.map((goal) => <button className="specific-goal-row" type="button" key={goal} aria-pressed={draft.goals.includes(goal)} onClick={() => toggleGoal(goal)}><span>{goal}</span><strong>{draft.goals.includes(goal) ? "Attivo" : "Disattivato"}</strong></button>)}</div></div>}

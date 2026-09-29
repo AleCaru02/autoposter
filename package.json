@@ -101,7 +101,8 @@
     "test:personal-brand-sources": "tsx tests/personal-brand-sources.test.ts",
     "test:social-runtime-preflight": "tsx tests/social-runtime-preflight.test.ts",
     "test:higgsfield-personal-brand": "tsx tests/higgsfield-personal-brand-foundation.test.ts",
-    "test:higgsfield-runtime": "tsx tests/higgsfield-runtime-boundary.test.ts"
+    "test:higgsfield-runtime": "tsx tests/higgsfield-runtime-boundary.test.ts",
+    "test:personal-brand-reference": "tsx tests/personal-brand-reference-preflight.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
