@@ -69,6 +69,15 @@ jobs:
       - { name: OpenAI text contract, run: "npm run test:openai" }
       - { name: OpenAI image contract, run: "npm run test:openai-image" }
       - { name: Build, run: "npm run build" }
+      - name: Higgsfield frontend secret absence regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -I -n -E 'HF_CREDENTIALS|hf-api-key|hf-secret' dist; then
+            echo "Higgsfield server-only identifiers leaked into frontend bundle or source maps" >&2
+            exit 1
+          fi
+          echo "Higgsfield frontend secret absence: PASS"
       - { name: Cloudflare dry run, run: "npx wrangler deploy --dry-run" }
       - name: Provision ephemeral admin bootstrap secret
         if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
@@ -162,6 +171,13 @@ jobs:
           }
           const settings = JSON.parse(fs.readFileSync('worker-settings.json', 'utf8'));
           const bindings = settings?.result?.bindings;
+          const higgsfieldPlainText = Array.isArray(bindings)
+            ? bindings.find((binding) => binding?.name === 'HF_CREDENTIALS' && binding?.type === 'plain_text')
+            : undefined;
+          if (higgsfieldPlainText) {
+            console.error('HF_CREDENTIALS must never be a plain_text Worker binding');
+            process.exit(1);
+          }
           const googleClientId = Array.isArray(bindings)
             ? bindings.find((binding) => binding?.name === 'GOOGLE_CLIENT_ID' && binding?.type === 'plain_text')
             : undefined;
