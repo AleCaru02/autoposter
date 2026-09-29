@@ -15,6 +15,7 @@ export type ReusableAssetCandidate = {
   format?: string | null;
   quality_status?: "PENDING" | "PASS" | "BLOCK" | "FAILED";
   identity_status?: "NOT_REQUIRED" | "PENDING" | "PASS" | "BLOCK";
+  reuse_count?: number;
   created_at?: string;
 };
 
