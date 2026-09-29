@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link2, Plus, Save, Trash2 } from "lucide-react";
+import { Link2, Plus, Trash2 } from "lucide-react";
 import type { Profile } from "../features/profiles/profile-context";
 import {
   deletePersonalBrandSource,
@@ -8,57 +8,13 @@ import {
   type PersonalBrandSourceRow,
 } from "../features/profiles/personal-brand-source-store";
 
-function lines(value: string) {
-  return [...new Set(value.split(/\n|,/).map((item) => item.trim()).filter(Boolean))];
-}
-
-type Draft = {
-  id: string | null;
-  sourceProfileId: string;
-  pillar: string;
-  enabled: boolean;
-  allowedTopics: string;
-  allowedClaims: string;
-  allowedCtas: string;
-  assetPolicy: PersonalBrandSourceRow["asset_policy"];
-  weight: number;
-  priority: number;
-};
-
-function blank(sourceProfileId = ""): Draft {
-  return {
-    id: null,
-    sourceProfileId,
-    pillar: "",
-    enabled: true,
-    allowedTopics: "",
-    allowedClaims: "",
-    allowedCtas: "",
-    assetPolicy: "REFERENCE_ONLY",
-    weight: 1,
-    priority: 100,
-  };
-}
-
-function fromRow(row: PersonalBrandSourceRow): Draft {
-  return {
-    id: row.id,
-    sourceProfileId: row.source_profile_id,
-    pillar: row.pillar,
-    enabled: row.enabled,
-    allowedTopics: row.allowed_topics.join("\n"),
-    allowedClaims: row.allowed_claims.join("\n"),
-    allowedCtas: row.allowed_ctas.join("\n"),
-    assetPolicy: row.asset_policy,
-    weight: row.weight,
-    priority: row.priority,
-  };
-}
-
 export function PersonalBrandSourcesPanel(props: { personalBrandProfileId: string; profiles: Profile[] }) {
-  const businesses = useMemo(() => props.profiles.filter((profile) => profile.profile_type === "BUSINESS" && profile.id !== props.personalBrandProfileId), [props.profiles, props.personalBrandProfileId]);
+  const businesses = useMemo(
+    () => props.profiles.filter((profile) => profile.profile_type === "BUSINESS" && profile.id !== props.personalBrandProfileId),
+    [props.profiles, props.personalBrandProfileId],
+  );
   const [rows, setRows] = useState<PersonalBrandSourceRow[]>([]);
-  const [draft, setDraft] = useState<Draft>(() => blank(businesses[0]?.id));
+  const [sourceProfileId, setSourceProfileId] = useState("");
   const [status, setStatus] = useState<"IDLE" | "LOADING" | "SAVING">("LOADING");
   const [error, setError] = useState<string | null>(null);
 
@@ -67,10 +23,9 @@ export function PersonalBrandSourcesPanel(props: { personalBrandProfileId: strin
     try {
       const next = await loadPersonalBrandSources(props.personalBrandProfileId);
       setRows(next);
-      setDraft((current) => current.id ? current : blank(current.sourceProfileId || businesses[0]?.id || ""));
       setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Impossibile caricare le fonti.");
+    } catch {
+      setError("Impossibile caricare le attività collegate. Riprova.");
     } finally {
       setStatus("IDLE");
     }
@@ -78,72 +33,97 @@ export function PersonalBrandSourcesPanel(props: { personalBrandProfileId: strin
 
   useEffect(() => { void load(); }, [props.personalBrandProfileId]);
 
-  async function save() {
-    if (!draft.sourceProfileId || !draft.pillar.trim()) {
-      setError("Scegli un’attività sorgente e indica il pillar.");
-      return;
+  const linkedIds = useMemo(() => new Set(rows.map((row) => row.source_profile_id)), [rows]);
+  const available = businesses.filter((profile) => !linkedIds.has(profile.id));
+
+  useEffect(() => {
+    if (!sourceProfileId || !available.some((profile) => profile.id === sourceProfileId)) {
+      setSourceProfileId(available[0]?.id ?? "");
     }
+  }, [available.map((profile) => profile.id).join("|"), sourceProfileId]);
+
+  async function connect() {
+    if (!sourceProfileId || status === "SAVING") return;
     setStatus("SAVING");
+    setError(null);
     try {
       await savePersonalBrandSource({
-        id: draft.id,
         personalBrandProfileId: props.personalBrandProfileId,
-        sourceProfileId: draft.sourceProfileId,
-        enabled: draft.enabled,
-        pillar: draft.pillar,
-        allowedTopics: lines(draft.allowedTopics),
-        allowedClaims: lines(draft.allowedClaims),
-        allowedCtas: lines(draft.allowedCtas),
-        assetPolicy: draft.assetPolicy,
-        weight: draft.weight,
-        priority: draft.priority,
+        sourceProfileId,
       });
-      setDraft(blank(businesses[0]?.id || ""));
       await load();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Fonte non salvata.");
+    } catch {
+      setError("Collegamento non riuscito. Riprova.");
       setStatus("IDLE");
     }
   }
 
   async function remove(row: PersonalBrandSourceRow) {
+    if (status === "SAVING") return;
+    setStatus("SAVING");
+    setError(null);
     try {
       await deletePersonalBrandSource(props.personalBrandProfileId, row.id);
-      if (draft.id === row.id) setDraft(blank(businesses[0]?.id || ""));
       await load();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Fonte non rimossa.");
+    } catch {
+      setError("Non sono riuscito a rimuovere il collegamento.");
+      setStatus("IDLE");
     }
   }
 
-  const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((current) => ({ ...current, [key]: value }));
-
   return <section className="panel">
-    <div className="panel-heading"><div><h2>Fonti del Personal Brand</h2><p>Autorizza esplicitamente quali attività possono fornire fatti al Personal Brand. Ogni collegamento resta associato a un solo pillar.</p></div><Link2 size={20} /></div>
+    <div className="panel-heading">
+      <div>
+        <h2>Dati da altre attività</h2>
+        <p>Opzionale. Collega un’attività solo se vuoi che questo Personal Brand possa usare i suoi dati verificati nei contenuti.</p>
+      </div>
+      <Link2 size={20} />
+    </div>
+
+    <p className="section-hint">
+      Non sostituisce le “Informazioni aggiuntive”: quelle descrivono la persona. Qui autorizzi soltanto l’uso di fatti provenienti da un’altra attività, per esempio Chogan.
+    </p>
+
     {error && <p className="form-error" role="alert">{error}</p>}
+
     {rows.length > 0 && <div className="specific-goals-list">
       {rows.map((row) => {
         const source = businesses.find((profile) => profile.id === row.source_profile_id);
+        const name = row.source_name || source?.name || "Attività";
         return <div className="specific-goal-row" key={row.id}>
-          <button type="button" onClick={() => setDraft(fromRow(row))}><span><strong>{source?.name ?? "Attività sorgente"}</strong> · {row.pillar}</span><strong>{row.enabled ? "Attiva" : "Disattivata"}</strong></button>
-          <button className="icon-button" type="button" aria-label="Rimuovi fonte" onClick={() => void remove(row)}><Trash2 size={15} /></button>
+          <div>
+            <strong>{name}</strong>
+            <small style={{ display: "block" }}>Può fornire dati verificati ai contenuti di questo Personal Brand.</small>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Scollega ${name}`}
+            disabled={status === "SAVING"}
+            onClick={() => void remove(row)}
+          >
+            <Trash2 size={15} />
+          </button>
         </div>;
       })}
     </div>}
-    {!businesses.length ? <p className="section-hint">Prima crea almeno un profilo attività BUSINESS da usare come fonte.</p> : <div className="brand-edit-grid">
-      <label>Attività sorgente<select value={draft.sourceProfileId} disabled={Boolean(draft.id)} onChange={(event) => patch("sourceProfileId", event.target.value)}>{businesses.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-      <label>Pillar<input value={draft.pillar} placeholder="Es. Property Management" onChange={(event) => patch("pillar", event.target.value)} /></label>
-      <label>Priorità<input type="number" min={0} max={10000} value={draft.priority} onChange={(event) => patch("priority", Number(event.target.value))} /></label>
-      <label>Peso<input type="number" min={0.001} max={100} step="0.1" value={draft.weight} onChange={(event) => patch("weight", Number(event.target.value))} /></label>
-      <label>Asset<select value={draft.assetPolicy} onChange={(event) => patch("assetPolicy", event.target.value as Draft["assetPolicy"])}><option value="NO_ASSETS">Non usare asset</option><option value="REFERENCE_ONLY">Solo riferimento</option><option value="REUSE_APPROVED">Riuso autorizzato</option></select></label>
-      <label><span>Fonte attiva</span><select value={draft.enabled ? "yes" : "no"} onChange={(event) => patch("enabled", event.target.value === "yes")}><option value="yes">Sì</option><option value="no">No</option></select></label>
-      <label className="full">Temi consentiti <span className="field-help">Uno per riga; vuoto = nessun limite aggiuntivo</span><textarea rows={3} value={draft.allowedTopics} onChange={(event) => patch("allowedTopics", event.target.value)} /></label>
-      <label className="full">Claim consentiti <span className="field-help">Uno per riga; vuoto = solo ciò che le fonti verificano</span><textarea rows={3} value={draft.allowedClaims} onChange={(event) => patch("allowedClaims", event.target.value)} /></label>
-      <label className="full">CTA consentite <span className="field-help">Una per riga; vuoto = nessun limite aggiuntivo</span><textarea rows={3} value={draft.allowedCtas} onChange={(event) => patch("allowedCtas", event.target.value)} /></label>
+
+    {!businesses.length ? (
+      <p className="section-hint">Non ci sono altre attività disponibili da collegare.</p>
+    ) : available.length > 0 ? (
       <div className="form-actions">
-        {draft.id && <button className="secondary-button" type="button" onClick={() => setDraft(blank(businesses[0]?.id || ""))}><Plus size={15} /> Nuova fonte</button>}
-        <button className="primary-button" type="button" disabled={status === "SAVING"} onClick={() => void save()}><Save size={15} /> {status === "SAVING" ? "Salvataggio…" : draft.id ? "Salva fonte" : "Aggiungi fonte"}</button>
+        <label style={{ flex: 1, minWidth: 220 }}>
+          <span>Attività da collegare</span>
+          <select value={sourceProfileId} disabled={status === "SAVING"} onChange={(event) => setSourceProfileId(event.target.value)}>
+            {available.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          </select>
+        </label>
+        <button className="primary-button" type="button" disabled={!sourceProfileId || status === "SAVING"} onClick={() => void connect()}>
+          <Plus size={15} /> {status === "SAVING" ? "Collegamento…" : "Collega attività"}
+        </button>
       </div>
-    </div>}
+    ) : (
+      <p className="section-hint">Tutte le attività disponibili sono già collegate.</p>
+    )}
   </section>;
 }
