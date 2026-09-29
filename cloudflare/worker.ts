@@ -24,7 +24,7 @@ interface Env {
   HF_CREDENTIALS?: string;
 }
 
-type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; profile_type: "BUSINESS" | "PERSONAL_BRAND" };
+type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; profile_type?: "BUSINESS" | "PERSONAL_BRAND" };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
@@ -283,7 +283,7 @@ async function handleGenerateImage(request: Request, env: Env) {
   let activeEventId: string | null = null;
   let logicalCommitted = false;
   try {
-    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
+    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry,profile_type&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
     const brands = await rows<Pick<BrandRow, "tone_of_voice">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice&limit=1`, token);
