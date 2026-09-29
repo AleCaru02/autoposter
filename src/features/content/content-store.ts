@@ -21,6 +21,7 @@ export type ContentItemRow = {
   fact_provenance: unknown[];
   editorial_cta: string | null;
   source_mix_approved: boolean;
+  decision_record: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
@@ -40,6 +41,26 @@ export type ContentVariantRow = {
   image_asset_id: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ContentCarouselSlideRow = {
+  id: string;
+  profile_id: string;
+  content_id: string;
+  variant_id: string;
+  position: number;
+  purpose: string;
+  headline: string;
+  body: string;
+  hierarchy: string;
+  visual_brief: string;
+  alt_text: string;
+  asset_id: string | null;
+  width: number;
+  height: number;
+  qa_status: "PENDING" | "PASS" | "BLOCK" | "FAILED";
   created_at: string;
   updated_at: string;
 };
@@ -121,13 +142,28 @@ export async function saveGeneratedContent(input: {
   const itemPayload = {
     id: contentId,
     profile_id: input.profileId,
-    topic: input.topic.trim(),
+    topic: input.content.editorialTopic.trim(),
     objective: input.objective?.trim() || null,
-    title: input.content.strategySummary.slice(0, 240),
+    title: input.content.editorialAngle.slice(0, 240),
     status: "IN_REVIEW",
+    pillar: input.content.pillar?.trim() || editorial?.pillar || null,
+    decision_record: {
+      source: "MANUAL",
+      requestedTopic: input.topic.trim(),
+      editorialTopic: input.content.editorialTopic,
+      editorialAngle: input.content.editorialAngle,
+      pillar: input.content.pillar?.trim() || editorial?.pillar || null,
+      strategySummary: input.content.strategySummary,
+      generatedAt: now,
+      variants: input.content.variants.map((variant) => ({
+        provider: variant.provider,
+        format: variant.format,
+        eligible: variant.eligible,
+        carouselSlideCount: variant.carouselSlides?.length ?? 0,
+      })),
+    },
     updated_at: now,
     ...(editorial?.profileType === "PERSONAL_BRAND" ? {
-      pillar: editorial.pillar,
       source_profile_id: editorial.sourceProfileId,
       source_profile_ids: editorial.sourceProfileIds,
       source_refs: sourceRefs,
@@ -147,6 +183,34 @@ export async function saveGeneratedContent(input: {
     throw new Error("Impossibile salvare il contenuto. Riprova.");
   }
 
+  const carouselRows = input.content.variants.flatMap((variant, variantIndex) =>
+    (variant.format === "CAROUSEL" ? (variant.carouselSlides ?? []) : []).map((slide) => ({
+      id: crypto.randomUUID(),
+      profile_id: input.profileId,
+      content_id: contentId,
+      variant_id: variantRows[variantIndex].id,
+      position: slide.position,
+      purpose: slide.purpose.trim(),
+      headline: slide.headline.trim(),
+      body: slide.body.trim(),
+      hierarchy: slide.hierarchy.trim(),
+      visual_brief: slide.visualBrief.trim(),
+      alt_text: slide.altText.trim(),
+      asset_id: null,
+      width: 1080,
+      height: 1080,
+      qa_status: "PENDING",
+      updated_at: now,
+    })),
+  );
+  if (carouselRows.length) {
+    const slides = await neonClient.from("content_carousel_slides").insert(carouselRows).select("id");
+    if (slides.error) {
+      await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", input.profileId);
+      throw new Error("Impossibile salvare le slide del carosello. Riprova.");
+    }
+  }
+
   return {
     contentId,
     variantIds: Object.fromEntries(variantRows.map((row) => [row._key, row.id])),
@@ -155,13 +219,13 @@ export async function saveGeneratedContent(input: {
 
 export async function loadContentWorkflow(profileId: string) {
   const itemsResult = await neonClient.from("content_items")
-    .select("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,created_at,updated_at")
+    .select("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,created_at,updated_at")
     .eq("profile_id", profileId)
     .order("updated_at", { ascending: false })
     .limit(50);
   if (itemsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
   const items = (itemsResult.data ?? []) as ContentItemRow[];
-  if (!items.length) return { items: [], variants: [] as ContentVariantRow[], assets: [] as AssetRow[], masterDecisions: {} as Record<string, StoredMasterDecision> };
+  if (!items.length) return { items: [], variants: [] as ContentVariantRow[], carouselSlides: [] as ContentCarouselSlideRow[], assets: [] as AssetRow[], masterDecisions: {} as Record<string, StoredMasterDecision> };
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
@@ -173,7 +237,22 @@ export async function loadContentWorkflow(profileId: string) {
   const rawVariants = (variantsResult.data ?? []) as Array<Omit<ContentVariantRow, "hashtags"> & { hashtags: unknown }>;
   const variants = rawVariants.map((row) => ({ ...row, hashtags: normalizeHashtags(row.hashtags) })) as ContentVariantRow[];
 
-  const assetIds = Array.from(new Set(variants.map((variant) => variant.image_asset_id).filter((id): id is string => typeof id === "string" && Boolean(id))));
+  const variantIds = variants.map((variant) => variant.id);
+  let carouselSlides: ContentCarouselSlideRow[] = [];
+  if (variantIds.length) {
+    const slidesResult = await neonClient.from("content_carousel_slides")
+      .select("id,profile_id,content_id,variant_id,position,purpose,headline,body,hierarchy,visual_brief,alt_text,asset_id,width,height,qa_status,created_at,updated_at")
+      .eq("profile_id", profileId)
+      .in("variant_id", variantIds)
+      .order("position", { ascending: true });
+    if (slidesResult.error) throw new Error("Impossibile caricare le slide dei caroselli. Riprova.");
+    carouselSlides = (slidesResult.data ?? []) as ContentCarouselSlideRow[];
+  }
+
+  const assetIds = Array.from(new Set([
+    ...variants.map((variant) => variant.image_asset_id),
+    ...carouselSlides.map((slide) => slide.asset_id),
+  ].filter((id): id is string => typeof id === "string" && Boolean(id))));
   let assets: AssetRow[] = [];
   if (assetIds.length) {
     const assetsResult = await neonClient.from("assets")
@@ -188,7 +267,7 @@ export async function loadContentWorkflow(profileId: string) {
   const platformStrategy = strategyResult.data?.platform_strategy;
   const rawDecisions = platformStrategy && typeof platformStrategy === "object" && !Array.isArray(platformStrategy) ? (platformStrategy as Record<string, unknown>).masterEditorialDecisions : null;
   const masterDecisions = rawDecisions && typeof rawDecisions === "object" && !Array.isArray(rawDecisions) ? Object.values(rawDecisions as Record<string, StoredMasterDecision>).reduce<Record<string, StoredMasterDecision>>((map, decision) => { if (decision && typeof decision.contentId === "string") map[decision.contentId] = decision; return map; }, {}) : {};
-  return { items, variants, assets, masterDecisions };
+  return { items, variants, carouselSlides, assets, masterDecisions };
 }
 
 export async function reviewVariant(input: {
