@@ -15,9 +15,11 @@ import { ActivityBudgetEngine } from "./activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./asset-intelligence.js";
 import { decideMasterEditorial, type MasterEditorialDecision } from "./master-editorial-brain.js";
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
+import { higgsfieldConfigured } from "./higgsfield.js";
+import { decideVisualRuntime } from "./visual-runtime-decision.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
@@ -175,19 +177,56 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     const aspectRatio=format==="STORY"?"2:3":"1:1";
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
-    if(reusable){imageAssetId=reusable.asset.id;await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;}
-    if(!imageAssetId)try{
-      const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption}});
+    const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
+    const visualBudget=await budgetEngine.snapshot(profile.id);
+    const identityRows=profile.profile_type==="PERSONAL_BRAND"
+      ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
+      : [];
+    const identityState=identityRows[0]?.status??"NOT_CONFIGURED";
+    const visualDecision=decideVisualRuntime({
+      profileType:profile.profile_type,
+      visualBrief:variant.visualBrief,
+      suitableRealAssetAvailable:Boolean(reusable),
+      higgsfieldConfigured:higgsfieldConfigured(env.HF_CREDENTIALS),
+      soulIdentityState:identityState,
+      higgsfieldBudgetRemainingEur:visualBudget.higgsfieldRemainingEur,
+      estimatedHiggsfieldCostEur:0.25,
+      estimatedOpenAiCostEur:0.25,
+    });
+    await sql`update public.content_variants set
+      visual_provider=${visualDecision.provider},
+      visual_model=${visualDecision.model},
+      visual_decision_reason=${visualDecision.reasonCode},
+      visual_estimated_cost_eur=${visualDecision.estimatedCostEur},
+      visual_identity_qa_status=${visualDecision.identityQaStatus},
+      updated_at=now()
+      where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
+
+    if(reusable){
+      imageAssetId=reusable.asset.id;
+      await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;
+      await sql`update public.content_variants set visual_actual_cost_eur=0 where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
+    }
+
+    if(!imageAssetId&&visualDecision.provider==="HIGGSFIELD"){
+      console.log("autopilot-visual-routing",{profileId:profile.id,variantId,provider:"HIGGSFIELD",reason:visualDecision.reasonCode,state:"BLOCKED_UNTIL_RUNTIME_CERTIFIED"});
+    }
+
+    if(!imageAssetId&&visualDecision.provider==="OPENAI")try{
+      const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption,visualProvider:visualDecision.provider,visualDecisionReason:visualDecision.reasonCode}});
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
         imageEventId=imageReservation.eventId;
-        const imageBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25});
+        const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption});
-        await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format}));
+        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:visualDecision.mustAvoidSyntheticPerson?"Do not depict or invent a synthetic person. Use objects, environment, typography or non-identifying visual elements only.":null});
+        await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
-        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1"})}::jsonb)`;
+        await sql`insert into public.assets (id,profile_id,source,kind,name,storage_url,mime_type,tags,metadata) values (${imageAssetId}::uuid,${profile.id}::uuid,'AI_IMAGE','IMAGE',${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb)`;
+        const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
+        const actualEur=Number(actualRows[0]?.actual_eur??visualDecision.estimatedCostEur);
+        await sql`update public.content_variants set visual_model=${image.model},visual_actual_cost_eur=${actualEur} where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
       }
     }catch(reason){if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}
   }
