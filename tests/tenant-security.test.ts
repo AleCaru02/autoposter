@@ -1,5 +1,17 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { AUXILIARY_PROFILE_TABLES, TENANT_TABLES, classifyAnonymousProbe, evaluateAuxiliaryProfileIsolation, evaluateOwnerContract, evaluateTenantSecurity } from "../cloudflare/tenant-security.js";
+
+const forceTenantMigration = await readFile("db/migrations/20260929_force_tenant_rls.sql", "utf8");
+assert.match(forceTenantMigration, /^--[\s\S]*\nBEGIN;/, "tenant FORCE RLS migration must be transactional");
+assert.match(forceTenantMigration, /COMMIT;\s*$/, "tenant FORCE RLS migration must commit");
+assert.doesNotMatch(forceTenantMigration, /\b(?:DROP|DELETE|TRUNCATE|GRANT|REVOKE|CREATE POLICY|ALTER POLICY)\b/i, "tenant FORCE RLS migration must not weaken policy or privilege contracts");
+for (const table of TENANT_TABLES) {
+  assert.match(forceTenantMigration, new RegExp(`'${table}'`), `${table} must be included in the forced tenant boundary`);
+}
+for (const { table_name } of AUXILIARY_PROFILE_TABLES) {
+  assert.doesNotMatch(forceTenantMigration, new RegExp(`'${table_name}'`), `${table_name} must remain outside the tenant FORCE RLS migration`);
+}
 
 const safeRows = TENANT_TABLES.map((table_name) => ({
   table_name,
