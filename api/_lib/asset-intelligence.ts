@@ -64,7 +64,7 @@ function hasCompatibleAspect(asset: ReusableAssetCandidate, requestedAspectRatio
 }
 
 /** Chooses only a genuinely suitable asset. It never reserves budget or calls an image provider. */
-export async function findReusableAsset(input: { visualBrief: string; aspectRatio: string; candidates: ReusableAssetCandidate[] }): Promise<ReusableAssetMatch | null> {
+export async function findReusableAsset(input: { visualBrief: string; aspectRatio: string; candidates: ReusableAssetCandidate[]; identityCritical?: boolean }): Promise<ReusableAssetMatch | null> {
   const fingerprint = await visualFingerprint({ visualBrief: input.visualBrief, aspectRatio: input.aspectRatio });
   const desired = terms(input.visualBrief);
   const matches: ReusableAssetMatch[] = [];
@@ -72,6 +72,7 @@ export async function findReusableAsset(input: { visualBrief: string; aspectRati
   for (const asset of input.candidates) {
     if (asset.kind !== "IMAGE" || !asset.storage_url || !hasCompatibleAspect(asset, input.aspectRatio)) continue;
     const metadata = object(asset.metadata);
+    if (input.identityCritical && metadata.identity_fallback === true) continue;
     if (metadata.visual_fingerprint === fingerprint) {
       matches.push({ asset, score: 1, reason: "EXACT_VISUAL_FINGERPRINT" });
       continue;
