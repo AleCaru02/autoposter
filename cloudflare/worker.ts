@@ -10,6 +10,7 @@ import { AiBudgetRecommendationEngine } from "../api/_lib/ai-budget-recommendati
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 import { resolveVisualProviderRuntime, visualDecisionPersistence } from "../api/_lib/visual-provider-runtime.js";
+import { inferVisualIdentityRequirements } from "../api/_lib/visual-provider-routing.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
