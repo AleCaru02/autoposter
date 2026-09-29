@@ -53,6 +53,17 @@ export type AssetRow = {
   storage_url: string;
   mime_type: string | null;
   metadata: Record<string, unknown>;
+  content_id?: string | null;
+  provider?: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD" | null;
+  model?: string | null;
+  cost_eur?: number;
+  width?: number | null;
+  height?: number | null;
+  format?: string | null;
+  quality_status?: "PENDING" | "PASS" | "BLOCK" | "FAILED";
+  identity_status?: "NOT_REQUIRED" | "PENDING" | "PASS" | "BLOCK";
+  publication_usage?: number;
+  reuse_count?: number;
   created_at: string;
 };
 export type StoredMasterDecision = { contentId?: string; rationale?: string; channels?: unknown };
@@ -209,14 +220,8 @@ export async function reviewVariant(input: {
 }
 
 export async function deleteContent(profileId: string, contentId: string) {
-  const variantAssets = await neonClient.from("content_variants").select("image_asset_id").eq("content_id", contentId).eq("profile_id", profileId);
-  if (variantAssets.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
-  const assetIds = (variantAssets.data ?? []).map((row) => row.image_asset_id).filter((id): id is string => typeof id === "string" && Boolean(id));
-
   const result = await neonClient.from("content_items").delete().eq("id", contentId).eq("profile_id", profileId).select("id");
   if (result.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
-  if (assetIds.length) {
-    const assetDelete = await neonClient.from("assets").delete().eq("profile_id", profileId).in("id", assetIds);
-    if (assetDelete.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
-  }
+  // Gli asset restano nella Libreria: content_id usa ON DELETE SET NULL e l'immagine
+  // può essere riutilizzata da contenuti futuri invece di essere distrutta col post.
 }
