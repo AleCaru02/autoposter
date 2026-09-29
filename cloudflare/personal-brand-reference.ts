@@ -51,7 +51,7 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function authContext(request: Request, env: Env) {
+async function authContext(request: Request, env: Env): Promise<{ error: Response } | { sql: ReturnType<typeof neon>; authUserId: string; databaseUrl: string }> {
   if (!env.DATABASE_URL) return { error: json({ error: "DATABASE_NOT_CONFIGURED" }, 503) } as const;
   const token = bearerValue(request.headers.get("authorization"));
   if (!token) return { error: json({ error: "UNAUTHENTICATED" }, 401) } as const;
@@ -112,7 +112,7 @@ async function signedPreviewUrl(env: Env, referenceId: string) {
   return `${base}/api/personal-brand/reference-image/${referenceId}?exp=${exp}&sig=${sig}`;
 }
 
-export async function handleReferenceImages(request: Request, env: Env) {
+export async function handleReferenceImages(request: Request, env: Env): Promise<Response> {
   const ctx = await authContext(request, env);
   if ("error" in ctx) return ctx.error;
   const { sql, authUserId } = ctx;
@@ -204,7 +204,7 @@ export async function handleReferenceImages(request: Request, env: Env) {
   return json({ error: "METHOD_NOT_ALLOWED" }, 405);
 }
 
-export async function handleSignedReferenceImage(request: Request, env: Env, referenceId: string) {
+export async function handleSignedReferenceImage(request: Request, env: Env, referenceId: string): Promise<Response> {
   if (request.method !== "GET") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY || !uuid(referenceId)) return json({ error: "NOT_FOUND" }, 404);
   const url = new URL(request.url);
@@ -235,7 +235,7 @@ export async function handleSignedReferenceImage(request: Request, env: Env, ref
   });
 }
 
-export async function handleSoulIdPreflight(request: Request, env: Env) {
+export async function handleSoulIdPreflight(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   const ctx = await authContext(request, env);
   if ("error" in ctx) return ctx.error;
