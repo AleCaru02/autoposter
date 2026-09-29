@@ -9,6 +9,7 @@ import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { AiBudgetRecommendationEngine } from "../api/_lib/ai-budget-recommendation.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
+import { resolveVisualProviderRuntime, visualDecisionPersistence } from "../api/_lib/visual-provider-runtime.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -20,9 +21,10 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   DATABASE_URL?: string;
   OPENAI_API_KEY?: string;
+  HF_CREDENTIALS?: string;
 }
 
-type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
+type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; profile_type: "BUSINESS" | "PERSONAL_BRAND" };
 type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
