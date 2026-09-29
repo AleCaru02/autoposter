@@ -79,7 +79,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path=public,pg_temp
-AS $
+AS $asset_usage$
 DECLARE v_asset_id uuid;
 BEGIN
   IF NEW.state='PUBLISHED' AND OLD.state IS DISTINCT FROM 'PUBLISHED' THEN
@@ -94,7 +94,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$;
+$asset_usage$;
 
 DROP TRIGGER IF EXISTS publication_asset_usage ON public.publication_jobs;
 CREATE TRIGGER publication_asset_usage
