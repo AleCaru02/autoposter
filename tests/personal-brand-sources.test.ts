@@ -4,6 +4,7 @@ import fs from "node:fs";
 const migration = fs.readFileSync("db/migrations/20260928_personal_brand_sources.sql", "utf8");
 const sourceStore = fs.readFileSync("src/features/profiles/personal-brand-source-store.ts", "utf8");
 const sourcePanel = fs.readFileSync("src/components/personal-brand-sources-panel.tsx", "utf8");
+const sourceApi = fs.readFileSync("cloudflare/personal-brand-sources.ts", "utf8");
 const composer = fs.readFileSync("src/components/manual-content-composer.tsx", "utf8");
 const manualGeneration = fs.readFileSync("src/features/content/manual-content-generation.ts", "utf8");
 const contentStore = fs.readFileSync("src/features/content/content-store.ts", "utf8");
@@ -27,14 +28,26 @@ for (const operation of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
 assert.match(migration, /owns_profile\(personal_brand_profile_id\)[\s\S]*owns_profile\(source_profile_id\)/);
 
 // CRUD + reload/persistence contract.
-assert.match(sourceStore, /from\("personal_brand_sources"\)[\s\S]*\.select\([\s\S]*personal_brand_profile_id[\s\S]*\.eq\("personal_brand_profile_id", personalBrandProfileId\)/, "READ must stay scoped to the active Personal Brand");
-assert.match(sourceStore, /\.insert\(payload\)/, "CREATE must persist source relationships");
-assert.match(sourceStore, /\.update\(payload\)\.eq\("id", input\.id\)\.eq\("personal_brand_profile_id", input\.personalBrandProfileId\)/, "UPDATE must be profile-scoped");
-assert.match(sourceStore, /\.delete\(\)\.eq\("id", id\)\.eq\("personal_brand_profile_id", personalBrandProfileId\)/, "DELETE must be profile-scoped");
-assert.match(sourceStore, /if \(!payload\.pillar\) throw new Error\("Il pillar è obbligatorio\."\)/);
+assert.match(sourceStore, /\/api\/personal-brand\/sources\?profileId=/, "READ must use authenticated same-origin API");
+assert.match(sourceStore, /method: "POST"/, "CREATE must use server API");
+assert.match(sourceStore, /method: "DELETE"/, "DELETE must use server API");
 assert.match(sourcePanel, /loadPersonalBrandSources\(props\.personalBrandProfileId\)/, "panel must reload persisted source rows");
 assert.match(sourcePanel, /savePersonalBrandSource/);
 assert.match(sourcePanel, /deletePersonalBrandSource/);
+assert.match(sourcePanel, /Dati da altre attività/, "UX must use non-technical wording");
+assert.doesNotMatch(sourcePanel, />Pillar</, "technical pillar field must not be exposed");
+assert.doesNotMatch(sourcePanel, />Priorità</, "technical priority field must not be exposed");
+assert.doesNotMatch(sourcePanel, />Peso</, "technical weight field must not be exposed");
+assert.match(sourcePanel, /Non sostituisce le “Informazioni aggiuntive”/, "UX must distinguish source authorization from free-form profile context");
+
+// Same-origin API owns the write contract and verifies both profiles server-side.
+assert.match(sourceApi, /owner_auth_user_id=\$\{authUserId\}/);
+assert.match(sourceApi, /profile_type='PERSONAL_BRAND'/);
+assert.match(sourceApi, /profile_type='BUSINESS'/);
+assert.match(sourceApi, /insert into public\.personal_brand_sources/);
+assert.match(sourceApi, /delete from public\.personal_brand_sources/);
+assert.match(sourceApi, /allowed_topics,allowed_claims,allowed_ctas,asset_policy,weight,priority/);
+assert.match(sourceApi, /'REFERENCE_ONLY',1,100/);
 
 // Server-side authorization cannot trust the browser-selected source.
 assert.match(sourceRuntime, /where s\.personal_brand_profile_id=\$\{personalBrandProfileId\}::uuid/);
