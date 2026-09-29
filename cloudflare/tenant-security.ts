@@ -31,6 +31,8 @@ export const AUXILIARY_PROFILE_TABLES = [
   { table_name: "provider_cost_attempts", access_mode: "SERVER_OWNED" },
   { table_name: "social_oauth_callbacks", access_mode: "SERVER_OWNED" },
   { table_name: "analytics_sync_targets", access_mode: "SERVER_OWNED" },
+  { table_name: "personal_brand_reference_images", access_mode: "SERVER_OWNED" },
+  { table_name: "personal_brand_visual_identities", access_mode: "SERVER_OWNED" },
 ] as const;
 
 type TenantTableSecurityRow = {
@@ -292,7 +294,9 @@ export async function handleTenantSecurityAudit(request: Request, env: { DATABAS
           ('profile_entitlement_package_assignments','SERVER_OWNED'),
           ('provider_cost_attempts','SERVER_OWNED'),
           ('social_oauth_callbacks','SERVER_OWNED'),
-          ('analytics_sync_targets','SERVER_OWNED')
+          ('analytics_sync_targets','SERVER_OWNED'),
+          ('personal_brand_reference_images','SERVER_OWNED'),
+          ('personal_brand_visual_identities','SERVER_OWNED')
       ), role_state as (
         select exists(select 1 from pg_roles where rolname='anonymous') as has_anonymous,
                exists(select 1 from pg_roles where rolname='authenticated') as has_authenticated
