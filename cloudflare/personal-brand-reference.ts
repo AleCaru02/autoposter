@@ -42,6 +42,15 @@ function json(body: unknown, status = 200) {
 
 function uuid(value: string) { return /^[0-9a-f-]{36}$/i.test(value); }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
 async function authContext(request: Request, env: Env) {
   if (!env.DATABASE_URL) return { error: json({ error: "DATABASE_NOT_CONFIGURED" }, 503) } as const;
   const token = bearerValue(request.headers.get("authorization"));
@@ -153,7 +162,7 @@ export async function handleReferenceImages(request: Request, env: Env) {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const technical = evaluateReferenceImage(bytes, file.type);
       const hash = await sha256Hex(bytes);
-      const base64 = btoa(String.fromCharCode(...bytes));
+      const base64 = bytesToBase64(bytes);
       try {
         const inserted = await sql`
           insert into public.personal_brand_reference_images(
