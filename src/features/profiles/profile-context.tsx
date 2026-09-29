@@ -80,7 +80,7 @@ async function fetchBootstrappedProfiles(preferredToken?: string | null): Promis
     const delay = PROFILE_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
     if (delay > 0) await new Promise((resolve) => window.setTimeout(resolve, delay));
     try {
-      const token = await authenticatedApiToken(preferredToken);
+      const token = await authenticatedApiToken(attempt === 0 ? preferredToken : null);
       const response = await fetch("/api/profile-bootstrap", {
         method: "GET",
         headers: {
