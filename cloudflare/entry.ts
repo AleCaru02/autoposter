@@ -23,6 +23,7 @@ import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/
 import { processDueAnalytics } from "../api/_lib/analytics.js";
 import { runLearningRuntime } from "../api/_lib/learning-runtime.js";
 import { handlePersonalBrandVisualIdentity } from "./personal-brand-visual.js";
+import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdPreflight } from "./personal-brand-reference.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -30,6 +31,7 @@ type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
   HF_CREDENTIALS?: string;
+  SOCIAL_TOKEN_KEY?: string;
 };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
 type ScheduledController = { cron?: string };
@@ -165,6 +167,12 @@ export default {
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
     if (path === "/api/learning/run") return handleLearningRun(request, env);
     if (path === "/api/personal-brand/visual-identity") return handlePersonalBrandVisualIdentity(request, env);
+    if (path === "/api/personal-brand/reference-images") return handleReferenceImages(request, env);
+    if (path === "/api/personal-brand/soul-id/preflight") return handleSoulIdPreflight(request, env);
+    if (path.startsWith("/api/personal-brand/reference-image/")) {
+      const referenceId = path.slice("/api/personal-brand/reference-image/".length);
+      return handleSignedReferenceImage(request, env, referenceId);
+    }
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
     if (path === "/api/profile-bootstrap") return handleWorkerProfileBootstrap(request, env);
