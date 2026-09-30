@@ -82,6 +82,12 @@ assert.ok(String(body.input).includes("https://example.test/servizi/property-man
 assert.ok(String(body.input).includes("Gestiamo pochi appartamenti selezionati"), "manual brand context must reach OpenAI generation");
 assert.ok(String(body.instructions).includes("userProvidedContext"), "the model must be told how to treat manual brand context safely");
 assert.ok(String(body.instructions).includes("vero carosello nativo"), "carousel generation must explicitly forbid collage-style fake carousels");
+assert.match(String(body.instructions), /STRATEGIA COPY Instagram/);
+assert.match(String(body.instructions), /Visual-first/i);
+assert.match(String(body.instructions), /STRATEGIA VISUAL Instagram/);
+assert.match(String(body.instructions), /hook forte/i);
+assert.match(String(body.input), /platformStrategies/);
+assert.match(String(body.input), /"provider":"INSTAGRAM"/);
 assert.equal(String(capturedInit?.body).includes("sk-test-only"), false, "la chiave non deve finire nel body/prompt");
 assert.equal(result.researchMode, "BALANCED");
 assert.deepEqual(result.externalSources, ["https://example.org/industry-report"]);
