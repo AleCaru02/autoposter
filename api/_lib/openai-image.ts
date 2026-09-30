@@ -90,7 +90,10 @@ export function buildImagePrompt(options: Omit<GenerateImageOptions, "apiKey" | 
     `Brief visivo confermato: ${clean(options.visualBrief, 2_000)}.`,
     options.caption ? `Contesto del contenuto: ${clean(options.caption, 1_500)}.` : "",
     options.additionalDirection ? `Indicazione aggiuntiva: ${clean(options.additionalDirection, 700)}.` : "",
-    "Qualità fotografica/grafica premium, dettagli curati, composizione pulita e credibile.",
+    "Costruisci una vera art direction, non una semplice illustrazione generica: definisci punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo e profondità percepibile.",
+    "Specifica una prospettiva o inquadratura intenzionale, illuminazione credibile, ombre, atmosfera, palette, materiali e texture coerenti con il settore e con il tono del brand.",
+    "Il risultato deve avere qualità editoriale premium e impatto da social feed, evitando look da stock, template vuoti, composizioni piatte o elementi decorativi casuali.",
+    "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente invece di usare una semplice icona o uno sfondo anonimo.",
     "Non aggiungere testo, loghi, marchi, watermark, prezzi, recensioni, certificazioni o claim non esplicitamente richiesti.",
     "Non inventare elementi fattuali dell'attività; il visual deve restare coerente con il brief senza affermare fatti nuovi.",
   ].filter(Boolean).join("\n");
