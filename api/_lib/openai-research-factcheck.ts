@@ -21,12 +21,15 @@ export type ResearchAgentResult = {
 
 export type FactCheckClaim = {
   claim: string;
-  status: "VERIFIED" | "UNSUPPORTED" | "CONTRADICTED" | "TIME_SENSITIVE";
+  claimType: "EXTERNAL" | "BRAND" | "INTERNAL" | "EDITORIAL";
+  slideNumber: number | null;
+  sourceRequired: boolean;
+  status: "VERIFIED" | "UNSUPPORTED" | "CONTRADICTED" | "TIME_SENSITIVE" | "NOT_FACTUAL";
   reason: string;
 };
 
 export type FactCheckAgentResult = {
-  verdict: "PASS" | "BLOCK" | "NEEDS_RESEARCH";
+  verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE";
   checkedClaims: FactCheckClaim[];
   sources: string[];
   responseId: string;
@@ -65,7 +68,7 @@ const FACTCHECK_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    verdict: { type: "string", enum: ["PASS", "BLOCK", "NEEDS_RESEARCH"] },
+    verdict: { type: "string", enum: ["PASS", "BLOCK", "NEEDS_SOURCE"] },
     checkedClaims: {
       type: "array",
       maxItems: 20,
@@ -74,10 +77,13 @@ const FACTCHECK_SCHEMA = {
         additionalProperties: false,
         properties: {
           claim: { type: "string" },
-          status: { type: "string", enum: ["VERIFIED", "UNSUPPORTED", "CONTRADICTED", "TIME_SENSITIVE"] },
+          claimType: { type: "string", enum: ["EXTERNAL", "BRAND", "INTERNAL", "EDITORIAL"] },
+          slideNumber: { type: ["integer", "null"], minimum: 1, maximum: 10 },
+          sourceRequired: { type: "boolean" },
+          status: { type: "string", enum: ["VERIFIED", "UNSUPPORTED", "CONTRADICTED", "TIME_SENSITIVE", "NOT_FACTUAL"] },
           reason: { type: "string" },
         },
-        required: ["claim", "status", "reason"],
+        required: ["claim", "claimType", "slideNumber", "sourceRequired", "status", "reason"],
       },
     },
   },
@@ -227,15 +233,18 @@ export async function runOpenAIFactCheckAgent(input: {
     schemaName: "post_automatici_fact_check_agent",
     instructions: [
       "Sei il Fact-check Agent di Post Automatici.",
-      "Controlla date, numeri, percentuali, prezzi, norme, scadenze e affermazioni esterne presenti nel contenuto.",
-      "Un claim del brand è verificabile soltanto con dati del brand/sito forniti nel contenuto; una fonte generale non può renderlo un fatto del brand.",
-      "Se un claim materiale non è supportato, usa UNSUPPORTED e verdict=BLOCK. Se serve nuova evidenza non disponibile, verdict=NEEDS_RESEARCH.",
-      "Se una fonte contraddice il claim, usa CONTRADICTED e verdict=BLOCK. Per fatti che possono cambiare indica TIME_SENSITIVE e richiedi evidenza attuale.",
-      "Non approvare per plausibilità: approva soltanto ciò che è supportato dalle evidenze disponibili.",
+      "Classifica ogni affermazione materiale come EXTERNAL, BRAND, INTERNAL oppure EDITORIAL.",
+      "EXTERNAL: fatti sul mondo, norme, date, prezzi di mercato, dati, news o statistiche. Devono avere una fonte verificabile; se manca o non è verificabile usa UNSUPPORTED e verdict=NEEDS_SOURCE.",
+      "BRAND: informazioni specifiche dell'attività o Personal Brand. Possono essere verificate solo con brandFacts, sito confermato, userProvidedContext o provenance esplicita forniti nel payload; una fonte generale non basta.",
+      "INTERNAL: metriche, risultati o dati interni del profilo. Sono verificati solo se l'evidenza interna è presente nel payload; altrimenti usa UNSUPPORTED.",
+      "EDITORIAL: opinioni, consigli, hook, CTA o formulazioni non fattuali. Usa status=NOT_FACTUAL, sourceRequired=false e non inventare una verifica.",
+      "Per un carosello valorizza slideNumber quando il claim appartiene chiaramente a una slide; usa null per claim globali.",
+      "Se una fonte contraddice il claim usa CONTRADICTED e verdict=BLOCK. Per fatti che possono cambiare usa TIME_SENSITIVE e richiedi evidenza attuale.",
+      "Non approvare per plausibilità e non inventare fonti. Se un claim esterno richiede fonte e non può essere verificato, verdict=NEEDS_SOURCE.",
     ].join("\n"),
     payload: { topic: input.topic, content: input.content, research: input.research, existingSources: input.existingSources },
   });
-  const parsed = result.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_RESEARCH"; checkedClaims: FactCheckClaim[] };
+  const parsed = result.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
   return {
     verdict: parsed.verdict,
     checkedClaims: Array.isArray(parsed.checkedClaims) ? parsed.checkedClaims : [],
