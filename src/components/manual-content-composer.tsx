@@ -273,6 +273,13 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
           finishGeneration(generated, sequence);
         } catch (reason) {
           if (reason instanceof ManualGenerationError && reason.code === "GENERATION_IN_PROGRESS") return;
+          try {
+            const canonical = await requestManualContentStatus(props.profileId, token, op.id);
+            if (canonical.state === "FAILED" && canonical.error) {
+              failGeneration(new ManualGenerationError(canonical.error, friendlyGenerationError(canonical.error)), sequence);
+              return;
+            }
+          } catch { /* fall back to the request error */ }
           failGeneration(reason, sequence);
         }
       }, 350);
@@ -284,6 +291,13 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
       finishGeneration(generated, sequence);
     } catch (reason) {
       if (reason instanceof ManualGenerationError && reason.code === "GENERATION_IN_PROGRESS") return;
+      try {
+        const canonical = await requestManualContentStatus(props.profileId, token, op.id);
+        if (canonical.state === "FAILED" && canonical.error) {
+          failGeneration(new ManualGenerationError(canonical.error, friendlyGenerationError(canonical.error)), sequence);
+          return;
+        }
+      } catch { /* fall back to the request error */ }
       failGeneration(reason, sequence);
     }
   }
