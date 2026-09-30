@@ -428,7 +428,7 @@ function factCheckEnvelope(content: GeneratedSocialContent, brand: BrandContext,
 }
 
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher: typeof fetch = options.fetcher ?? ((input, init) => globalThis.fetch(input, init));
   const model = options.model ?? "gpt-5.6-terra";
   if (model !== "gpt-5.6-terra") throw new Error("OPENAI_TEXT_MODEL_NOT_ALLOWED");
   const websiteContext = compactWebsiteContext(options.topic, options.brand.confirmedWebsiteContent);
