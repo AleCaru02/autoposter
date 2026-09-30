@@ -12,7 +12,7 @@ const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.
 const VALID_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 
-type ProfileRow = { id: string; name: string; industry: string | null };
+type ProfileRow = { id: string; name: string; industry: string | null; profile_type: "BUSINESS" | "PERSONAL_BRAND" };
 type BrandRow = { tone_of_voice: unknown; visual_identity: unknown };
 type VariantRow = {
   id: string;
@@ -83,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let activeEventId: string | null = null;
   let logicalCommitted = false;
   try {
-    const profiles = await readRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
+    const profiles = await readRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry,profile_type&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
     const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
@@ -161,6 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       budget: activityBudget,
       importance: routeImportance,
       profileName: profile.name,
+      profileType: profile.profile_type,
       industry: profile.industry,
       tone: summary(brands[0]?.tone_of_voice),
       brandColors: brandVisual.colors,
@@ -193,6 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           metadata: {
             provider: result.provider,
             model: result.model,
+            profile_type: profile.profile_type,
             quality: result.quality,
             size: result.size,
             aspect_ratio: result.aspectRatio,
