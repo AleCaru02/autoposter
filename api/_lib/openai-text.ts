@@ -618,15 +618,21 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   }
   await reportProgress(options, 92, "VERIFIED");
 
-  const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
-  const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + (factCheck?.usage.outputTokens ?? 0);
-  const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + (factCheck?.usage.webSearchCalls ?? 0);
+  const factCheckInputTokens = factCheckRuns.reduce((sum, run) => sum + run.usage.inputTokens, 0);
+  const factCheckOutputTokens = factCheckRuns.reduce((sum, run) => sum + run.usage.outputTokens, 0);
+  const factCheckWebSearchCalls = factCheckRuns.reduce((sum, run) => sum + run.usage.webSearchCalls, 0);
+  const repairInputTokens = copyRepair?.usage.inputTokens ?? 0;
+  const repairOutputTokens = copyRepair?.usage.outputTokens ?? 0;
+  const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + factCheckInputTokens + repairInputTokens;
+  const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + factCheckOutputTokens + repairOutputTokens;
+  const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + factCheckWebSearchCalls;
   const mainTokenCost = mainInputTokens !== null && mainOutputTokens !== null ? estimateTerraCostUsd(mainInputTokens, mainOutputTokens, cachedInputTokens, cacheWriteTokens) : null;
   const mainCostUsd = mainTokenCost === null ? null : mainTokenCost + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
   const researchCostUsd = dedicatedResearch ? agentCost(dedicatedResearch) : null;
-  const factCheckCostUsd = factCheck ? agentCost(factCheck) : null;
-  const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + (factCheckCostUsd ?? 0);
-  const externalSources = [...new Set([...combinedSources, ...(factCheck?.sources ?? [])])].slice(0, 20);
+  const factCheckCostUsd = factCheckRuns.reduce((sum, run) => sum + agentCost(run), 0);
+  const copyRepairCostUsd = copyRepair ? estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens) : 0;
+  const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + factCheckCostUsd + copyRepairCostUsd;
+  const externalSources = [...new Set([...combinedSources, ...factCheckRuns.flatMap((run) => run.sources)])].slice(0, 20);
   const externalClaimPresent = content.variants.some((variant) => variant.factualBasis.some((basis) => /BASE ESTERNA/i.test(basis)));
   const technicalEvents: OpenAITextTechnicalEvent[] = [
     {
