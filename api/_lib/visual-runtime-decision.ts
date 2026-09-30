@@ -1,5 +1,6 @@
 import type { VisualRoutingDecision, SoulIdentityState } from "./visual-provider-routing.js";
 import { routeVisualProvider } from "./visual-provider-routing.js";
+import type { ContentSubject } from "./subject-strategy.js";
 
 export type PersistedVisualDecision = VisualRoutingDecision & {
   model: string | null;
@@ -25,15 +26,18 @@ export function decideVisualRuntime(input: {
   higgsfieldBudgetRemainingEur: number;
   estimatedHiggsfieldCostEur: number;
   estimatedOpenAiCostEur: number;
+  subject?: ContentSubject | null;
 }): PersistedVisualDecision {
   const intent = visualIntentFromBrief(input.visualBrief);
+  const explicitCanonicalPerson = input.subject === "CANONICAL_PERSON";
+  const explicitGenericPerson = input.subject === "GENERIC_PERSON" || input.subject === "TEAM";
   const decision = routeVisualProvider({
     profileType: input.profileType,
     suitableRealAssetAvailable: input.suitableRealAssetAvailable,
-    personIsPrimarySubject: intent.personIsPrimarySubject,
-    requiresIdentityConsistency: intent.requiresIdentityConsistency,
-    requiresNewScene: intent.requiresNewScene,
-    virtualShoot: intent.virtualShoot,
+    personIsPrimarySubject: explicitCanonicalPerson || explicitGenericPerson || intent.personIsPrimarySubject,
+    requiresIdentityConsistency: explicitCanonicalPerson || intent.requiresIdentityConsistency,
+    requiresNewScene: explicitCanonicalPerson || intent.requiresNewScene,
+    virtualShoot: explicitCanonicalPerson || intent.virtualShoot,
     higgsfieldConfigured: input.higgsfieldConfigured,
     soulIdentityState: input.soulIdentityState,
     higgsfieldBudgetRemainingEur: input.higgsfieldBudgetRemainingEur,
