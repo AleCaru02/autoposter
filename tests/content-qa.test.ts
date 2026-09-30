@@ -1,0 +1,103 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { finalizeVisualQa, runOpenAIVisualQa } from "../api/_lib/openai-visual-qa.js";
+
+const [migration,runtime,endpoint,entry,store,page,worker,vercelImage,factcheck,editorial] = await Promise.all([
+  readFile("db/migrations/20260930_content_qa.sql","utf8"),
+  readFile("api/_lib/content-qa.ts","utf8"),
+  readFile("cloudflare/content-qa.ts","utf8"),
+  readFile("cloudflare/entry.ts","utf8"),
+  readFile("src/features/content/content-store.ts","utf8"),
+  readFile("src/pages/approvals-page.tsx","utf8"),
+  readFile("cloudflare/worker.ts","utf8"),
+  readFile("api/generate-image.ts","utf8"),
+  readFile("api/_lib/openai-research-factcheck.ts","utf8"),
+  readFile("api/_lib/openai-editorial-qa.ts","utf8"),
+]);
+
+for (const field of ["brand_status","copy_status","visual_status","fact_status","platform_status","duplicate_status","budget_status"]) {
+  assert.match(migration,new RegExp(field),`structured QA must persist ${field}`);
+}
+assert.match(migration,/content_qa_results/);
+assert.match(migration,/content_variants_qa_invalidation/);
+assert.match(migration,/content_carousel_slides_qa_invalidation/);
+assert.match(migration,/CONTENT_QA_PASS_REQUIRED/);
+assert.match(migration,/CONTENT_ASSET_QA_PASS_REQUIRED/);
+assert.match(migration,/s\.qa_status='PASS'/);
+assert.match(migration,/a\.quality_status='PASS'/);
+assert.match(migration,/a\.identity_status IN \('NOT_REQUIRED','PASS'\)/);
+assert.match(migration,/FORCE ROW LEVEL SECURITY/);
+
+for (const symbol of ["runOpenAIEditorialQA","runOpenAIFactCheckAgent","runOpenAIVisualQa","findNearDuplicate","ActivityBudgetEngine"]) {
+  assert.match(runtime,new RegExp(symbol),`Content QA must execute ${symbol}`);
+}
+for (const field of ["slideNumber","copyStatus","visualStatus","factStatus","brandStatus","qualityStatus","reason"]) {
+  assert.match(runtime,new RegExp(field),`carousel slide QA must expose ${field}`);
+}
+assert.match(runtime,/claimType === "EXTERNAL"/);
+assert.match(runtime,/sourceRequired/);
+assert.match(runtime,/NEEDS_SOURCE/);
+assert.match(runtime,/costBucket:"OTHER_AI"/);
+assert.match(runtime,/identityStatus\(profile\.profile_type/);
+assert.match(runtime,/content\.qa\.run/);
+
+assert.match(endpoint,/verifiedCustomerAuthUserId/);
+assert.match(endpoint,/actorType: "MANUAL"/);
+assert.ok(entry.indexOf('path === "/api/content-qa"') < entry.indexOf("return worker.fetch(request, env)"),"canonical Worker must route QA before asset fallback");
+assert.match(store,/runVariantQa/);
+assert.match(page,/variant\.qa_status !== "PASS"/);
+assert.match(page,/Content QA/);
+assert.match(page,/Esegui QA/);
+
+assert.match(worker,/carouselSlideId/);
+assert.match(worker,/content_carousel_slides/);
+assert.match(worker,/CAROUSEL_SLIDE_IMAGE_LINK/);
+assert.match(vercelImage,/carouselSlideId/);
+assert.match(vercelImage,/CAROUSEL_SLIDE_IMAGE_LINK/);
+assert.match(page,/generateCarouselSlideImage/);
+assert.match(page,/Genera visuale slide/);
+
+assert.match(factcheck,/claimType/);
+assert.match(factcheck,/EDITORIAL/);
+assert.match(factcheck,/NOT_FACTUAL/);
+assert.match(factcheck,/verdict=NEEDS_SOURCE/);
+assert.match(editorial,/copyQuality/);
+assert.match(editorial,/grammar/);
+assert.match(editorial,/hashtagFit/);
+assert.match(editorial,/slideChecks/);
+
+const pass = finalizeVisualQa({
+  briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,
+},"ok");
+assert.equal(pass.verdict,"PASS");
+const fail = finalizeVisualQa({
+  briefMatch:.95,composition:.95,technicalQuality:.5,socialFormat:.95,brandSafety:.98,textSafety:.98,
+},"artefatti");
+assert.equal(fail.verdict,"FAIL");
+assert.equal(fail.checks.technicalQuality,"FAIL");
+
+let requestBody: Record<string,any>|null=null;
+const visual = await runOpenAIVisualQa({
+  apiKey:"test-only",
+  imageUrl:"data:image/png;base64,AAAA",
+  profileName:"Brand test",
+  industry:"Servizi",
+  provider:"INSTAGRAM",
+  format:"POST",
+  visualBrief:"Interno professionale e ordinato",
+  altText:"Interno ordinato",
+  fetcher:(async (_url:string|URL|Request,init?:RequestInit)=>{
+    requestBody=JSON.parse(String(init?.body??"{}"));
+    return new Response(JSON.stringify({
+      id:"resp_visual_qa",
+      model:"gpt-5.6-terra",
+      output_text:JSON.stringify({scores:{briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98},reason:"coerente"}),
+      usage:{input_tokens:100,output_tokens:40,total_tokens:140},
+    }),{status:200,headers:{"x-request-id":"req_visual_qa"}});
+  }) as typeof fetch,
+});
+assert.equal(visual.verdict,"PASS");
+assert.equal(requestBody?.input?.[0]?.content?.[1]?.type,"input_image");
+assert.equal(requestBody?.store,false);
+
+console.log("Content QA regression: PASS — structured global/slide QA, factual classification, visual inspection, budget and fail-closed approval.");
