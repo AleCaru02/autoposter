@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { friendlyGenerationError, manualGenerationFingerprint, requestManualContent } from "../src/features/content/manual-content-generation.js";
+import { ManualGenerationError, friendlyGenerationError, manualGenerationFingerprint, requestManualContent, requestManualContentStatus } from "../src/features/content/manual-content-generation.js";
 
 const baseRequest = {
   profileId: "11111111-1111-4111-8111-111111111111",
@@ -59,19 +59,46 @@ await assert.rejects(
   /limite di generazione/,
 );
 assert.match(friendlyGenerationError("DUPLICATE_CONTENT"), /simile/);
+assert.match(friendlyGenerationError("FACTCHECK_NEEDS_SOURCE"), /fonti sufficienti/i);
 assert.doesNotMatch(friendlyGenerationError("METERING_FAILED"), /meter|capability|provider/i);
 
-const [page, composer, store, workerText, entry, approvals] = await Promise.all([
+const progressResult = await requestManualContentStatus("11111111-1111-4111-8111-111111111111", "test-jwt", "operation-000000000001", async (url, init) => {
+  assert.equal(String(url), "/api/generate-text/status");
+  const statusHeaders = new Headers(init?.headers);
+  assert.equal(statusHeaders.get("x-post-automatici-operation-id"), "operation-000000000001");
+  return new Response(JSON.stringify({
+    state: "COMPLETED",
+    percent: 100,
+    stage: "COMMITTED",
+    result: { content: generated, editorialContext },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+});
+assert.equal(progressResult.state, "COMPLETED");
+assert.equal(progressResult.percent, 100);
+assert.equal(progressResult.result?.content.editorialTopic, generated.editorialTopic);
+
+await assert.rejects(
+  requestManualContent(baseRequest, "test-jwt", "operation-000000000001", async () => new Response(JSON.stringify({ error: "FACTCHECK_NEEDS_SOURCE" }), { status: 422 })),
+  (reason: unknown) => reason instanceof ManualGenerationError && reason.code === "FACTCHECK_NEEDS_SOURCE" && /fonti sufficienti/i.test(reason.message),
+);
+
+const [page, composer, store, workerText, entry, approvals, metering] = await Promise.all([
   readFile("src/pages/content-generator-page.tsx", "utf8"),
   readFile("src/components/manual-content-composer.tsx", "utf8"),
   readFile("src/features/content/content-store.ts", "utf8"),
   readFile("cloudflare/generate-text.ts", "utf8"),
   readFile("cloudflare/entry.ts", "utf8"),
   readFile("src/pages/approvals-page.tsx", "utf8"),
+  readFile("api/_lib/text-generation-metering.ts", "utf8"),
 ]);
 
 assert.match(page, /ManualContentComposer/, "customer content page must expose manual creation");
 assert.match(composer, /requestManualContent/, "manual composer must call the guarded text endpoint");
+assert.match(composer, /requestManualContentStatus/, "manual composer must poll real server-side progress");
+assert.match(composer, /sessionStorage/, "manual composer must survive navigation and refresh in the same tab");
+assert.match(composer, /aria-valuenow=\{progress\.percent\}/, "manual composer must expose a real progress percentage");
+assert.match(composer, /Puoi aprire Calendario/, "manual composer must explain that navigation no longer cancels the operation");
+assert.match(composer, /operation: op/, "pending operation must be persisted instead of being lost on navigation");
 assert.match(composer, /saveGeneratedContent/, "generated content must be persistible");
 assert.match(composer, /INSTAGRAM/);
 assert.match(composer, /FACEBOOK/);
@@ -90,8 +117,15 @@ assert.match(store, /from\("content_items"\)\.delete\(\)\.eq\("id", contentId\)\
 assert.match(store, /from\("content_carousel_slides"\)\.insert\(carouselRows\)/, "real carousel slides must be persisted as first-class rows");
 assert.match(store, /decision_record/, "content must persist an auditable decision record");
 assert.match(workerText, /normalizeEditorialResearchMode\(body\.researchMode\)/, "Cloudflare manual generation must honor the selected editorial mode");
+assert.match(workerText, /handleWorkerGenerateTextStatus/, "Cloudflare must expose generation status for resume");
+assert.match(workerText, /FACTCHECK_NEEDS_SOURCE/, "factual verification failures must no longer collapse into a generic error");
+assert.match(workerText, /onProgress:/, "server must persist actual pipeline stages");
+assert.match(metering, /client_operation_identity/, "metering must persist client operation identity for navigation resume");
+assert.match(metering, /getOperationStatus/, "metering must support operation progress lookup");
+assert.match(metering, /progress_percent/, "metering must persist real progress percentage");
 assert.match(workerText, /requestFingerprint: \{ topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext\.sourceProfileId, pillar: editorialContext\.pillar \}/, "research mode and Personal Brand source context must be part of idempotency identity");
-assert.match(workerText, /brand: context, researchMode, cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
+assert.match(workerText, /brand:\s*context,[\s\S]{0,160}researchMode,[\s\S]{0,160}cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
+assert.ok(entry.indexOf('path === "/api/generate-text/status"') < entry.indexOf('path === "/api/generate-text"'), "status route must not be swallowed by the main generation route");
 assert.ok(entry.indexOf('path === "/api/generate-text"') < entry.indexOf("return worker.fetch(request, env)"), "canonical Worker entry must route generation before asset fallback");
 assert.match(approvals, /fetch\("\/api\/generate-image"/);
 assert.match(approvals, /contentVariantId: variant\.id/);

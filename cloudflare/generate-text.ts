@@ -49,6 +49,44 @@ function summaryField(value: unknown) {
   return typeof summary === "string" && summary.trim() ? summary.trim() : null;
 }
 
+function publicGenerationError(detail: string) {
+  if (detail === "OPENAI_FACTCHECK_NEEDS_SOURCE") return "FACTCHECK_NEEDS_SOURCE";
+  if (detail === "OPENAI_FACTCHECK_BLOCK") return "FACTCHECK_BLOCKED";
+  if (detail === "OPENAI_RESEARCH_BLOCKED" || detail === "AI_BRAIN_INSUFFICIENT_SOURCES") return "RESEARCH_INSUFFICIENT";
+  if (detail.startsWith("METERING_FAILED")) return "METERING_FAILED";
+  if (detail.startsWith("OPENAI_")) return "AI_PROVIDER_ERROR";
+  return "GENERATION_FAILED";
+}
+
+
+export async function handleWorkerGenerateTextStatus(request: Request, env: Env) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const token = bearer(request);
+  if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
+  if (!env.DATABASE_URL) return json({ error: "DATABASE_NOT_CONFIGURED" }, 503);
+  let body: Record<string, unknown> = {};
+  try { body = await request.json() as Record<string, unknown>; } catch { /* validated below */ }
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
+  if (!profileId || !/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
+  const authUserId = await verifiedCustomerAuthUserId(token, env.DATABASE_URL);
+  if (!authUserId) return json({ error: "AUTH_REQUIRED" }, 401);
+  const sql = neon(env.DATABASE_URL);
+  try { await loadEditorialProfile(sql, profileId, authUserId); }
+  catch { return json({ error: "PROFILE_NOT_FOUND" }, 404); }
+  const meter = new TextGenerationMetering(env.DATABASE_URL);
+  const status = await meter.getOperationStatus(profileId, "MANUAL", operationIdentity);
+  if (!status) return json({ state: "NOT_FOUND", percent: 0, stage: "PREPARING" }, 200);
+  const result = status.cached?.response && typeof status.cached.response === "object" ? status.cached.response : null;
+  return json({
+    state: status.state === "COMMITTED" ? "COMPLETED" : status.state === "RELEASED" ? "FAILED" : "IN_PROGRESS",
+    percent: status.percent,
+    stage: status.stage,
+    error: status.releaseReason ? publicGenerationError(status.releaseReason) : null,
+    result,
+    createdAt: status.createdAt,
+  });
+}
 
 async function recentContentForDedupe(profileId: string, token: string): Promise<ContentDedupeCandidate[]> {
   const items = await rows<RecentItemRow>(`content_items?profile_id=eq.${encodeURIComponent(profileId)}&select=id,topic,title&order=created_at.desc&limit=40`, token);
@@ -167,6 +205,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
     const eventId = reservation.eventId;
     activeEventId = eventId;
+    await meter.setProgress(eventId, 15, "ANALYZING");
 
     const requestUpperBoundUsd = estimateTextRequestUpperBoundUsd({ topic: enriched.topic, objective, providers, formats, brand: context, researchMode });
     const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({
@@ -181,7 +220,18 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     }
 
     await meter.markProviderStarted(eventId);
-    const result = await generateSocialText({ apiKey: env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({
+      apiKey: env.OPENAI_API_KEY,
+      topic: enriched.topic,
+      objective,
+      providers,
+      formats,
+      brand: context,
+      researchMode,
+      cacheKey: `post-automatici:${profileId}`,
+      onProgress: async ({ percent, stage }) => { await meter.setProgress(eventId, percent, stage); },
+    });
+    await meter.setProgress(eventId, 95, "FINALIZING");
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
       requested_topic: topic,
@@ -228,6 +278,8 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     if (detail === "PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED") return json({ error: detail }, 403);
     if (detail === "PROFILE_NOT_FOUND") return json({ error: detail }, 404);
-    return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" }, detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500);
+    const publicError = publicGenerationError(detail);
+    const status = detail.startsWith("OPENAI_") || detail === "AI_BRAIN_INSUFFICIENT_SOURCES" ? 422 : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return json({ error: publicError }, status);
   }
 }

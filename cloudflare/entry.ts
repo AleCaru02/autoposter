@@ -1,5 +1,5 @@
 import worker from "./worker.js";
-import { handleWorkerGenerateText } from "./generate-text.js";
+import { handleWorkerGenerateText, handleWorkerGenerateTextStatus } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerOnboardingProvision } from "./onboarding-provision.js";
 import { handleWorkerOnboardingComplete } from "./onboarding-complete.js";
@@ -179,6 +179,7 @@ export default {
       return handleSignedReferenceImage(request, env, referenceId);
     }
     if (path === "/api/editorial-agents/strategy-plan") return handleWorkerStrategyPlanner(request, env);
+    if (path === "/api/generate-text/status") return handleWorkerGenerateTextStatus(request, env);
     if (path === "/api/generate-text") return handleWorkerGenerateText(request, env);
     if (path === "/api/profile-bootstrap") return handleWorkerProfileBootstrap(request, env);
     if (path === "/api/profile-archive") return handleWorkerProfileArchive(request, env);

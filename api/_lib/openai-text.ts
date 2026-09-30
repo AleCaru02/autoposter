@@ -120,6 +120,7 @@ export type GenerateOptions = {
   fetcher?: typeof fetch;
   model?: string;
   cacheKey?: string;
+  onProgress?: (update: { percent: number; stage: "ANALYZING" | "RESEARCHING" | "WRITING" | "COPY_READY" | "VERIFYING" | "VERIFIED" }) => void | Promise<void>;
 };
 
 const TERRA_INPUT_PER_MILLION_USD = 2;
@@ -319,6 +320,10 @@ function agentCost(result: ResearchAgentResult | { usage: { inputTokens: number;
   return estimateTerraCostUsd(result.usage.inputTokens, result.usage.outputTokens) + result.usage.webSearchCalls * WEB_SEARCH_PER_RUN_USD;
 }
 
+async function reportProgress(options: GenerateOptions, percent: number, stage: "ANALYZING" | "RESEARCHING" | "WRITING" | "COPY_READY" | "VERIFYING" | "VERIFIED") {
+  try { await options.onProgress?.({ percent, stage }); } catch { /* progress telemetry must never break content generation */ }
+}
+
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
   const fetcher = options.fetcher ?? fetch;
   const model = options.model ?? "gpt-5.6-terra";
@@ -331,9 +336,11 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     target: options.brand.target,
     mode: options.researchMode ?? "BALANCED",
   });
+  await reportProgress(options, 25, "ANALYZING");
 
   let dedicatedResearch: ResearchAgentResult | null = null;
   if (shouldRunResearchAgent(research.mode)) {
+    await reportProgress(options, 35, "RESEARCHING");
     dedicatedResearch = await runOpenAIResearchAgent({
       apiKey: options.apiKey,
       topic: options.topic,
@@ -362,6 +369,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     }
   }
 
+  await reportProgress(options, 45, "WRITING");
   const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
@@ -435,6 +443,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_OUTPUT");
   const content = validateResult(JSON.parse(outputText), options.providers, options.formats);
+  await reportProgress(options, 72, "COPY_READY");
   const brain = brainDecision({
     spendEur: 0,
     task: "COPY_FINAL",
@@ -454,6 +463,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
 
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
   if (brain.factCheckRequired || contentNeedsFactCheck(content, research.mode)) {
+    await reportProgress(options, 82, "VERIFYING");
     factCheck = await runOpenAIFactCheckAgent({
       apiKey: options.apiKey,
       topic: options.topic,
@@ -482,6 +492,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     });
     // Persist technical cost before surfacing a blocking fact-check verdict.
   }
+  await reportProgress(options, 92, "VERIFIED");
 
   const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + (factCheck?.usage.inputTokens ?? 0);
   const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + (factCheck?.usage.outputTokens ?? 0);
