@@ -216,5 +216,35 @@ assert.deepEqual(repaired.sources, ["https://example.org/airbnb-source", "https:
 assert.equal(repaired.usage.webSearchCalls, 2);
 assert.equal(repaired.usage.inputTokens, 210);
 
+const originalGlobalFetch = globalThis.fetch;
+let receiverChecked = false;
+globalThis.fetch = (async function(this: typeof globalThis, _url: string | URL | Request, _init?: RequestInit) {
+  receiverChecked = this === globalThis;
+  if (!receiverChecked) throw new TypeError("Illegal invocation: function called with incorrect `this` reference.");
+  const output = {
+    verdict: "PASS",
+    checkedClaims: [{ claim: "Nota editoriale", claimType: "EDITORIAL", slideNumber: null, sourceRequired: false, status: "NOT_FACTUAL", reason: "Nessuna verifica esterna richiesta." }],
+  };
+  return new Response(JSON.stringify({
+    id: "resp_bound_fetch",
+    model: "gpt-5.6-terra",
+    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }],
+    usage: { input_tokens: 12, output_tokens: 8, total_tokens: 20 },
+  }), { status: 200 });
+}) as typeof fetch;
+try {
+  const boundFetchCheck = await runOpenAIFactCheckAgent({
+    apiKey: "test-key",
+    topic: "Tema editoriale",
+    content: { caption: "Nota editoriale" },
+    research: null,
+    existingSources: [],
+    allowWebSearch: false,
+  });
+  assert.equal(boundFetchCheck.verdict, "PASS");
+  assert.equal(receiverChecked, true, "Cloudflare-style global fetch must retain globalThis as its receiver");
+} finally {
+  globalThis.fetch = originalGlobalFetch;
+}
 
 console.log("OpenAI Research + Fact-check agents regression: PASS");
