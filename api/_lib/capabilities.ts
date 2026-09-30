@@ -49,6 +49,7 @@ export const CAPABILITY_REGISTRY = define({
   "ai.research.web": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "ai.research.factcheck": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "ai.strategy.generate": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_VERIFIED" },
+  "content.qa.run": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "content.dedupe": { classification: "CORE_ALL_PLANS", limitType: "UNLIMITED", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "content.format.post": { classification: "CORE_ALL_PLANS", limitType: "UNLIMITED", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "content.format.carousel": { classification: "NOT_READY", limitType: "NOT_APPLICABLE", status: "PARTIAL" },
