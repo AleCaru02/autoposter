@@ -85,11 +85,11 @@ function count(values:string[]|undefined,value:string){return values?.filter((it
 function recentCandidate(row:EditorialMemoryRecentContent):ContentDedupeCandidate{
   return {id:row.id,topic:row.topic,angle:row.angle,hook:row.hook,cta:row.cta,pillar:row.pillar,visualArchetype:row.visualArchetype,subjectStrategy:row.subjectStrategy,narrativeStructure:null};
 }
-function platformCta(provider:SocialProvider,index:number){
-  if(provider==="INSTAGRAM")return index%2?"Salva il post per riprenderlo quando ti serve":"Condividilo con chi sta affrontando questa scelta";
-  if(provider==="FACEBOOK")return index%2?"Scrivici per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
-  if(provider==="LINKEDIN")return index%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci sul metodo nei commenti";
-  return index%2?"Scopri il servizio e richiedi informazioni":"Visita il sito per il prossimo passo disponibile";
+function platformCta(provider:SocialProvider,providerOccurrence:number){
+  if(provider==="INSTAGRAM")return providerOccurrence%2?"Salva il post per riprenderlo quando ti serve":"Condividilo con chi sta affrontando questa scelta";
+  if(provider==="FACEBOOK")return providerOccurrence%2?"Scrivici per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
+  if(provider==="LINKEDIN")return providerOccurrence%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci sul metodo nei commenti";
+  return providerOccurrence%2?"Scopri il servizio e richiedi informazioni":"Visita il sito per il prossimo passo disponibile";
 }
 function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number){
   const templates:Record<EditorialIntent,string> = {
@@ -153,7 +153,7 @@ export function runProfileSmmCertificationSimulation(
       ? memory.continuity.suggestedNextTopicIntent!
       : `${pillar}: ${motif}`;
     const hook=hookFor(intent,pillar,motif,index);
-    const cta=platformCta(provider,index);
+    const cta=platformCta(provider,Math.floor(index/PROVIDERS.length));
     const visualBrief=visualBriefFor(fixture.profileType,contentType,intent,pillar,index);
 
     const subjectDecision=chooseSubjectStrategy({
@@ -170,10 +170,12 @@ export function runProfileSmmCertificationSimulation(
     const continuity=deriveContinuityDecision({memory,profileType:fixture.profileType,contentType,intent,topic});
     const candidate:ContentDedupeCandidate={
       topic,angle:hook,hook,caption:`${hook}. Sviluppo utile e specifico del tema ${topic}, senza claim esterni simulati.`,
-      cta,pillar,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:contentType,
+      cta,pillar,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:`${contentType}:${intent}`,
     };
     const recent=history.map(recentCandidate);
     const duplicate=findNearDuplicate(candidate,recent);
+    const linkedSeriesContinuation=continuity.mode==="CONTINUE_SERIES"&&Boolean(continuity.previousContentId);
+    const duplicateBlocked=Boolean(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78));
     const repetition=findEditorialRepetition(candidate,recent);
     const identityStatus=subjectDecision.subject==="CANONICAL_PERSON"?"PASS":"NOT_REQUIRED";
     const assetProvider=subjectDecision.subject==="CANONICAL_PERSON"?"HIGGSFIELD":"OPENAI";
@@ -235,7 +237,7 @@ export function runProfileSmmCertificationSimulation(
       VISUAL:visualBrief.length>=30?"PASS":"FAIL",
       IDENTITY:subjectDecision.subject!=="CANONICAL_PERSON"||identityStatus==="PASS"?"PASS":"FAIL",
       CONTINUITY:feed.checks.narrativeContinuity?"PASS":"FAIL",
-      ANTI_REPETITION:!duplicate&&!repetition.blocked?"PASS":"FAIL",
+      ANTI_REPETITION:!duplicateBlocked&&!repetition.blocked?"PASS":"FAIL",
       FEED_COHERENCE:feed.status,
       PROFILE_TYPE_FIT:profileTypeFit?"PASS":"FAIL",
       PLATFORM_FIT:platformFit?"PASS":"FAIL",
