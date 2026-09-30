@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources } from "../api/_lib/openai-research-factcheck.js";
 
 assert.equal(shouldRunResearchAgent("NEWS"), true);
-assert.equal(shouldRunResearchAgent("BALANCED"), true);
-assert.equal(shouldRunResearchAgent("TIPS"), true);
-assert.equal(shouldRunResearchAgent("EVERGREEN"), true);
+assert.equal(shouldRunResearchAgent("BALANCED"), false);
+assert.equal(shouldRunResearchAgent("TIPS"), false);
+assert.equal(shouldRunResearchAgent("EVERGREEN"), false);
 assert.equal(shouldRunResearchAgent("WEBSITE_ONLY"), false);
 assert.deepEqual(
   trustedVerificationSources([
@@ -22,6 +22,7 @@ assert.equal(contentNeedsFactCheck({ caption: "Il valore è aumentato del 12%." 
 assert.equal(contentNeedsFactCheck({ caption: "Il servizio costa 100 €." }, "WEBSITE_ONLY"), true);
 assert.equal(contentNeedsFactCheck({ caption: "La regola cambia nel 2026." }, "WEBSITE_ONLY"), true);
 assert.equal(contentNeedsFactCheck({ caption: "Aggiornamento di settore" }, "NEWS"), true);
+assert.equal(contentNeedsFactCheck({ factualBasis: ["BASE ESTERNA: documentazione ufficiale"] }, "BALANCED"), true, "ogni claim dichiarato esterno deve essere fact-checkato");
 
 let researchCalls = 0;
 const researchFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
