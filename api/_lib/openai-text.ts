@@ -678,13 +678,14 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     ...(factCheck ? [{
       operation: "AGENT_FACTCHECK" as const,
       model: factCheck.model,
-      inputTokens: factCheck.usage.inputTokens,
-      outputTokens: factCheck.usage.outputTokens,
+      inputTokens: factCheckInputTokens,
+      outputTokens: factCheckOutputTokens,
       costUsd: factCheckCostUsd,
       metadata: {
         openai_response_id: factCheck.responseId,
         openai_request_id: factCheck.requestId,
-        web_search_calls: factCheck.usage.webSearchCalls,
+        web_search_calls: factCheckWebSearchCalls,
+        passes: factCheckRuns.length,
         verdict: factCheck.verdict,
         sources: factCheck.sources,
       },
