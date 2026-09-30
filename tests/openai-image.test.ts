@@ -43,6 +43,7 @@ assert.equal(normalizedBrand.visualStyle, "Minimal, premium, sobrio.");
 
 const prompt = buildImagePrompt({
   profileName: "QA Property",
+  profileType: "PERSONAL_BRAND",
   industry: "Property management",
   tone: "Professionale",
   brandColors: ["#112233", "#F5F1E8"],
@@ -55,6 +56,10 @@ const prompt = buildImagePrompt({
   additionalDirection: null,
 });
 assert.ok(prompt.includes("Appartamento luminoso"));
+assert.match(prompt, /SISTEMA VISIVO PERSONAL BRAND/);
+assert.match(prompt, /feed editoriale coerente/i);
+assert.match(prompt, /Non inventare il volto del titolare/i);
+assert.match(prompt, /colori, font e stile devono provenire dal profilo attivo/i);
 assert.match(prompt, /Palette del profilo da rispettare: #112233, #F5F1E8/);
 assert.match(prompt, /Inter, Georgia/);
 assert.match(prompt, /Minimal, premium, sobrio/);
@@ -66,6 +71,7 @@ assert.ok(prompt.includes("illuminazione"));
 const result = await generateOpenAIImage({
   apiKey: "sk-image-test-only",
   profileName: "QA Property",
+  profileType: "PERSONAL_BRAND",
   industry: "Property management",
   tone: "Professionale",
   brandColors: ["#112233", "#F5F1E8"],
@@ -91,10 +97,13 @@ assert.match(String(calls[0].body.instructions), /NON inventare cartografia/i);
 assert.match(String(calls[0].body.instructions), /massimo un headline/i);
 assert.match(String(calls[0].body.instructions), /STRATEGIA VISUAL Instagram/);
 assert.match(String(calls[0].body.instructions), /fermare lo scroll/i);
+assert.match(String(calls[0].body.instructions), /SISTEMA VISIVO PERSONAL BRAND/);
+assert.match(String(calls[0].body.instructions), /feed editoriale coerente/i);
 const mediaInput = JSON.parse(String(calls[0].body.input));
 assert.deepEqual(mediaInput.brand.colors, ["#112233", "#F5F1E8"]);
 assert.deepEqual(mediaInput.brand.fonts, ["Inter", "Georgia"]);
 assert.equal(mediaInput.brand.visualStyle, "Minimal, premium, sobrio.");
+assert.equal(mediaInput.brand.profileType, "PERSONAL_BRAND");
 assert.equal("tools" in calls[0].body, false, "Media Manager non deve spendere per web search");
 assert.equal(calls[1].url, "https://api.openai.com/v1/images/generations");
 assert.equal(calls[1].headers.authorization, "Bearer sk-image-test-only");
@@ -112,6 +121,8 @@ assert.match(String(calls[1].body.prompt), /non inventare cartografia/i);
 assert.match(String(calls[1].body.prompt), /massimo un headline/i);
 assert.match(String(calls[1].body.prompt), /STRATEGIA VISUAL Instagram/);
 assert.match(String(calls[1].body.prompt), /fermare lo scroll/i);
+assert.match(String(calls[1].body.prompt), /SISTEMA VISIVO PERSONAL BRAND/);
+assert.match(String(calls[1].body.prompt), /Non inventare il volto del titolare/i);
 assert.equal(JSON.stringify(calls.map((call) => call.body)).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
 
 const mediaCost = estimateTerraCostUsd(100, 80);
