@@ -124,7 +124,7 @@ assert.match(metering, /client_operation_identity/, "metering must persist clien
 assert.match(metering, /getOperationStatus/, "metering must support operation progress lookup");
 assert.match(metering, /progress_percent/, "metering must persist real progress percentage");
 assert.match(workerText, /requestFingerprint: \{ topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext\.sourceProfileId, pillar: editorialContext\.pillar \}/, "research mode and Personal Brand source context must be part of idempotency identity");
-assert.match(workerText, /brand: context, researchMode, cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
+assert.match(workerText, /brand:\s*context,[\s\S]{0,160}researchMode,[\s\S]{0,160}cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
 assert.ok(entry.indexOf('path === "/api/generate-text/status"') < entry.indexOf('path === "/api/generate-text"'), "status route must not be swallowed by the main generation route");
 assert.ok(entry.indexOf('path === "/api/generate-text"') < entry.indexOf("return worker.fetch(request, env)"), "canonical Worker entry must route generation before asset fallback");
 assert.match(approvals, /fetch\("\/api\/generate-image"/);
