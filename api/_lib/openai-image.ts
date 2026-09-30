@@ -39,6 +39,7 @@ export type OpenAIImageResult = {
   mimeType: "image/png";
   base64: string;
   revisedPrompt: string | null;
+  generationPrompt: string;
   requestId: string | null;
   size: ImageSize;
   aspectRatio: "1:1" | "2:3";
@@ -60,6 +61,9 @@ export type GenerateImageOptions = {
   profileName: string;
   industry: string | null;
   tone: string | null;
+  brandColors?: string[];
+  brandFonts?: string[];
+  brandVisualStyle?: string | null;
   provider: ImageSocialProvider;
   format: ImageSocialFormat;
   visualBrief: string;
@@ -76,9 +80,35 @@ function clean(value: string | null | undefined, max: number) {
   return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-export function buildImagePrompt(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
+function cleanList(values: string[] | undefined, maxItems: number, itemMax = 120) {
+  return [...new Set((values ?? []).map((value) => clean(value, itemMax)).filter(Boolean))].slice(0, maxItems);
+}
+
+export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
+  const colors = cleanList(options.brandColors, 8, 64);
+  const fonts = cleanList(options.brandFonts, 6, 100);
+  const storySafety = options.format === "STORY"
+    ? "STORY: mantieni testo e soggetto essenziali nella zona centrale, con ampio respiro sopra e sotto per l'interfaccia social e margini laterali sufficienti per un successivo ritaglio 9:16."
+    : "POST/CAROUSEL: mantieni headline, soggetto ed elementi essenziali ad almeno circa l'8% dai bordi e leggibili in anteprima mobile.";
+  return [
+    "VINCOLI VISIVI OBBLIGATORI:",
+    colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
+    fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
+    options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
+    "Il visual deve comunicare l'idea centrale del contenuto, non limitarsi a decorare il luogo o il settore.",
+    "Una sola gerarchia principale e al massimo tre elementi secondari. Niente composizioni affollate, collage casuali, infografiche improvvisate o troppi punti focali.",
+    "Per luoghi reali, quartieri, mappe, metro, strade, landmark o percorsi: non inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o label fattuali. Senza dati geografici verificati o asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale.",
+    "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
+    "Se il brief richiede testo nell'immagine, usa esclusivamente il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, label, numeri, pseudo-dati o didascalie inventate.",
+    "Testo ad alto contrasto, grande e immediatamente leggibile su smartphone; non sovrapporlo a zone visivamente rumorose.",
+    storySafety,
+    "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
+  ].filter(Boolean).join("\n");
+}
+
+function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
   const sizeInstruction = options.format === "STORY"
-    ? "Composizione verticale 2:3, soggetto principale ben leggibile anche su smartphone."
+    ? "Composizione verticale 2:3 progettata per restare leggibile dopo un ritaglio 9:16."
     : "Composizione quadrata 1:1, soggetto principale ben leggibile anche su smartphone.";
   return [
     "Crea un'immagine social originale e professionale per il brand indicato.",
@@ -90,13 +120,14 @@ export function buildImagePrompt(options: Omit<GenerateImageOptions, "apiKey" | 
     `Brief visivo confermato: ${clean(options.visualBrief, 2_000)}.`,
     options.caption ? `Contesto del contenuto: ${clean(options.caption, 1_500)}.` : "",
     options.additionalDirection ? `Indicazione aggiuntiva: ${clean(options.additionalDirection, 700)}.` : "",
-    "Costruisci una vera art direction, non una semplice illustrazione generica: definisci punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo e profondità percepibile.",
-    "Specifica una prospettiva o inquadratura intenzionale, illuminazione credibile, ombre, atmosfera, palette, materiali e texture coerenti con il settore e con il tono del brand.",
+    "Costruisci una vera art direction: punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo, profondità, prospettiva, illuminazione, ombre, atmosfera, materiali e texture.",
     "Il risultato deve avere qualità editoriale premium e impatto da social feed, evitando look da stock, template vuoti, composizioni piatte o elementi decorativi casuali.",
-    "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente invece di usare una semplice icona o uno sfondo anonimo.",
-    "Non aggiungere testo, loghi, marchi, watermark, prezzi, recensioni, certificazioni o claim non esplicitamente richiesti.",
-    "Non inventare elementi fattuali dell'attività; il visual deve restare coerente con il brief senza affermare fatti nuovi.",
+    "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente.",
   ].filter(Boolean).join("\n");
+}
+
+export function buildImagePrompt(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
+  return [buildFallbackArtDirection(options), buildImageGuardrails(options)].filter(Boolean).join("\n\n");
 }
 
 function numberOrNull(value: unknown) {
@@ -115,6 +146,9 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     profileName: options.profileName,
     industry: options.industry,
     tone: options.tone,
+    brandColors: options.brandColors ?? [],
+    brandFonts: options.brandFonts ?? [],
+    brandVisualStyle: options.brandVisualStyle ?? null,
     provider: options.provider,
     format: options.format,
     visualBrief: options.visualBrief,
@@ -130,9 +164,8 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     costUsd: mediaManager.usage.estimatedCostUsd,
     metadata: { openai_response_id: mediaManager.responseId, openai_request_id: mediaManager.requestId },
   };
-  const fallbackPrompt = buildImagePrompt(options);
   const mediaPrompt = mediaManager.imagePrompt.trim();
-  const prompt = mediaPrompt.length >= 600
+  const promptBase = mediaPrompt.length >= 600
     ? mediaPrompt
     : [
         mediaPrompt,
@@ -141,8 +174,9 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
         mediaManager.environment ? `Ambiente: ${clean(mediaManager.environment, 600)}.` : "",
         mediaManager.composition ? `Composizione e gerarchia: ${clean(mediaManager.composition, 700)}.` : "",
         mediaManager.style ? `Stile, luce e atmosfera: ${clean(mediaManager.style, 700)}.` : "",
-        fallbackPrompt,
+        buildFallbackArtDirection(options),
       ].filter(Boolean).join("\n");
+  const prompt = [promptBase, buildImageGuardrails(options)].filter(Boolean).join("\n\n");
   const response = await fetcher("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
@@ -192,6 +226,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     mimeType: "image/png",
     base64,
     revisedPrompt: first && typeof first.revised_prompt === "string" ? first.revised_prompt : null,
+    generationPrompt: prompt,
     requestId,
     size,
     aspectRatio: options.format === "STORY" ? "2:3" : "1:1",
