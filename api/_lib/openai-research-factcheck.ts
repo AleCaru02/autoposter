@@ -121,7 +121,24 @@ function sources(body: Record<string, unknown>) {
       } catch { /* ignore invalid provider URLs */ }
     }
   }
-  return [...urls].slice(0, 20);
+  return [...urls].slice(0, 30);
+}
+
+const NON_AUTHORITATIVE_FACT_DOMAINS = new Set([
+  "reddit.com","quora.com","facebook.com","instagram.com","tiktok.com","x.com","twitter.com","pinterest.com"
+]);
+
+export function trustedVerificationSources(values: string[]) {
+  const accepted: string[] = [];
+  for (const value of values) {
+    try {
+      const url = new URL(value);
+      const host = url.hostname.toLowerCase().replace(/^www\./,"");
+      if ([...NON_AUTHORITATIVE_FACT_DOMAINS].some((domain) => host === domain || host.endsWith(`.${domain}`))) continue;
+      accepted.push(url.toString());
+    } catch { /* invalid source is never accepted */ }
+  }
+  return [...new Set(accepted)].slice(0, 20);
 }
 
 function usage(body: Record<string, unknown>) {
@@ -143,6 +160,7 @@ async function callStructured(input: {
   schemaName: string;
   useWebSearch: boolean;
   requireWebSearch?: boolean;
+  maxWebSearchCalls?: number;
   fetcher?: typeof fetch;
 }) {
   const fetcher = input.fetcher ?? fetch;
@@ -157,7 +175,7 @@ async function callStructured(input: {
       input: JSON.stringify(input.payload),
       ...(input.useWebSearch ? {
         tools: [{ type: "web_search", search_context_size: "low" }],
-        max_tool_calls: 1,
+        max_tool_calls: Math.max(1, Math.min(input.maxWebSearchCalls ?? 1, 4)),
         include: ["web_search_call.action.sources"],
         ...(input.requireWebSearch ? { tool_choice: "required" } : {}),
       } : {}),
@@ -175,7 +193,7 @@ async function callStructured(input: {
 }
 
 export function shouldRunResearchAgent(mode: EditorialResearchMode) {
-  return mode === "NEWS";
+  return mode !== "WEBSITE_ONLY";
 }
 
 export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchMode) {
@@ -197,24 +215,34 @@ export async function runOpenAIResearchAgent(input: {
     apiKey: input.apiKey,
     fetcher: input.fetcher,
     useWebSearch: true,
+    requireWebSearch: true,
+    maxWebSearchCalls: 3,
     schema: RESEARCH_SCHEMA,
     schemaName: "post_automatici_research_agent",
     instructions: [
       "Sei il Research Agent di Post Automatici.",
-      "Raccogli soltanto evidenze utili al tema richiesto usando al massimo una ricerca web.",
-      "Preferisci fonti primarie e ufficiali. Per news e dati correnti verifica data e freschezza.",
+      "Raccogli soltanto evidenze utili al tema richiesto usando la ricerca web in modo obbligatorio.",
+      "Gerarchia fonti: 1) fonte primaria del soggetto citato; 2) ente pubblico, istituzione o documentazione ufficiale; 3) testata/editoria affidabile solo come supporto secondario.",
+      "Per confronti fra piattaforme, aziende o prodotti cerca separatamente fonti autorevoli per ciascun soggetto citato.",
+      "Non usare social post, forum, Reddit, Quora, aggregatori anonimi, siti copia-incolla o pagine SEO come prova fattuale.",
+      "Una fonte secondaria da sola non basta per claim materiali se esiste una fonte primaria/ufficiale reperibile. Per claim delicati o potenzialmente controversi cerca conferma indipendente.",
+      "Se fonti affidabili si contraddicono, privilegia la fonte primaria/ufficiale più recente e segnala l'incertezza; non scegliere la versione più sensazionale.",
+      "Per news e dati correnti verifica data e freschezza.",
       "Non trasformare mai informazioni generali di settore in fatti specifici del brand.",
-      "Se non trovi evidenza adeguata e sufficientemente recente, status=BLOCKED.",
+      "Se non trovi evidenza adeguata e sufficientemente recente, status=BLOCKED: meglio omettere il claim che usare una fonte debole.",
       "Non inventare URL: gli URL reali vengono raccolti separatamente dalle citazioni dello strumento.",
     ].join("\n"),
     payload: input,
   });
   const parsed = result.parsed as unknown as { status: "READY" | "BLOCKED"; summary: string; evidence: ResearchEvidence[] };
+  const acceptedSources = trustedVerificationSources(sources(result.body));
+  const evidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
+  const usableEvidence = evidence.filter((item) => item.reliability !== "LOW" && item.sourceType !== "UNKNOWN");
   return {
-    status: parsed.status,
+    status: parsed.status === "READY" && acceptedSources.length > 0 && usableEvidence.length > 0 ? "READY" : "BLOCKED",
     summary: parsed.summary,
-    evidence: Array.isArray(parsed.evidence) ? parsed.evidence : [],
-    sources: sources(result.body),
+    evidence: usableEvidence,
+    sources: acceptedSources,
     responseId: typeof result.body.id === "string" ? result.body.id : "",
     requestId: result.requestId,
     model: typeof result.body.model === "string" ? result.body.model : "gpt-5.6-terra",
@@ -242,7 +270,10 @@ export async function runOpenAIFactCheckAgent(input: {
     "Per un carosello valorizza slideNumber quando il claim appartiene chiaramente a una slide; usa null per claim globali.",
     "Se una fonte contraddice il claim usa CONTRADICTED e verdict=BLOCK. Per fatti che possono cambiare usa TIME_SENSITIVE e richiedi evidenza attuale.",
     "Non approvare per plausibilità e non inventare fonti. Se un claim esterno richiede fonte e non può essere verificato, verdict=NEEDS_SOURCE.",
+    "Gerarchia fonti per verifica: fonte primaria del soggetto > ente/documentazione ufficiale > fonte editoriale affidabile corroborata.",
+    "Non considerare social post, forum, Reddit, Quora, aggregatori anonimi, siti copia-incolla o pagine SEO come prova sufficiente di un claim fattuale.",
     "Quando usi la ricerca web per un confronto fra più piattaforme, aziende, prodotti o soggetti, cerca evidenze per TUTTI i soggetti citati: non fermarti alla prima entità trovata.",
+    "Se due fonti affidabili sono in conflitto, non scegliere arbitrariamente: usa la fonte primaria/ufficiale più recente oppure marca il claim come TIME_SENSITIVE/UNSUPPORTED.",
   ].join("\n");
 
   const first = await callStructured({
@@ -250,6 +281,7 @@ export async function runOpenAIFactCheckAgent(input: {
     fetcher: input.fetcher,
     useWebSearch: input.allowWebSearch,
     requireWebSearch: input.requireWebSearch,
+    maxWebSearchCalls: input.allowWebSearch ? 3 : 1,
     schema: FACTCHECK_SCHEMA,
     schemaName: "post_automatici_fact_check_agent",
     instructions: baseInstructions,
@@ -257,12 +289,14 @@ export async function runOpenAIFactCheckAgent(input: {
   });
   const firstParsed = first.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
   const firstClaims = Array.isArray(firstParsed.checkedClaims) ? firstParsed.checkedClaims : [];
-  const firstSources = [...new Set([...input.existingSources, ...sources(first.body)])].slice(0, 20);
+  const firstSources = trustedVerificationSources([...input.existingSources, ...sources(first.body)]);
   const firstUsage = usage(first.body);
 
-  if (firstParsed.verdict !== "NEEDS_SOURCE" || !input.allowWebSearch) {
+  const firstRequiresSource = firstClaims.some((claim) => claim.sourceRequired && claim.status === "VERIFIED");
+  const firstVerdict = firstParsed.verdict === "PASS" && firstRequiresSource && firstSources.length === 0 ? "NEEDS_SOURCE" : firstParsed.verdict;
+  if (firstVerdict !== "NEEDS_SOURCE" || !input.allowWebSearch) {
     return {
-      verdict: firstParsed.verdict,
+      verdict: firstVerdict,
       checkedClaims: firstClaims,
       sources: firstSources,
       responseId: typeof first.body.id === "string" ? first.body.id : "",
@@ -282,6 +316,7 @@ export async function runOpenAIFactCheckAgent(input: {
     fetcher: input.fetcher,
     useWebSearch: true,
     requireWebSearch: true,
+    maxWebSearchCalls: 3,
     schema: FACTCHECK_SCHEMA,
     schemaName: "post_automatici_fact_check_repair",
     instructions: [
@@ -302,11 +337,13 @@ export async function runOpenAIFactCheckAgent(input: {
   });
   const secondParsed = second.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
   const secondClaims = Array.isArray(secondParsed.checkedClaims) ? secondParsed.checkedClaims : [];
-  const secondSources = [...new Set([...firstSources, ...sources(second.body)])].slice(0, 20);
+  const secondSources = trustedVerificationSources([...firstSources, ...sources(second.body)]);
   const secondUsage = usage(second.body);
 
+  const secondRequiresSource = secondClaims.some((claim) => claim.sourceRequired && claim.status === "VERIFIED");
+  const secondVerdict = secondParsed.verdict === "PASS" && secondRequiresSource && secondSources.length === 0 ? "NEEDS_SOURCE" : secondParsed.verdict;
   return {
-    verdict: secondParsed.verdict,
+    verdict: secondVerdict,
     checkedClaims: secondClaims,
     sources: secondSources,
     responseId: typeof second.body.id === "string" ? second.body.id : "",
