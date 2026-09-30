@@ -663,6 +663,18 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         sources: dedicatedResearch.sources,
       },
     }] : []),
+    ...(copyRepair ? [{
+      operation: "AGENT_COPY_REPAIR" as const,
+      model: copyRepair.model,
+      inputTokens: copyRepair.usage.inputTokens,
+      outputTokens: copyRepair.usage.outputTokens,
+      costUsd: copyRepairCostUsd,
+      metadata: {
+        openai_response_id: copyRepair.responseId,
+        openai_request_id: copyRepair.requestId,
+        reason: "FACTCHECK_NEEDS_SOURCE",
+      },
+    }] : []),
     ...(factCheck ? [{
       operation: "AGENT_FACTCHECK" as const,
       model: factCheck.model,
