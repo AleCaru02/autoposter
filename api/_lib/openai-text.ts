@@ -547,6 +547,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const combinedSources = [...new Set([...(dedicatedResearch?.sources ?? []), ...mainSources])].slice(0, 20);
 
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
+  const factCheckRuns: Array<Awaited<ReturnType<typeof runOpenAIFactCheckAgent>>> = [];
+  let copyRepair: Awaited<ReturnType<typeof repairUnsupportedContent>> | null = null;
   if (brain.factCheckRequired || contentNeedsFactCheck(content, research.mode)) {
     await reportProgress(options, 82, "VERIFYING");
     factCheck = await runOpenAIFactCheckAgent({
@@ -572,10 +574,11 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       },
       research: dedicatedResearch,
       existingSources: combinedSources,
-      allowWebSearch: research.useWebSearch && combinedSources.length === 0,
+      allowWebSearch: research.useWebSearch,
       requireWebSearch: research.useWebSearch && combinedSources.length === 0,
       fetcher,
     });
+    factCheckRuns.push(factCheck);
     // Persist technical cost before surfacing a blocking fact-check verdict.
   }
   await reportProgress(options, 92, "VERIFIED");
