@@ -41,6 +41,12 @@ export type ContentVariantRow = {
   image_asset_id: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
+  approval_mode: "MANUAL" | "AUTO";
+  workflow_status: "DRAFT" | "REVIEW" | "REVIEW_REQUIRED" | "APPROVED" | "REJECTED";
+  approved_by: string | null;
+  approved_at: string | null;
+  rejected_reason: string | null;
+  approved_fingerprint: string | null;
   factual_basis: string[];
   qa_status: "PENDING" | "PASS" | "FAIL" | "NEEDS_SOURCE";
   qa_fingerprint: string | null;
@@ -131,6 +137,7 @@ export type ContentQaApiResult = {
 type ReviewResponse = {
   variantId?: string;
   approvalStatus?: ApprovalStatus;
+  workflowStatus?: "DRAFT" | "REVIEW" | "REVIEW_REQUIRED" | "APPROVED" | "REJECTED";
   contentStatus?: "IN_REVIEW" | "APPROVED" | "CHANGES_REQUESTED";
   updatedAt?: string;
   error?: string;
@@ -160,6 +167,8 @@ export async function saveGeneratedContent(input: {
     alt_text: variant.altText,
     factual_basis: variant.factualBasis,
     approval_status: "PENDING" as ApprovalStatus,
+    approval_mode: "MANUAL" as const,
+    workflow_status: "DRAFT" as const,
     updated_at: now,
     _key: variantKey(variant.provider, variant.format, index),
   }));
@@ -264,7 +273,7 @@ export async function loadContentWorkflow(profileId: string) {
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
-    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,approval_mode,workflow_status,approved_by,approved_at,rejected_reason,approved_fingerprint,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
@@ -317,6 +326,7 @@ export async function reviewVariant(input: {
   visualBrief: string;
   altText: string;
   approvalStatus: ApprovalStatus;
+  rejectedReason?: string | null;
 }) {
   const token = await authenticatedApiToken();
   const response = await fetch("/api/content-review", {
@@ -325,12 +335,12 @@ export async function reviewVariant(input: {
     body: JSON.stringify({ ...input, hashtags: normalizeHashtags(input.hashtags) }),
   });
   const body = await response.json() as ReviewResponse;
-  if (!response.ok || !body.variantId || !body.approvalStatus || !body.contentStatus || !body.updatedAt) {
+  if (!response.ok || !body.variantId || !body.approvalStatus || !body.workflowStatus || !body.contentStatus || !body.updatedAt) {
     if (response.status === 409) throw new Error("Il contenuto è stato modificato in un’altra sessione. Aggiorna la pagina prima di continuare.");
     if (response.status === 403 || response.status === 404) throw new Error("Non puoi modificare questo contenuto.");
     throw new Error("Revisione non salvata. Riprova.");
   }
-  return { approvalStatus: body.approvalStatus, contentStatus: body.contentStatus, updatedAt: body.updatedAt };
+  return { approvalStatus: body.approvalStatus, workflowStatus: body.workflowStatus, contentStatus: body.contentStatus, updatedAt: body.updatedAt };
 }
 
 export async function deleteContent(profileId: string, contentId: string) {

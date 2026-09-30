@@ -14,11 +14,13 @@ export type ContentReviewInput = {
   visualBrief: string;
   altText: string;
   approvalStatus: ContentReviewStatus;
+  rejectedReason?: string | null;
 };
 
 export type ContentReviewResult = {
   variantId: string;
   approvalStatus: ContentReviewStatus;
+  workflowStatus: "DRAFT" | "REVIEW" | "REVIEW_REQUIRED" | "APPROVED" | "REJECTED";
   contentStatus: "IN_REVIEW" | "APPROVED" | "CHANGES_REQUESTED";
   updatedAt: string;
 };
@@ -41,6 +43,7 @@ function normalizedInput(input: ContentReviewInput) {
     hashtags: input.hashtags.map((tag) => tag.trim()).filter(Boolean).slice(0, 30),
     visualBrief: input.visualBrief.trim(),
     altText: input.altText.trim(),
+    rejectedReason: typeof input.rejectedReason === "string" ? input.rejectedReason.trim().slice(0, 1000) : null,
   };
 }
 
@@ -49,8 +52,8 @@ export async function reviewContentVariant(databaseUrl: string, authUserId: stri
   const input = normalizedInput(rawInput);
   const sql = neon(databaseUrl);
   const rows = await sql`
-    select variant_id::text, approval_status, content_status, updated_at::text
-    from public.review_content_variant(
+    select variant_id::text, approval_status, workflow_status, content_status, updated_at::text
+    from public.review_content_variant_v2(
       ${authUserId},
       ${input.profileId}::uuid,
       ${input.contentId}::uuid,
@@ -62,10 +65,11 @@ export async function reviewContentVariant(databaseUrl: string, authUserId: stri
       ${JSON.stringify(input.hashtags)}::jsonb,
       ${input.visualBrief},
       ${input.altText},
-      ${input.approvalStatus}
+      ${input.approvalStatus},
+      ${input.rejectedReason}
     )
-  ` as unknown as Array<{ variant_id: string; approval_status: ContentReviewStatus; content_status: ContentReviewResult["contentStatus"]; updated_at: string }>;
+  ` as unknown as Array<{ variant_id: string; approval_status: ContentReviewStatus; workflow_status: ContentReviewResult["workflowStatus"]; content_status: ContentReviewResult["contentStatus"]; updated_at: string }>;
   const result = rows[0];
   if (!result) throw new Error("CONTENT_REVIEW_FAILED");
-  return { variantId: result.variant_id, approvalStatus: result.approval_status, contentStatus: result.content_status, updatedAt: result.updated_at };
+  return { variantId: result.variant_id, approvalStatus: result.approval_status, workflowStatus: result.workflow_status, contentStatus: result.content_status, updatedAt: result.updated_at };
 }

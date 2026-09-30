@@ -462,6 +462,7 @@ export async function runContentQa(input: {
         checkedAt,reused:false,
       };
       await persistResult(sql,blocked,input.actorType);
+      if (input.actorType === "MANUAL") await sql`select public.mark_content_variant_in_review(${input.profileId}::uuid,${input.variantId}::uuid)`;
       await usage.releaseUsage(usageEventId);
       return blocked;
     }
@@ -652,6 +653,7 @@ export async function runContentQa(input: {
     };
 
     await persistResult(sql,result,input.actorType);
+    if (input.actorType === "MANUAL") await sql`select public.mark_content_variant_in_review(${input.profileId}::uuid,${input.variantId}::uuid)`;
 
     const factCost=estimateTerraCostUsd(factCheck.usage.inputTokens,factCheck.usage.outputTokens)+factCheck.usage.webSearchCalls*WEB_SEARCH_COST_USD;
     await persistTechnicalUsage(sql,input.profileId,usageEventId,[

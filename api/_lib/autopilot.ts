@@ -4,6 +4,7 @@ import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./editorial-research.js";
 import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan.js";
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
+import { runContentQa } from "./content-qa.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
 import { generateRoutedImage } from "./routed-image.js";
@@ -260,7 +261,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   }else{
     await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${now}::timestamptz)`;
   }
-  await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${now}::timestamptz)`;
+  await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,approval_mode,workflow_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${approvalMode==="AUTOMATIC"?"AUTO":"MANUAL"},'DRAFT',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
     const aspectRatio=format==="STORY"?"2:3":"1:1";
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
@@ -330,8 +331,24 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       }
     }catch(reason){if(imageEventId&&!imageCommitted)await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);console.error("autopilot-image",{profileId:profile.id,provider,detail:reason instanceof Error?reason.message:"unknown"});}
   }
-  const canAutoApprove=approvalMode==="AUTOMATIC"&&variant.eligible&&Boolean(imageAssetId);if(imageAssetId)await sql`update public.content_variants set image_asset_id=${imageAssetId}::uuid,approval_status=${canAutoApprove?"APPROVED":"PENDING"},updated_at=now() where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;else if(canAutoApprove)throw new Error("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL");
+  if(imageAssetId)await sql`update public.content_variants set image_asset_id=${imageAssetId}::uuid,approval_status='PENDING',updated_at=now() where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
   if(imageEventId&&imageAssetId){await imageMeter.storeResult(imageEventId,{response:{assetId:imageAssetId,duplicate:true},assetId:imageAssetId,variantId});await imageMeter.commit(imageEventId);imageCommitted=true;}
+  let canAutoApprove=false;
+  if(approvalMode==="AUTOMATIC"&&variant.eligible){
+    if(!imageAssetId)throw new Error("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL");
+    const finalQa=await runContentQa({
+      databaseUrl:env.DATABASE_URL!,
+      apiKey:env.OPENAI_API_KEY,
+      profileId:profile.id,
+      contentId,
+      variantId,
+      actorType:"AUTOPILOT",
+    });
+    if(finalQa.overallStatus==="PASS"){
+      const approvedRows=await sql`select public.auto_approve_content_variant(${profile.id}::uuid,${variantId}::uuid,'SYSTEM_AUTOPILOT') as approved` as unknown as Array<{approved:boolean}>;
+      canAutoApprove=approvedRows[0]?.approved===true;
+    }
+  }
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
   if(variant.eligible){const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
   }catch(reason){if(imageEventId&&!imageCommitted){if(imageAssetId)await sql`delete from public.assets where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`.catch(()=>undefined);await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);}if(reason instanceof OpenAITextPipelineError)await meter.persistTechnicalEvents(profile.id,logicalEventId,reason.technicalEvents).catch(()=>undefined);if(!logicalCommitted)await meter.release(logicalEventId,reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED").catch(()=>undefined);throw reason;}

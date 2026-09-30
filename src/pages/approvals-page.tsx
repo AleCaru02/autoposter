@@ -53,8 +53,16 @@ function parseHashtags(value: string) {
 
 function statusLabel(status: string) {
   if (status === "APPROVED") return "Approvato";
-  if (status === "CHANGES_REQUESTED") return "Da correggere";
+  if (status === "CHANGES_REQUESTED") return "Rifiutato";
   return "In revisione";
+}
+
+function workflowStatusLabel(status: ContentVariantRow["workflow_status"]) {
+  if (status === "DRAFT") return "Bozza";
+  if (status === "REVIEW") return "In revisione";
+  if (status === "REVIEW_REQUIRED") return "Revisione richiesta";
+  if (status === "APPROVED") return "Approvato";
+  return "Rifiutato";
 }
 
 function providerLabel(provider: string) {
@@ -157,6 +165,12 @@ export function ApprovalsPage() {
           visual_brief: draft.visualBrief || null,
           alt_text: draft.altText || null,
           approval_status: result.approvalStatus,
+          approval_mode: "MANUAL",
+          workflow_status: result.workflowStatus,
+          approved_by: result.workflowStatus === "APPROVED" ? row.approved_by : null,
+          approved_at: result.workflowStatus === "APPROVED" ? row.approved_at : null,
+          rejected_reason: result.workflowStatus === "REJECTED" ? row.rejected_reason : null,
+          approved_fingerprint: result.workflowStatus === "APPROVED" ? row.approved_fingerprint : null,
           qa_status: changed ? "PENDING" : row.qa_status,
           qa_fingerprint: changed ? null : row.qa_fingerprint,
           qa_result: changed ? {} : row.qa_result,
@@ -214,6 +228,16 @@ export function ApprovalsPage() {
 
   async function approve(variant: ContentVariantRow, approvalStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED") {
     if (!selectedProfile) return;
+    let rejectedReason: string | null = null;
+    if (approvalStatus === "CHANGES_REQUESTED") {
+      const reason = window.prompt("Motivo del rifiuto o delle modifiche richieste:");
+      if (reason === null) return;
+      rejectedReason = reason.trim();
+      if (!rejectedReason) {
+        setError("Indica il motivo del rifiuto.");
+        return;
+      }
+    }
     if (approvalStatus === "APPROVED" && variant.qa_status !== "PASS") {
       setError("Il contenuto non può essere approvato finché il Content QA non è PASS.");
       return;
@@ -244,6 +268,7 @@ export function ApprovalsPage() {
         visualBrief: draft.visualBrief,
         altText: draft.altText,
         approvalStatus,
+        rejectedReason,
       });
       dirtyVariantIdsRef.current.delete(variant.id);
       await reload();
@@ -359,7 +384,7 @@ export function ApprovalsPage() {
               const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset, masterDecision: masterDecisions[item.id] });
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
-                <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`variant-status variant-${variant.qa_status.toLowerCase()}`}>QA {variant.qa_status}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
+                <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.workflow_status.toLowerCase()}`}>{workflowStatusLabel(variant.workflow_status)} · {variant.approval_mode === "AUTO" ? "Auto" : "Manuale"}</span><span className={`variant-status variant-${variant.qa_status.toLowerCase()}`}>QA {variant.qa_status}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
                 <div className="approval-grid" onBlurCapture={() => void persistVariant(variant).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."))}>
                   <label>Hook<input value={draft.hook} onChange={(event) => setDraftField(variant, "hook", event.target.value)} /></label>
                   <label>CTA<input value={draft.cta} onChange={(event) => setDraftField(variant, "cta", event.target.value)} /></label>
@@ -384,6 +409,14 @@ export function ApprovalsPage() {
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
                 </div> : asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                <details className="decision-record"><summary>Approvazione · {workflowStatusLabel(variant.workflow_status)}</summary>
+                  <dl>
+                    <div><dt>Modalità</dt><dd>{variant.approval_mode === "AUTO" ? "Automatica" : "Manuale"}</dd></div>
+                    <div><dt>Approvato da</dt><dd>{variant.approved_by ?? "—"}</dd></div>
+                    <div><dt>Approvato il</dt><dd>{variant.approved_at ? new Date(variant.approved_at).toLocaleString("it-IT") : "—"}</dd></div>
+                    <div><dt>Motivo rifiuto</dt><dd>{variant.rejected_reason ?? "—"}</dd></div>
+                  </dl>
+                </details>
                 <details className="decision-record"><summary>Content QA · {variant.qa_status}</summary>
                   <dl>
                     {Object.entries(variant.qa_result ?? {}).filter(([key]) => ["brandStatus","copyStatus","visualStatus","factStatus","platformStatus","duplicateStatus","budgetStatus"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
@@ -395,7 +428,7 @@ export function ApprovalsPage() {
                   {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
                   <button className="secondary-button" type="button" disabled={busy[`qa-${variant.id}`] || currentSaveStatus === "SAVING" || currentSaveStatus === "WAITING"} onClick={() => void runQa(variant)}><CheckCircle2 size={16} /> {busy[`qa-${variant.id}`] ? "QA in corso…" : variant.qa_status === "PASS" ? "Riesegui QA" : "Esegui QA"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady || variant.qa_status !== "PASS"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
-                  <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
+                  <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Rifiuta</button>
                   {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
                 </div>
               </article>;
