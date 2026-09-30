@@ -175,7 +175,7 @@ async function callStructured(input: {
   maxWebSearchCalls?: number;
   fetcher?: typeof fetch;
 }) {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
   const response = await fetcher("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
