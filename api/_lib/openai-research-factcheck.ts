@@ -204,7 +204,7 @@ async function callStructured(input: {
   return { parsed: JSON.parse(output) as Record<string, unknown>, body, requestId };
 }
 
-export function shouldRunResearchAgent(mode: EditorialResearchMode) {
+export function shouldRunResearchAgent(mode: EditorialResearchMode, _topic = "") {
   return mode === "NEWS";
 }
 
