@@ -36,7 +36,8 @@ assert.doesNotMatch(personalMigration, /'UNLIMITED'/);
 
 const migration = readFileSync(new URL("../db/migrations/20260905_fase4e_plan_packaging.sql", import.meta.url), "utf8");
 const higgsfieldMigration = readFileSync(new URL("../db/migrations/20260929_z_higgsfield_personal_brand_image_engine.sql", import.meta.url), "utf8");
-const packageMigrationChain = `${migration}\n${higgsfieldMigration}`;
+const contentQaMigration = readFileSync(new URL("../db/migrations/20260930_content_qa.sql", import.meta.url), "utf8");
+const packageMigrationChain = `${migration}\n${higgsfieldMigration}\n${contentQaMigration}`;
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.entitlement_packages/i);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.entitlement_package_capabilities/i);
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.profile_entitlement_package_assignments/i);
