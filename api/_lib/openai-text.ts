@@ -79,7 +79,7 @@ export type OpenAITextUsage = {
 };
 
 export type OpenAITextTechnicalEvent = {
-  operation: "GENERATE_SOCIAL_TEXT" | "AGENT_RESEARCH" | "AGENT_FACTCHECK";
+  operation: "GENERATE_SOCIAL_TEXT" | "AGENT_RESEARCH" | "AGENT_FACTCHECK" | "AGENT_COPY_REPAIR";
   model: string;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -325,6 +325,87 @@ async function reportProgress(options: GenerateOptions, percent: number, stage: 
   try { await options.onProgress?.({ percent, stage }); } catch { /* progress telemetry must never break content generation */ }
 }
 
+async function repairUnsupportedContent(input: {
+  apiKey: string;
+  model: string;
+  topic: string;
+  objective: string | null;
+  providers: SocialProvider[];
+  formats: SocialFormat[];
+  brand: BrandContext;
+  websiteContext: string;
+  content: GeneratedSocialContent;
+  checkedClaims: Array<{ claim: string; claimType: string; sourceRequired: boolean; status: string; reason: string }>;
+  sources: string[];
+  fetcher: typeof fetch;
+}) {
+  const response = await input.fetcher("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: input.model,
+      store: false,
+      reasoning: { effort: "medium" },
+      instructions: [
+        "Sei il Copy Repair Agent di Post Automatici.",
+        "Il contenuto è stato bloccato dal fact-check. Devi ripararlo, non difenderlo.",
+        "Rimuovi, riscrivi o generalizza ogni claim UNSUPPORTED o TIME_SENSITIVE indicato in checkedClaims.",
+        "Non aggiungere nuovi fatti esterni, numeri, percentuali, commissioni, performance, regole di piattaforma, sedi, risultati o promesse che non siano supportati dal contesto fornito.",
+        "Puoi mantenere i claim VERIFIED, i dati BRAND supportati dal brand/sito e le formulazioni EDITORIAL non fattuali.",
+        "Se non puoi dimostrare una differenza specifica tra due piattaforme, trasformala in un criterio decisionale verificabile o in una domanda/considerazione editoriale, invece di inventare.",
+        "Mantieni esattamente una variante per ogni combinazione provider/formato richiesta.",
+        ...input.providers.map((provider) => platformStrategyPrompt(provider)),
+        "Preserva il tema e l'obiettivo dell'utente, ma la sicurezza fattuale ha priorità sulla ricchezza del copy.",
+        "Per GBP se il concept non ha utilità aziendale/locale concreta, imposta eligible=false.",
+        "Restituisci esclusivamente JSON conforme allo schema.",
+      ].join("\n"),
+      input: JSON.stringify({
+        topic: input.topic,
+        objective: input.objective,
+        providers: input.providers,
+        formats: input.formats,
+        originalContent: input.content,
+        checkedClaims: input.checkedClaims,
+        verifiedSources: input.sources,
+        brand: {
+          name: input.brand.profileName,
+          industry: input.brand.industry,
+          websiteUrl: input.brand.websiteUrl,
+          description: input.brand.description,
+          businessModel: input.brand.businessModel,
+          location: input.brand.location,
+          serviceArea: input.brand.serviceArea,
+          target: input.brand.target,
+          tone: input.brand.tone,
+          goals: input.brand.goals,
+          userProvidedContext: input.brand.userContext?.trim() || null,
+          authorizedSource: input.brand.authorizedSource ?? null,
+        },
+        confirmedWebsiteSources: input.websiteContext,
+      }),
+      text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_copy_repair", strict: true, schema: OUTPUT_SCHEMA } },
+      max_output_tokens: MAX_TEXT_OUTPUT_TOKENS,
+    }),
+  });
+  const requestId = response.headers.get("x-request-id");
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`OPENAI_COPY_REPAIR_HTTP_${response.status}`);
+  const body = JSON.parse(raw) as Record<string, unknown>;
+  const text = extractOutputText(body);
+  if (!text) throw new Error("OPENAI_COPY_REPAIR_EMPTY_OUTPUT");
+  const repaired = validateResult(JSON.parse(text), input.providers, input.formats);
+  const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
+  const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+  const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+  return {
+    content: repaired,
+    responseId: typeof body.id === "string" ? body.id : "",
+    requestId,
+    model: typeof body.model === "string" ? body.model : input.model,
+    usage: { inputTokens, outputTokens, totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : inputTokens + outputTokens },
+  };
+}
+
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
   const fetcher = options.fetcher ?? fetch;
   const model = options.model ?? "gpt-5.6-terra";
@@ -446,7 +527,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const body = JSON.parse(raw) as Record<string, unknown>;
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_OUTPUT");
-  const content = validateResult(JSON.parse(outputText), options.providers, options.formats);
+  let content = validateResult(JSON.parse(outputText), options.providers, options.formats);
   await reportProgress(options, 72, "COPY_READY");
   const brain = brainDecision({
     spendEur: 0,
