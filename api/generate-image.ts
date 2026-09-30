@@ -4,6 +4,7 @@ import { generateRoutedImage } from "./_lib/routed-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
+import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
 
 export const config = { maxDuration: 60 };
 
@@ -12,7 +13,7 @@ const VALID_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "
 const VALID_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 
 type ProfileRow = { id: string; name: string; industry: string | null };
-type BrandRow = { tone_of_voice: unknown };
+type BrandRow = { tone_of_voice: unknown; visual_identity: unknown };
 type VariantRow = {
   id: string;
   content_id: string;
@@ -84,7 +85,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profiles = await readRows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
-    const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice&limit=1`, token);
+    const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
+    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
 
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -160,6 +162,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileName: profile.name,
       industry: profile.industry,
       tone: summary(brands[0]?.tone_of_voice),
+      brandColors: brandVisual.colors,
+      brandFonts: brandVisual.fonts,
+      brandVisualStyle: brandVisual.visualStyle,
       provider: requestedProvider,
       format: requestedFormat,
       visualBrief,
@@ -184,7 +189,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           storage_url: dataUrl,
           mime_type: result.mimeType,
           tags: [requestedProvider, requestedFormat, "AI_GENERATED"],
-          metadata: { provider: result.provider, model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+          metadata: {
+            provider: result.provider,
+            model: result.model,
+            quality: result.quality,
+            size: result.size,
+            aspect_ratio: result.aspectRatio,
+            visual_brief: visualBrief,
+            visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }),
+            generation_prompt: result.generationPrompt.slice(0, 8_000),
+            brand_palette: brandVisual.colors,
+            brand_fonts: brandVisual.fonts,
+            brand_visual_style: brandVisual.visualStyle,
+            provider_request_id: result.requestId,
+            storage_mode: "DATABASE_DATA_URL_V1",
+          },
         }),
       });
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);

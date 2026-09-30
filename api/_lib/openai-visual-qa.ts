@@ -81,6 +81,9 @@ export async function runOpenAIVisualQa(input:{
   format:string;
   visualBrief:string;
   altText:string|null;
+  brandColors?:string[];
+  brandFonts?:string[];
+  brandVisualStyle?:string|null;
   fetcher?:typeof fetch;
 }):Promise<OpenAIVisualQaResult> {
   if (!/^data:image\/(?:jpeg|png|webp);base64,/i.test(input.imageUrl) && !/^https:\/\//i.test(input.imageUrl)) throw new Error("VISUAL_QA_IMAGE_REQUIRED");
@@ -95,17 +98,31 @@ export async function runOpenAIVisualQa(input:{
         "Sei il Visual QA di Post Automatici.",
         "Valuta esclusivamente ciò che è visibile nell'immagine candidata e il suo rapporto con il brief.",
         "Non identificare persone e non inferire attributi sensibili.",
-        "briefMatch: coerenza concreta con il brief visivo.",
-        "composition: gerarchia, leggibilità, ritaglio e composizione professionale.",
-        "technicalQuality: artefatti, anatomia quando visibile, nitidezza e qualità generale.",
-        "socialFormat: idoneità al formato social richiesto e leggibilità mobile.",
-        "brandSafety: nessun logo, prezzo, recensione, certificazione, prodotto o fatto del brand inventato/non richiesto.",
-        "textSafety: nessun testo grafico illeggibile, falso o non richiesto; se non c'è testo, assegna score alto.",
+        "briefMatch: il visual deve comunicare davvero l'idea centrale del brief, non limitarsi a mostrare genericamente il settore, la città o un ambiente decorativo.",
+        "composition: una gerarchia principale chiara, massimo pochi elementi secondari, buon uso dello spazio, nessun sovraccarico, mappa affollata o collage improvvisato.",
+        "technicalQuality: artefatti, anatomia quando visibile, nitidezza, prospettiva, coerenza di luce/ombre e qualità generale.",
+        "socialFormat: idoneità al formato richiesto, margini sicuri, leggibilità immediata su smartphone; per STORY penalizza elementi essenziali troppo vicini a bordi/altezze occupate dalla UI.",
+        "brandSafety: se sono forniti colori/font/stile del profilo, il visual deve rispettarli in modo riconoscibile. Penalizza palette arbitrarie o identità visiva scollegata. Nessun logo, prezzo, recensione, certificazione, prodotto o fatto del brand inventato/non richiesto.",
+        "brandSafety deve inoltre penalizzare rappresentazioni sintetiche presentate come prove reali del brand: appartamenti, uffici, viste, prodotti, persone o risultati non confermati.",
+        "Per luoghi reali, penalizza mappe, linee metro, percorsi, pin, label geografiche, edifici o relazioni spaziali aggiunti senza essere richiesti dal brief: una grafica plausibile non equivale a un dato verificato.",
+        "textSafety: se il brief richiede testo, deve comparire solo il testo richiesto, grande e leggibile. Penalizza microcopy, label, quartieri, numeri, pseudo-dati, didascalie o testi extra inventati, anche se graficamente credibili; se non c'è testo richiesto, testo aggiunto abbassa fortemente lo score.",
         "Non approvare per plausibilità: usa score prudente quando un requisito non è verificabile visivamente.",
         "Restituisci solo JSON conforme allo schema.",
       ].join("\n"),
       input:[{role:"user",content:[
-        {type:"input_text",text:JSON.stringify({brand:input.profileName,industry:input.industry,provider:input.provider,format:input.format,visualBrief:input.visualBrief,altText:input.altText})},
+        {type:"input_text",text:JSON.stringify({
+          brand:input.profileName,
+          industry:input.industry,
+          provider:input.provider,
+          format:input.format,
+          visualBrief:input.visualBrief,
+          altText:input.altText,
+          brandIdentity:{
+            colors:input.brandColors??[],
+            fonts:input.brandFonts??[],
+            visualStyle:input.brandVisualStyle??null,
+          },
+        })},
         {type:"input_image",image_url:input.imageUrl,detail:"high"},
       ]}],
       text:{verbosity:"low",format:{type:"json_schema",name:"post_automatici_visual_qa",strict:true,schema:SCHEMA}},

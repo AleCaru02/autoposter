@@ -56,6 +56,9 @@ export async function runOpenAIMediaManager(input: {
   profileName: string;
   industry: string | null;
   tone: string | null;
+  brandColors?: string[];
+  brandFonts?: string[];
+  brandVisualStyle?: string | null;
   provider: ImageSocialProvider;
   format: ImageSocialFormat;
   visualBrief: string;
@@ -76,10 +79,17 @@ export async function runOpenAIMediaManager(input: {
         "Trasforma il brief editoriale già approvato in una vera art direction pronta per OpenAI Immagini 2: non limitarti a riscrivere o allungare il brief.",
         "Ogni imagePrompt deve descrivere una scena ricca, intenzionale e visivamente memorabile, evitando immagini corporate generiche, piatte, vuote o da stock.",
         "Definisci sempre: soggetto principale e dettagli secondari utili; primo piano, piano intermedio e sfondo; punto focale e gerarchia visiva; prospettiva o inquadratura; profondità; illuminazione, ombre e atmosfera; palette, materiali e texture; livello di realismo; uso intenzionale dello spazio negativo.",
+        "Il visual deve comunicare prima di tutto l'IDEA CENTRALE del contenuto. Non limitarti a mostrare il luogo o il settore come decorazione: scegli una scena o metafora che renda visibile il messaggio.",
+        "Mantieni una sola gerarchia principale e al massimo tre elementi secondari. Evita sovraccarico, infografiche improvvisate, collage, mappe affollate e troppi punti focali.",
+        "La brand identity fornita nel campo brand è un vincolo reale del profilo: usa i colori osservati/confermati come palette dominante e di accento, scegliendo 2-4 colori coerenti invece di usarli tutti. Non sostituirli con una palette arbitraria; bianco, nero e neutri sono ammessi per contrasto.",
+        "Se sono forniti font o indicazioni di stile visivo, rispettane il carattere tipografico e l'estetica generale. Non inventare un'identità editoriale diversa solo perché sembra più elegante.",
         "Quando il contenuto è concettuale o informativo, traduci il concetto in una metafora visuale concreta e pertinente al settore invece di produrre una semplice icona, mappa o sfondo decorativo.",
-        "Se il brief richiede esplicitamente una mappa, una città o un'area geografica, costruisci una composizione editoriale ricca: contesto urbano riconoscibile senza inventare fatti, livelli di profondità, percorsi o punti di interesse solo se supportati dal brief, trattamento grafico coerente e un chiaro punto focale.",
-        "Se il brief richiede esplicitamente testo nell'immagine, specifica posizione, gerarchia, dimensione relativa, contrasto e area di respiro del testo; altrimenti non inserire testo.",
-        "Adatta composizione e densità alla piattaforma e al formato. Per STORY privilegia una composizione verticale con forte gerarchia mobile; per POST/CAROUSEL una composizione quadrata capace di fermare lo scroll.",
+        "Per luoghi reali, quartieri, mappe, metropolitane, strade, landmark o percorsi: NON inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o etichette fattuali. Se non sono forniti dati geografici verificati o un asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale senza pretendere accuratezza geografica.",
+        "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se fosse realmente appartenente al brand, salvo che il brief lo confermi esplicitamente. Una scena sintetica deve restare illustrativa, non una falsa prova dell'attività.",
+        "Se il brief richiede esplicitamente testo nell'immagine, usa SOLO il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, label, numeri, pseudo-dati, didascalie o altri testi inventati.",
+        "Il testo richiesto deve avere forte contrasto, margini generosi e leggibilità immediata su smartphone; niente testo piccolo su sfondi complessi. Per POST/CAROUSEL mantieni gli elementi essenziali lontani almeno circa l'8% dai bordi.",
+        "Per STORY costruisci una gerarchia verticale forte e lascia ampie zone sicure sopra e sotto per l'interfaccia social; concentra testo e soggetto nella parte centrale e mantieni gli elementi essenziali nella zona centrale anche in caso di ritaglio 9:16.",
+        "Adatta composizione e densità alla piattaforma e al formato. Per POST/CAROUSEL una composizione quadrata capace di fermare lo scroll; per STORY una composizione verticale semplice da leggere in meno di due secondi.",
         "Non inventare sedi, persone reali, prodotti, risultati, certificazioni, prezzi, loghi o caratteristiche specifiche del brand che non siano presenti nel contesto.",
         "Non usare ricerca web. Non scrivere copy social: occupati soltanto del visual.",
         "Evita watermark, marchi di terzi, claim visivi non verificati, collage casuali, elementi decorativi senza funzione, fondi eccessivamente vuoti e look da template generico.",
@@ -87,7 +97,14 @@ export async function runOpenAIMediaManager(input: {
         "Restituisci esclusivamente JSON conforme allo schema.",
       ].join("\n"),
       input: JSON.stringify({
-        brand: { name: input.profileName, industry: input.industry, tone: input.tone },
+        brand: {
+          name: input.profileName,
+          industry: input.industry,
+          tone: input.tone,
+          colors: input.brandColors ?? [],
+          fonts: input.brandFonts ?? [],
+          visualStyle: input.brandVisualStyle ?? null,
+        },
         placement: { provider: input.provider, format: input.format },
         visualBrief: input.visualBrief,
         captionContext: input.caption ?? null,

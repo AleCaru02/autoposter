@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildImagePrompt, estimateImageCostUsd, generateOpenAIImage, imageSizeForFormat } from "../api/_lib/openai-image.js";
+import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
 
 const calls: Array<{ url: string; body: Record<string, any>; headers: Record<string, string> }> = [];
@@ -31,14 +32,51 @@ assert.equal(imageSizeForFormat("POST"), "1024x1024");
 assert.equal(imageSizeForFormat("CAROUSEL"), "1024x1024");
 assert.equal(imageSizeForFormat("STORY"), "1024x1536");
 
-const prompt = buildImagePrompt({ profileName: "QA Property", industry: "Property management", tone: "Professionale", provider: "INSTAGRAM", format: "POST", visualBrief: "Appartamento luminoso e ordinato", caption: "Gestione professionale degli affitti brevi.", additionalDirection: null });
-assert.ok(prompt.includes("Appartamento luminoso"));
-assert.ok(prompt.includes("Non aggiungere testo, loghi"));
-assert.ok(prompt.includes("primo piano, piano intermedio, sfondo"));
-assert.ok(prompt.includes("illuminazione credibile"));
-assert.ok(prompt.toLowerCase().includes("senza affermare fatti nuovi"));
+const normalizedBrand = normalizeBrandVisualIdentity({
+  observedColors: ["#112233", "#F5F1E8", "var(--accent)", "#112233"],
+  observedFonts: ["Inter", "Inter", "Georgia"],
+  summary: "Minimal, premium, sobrio.",
+});
+assert.deepEqual(normalizedBrand.colors, ["#112233", "#F5F1E8"]);
+assert.deepEqual(normalizedBrand.fonts, ["Inter", "Georgia"]);
+assert.equal(normalizedBrand.visualStyle, "Minimal, premium, sobrio.");
 
-const result = await generateOpenAIImage({ apiKey: "sk-image-test-only", profileName: "QA Property", industry: "Property management", tone: "Professionale", provider: "INSTAGRAM", format: "POST", visualBrief: "Appartamento luminoso e ordinato", caption: "Gestione professionale degli affitti brevi.", fetcher });
+const prompt = buildImagePrompt({
+  profileName: "QA Property",
+  industry: "Property management",
+  tone: "Professionale",
+  brandColors: ["#112233", "#F5F1E8"],
+  brandFonts: ["Inter", "Georgia"],
+  brandVisualStyle: "Minimal, premium, sobrio.",
+  provider: "INSTAGRAM",
+  format: "POST",
+  visualBrief: "Appartamento luminoso e ordinato",
+  caption: "Gestione professionale degli affitti brevi.",
+  additionalDirection: null,
+});
+assert.ok(prompt.includes("Appartamento luminoso"));
+assert.match(prompt, /Palette del profilo da rispettare: #112233, #F5F1E8/);
+assert.match(prompt, /Inter, Georgia/);
+assert.match(prompt, /Minimal, premium, sobrio/);
+assert.match(prompt, /non inventare cartografia/i);
+assert.match(prompt, /massimo un headline/i);
+assert.ok(prompt.includes("primo piano, piano intermedio, sfondo"));
+assert.ok(prompt.includes("illuminazione"));
+
+const result = await generateOpenAIImage({
+  apiKey: "sk-image-test-only",
+  profileName: "QA Property",
+  industry: "Property management",
+  tone: "Professionale",
+  brandColors: ["#112233", "#F5F1E8"],
+  brandFonts: ["Inter", "Georgia"],
+  brandVisualStyle: "Minimal, premium, sobrio.",
+  provider: "INSTAGRAM",
+  format: "POST",
+  visualBrief: "Appartamento luminoso e ordinato",
+  caption: "Gestione professionale degli affitti brevi.",
+  fetcher,
+});
 
 assert.equal(calls.length, 2, "ogni immagine effettiva deve passare prima dal Media Manager e poi da gpt-image-2");
 assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
@@ -49,6 +87,12 @@ assert.match(String(calls[0].body.instructions), /non limitarti a riscrivere o a
 assert.match(String(calls[0].body.instructions), /primo piano, piano intermedio e sfondo/i);
 assert.match(String(calls[0].body.instructions), /illuminazione, ombre e atmosfera/i);
 assert.match(String(calls[0].body.instructions), /700-1800 caratteri/i);
+assert.match(String(calls[0].body.instructions), /NON inventare cartografia/i);
+assert.match(String(calls[0].body.instructions), /massimo un headline/i);
+const mediaInput = JSON.parse(String(calls[0].body.input));
+assert.deepEqual(mediaInput.brand.colors, ["#112233", "#F5F1E8"]);
+assert.deepEqual(mediaInput.brand.fonts, ["Inter", "Georgia"]);
+assert.equal(mediaInput.brand.visualStyle, "Minimal, premium, sobrio.");
 assert.equal("tools" in calls[0].body, false, "Media Manager non deve spendere per web search");
 assert.equal(calls[1].url, "https://api.openai.com/v1/images/generations");
 assert.equal(calls[1].headers.authorization, "Bearer sk-image-test-only");
@@ -61,6 +105,9 @@ assert.match(calls[1].body.prompt, /PROMPT MEDIA MANAGER/);
 assert.ok(String(calls[1].body.prompt).length >= 600, "un prompt visuale troppo corto deve essere arricchito prima di gpt-image-2");
 assert.match(String(calls[1].body.prompt), /Composizione e gerarchia:/);
 assert.match(String(calls[1].body.prompt), /Stile, luce e atmosfera:/);
+assert.match(String(calls[1].body.prompt), /Palette del profilo da rispettare: #112233, #F5F1E8/);
+assert.match(String(calls[1].body.prompt), /non inventare cartografia/i);
+assert.match(String(calls[1].body.prompt), /massimo un headline/i);
 assert.equal(JSON.stringify(calls.map((call) => call.body)).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
 
 const mediaCost = estimateTerraCostUsd(100, 80);
@@ -72,6 +119,8 @@ assert.equal(result.mediaManager.requestId, "req_media_test");
 assert.equal(result.quality, "high");
 assert.equal(result.mimeType, "image/png");
 assert.equal(result.requestId, "req_image_test");
+assert.match(result.generationPrompt, /Palette del profilo da rispettare/);
+assert.match(result.generationPrompt, /non inventare cartografia/i);
 assert.equal(Buffer.from(result.base64, "base64").toString(), "fake-png");
 assert.equal(imageCost, 0.03625);
 assert.equal(result.usage.mediaManagerCostUsd, mediaCost);

@@ -7,6 +7,7 @@ import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { runOpenAIFactCheckAgent, type FactCheckAgentResult, type FactCheckClaim } from "./openai-research-factcheck.js";
 import { runOpenAIVisualQa, type OpenAIVisualQaResult } from "./openai-visual-qa.js";
 import { loadEditorialProfile, loadProfileBrandContext } from "./personal-brand-sources.js";
+import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
 
 export type ContentQaDimensionStatus = "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
 export type ContentQaOverallStatus = "PASS" | "FAIL" | "NEEDS_SOURCE";
@@ -395,6 +396,7 @@ export async function runContentQa(input: {
   const sql = neon(input.databaseUrl);
   const profile = await loadEditorialProfile(sql,input.profileId,input.authUserId ?? null);
   const brandContext = await loadProfileBrandContext(sql,profile);
+  const brandVisual = normalizeBrandVisualIdentity(brandContext.visualIdentity);
   const { item,variant,slides,assets } = await loadInputs(sql,input.profileId,input.contentId,input.variantId);
   const generatedVariant = variantFrom(variant,slides);
   const content = generatedContent(item,generatedVariant);
@@ -405,6 +407,7 @@ export async function runContentQa(input: {
     imageAssetId:variant.image_asset_id,
     slides,
     assets:assets.map((asset)=>({id:asset.id,provider:asset.provider,model:asset.model,width:asset.width,height:asset.height,format:asset.format,identityStatus:asset.identity_status})),
+    brandVisual,
   });
 
   if (!input.force && variant.qa_fingerprint===fingerprint && variant.qa_status!=="PENDING") {
@@ -537,6 +540,9 @@ export async function runContentQa(input: {
           format:variant.format,
           visualBrief:variant.visual_brief??"",
           altText:variant.alt_text,
+          brandColors:brandVisual.colors,
+          brandFonts:brandVisual.fonts,
+          brandVisualStyle:brandVisual.visualStyle,
           fetcher:input.fetcher,
         });
         globalVisualStatus=variantVisualResult.verdict==="PASS"&&variantIdentityStatus==="PASS"?"PASS":"FAIL";
@@ -575,6 +581,9 @@ export async function runContentQa(input: {
             format:"CAROUSEL",
             visualBrief:slide.visual_brief,
             altText:slide.alt_text,
+            brandColors:brandVisual.colors,
+            brandFonts:brandVisual.fonts,
+            brandVisualStyle:brandVisual.visualStyle,
             fetcher:input.fetcher,
           });
           slideVisualStatus=visualQa.verdict==="PASS"&&identity==="PASS"?"PASS":"FAIL";
