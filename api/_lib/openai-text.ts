@@ -284,7 +284,8 @@ function normalizedCopy(value: string) {
 
 export function editorialQualityIssues(content: GeneratedSocialContent, topic: string, objective?: string | null) {
   const issues: string[] = [];
-  if (!/[.!?…]$/.test(content.editorialAngle.trim())) {
+  const angle = content.editorialAngle.trim();
+  if (angle.length >= 150 && !/[.!?…]$/.test(angle)) {
     issues.push("EDITORIAL_ANGLE_INCOMPLETE");
   }
   const count = requestedStructuralCount(topic, objective);
