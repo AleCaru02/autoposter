@@ -140,7 +140,7 @@ const OUTPUT_SCHEMA = {
   properties: {
     editorialTopic: { type: "string", minLength: 3, maxLength: 120 },
     pillar: { type: "string", minLength: 2, maxLength: 120 },
-    editorialAngle: { type: "string", minLength: 3, maxLength: 180 },
+    editorialAngle: { type: "string", minLength: 12, maxLength: 320 },
     strategySummary: { type: "string" },
     variants: {
       type: "array",
@@ -152,12 +152,12 @@ const OUTPUT_SCHEMA = {
           provider: { type: "string", enum: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] },
           format: { type: "string", enum: ["POST", "CAROUSEL", "STORY"] },
           eligible: { type: "boolean" },
-          hook: { type: "string" },
-          caption: { type: "string" },
+          hook: { type: "string", minLength: 3, maxLength: 220 },
+          caption: { type: "string", minLength: 30, maxLength: 5000 },
           cta: { type: ["string", "null"] },
           hashtags: { type: "array", items: { type: "string" }, maxItems: 15 },
-          visualBrief: { type: "string" },
-          altText: { type: "string" },
+          visualBrief: { type: "string", minLength: 10, maxLength: 1800 },
+          altText: { type: "string", minLength: 10, maxLength: 700 },
           factualBasis: { type: "array", items: { type: "string" }, maxItems: 12 },
           carouselSlides: {
             type: "array",
@@ -264,6 +264,47 @@ export function extractWebSearchSources(body: Record<string, unknown>) {
   return [...urls].slice(0, 20);
 }
 
+export function requestedStructuralCount(topic: string, objective?: string | null) {
+  const value = `${topic} ${objective ?? ""}`.normalize("NFKC").toLowerCase();
+  const numeric = value.match(/\b([2-9]|10)\s+(?:differenz\w*|punt\w*|aspett\w*|consigl\w*|error\w*|passagg\w*|motivi\w*|idee\w*|strategie\w*|cose\w*)\b/);
+  if (numeric) return Number(numeric[1]);
+  const words: Record<string, number> = { due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10 };
+  const word = value.match(/\b(due|tre|quattro|cinque|sei|sette|otto|nove|dieci)\s+(?:differenz\w*|punt\w*|aspett\w*|consigl\w*|error\w*|passagg\w*|motivi\w*|idee\w*|strategie\w*|cose\w*)\b/);
+  return word ? words[word[1]] ?? null : null;
+}
+
+function hasNumberedStructure(text: string, count: number) {
+  return Array.from({ length: count }, (_, index) => index + 1)
+    .every((number) => new RegExp(`(?:^|\\n|\\s)${number}\\s*[.)\\-:]`, "m").test(text));
+}
+
+function normalizedCopy(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9à-öø-ÿ]+/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+export function editorialQualityIssues(content: GeneratedSocialContent, topic: string, objective?: string | null) {
+  const issues: string[] = [];
+  if (!/[.!?…]$/.test(content.editorialAngle.trim())) {
+    issues.push("EDITORIAL_ANGLE_INCOMPLETE");
+  }
+  const count = requestedStructuralCount(topic, objective);
+  if (count) {
+    for (const variant of content.variants) {
+      if (variant.format === "POST" && !hasNumberedStructure(variant.caption, count)) {
+        issues.push(`REQUESTED_COUNT_MISSING:${variant.provider}:${count}`);
+      }
+    }
+  }
+  const seen = new Map<string, string>();
+  for (const variant of content.variants) {
+    const signature = normalizedCopy(`${variant.hook} ${variant.caption}`);
+    const previous = seen.get(signature);
+    if (previous && previous !== variant.provider) issues.push(`CROSS_PLATFORM_DUPLICATE:${previous}:${variant.provider}`);
+    else if (signature) seen.set(signature, variant.provider);
+  }
+  return [...new Set(issues)];
+}
+
 function validateResult(value: unknown, providers: SocialProvider[], formats: SocialFormat[]): GeneratedSocialContent {
   if (!value || typeof value !== "object") throw new Error("OPENAI_INVALID_JSON");
   const candidate = value as Partial<GeneratedSocialContent>;
@@ -289,7 +330,11 @@ function validateResult(value: unknown, providers: SocialProvider[], formats: So
     } else if (slides.length) {
       throw new Error("OPENAI_UNEXPECTED_CAROUSEL_SLIDES");
     }
-    return { ...variant, carouselSlides: slides };
+    const maxHashtags = variant.provider === "INSTAGRAM" ? 8 : variant.provider === "FACEBOOK" ? 3 : variant.provider === "LINKEDIN" ? 3 : 0;
+    const hashtags = Array.isArray(variant.hashtags)
+      ? [...new Set(variant.hashtags.filter((tag): tag is string => typeof tag === "string" && Boolean(tag.trim())).map((tag) => tag.trim()))].slice(0, maxHashtags)
+      : [];
+    return { ...variant, hashtags, carouselSlides: slides };
   });
   return {
     ...candidate,
@@ -337,6 +382,9 @@ async function repairUnsupportedContent(input: {
   content: GeneratedSocialContent;
   checkedClaims: Array<{ claim: string; claimType: string; sourceRequired: boolean; status: string; reason: string }>;
   sources: string[];
+  repairReason?: "FACTCHECK" | "EDITORIAL_QUALITY";
+  qualityIssues?: string[];
+  research?: ResearchAgentResult | null;
   fetcher: typeof fetch;
 }) {
   const response = await input.fetcher("https://api.openai.com/v1/responses", {
@@ -348,8 +396,12 @@ async function repairUnsupportedContent(input: {
       reasoning: { effort: "medium" },
       instructions: [
         "Sei il Copy Repair Agent di Post Automatici.",
-        "Il contenuto è stato bloccato dal fact-check. Devi ripararlo, non difenderlo.",
-        "Rimuovi, riscrivi o generalizza ogni claim UNSUPPORTED o TIME_SENSITIVE indicato in checkedClaims.",
+        input.repairReason === "EDITORIAL_QUALITY"
+          ? "Il contenuto non ha superato il controllo editoriale deterministico. Riparalo rispettando esattamente qualityIssues e la richiesta originale, senza cambiare tema."
+          : "Il contenuto è stato bloccato dal fact-check. Devi ripararlo, non difenderlo.",
+        input.repairReason === "EDITORIAL_QUALITY"
+          ? "Se l'utente chiede un numero preciso di differenze/punti, ogni POST deve contenerli tutti, distinti e numerati 1..N. Non sostituire differenze richieste con formule vaghe come 'aspetti da valutare'. editorialAngle deve essere una frase completa e non deve finire con parole tagliate."
+          : "Rimuovi, riscrivi o generalizza ogni claim UNSUPPORTED o TIME_SENSITIVE indicato in checkedClaims.",
         "Non aggiungere nuovi fatti esterni, numeri, percentuali, commissioni, performance, regole di piattaforma, sedi, risultati o promesse che non siano supportati dal contesto fornito.",
         "Puoi mantenere i claim VERIFIED, i dati BRAND supportati dal brand/sito e le formulazioni EDITORIAL non fattuali.",
         "Se non puoi dimostrare una differenza specifica tra due piattaforme, trasformala in un criterio decisionale verificabile o in una domanda/considerazione editoriale, invece di inventare.",
@@ -366,7 +418,9 @@ async function repairUnsupportedContent(input: {
         formats: input.formats,
         originalContent: input.content,
         checkedClaims: input.checkedClaims,
+        qualityIssues: input.qualityIssues ?? [],
         verifiedSources: input.sources,
+        researchEvidence: input.research ? { summary: input.research.summary, evidence: input.research.evidence, sources: input.research.sources } : null,
         brand: {
           name: input.brand.profileName,
           industry: input.brand.industry,
@@ -442,11 +496,12 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   await reportProgress(options, 25, "ANALYZING");
 
   let dedicatedResearch: ResearchAgentResult | null = null;
-  if (shouldRunResearchAgent(research.mode)) {
+  const researchTopic = [options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
+  if (shouldRunResearchAgent(research.mode, researchTopic)) {
     await reportProgress(options, 35, "RESEARCHING");
     dedicatedResearch = await runOpenAIResearchAgent({
       apiKey: options.apiKey,
-      topic: options.topic,
+      topic: researchTopic,
       industry: options.brand.industry,
       businessDescription: options.brand.description,
       target: options.brand.target,
@@ -492,6 +547,10 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     ...options.providers.map((provider) => platformStrategyPrompt(provider)),
     "Per lo stesso tema puoi mantenere il nucleo informativo, ma hook, struttura, lunghezza, CTA, hashtag, ritmo, angolo di presentazione e visualBrief devono essere nativi della piattaforma.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
+    "task.objective può contenere sia un obiettivo marketing sia vincoli editoriali espliciti. Numeri, confronti, elementi richiesti e taglio indicati dall'utente sono requisiti da rispettare, non suggerimenti da reinterpretare.",
+    "Se topic o objective chiedono N differenze/punti/consigli/errori, produci esattamente N elementi sostanziali e distinti. Nei POST numerali chiaramente 1..N; non trasformarli in un elenco vago di criteri.",
+    "Nei confronti tra piattaforme/prodotti/servizi rispondi direttamente al confronto richiesto. Evita premesse evasive o formule tipo 'non esiste un vincitore' se l'utente non lo ha chiesto; usa invece differenze concrete supportate dalle fonti.",
+    "editorialAngle deve essere una frase completa e leggibile. Non troncare mai una parola o una frase per rientrare nei limiti.",
     "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
     "pillar deve indicare il pilastro editoriale concreto a cui appartiene il contenuto, non una categoria generica come 'social'.",
     "editorialAngle deve descrivere in modo conciso il punto di vista concreto usato per trattare quel tema; due copy sullo stesso tema ma con angoli realmente diversi devono avere angoli diversi.",
@@ -504,7 +563,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Restituisci esclusivamente l'output strutturato richiesto.",
   ].filter(Boolean).join("\n");
   const userContext = JSON.stringify({
-    task: { topic: options.topic, objective: options.objective ?? null, providers: options.providers, formats: options.formats, researchMode: research.mode, freshnessGuidanceDays: research.freshnessDays },
+    task: { topic: options.topic, objective: options.objective ?? null, requestedStructuralCount: requestedStructuralCount(options.topic, options.objective), providers: options.providers, formats: options.formats, researchMode: research.mode, freshnessGuidanceDays: research.freshnessDays },
     platformStrategies: selectedPlatformStrategies(options.providers),
     brand: {
       name: options.brand.profileName,
@@ -553,6 +612,40 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const outputText = extractOutputText(body);
   if (!outputText) throw new Error("OPENAI_EMPTY_OUTPUT");
   let content = validateResult(JSON.parse(outputText), options.providers, options.formats);
+  let editorialRepair: Awaited<ReturnType<typeof repairUnsupportedContent>> | null = null;
+  const initialQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+  if (initialQualityIssues.length) {
+    editorialRepair = await repairUnsupportedContent({
+      apiKey: options.apiKey,
+      model,
+      topic: options.topic,
+      objective: options.objective ?? null,
+      providers: options.providers,
+      formats: options.formats,
+      brand: options.brand,
+      websiteContext,
+      content,
+      checkedClaims: [],
+      sources: dedicatedResearch?.sources ?? [],
+      repairReason: "EDITORIAL_QUALITY",
+      qualityIssues: initialQualityIssues,
+      research: dedicatedResearch,
+      fetcher,
+    });
+    content = editorialRepair.content;
+    const remainingQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+    if (remainingQualityIssues.length) {
+      const repairCostUsd = estimateTerraCostUsd(editorialRepair.usage.inputTokens, editorialRepair.usage.outputTokens);
+      throw new OpenAITextPipelineError("OPENAI_EDITORIAL_QUALITY_BLOCKED", [{
+        operation: "AGENT_COPY_REPAIR",
+        model: editorialRepair.model,
+        inputTokens: editorialRepair.usage.inputTokens,
+        outputTokens: editorialRepair.usage.outputTokens,
+        costUsd: repairCostUsd,
+        metadata: { reason: "EDITORIAL_QUALITY", quality_issues: remainingQualityIssues },
+      }]);
+    }
+  }
   await reportProgress(options, 72, "COPY_READY");
   const brain = brainDecision({
     spendEur: 0,
@@ -602,6 +695,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         content,
         checkedClaims: factCheck.checkedClaims,
         sources: repairSources,
+        repairReason: "FACTCHECK",
+        research: dedicatedResearch,
         fetcher,
       });
       content = copyRepair.content;
@@ -625,8 +720,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const factCheckInputTokens = factCheckRuns.reduce((sum, run) => sum + run.usage.inputTokens, 0);
   const factCheckOutputTokens = factCheckRuns.reduce((sum, run) => sum + run.usage.outputTokens, 0);
   const factCheckWebSearchCalls = factCheckRuns.reduce((sum, run) => sum + run.usage.webSearchCalls, 0);
-  const repairInputTokens = copyRepair?.usage.inputTokens ?? 0;
-  const repairOutputTokens = copyRepair?.usage.outputTokens ?? 0;
+  const repairInputTokens = (editorialRepair?.usage.inputTokens ?? 0) + (copyRepair?.usage.inputTokens ?? 0);
+  const repairOutputTokens = (editorialRepair?.usage.outputTokens ?? 0) + (copyRepair?.usage.outputTokens ?? 0);
   const totalInputTokens = mainInputTokens === null ? null : mainInputTokens + (dedicatedResearch?.usage.inputTokens ?? 0) + factCheckInputTokens + repairInputTokens;
   const totalOutputTokens = mainOutputTokens === null ? null : mainOutputTokens + (dedicatedResearch?.usage.outputTokens ?? 0) + factCheckOutputTokens + repairOutputTokens;
   const webSearchCalls = mainWebSearchCalls + (dedicatedResearch?.usage.webSearchCalls ?? 0) + factCheckWebSearchCalls;
@@ -634,8 +729,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const mainCostUsd = mainTokenCost === null ? null : mainTokenCost + mainWebSearchCalls * WEB_SEARCH_PER_RUN_USD;
   const researchCostUsd = dedicatedResearch ? agentCost(dedicatedResearch) : null;
   const factCheckCostUsd = factCheckRuns.reduce((sum, run) => sum + agentCost(run), 0);
+  const editorialRepairCostUsd = editorialRepair ? estimateTerraCostUsd(editorialRepair.usage.inputTokens, editorialRepair.usage.outputTokens) : 0;
   const copyRepairCostUsd = copyRepair ? estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens) : 0;
-  const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + factCheckCostUsd + copyRepairCostUsd;
+  const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + factCheckCostUsd + editorialRepairCostUsd + copyRepairCostUsd;
   const externalSources = [...new Set([...combinedSources, ...factCheckRuns.flatMap((run) => run.sources)])].slice(0, 20);
   const externalClaimPresent = content.variants.some((variant) => variant.factualBasis.some((basis) => /BASE ESTERNA/i.test(basis)));
   const technicalEvents: OpenAITextTechnicalEvent[] = [
@@ -665,6 +761,19 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         openai_request_id: dedicatedResearch.requestId,
         web_search_calls: dedicatedResearch.usage.webSearchCalls,
         sources: dedicatedResearch.sources,
+      },
+    }] : []),
+    ...(editorialRepair ? [{
+      operation: "AGENT_COPY_REPAIR" as const,
+      model: editorialRepair.model,
+      inputTokens: editorialRepair.usage.inputTokens,
+      outputTokens: editorialRepair.usage.outputTokens,
+      costUsd: editorialRepairCostUsd,
+      metadata: {
+        openai_response_id: editorialRepair.responseId,
+        openai_request_id: editorialRepair.requestId,
+        reason: "EDITORIAL_QUALITY",
+        quality_issues: initialQualityIssues,
       },
     }] : []),
     ...(copyRepair ? [{
