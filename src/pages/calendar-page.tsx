@@ -21,6 +21,18 @@ import {
   type PreferredSlot,
   type SocialProvider,
 } from "../features/calendar/calendar-workflow";
+import {
+  jobDisplayStatus,
+  jobMatchesFilters,
+  shiftDateKey,
+  variantDisplayStatus,
+  variantMatchesFilters,
+  visibleStatuses,
+  weekDateKeys,
+  type CalendarDisplayStatus,
+  type CalendarFilters,
+  type CalendarViewMode,
+} from "../features/calendar/calendar-view";
 import "../calendar.css";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 
@@ -33,10 +45,10 @@ type ScheduleDraft = {
   enabled: boolean;
 };
 
-type MonthCursor = { year: number; month: number };
 type DayCell = { day: number; key: string; weekend: boolean; today: boolean } | null;
 
 const WEEK_HEADERS = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+const FORMAT_OPTIONS = ["POST", "CAROUSEL", "STORY"] as const;
 
 function providerLabel(provider: string) {
   return SOCIAL_PROVIDERS.find((item) => item.value === provider)?.label ?? provider;
@@ -83,31 +95,50 @@ function dateKeyFromInstant(value: string, timezone: string) {
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
 }
 
-function monthFromTimezone(timezone: string): MonthCursor {
-  const parts = zonedDateParts(new Date(), timezone);
-  return { year: parts.year, month: parts.month - 1 };
+function todayKey(timezone: string) {
+  return dateKeyFromInstant(new Date().toISOString(), timezone);
 }
 
-function monthLabel(cursor: MonthCursor) {
-  const label = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(cursor.year, cursor.month, 1)));
+function dateFromKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function monthLabel(value: string) {
+  const date = dateFromKey(value);
+  const label = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric", timeZone: "UTC" }).format(date);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function buildMonthCells(cursor: MonthCursor, timezone: string): DayCell[] {
-  const daysInMonth = new Date(Date.UTC(cursor.year, cursor.month + 1, 0)).getUTCDate();
-  const firstUtcDay = new Date(Date.UTC(cursor.year, cursor.month, 1)).getUTCDay();
+function dayLabel(value: string) {
+  return new Intl.DateTimeFormat("it-IT", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" }).format(dateFromKey(value));
+}
+
+function shortDayLabel(value: string) {
+  return new Intl.DateTimeFormat("it-IT", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" }).format(dateFromKey(value));
+}
+
+function shiftMonthKey(value: string, delta: number) {
+  const date = dateFromKey(value);
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + delta);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function buildMonthCells(focusDateKey: string, timezone: string): DayCell[] {
+  const focus = dateFromKey(focusDateKey);
+  const year = focus.getUTCFullYear();
+  const month = focus.getUTCMonth();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const firstUtcDay = new Date(Date.UTC(year, month, 1)).getUTCDay();
   const mondayOffset = (firstUtcDay + 6) % 7;
-  const todayParts = zonedDateParts(new Date(), timezone);
+  const currentKey = todayKey(timezone);
   const cells: DayCell[] = Array.from({ length: mondayOffset }, () => null);
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const utcDay = new Date(Date.UTC(cursor.year, cursor.month, day)).getUTCDay();
-    const mondayIndex = (utcDay + 6) % 7;
-    cells.push({
-      day,
-      key: `${cursor.year}-${String(cursor.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-      weekend: mondayIndex >= 5,
-      today: todayParts.year === cursor.year && todayParts.month === cursor.month + 1 && todayParts.day === day,
-    });
+    const date = new Date(Date.UTC(year, month, day));
+    const mondayIndex = (date.getUTCDay() + 6) % 7;
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    cells.push({ day, key, weekend: mondayIndex >= 5, today: key === currentKey });
   }
   while (cells.length % 7 !== 0) cells.push(null);
   return cells;
@@ -118,20 +149,33 @@ function timeLabel(value: string, timezone: string) {
   return `${parts.hour}:${parts.minute}`;
 }
 
+function statusLabel(status: CalendarDisplayStatus) {
+  const labels: Record<CalendarDisplayStatus, string> = {
+    DRAFT: "Bozza",
+    REVIEW: "Revisione",
+    APPROVED: "Approvato",
+    SCHEDULED: "Programmato",
+    PUBLISHING: "In pubblicazione",
+    PUBLISHED: "Pubblicato",
+    FAILED: "Fallito",
+  };
+  return labels[status];
+}
+
 function jobStatus(job: CalendarJobRow, timezone: string) {
   if (job.execution_mode === "DEMO_SIMULATION" && job.state === "PUBLISHED") return "Pubblicato in demo · nessun invio reale";
   if (job.execution_mode === "DEMO_SIMULATION" && job.state === "SCHEDULED") return "Programmato in demo · nessun invio reale";
   if (job.state === "PROCESSING") return "In pubblicazione";
   if (job.state === "PUBLISHED") return job.published_at ? `Pubblicato · ${timeLabel(job.published_at, timezone)}` : "Pubblicato";
-  if (job.state === "BLOCKED_APPROVAL") return "In attesa di approvazione";
-  if (job.state === "FAILED" && job.outcome_unknown) return "Da verificare sul social";
+  if (job.state === "BLOCKED_APPROVAL") return "Revisione richiesta";
+  if (job.state === "FAILED" && job.outcome_unknown) return "Esito remoto da verificare";
   if (job.state === "FAILED") return "Pubblicazione fallita";
   if (job.next_attempt_at) return `Da riprovare · ${timeLabel(job.next_attempt_at, timezone)}`;
   return "Programmato";
 }
 
 export function CalendarPage() {
-  const { selectedProfile } = useProfiles();
+  const { profiles, selectedProfile, setSelectedProfileId } = useProfiles();
   const [state, setState] = useState<CalendarState>({ schedules: [], variants: [], jobs: [], contentTitles: {} });
   const [drafts, setDrafts] = useState<Record<SocialProvider, ScheduleDraft> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -141,7 +185,9 @@ export function CalendarPage() {
   const [scheduleLocal, setScheduleLocal] = useState("");
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [jobTimes, setJobTimes] = useState<Record<string, string>>({});
-  const [cursor, setCursor] = useState<MonthCursor>(() => monthFromTimezone("Europe/Rome"));
+  const [viewMode, setViewMode] = useState<CalendarViewMode>("MONTH");
+  const [focusDateKey, setFocusDateKey] = useState(() => todayKey("Europe/Rome"));
+  const [filters, setFilters] = useState<CalendarFilters>({ provider: "ALL", format: "ALL", status: "ALL" });
   const draftsRef = useRef<Record<SocialProvider, ScheduleDraft> | null>(null);
   const scheduleTimersRef = useRef<Partial<Record<SocialProvider, ReturnType<typeof setTimeout>>>>({});
 
@@ -151,7 +197,12 @@ export function CalendarPage() {
     setError(null);
     try {
       const next = await loadCalendarState(selectedProfile.id);
-      const approved = next.variants.filter((variant) => variant.eligible && variant.approval_status === "APPROVED");
+      const approved = next.variants.filter((variant) =>
+        variant.eligible
+        && variant.approval_status === "APPROVED"
+        && variant.workflow_status === "APPROVED"
+        && variant.qa_status === "PASS"
+      );
       const nextDrafts = Object.fromEntries(SOCIAL_PROVIDERS.map(({ value }) => [value, makeScheduleDraft(value, selectedProfile.timezone, next)])) as Record<SocialProvider, ScheduleDraft>;
       setState(next);
       setDrafts(nextDrafts);
@@ -167,21 +218,42 @@ export function CalendarPage() {
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
-    if (selectedProfile) setCursor(monthFromTimezone(selectedProfile.timezone));
+    if (!selectedProfile) return;
+    setFocusDateKey(todayKey(selectedProfile.timezone));
+    setSelectedJobId(null);
+    setFilters({ provider: "ALL", format: "ALL", status: "ALL" });
   }, [selectedProfile?.id, selectedProfile?.timezone]);
 
   const variantMap = useMemo(() => new Map(state.variants.map((variant) => [variant.id, variant])), [state.variants]);
-  const approvedVariants = useMemo(() => state.variants.filter((variant) => variant.eligible && variant.approval_status === "APPROVED"), [state.variants]);
-  const monthCells = useMemo(() => selectedProfile ? buildMonthCells(cursor, selectedProfile.timezone) : [], [cursor, selectedProfile]);
+  const approvedVariants = useMemo(() => state.variants.filter((variant) =>
+    variant.eligible
+    && variant.approval_status === "APPROVED"
+    && variant.workflow_status === "APPROVED"
+    && variant.qa_status === "PASS"
+  ), [state.variants]);
+
+  const filteredJobs = useMemo(
+    () => state.jobs.filter((job) => jobMatchesFilters(job, variantMap.get(job.variant_id), filters)),
+    [state.jobs, variantMap, filters],
+  );
+  const scheduledVariantIds = useMemo(() => new Set(state.jobs.map((job) => job.variant_id)), [state.jobs]);
+  const unscheduledVariants = useMemo(
+    () => state.variants.filter((variant) => !scheduledVariantIds.has(variant.id) && variantMatchesFilters(variant, filters)),
+    [state.variants, scheduledVariantIds, filters],
+  );
+
   const jobsByDate = useMemo(() => {
     if (!selectedProfile) return new Map<string, CalendarJobRow[]>();
     const map = new Map<string, CalendarJobRow[]>();
-    for (const job of state.jobs) {
+    for (const job of filteredJobs) {
       const key = dateKeyFromInstant(job.scheduled_at, selectedProfile.timezone);
       map.set(key, [...(map.get(key) ?? []), job]);
     }
     return map;
-  }, [state.jobs, selectedProfile]);
+  }, [filteredJobs, selectedProfile]);
+
+  const monthCells = useMemo(() => selectedProfile ? buildMonthCells(focusDateKey, selectedProfile.timezone) : [], [focusDateKey, selectedProfile]);
+  const weekKeys = useMemo(() => weekDateKeys(focusDateKey), [focusDateKey]);
   const selectedJob = selectedJobId ? state.jobs.find((job) => job.id === selectedJobId) ?? null : null;
 
   async function run(key: string, task: () => Promise<void>) {
@@ -195,9 +267,6 @@ export function CalendarPage() {
 
   async function persistSchedule(provider: SocialProvider, draft = draftsRef.current?.[provider]) {
     if (!selectedProfile || !draft) return;
-    const timer = scheduleTimersRef.current[provider];
-    if (timer) clearTimeout(timer);
-    delete scheduleTimersRef.current[provider];
     await saveProviderSchedule({
       profileId: selectedProfile.id,
       provider,
@@ -210,8 +279,8 @@ export function CalendarPage() {
   }
 
   function queueSchedule(provider: SocialProvider, draft: ScheduleDraft) {
-    const timer = scheduleTimersRef.current[provider];
-    if (timer) clearTimeout(timer);
+    const existing = scheduleTimersRef.current[provider];
+    if (existing) clearTimeout(existing);
     scheduleTimersRef.current[provider] = setTimeout(() => {
       void persistSchedule(provider, draft).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio frequenza non riuscito."));
     }, 450);
@@ -248,8 +317,7 @@ export function CalendarPage() {
   function patchSlot(provider: SocialProvider, index: number, patch: Partial<PreferredSlot>) {
     const draft = drafts?.[provider];
     if (!draft) return;
-    const next = draft.preferredSlots.map((slot, slotIndex) => slotIndex === index ? { ...slot, ...patch } : slot);
-    patchDraft(provider, { preferredSlots: next });
+    patchDraft(provider, { preferredSlots: draft.preferredSlots.map((slot, slotIndex) => slotIndex === index ? { ...slot, ...patch } : slot) });
   }
 
   function removeSlot(provider: SocialProvider, index: number) {
@@ -258,11 +326,9 @@ export function CalendarPage() {
     patchDraft(provider, { preferredSlots: draft.preferredSlots.filter((_, slotIndex) => slotIndex !== index) });
   }
 
-  function changeMonth(delta: number) {
-    setCursor((current) => {
-      const date = new Date(Date.UTC(current.year, current.month + delta, 1));
-      return { year: date.getUTCFullYear(), month: date.getUTCMonth() };
-    });
+  function navigate(delta: number) {
+    if (viewMode === "MONTH") setFocusDateKey((current) => shiftMonthKey(current, delta));
+    else setFocusDateKey((current) => shiftDateKey(current, delta * (viewMode === "WEEK" ? 7 : 1)));
   }
 
   async function scheduleVariant() {
@@ -295,54 +361,97 @@ export function CalendarPage() {
     });
   }
 
+  function renderJob(job: CalendarJobRow) {
+    if (!selectedProfile) return null;
+    const variant = variantMap.get(job.variant_id);
+    const display = jobDisplayStatus(job);
+    return <button
+      type="button"
+      className={`calendar-event provider-${job.provider.toLowerCase()} status-${display.toLowerCase()}`}
+      key={job.id}
+      onClick={() => setSelectedJobId(job.id)}
+    >
+      <span>{timeLabel(job.scheduled_at, selectedProfile.timezone)} · {providerLabel(job.provider)} · {variant?.format ?? "—"}</span>
+      <strong>{variant ? variantTitle(variant, state) : "Contenuto"}</strong>
+      <small>{statusLabel(display)}</small>
+    </button>;
+  }
+
   if (!selectedProfile) return null;
   if (loading || !drafts) return <div className="page-content"><p>Caricamento calendario…</p></div>;
 
+  const viewTitle = viewMode === "MONTH"
+    ? monthLabel(focusDateKey)
+    : viewMode === "WEEK"
+      ? `${shortDayLabel(weekKeys[0])} – ${shortDayLabel(weekKeys[6])}`
+      : dayLabel(focusDateKey);
+
   return <div className="page-content calendar-page">
     <header className="page-header calendar-page-header">
-      <div><p className="eyebrow">Calendario · {selectedProfile.name}</p><h1>Calendario contenuti</h1><p>Qui vedi cosa è previsto giorno per giorno. Sabato e domenica sono evidenziati, ma restano giorni pubblicabili.</p></div>
+      <div><p className="eyebrow">Calendario · {selectedProfile.name}</p><h1>Calendario contenuti</h1><p>Mese, settimana e giorno con stato reale di approvazione e pubblicazione nel fuso {selectedProfile.timezone}.</p></div>
     </header>
     <CustomerWorkflowJourney current="PLAN" />
-
     {error && <p className="form-error" role="alert">{error}</p>}
+
+    <section className="panel calendar-controls">
+      <div className="calendar-view-switch" aria-label="Vista calendario">
+        {(["MONTH","WEEK","DAY"] as CalendarViewMode[]).map((mode) => <button type="button" key={mode} className={viewMode === mode ? "active" : ""} onClick={() => setViewMode(mode)}>{mode === "MONTH" ? "Mese" : mode === "WEEK" ? "Settimana" : "Giorno"}</button>)}
+      </div>
+      <div className="calendar-filter-grid">
+        <label>Attività<select value={selectedProfile.id} onChange={(event) => setSelectedProfileId(event.target.value)}>{profiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label>
+        <label>Social<select value={filters.provider} onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value as CalendarFilters["provider"] }))}><option value="ALL">Tutti</option>{SOCIAL_PROVIDERS.map((provider) => <option value={provider.value} key={provider.value}>{provider.label}</option>)}</select></label>
+        <label>Formato<select value={filters.format} onChange={(event) => setFilters((current) => ({ ...current, format: event.target.value }))}><option value="ALL">Tutti</option>{FORMAT_OPTIONS.map((format) => <option value={format} key={format}>{format}</option>)}</select></label>
+        <label>Stato<select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as CalendarFilters["status"] }))}><option value="ALL">Tutti</option>{visibleStatuses().map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>
+      </div>
+    </section>
 
     <section className="month-calendar panel">
       <header className="month-toolbar">
-        <div className="month-navigation"><button type="button" className="calendar-icon-button" onClick={() => changeMonth(-1)} aria-label="Mese precedente"><ChevronLeft size={18} /></button><h2>{monthLabel(cursor)}</h2><button type="button" className="calendar-icon-button" onClick={() => changeMonth(1)} aria-label="Mese successivo"><ChevronRight size={18} /></button></div>
-        <button type="button" className="today-button" onClick={() => setCursor(monthFromTimezone(selectedProfile.timezone))}>Oggi</button>
+        <div className="month-navigation"><button type="button" className="calendar-icon-button" onClick={() => navigate(-1)} aria-label="Periodo precedente"><ChevronLeft size={18} /></button><h2>{viewTitle}</h2><button type="button" className="calendar-icon-button" onClick={() => navigate(1)} aria-label="Periodo successivo"><ChevronRight size={18} /></button></div>
+        <button type="button" className="today-button" onClick={() => setFocusDateKey(todayKey(selectedProfile.timezone))}>Oggi</button>
       </header>
 
-      <div className="month-scroll">
-        <div className="month-grid">
-          {WEEK_HEADERS.map((label, index) => <div className={`weekday-header ${index >= 5 ? "weekend" : ""}`} key={label}>{label}</div>)}
-          {monthCells.map((cell, index) => {
-            if (!cell) return <div className="calendar-day outside" key={`blank-${index}`} />;
-            const jobs = jobsByDate.get(cell.key) ?? [];
-            return <div className={`calendar-day ${cell.weekend ? "weekend" : ""} ${cell.today ? "today" : ""}`} key={cell.key}>
-              <div className="day-number-row"><span className="day-number">{cell.day}</span>{cell.today && <small>Oggi</small>}</div>
-              <div className="day-events">{jobs.map((job) => {
-                const variant = variantMap.get(job.variant_id);
-                const blocked = job.state === "BLOCKED_APPROVAL";
-                return <button type="button" className={`calendar-event provider-${job.provider.toLowerCase()} ${blocked ? "blocked" : ""}`} key={job.id} onClick={() => setSelectedJobId(job.id)}>
-                  <span>{timeLabel(job.scheduled_at, selectedProfile.timezone)} · {providerLabel(job.provider)}</span>
-                  <strong>{variant ? variantTitle(variant, state) : "Contenuto"}</strong>
-                  <small>{jobStatus(job, selectedProfile.timezone)}</small>
-                </button>;
-              })}</div>
-            </div>;
-          })}
-        </div>
-      </div>
+      {viewMode === "MONTH" && <div className="month-scroll"><div className="month-grid">
+        {WEEK_HEADERS.map((label, index) => <div className={`weekday-header ${index >= 5 ? "weekend" : ""}`} key={label}>{label}</div>)}
+        {monthCells.map((cell, index) => {
+          if (!cell) return <div className="calendar-day outside" key={`blank-${index}`} />;
+          const jobs = jobsByDate.get(cell.key) ?? [];
+          return <div className={`calendar-day ${cell.weekend ? "weekend" : ""} ${cell.today ? "today" : ""}`} key={cell.key}>
+            <div className="day-number-row"><button type="button" className="day-number-link" onClick={() => { setFocusDateKey(cell.key); setViewMode("DAY"); }}>{cell.day}</button>{cell.today && <small>Oggi</small>}</div>
+            <div className="day-events">{jobs.map(renderJob)}</div>
+          </div>;
+        })}
+      </div></div>}
+
+      {viewMode === "WEEK" && <div className="calendar-week-grid">
+        {weekKeys.map((key, index) => <section className={`calendar-week-day ${index >= 5 ? "weekend" : ""}`} key={key}>
+          <header><button type="button" onClick={() => { setFocusDateKey(key); setViewMode("DAY"); }}>{shortDayLabel(key)}</button></header>
+          <div className="day-events">{(jobsByDate.get(key) ?? []).map(renderJob)}</div>
+        </section>)}
+      </div>}
+
+      {viewMode === "DAY" && <div className="calendar-day-detail">
+        <header><h3>{dayLabel(focusDateKey)}</h3><span>{selectedProfile.timezone}</span></header>
+        <div className="calendar-day-timeline">{(jobsByDate.get(focusDateKey) ?? []).length ? (jobsByDate.get(focusDateKey) ?? []).map(renderJob) : <p>Nessun contenuto programmato con i filtri attuali.</p>}</div>
+      </div>}
+    </section>
+
+    <section className="panel calendar-unscheduled">
+      <header><div><p className="eyebrow">Workflow</p><h2>Contenuti non programmati</h2></div><span>{unscheduledVariants.length}</span></header>
+      {unscheduledVariants.length === 0 ? <p>Nessun contenuto non programmato con i filtri attuali.</p> : <div className="unscheduled-list">{unscheduledVariants.slice(0, 30).map((variant) => {
+        const display = variantDisplayStatus(variant);
+        return <article key={variant.id}><div><strong>{variantTitle(variant, state)}</strong><small>{providerLabel(variant.provider)} · {variant.format} · QA {variant.qa_status}</small></div><span className={`calendar-state status-${display.toLowerCase()}`}>{statusLabel(display)}</span></article>;
+      })}</div>}
     </section>
 
     {selectedJob && <section className="panel selected-calendar-item">
       <div><small>{providerLabel(selectedJob.provider)} · {jobStatus(selectedJob, selectedProfile.timezone)}</small><h2>{variantMap.get(selectedJob.variant_id) ? variantTitle(variantMap.get(selectedJob.variant_id)!, state) : "Contenuto programmato"}</h2><p>{selectedJob.state === "BLOCKED_APPROVAL" ? "Questo contenuto richiede una nuova approvazione." : selectedJob.state === "FAILED" ? (selectedJob.last_error || "Controlla il collegamento social prima di riprovare.") : selectedJob.state === "PROCESSING" ? "La pubblicazione è in corso." : selectedJob.state === "PUBLISHED" ? "La pubblicazione è stata completata." : "Puoi spostarlo o rimuoverlo dal calendario."}</p></div>
-      <div className="selected-calendar-actions"><input type="datetime-local" value={jobTimes[selectedJob.id] ?? ""} disabled={selectedJob.state !== "SCHEDULED" && selectedJob.state !== "BLOCKED_APPROVAL"} onChange={(event) => setJobTimes((current) => ({ ...current, [selectedJob.id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={selectedJob.state !== "SCHEDULED" || busy[`job-${selectedJob.id}`]} onClick={() => void reschedule(selectedJob)}>Sposta</button><button type="button" className="danger-outline-button" disabled={!(["SCHEDULED", "BLOCKED_APPROVAL"].includes(selectedJob.state)) || busy[`remove-${selectedJob.id}`]} onClick={() => void removeJob(selectedJob)}><Trash2 size={15} /> Rimuovi</button><button type="button" className="calendar-icon-button" onClick={() => setSelectedJobId(null)} aria-label="Chiudi"><X size={17} /></button></div>
+      <div className="selected-calendar-actions"><input type="datetime-local" value={jobTimes[selectedJob.id] ?? ""} disabled={selectedJob.state !== "SCHEDULED" && selectedJob.state !== "BLOCKED_APPROVAL"} onChange={(event) => setJobTimes((current) => ({ ...current, [selectedJob.id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={selectedJob.state !== "SCHEDULED" || busy[`job-${selectedJob.id}`]} onClick={() => void reschedule(selectedJob)}>Sposta</button><button type="button" className="danger-outline-button" disabled={!["SCHEDULED","BLOCKED_APPROVAL"].includes(selectedJob.state) || busy[`remove-${selectedJob.id}`]} onClick={() => void removeJob(selectedJob)}><Trash2 size={15} /> Rimuovi</button><button type="button" className="calendar-icon-button" onClick={() => setSelectedJobId(null)} aria-label="Chiudi"><X size={17} /></button></div>
     </section>}
 
     <details className="panel calendar-settings">
       <summary>Frequenza automatica</summary>
-      <p className="calendar-settings-intro">Imposta quante volte vuoi pubblicare per social. Le modifiche vengono memorizzate senza pulsanti di salvataggio.</p>
+      <p className="calendar-settings-intro">Imposta quante volte vuoi pubblicare per social. Le modifiche vengono memorizzate automaticamente.</p>
       <div className="schedule-card-grid compact-schedules">{SOCIAL_PROVIDERS.map(({ value, label }) => {
         const draft = drafts[value];
         return <article className="schedule-card" key={value} onBlurCapture={() => void persistSchedule(value).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio frequenza non riuscito."))}>
@@ -356,8 +465,8 @@ export function CalendarPage() {
 
     <details className="panel calendar-manual">
       <summary>Aggiungi manualmente un contenuto</summary>
-      <p>Serve solo come eccezione. Il flusso normale sarà automatico.</p>
-      {approvedVariants.length === 0 ? <div className="empty-calendar"><Clock3 size={19} /><div><strong>Nessun contenuto approvato disponibile</strong><p>Quando il sistema avrà contenuti pronti compariranno qui.</p></div></div> : <div className="calendar-compose"><label>Contenuto<select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{approvedVariants.map((variant) => <option value={variant.id} key={variant.id}>{providerLabel(variant.provider)} · {variantTitle(variant, state)}</option>)}</select></label><label>Data e ora<input type="datetime-local" value={scheduleLocal} onChange={(event) => setScheduleLocal(event.target.value)} /></label><button className="secondary-button" type="button" disabled={!variantId || !scheduleLocal || busy["new-job"]} onClick={() => void scheduleVariant()}><CalendarClock size={16} /> Aggiungi</button></div>}
+      <p>Usalo come eccezione al flusso automatico. Sono selezionabili solo versioni approvate che corrispondono al QA approvato.</p>
+      {approvedVariants.length === 0 ? <div className="empty-calendar"><Clock3 size={19} /><div><strong>Nessun contenuto approvato disponibile</strong><p>Approva un contenuto dopo QA PASS per programmarlo.</p></div></div> : <div className="calendar-compose"><label>Contenuto<select value={variantId} onChange={(event) => setVariantId(event.target.value)}>{approvedVariants.map((variant) => <option value={variant.id} key={variant.id}>{providerLabel(variant.provider)} · {variant.format} · {variantTitle(variant, state)}</option>)}</select></label><label>Data e ora<input type="datetime-local" value={scheduleLocal} onChange={(event) => setScheduleLocal(event.target.value)} /></label><button className="secondary-button" type="button" disabled={!variantId || !scheduleLocal || busy["new-job"]} onClick={() => void scheduleVariant()}><CalendarClock size={16} /> Aggiungi</button></div>}
     </details>
   </div>;
 }
