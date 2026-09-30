@@ -11,6 +11,9 @@ export type RoutedImageOptions = {
   profileName: string;
   industry?: string | null;
   tone?: string | null;
+  brandColors?: string[];
+  brandFonts?: string[];
+  brandVisualStyle?: string | null;
   provider: ImageSocialProvider;
   format: ImageSocialFormat;
   visualBrief: string;
@@ -44,6 +47,9 @@ export async function generateRoutedImage(options: RoutedImageOptions): Promise<
     profileName: options.profileName,
     industry: options.industry ?? null,
     tone: options.tone ?? null,
+    brandColors: options.brandColors ?? [],
+    brandFonts: options.brandFonts ?? [],
+    brandVisualStyle: options.brandVisualStyle ?? null,
     provider: options.provider,
     format: options.format,
     visualBrief: options.visualBrief,
