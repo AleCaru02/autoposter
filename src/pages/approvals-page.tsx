@@ -300,7 +300,30 @@ export function ApprovalsPage() {
     });
   }
 
-  async function removeItem(item: ContentItemRow) {
+  async function generateCarouselSlideImage(variant: ContentVariantRow, slide: ContentCarouselSlideRow) {
+    if (!selectedProfile || variant.format !== "CAROUSEL") return;
+    await run(`slide-image-${slide.id}`, async () => {
+      const token = await authenticatedApiToken();
+      const response = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },
+        body: JSON.stringify({
+          profileId: selectedProfile.id,
+          contentVariantId: variant.id,
+          carouselSlideId: slide.id,
+          provider: variant.provider,
+          format: "CAROUSEL",
+          visualBrief: slide.visual_brief,
+          caption: [slide.headline, slide.body].filter(Boolean).join(" — "),
+        }),
+      });
+      const body = await response.json() as ImageResponse;
+      if (!response.ok || !body.asset?.id) throw new Error("Visuale della slide non salvato. Riprova tra poco.");
+      await reload();
+    });
+  }
+
+    async function removeItem(item: ContentItemRow) {
     if (!selectedProfile || !window.confirm("Eliminare questo contenuto e tutte le sue varianti?")) return;
     await run(`delete-${item.id}`, async () => {
       await deleteContent(selectedProfile.id, item.id);
@@ -356,6 +379,7 @@ export function ApprovalsPage() {
                       <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
                       <p><strong>Visuale:</strong> {slide.visual_brief}</p>
                       {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
+                      <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`]} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] ? "Generazione…" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
                     </article>;
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
