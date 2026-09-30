@@ -1,6 +1,6 @@
 import type { ActivityBudgetPreflight } from "./activity-budget.js";
 import type { ContentImportance } from "./ai-brain-policy.js";
-import { generateOpenAIImage, type OpenAIImageResult } from "./openai-image.js";
+import { generateOpenAIImage, type OpenAIImageResult, type ImageGenerationProgressUpdate } from "./openai-image.js";
 import { routeAiTask, type RouterEnvironment } from "./model-router.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
 
@@ -19,6 +19,7 @@ export type RoutedImageOptions = {
   reusableAssetAvailable?: boolean;
   difficultPhotoEditing?: boolean;
   fetcher?: typeof fetch;
+  onProgress?: (update: ImageGenerationProgressUpdate) => void | Promise<void>;
 };
 
 export async function generateRoutedImage(options: RoutedImageOptions): Promise<OpenAIImageResult> {
@@ -50,5 +51,6 @@ export async function generateRoutedImage(options: RoutedImageOptions): Promise<
     caption: options.caption,
     additionalDirection: options.additionalDirection,
     fetcher: options.fetcher,
+    onProgress: options.onProgress,
   });
 }
