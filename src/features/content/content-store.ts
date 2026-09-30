@@ -99,6 +99,35 @@ export type SavedGeneration = {
   variantIds: Record<string, string>;
 };
 
+export type ContentQaApiResult = {
+  runId: string;
+  profileId: string;
+  contentId: string;
+  variantId: string;
+  contentFingerprint: string;
+  overallStatus: "PASS" | "FAIL" | "NEEDS_SOURCE";
+  brandStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  copyStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  visualStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  factStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  platformStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  duplicateStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  budgetStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  reasons: string[];
+  slides: Array<{
+    slideId: string;
+    slideNumber: number;
+    copyStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    visualStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    factStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    brandStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    qualityStatus: "PASS" | "FAIL" | "NEEDS_SOURCE";
+    reason: string;
+  }>;
+  checkedAt: string;
+  reused: boolean;
+};
+
 type ReviewResponse = {
   variantId?: string;
   approvalStatus?: ApprovalStatus;
@@ -309,4 +338,22 @@ export async function deleteContent(profileId: string, contentId: string) {
   if (result.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   // Gli asset restano nella Libreria: content_id usa ON DELETE SET NULL e l'immagine
   // può essere riutilizzata da contenuti futuri invece di essere distrutta col post.
+}
+
+
+export async function runVariantQa(input: { profileId: string; contentId: string; variantId: string; force?: boolean }) {
+  const token = await authenticatedApiToken();
+  const response = await fetch("/api/content-qa", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json() as ContentQaApiResult & { error?: string };
+  if (!response.ok || !body.runId || !body.overallStatus) {
+    if (response.status === 409) throw new Error("Il QA è già in corso o deve essere riavviato.");
+    if (response.status === 429) throw new Error("Budget o limite QA raggiunto per questa attività.");
+    if (response.status === 404) throw new Error("Contenuto non trovato.");
+    throw new Error("Content QA non completato. Riprova.");
+  }
+  return body;
 }
