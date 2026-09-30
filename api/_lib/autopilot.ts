@@ -278,6 +278,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
+  const brandVisual=normalizeBrandVisualIdentity(loaded.visualIdentity);
   const decisionRecord=JSON.stringify({
     source:"AUTOPILOT",
     masterDecisionId:master.id,
@@ -295,14 +296,37 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     editorialTopic:generated.content.editorialTopic,
     editorialAngle:generated.content.editorialAngle,
     strategySummary:generated.content.strategySummary,
+    profileType:profile.profile_type,
+    subjectStrategy:subjectDecision.subject,
+    visualArchetype:subjectDecision.visualArchetype,
+    subjectReason:subjectDecision.reason,
+    continuity:{
+      mode:continuityDecision.mode,
+      seriesId:continuityDecision.seriesId,
+      sequenceNumber:continuityDecision.sequenceNumber,
+      previousContentId:continuityDecision.previousContentId,
+      nextTopicIntent:continuityDecision.nextTopicIntent,
+      reason:continuityDecision.continuityReason,
+    },
+    memoryProof:{
+      builtAt:memory.builtAt,
+      sourceContentCount:memory.sourceContentCount,
+      suggestedNextTopicIntent:memory.continuity.suggestedNextTopicIntent,
+      underusedPillars:memory.balance.underusedPillars,
+      overusedPillars:memory.balance.overusedPillars,
+      feedbackSignals:memory.feedback.weightedSignals.slice(0,6),
+      recentSubjects:memory.recent.subjects.slice(0,8),
+      recentVisualArchetypes:memory.recent.visualArchetypes.slice(0,8),
+    },
+    antiRepetition:repetition.signals,
     generatedAt:now,
   });
   if(loaded.personalBrand){
     const sourceRefs=[...loaded.personalBrand.sourceRefs,...generated.externalSources.map((url)=>({type:"EXTERNAL_SOURCE",url}))];
     const factProvenance=[...loaded.personalBrand.factProvenance,...generated.externalSources.map((url)=>({source_type:"EXTERNAL_SOURCE",url}))];
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${decisionRecord}::jsonb,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }else{
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,approval_mode,workflow_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${approvalMode==="AUTOMATIC"?"AUTO":"MANUAL"},'DRAFT',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
@@ -311,19 +335,16 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
     const visualBudget=await budgetEngine.snapshot(profile.id);
-    const identityRows=profile.profile_type==="PERSONAL_BRAND"
-      ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
-      : [];
-    const identityState=identityRows[0]?.status??"NOT_CONFIGURED";
     const visualDecision=decideVisualRuntime({
       profileType:profile.profile_type,
       visualBrief:variant.visualBrief,
       suitableRealAssetAvailable:Boolean(reusable),
       higgsfieldConfigured:higgsfieldConfigured(env.HF_CREDENTIALS),
-      soulIdentityState:identityState,
+      soulIdentityState:canonicalIdentityState,
       higgsfieldBudgetRemainingEur:visualBudget.higgsfieldRemainingEur,
       estimatedHiggsfieldCostEur:0.25,
       estimatedOpenAiCostEur:0.25,
+      subject:subjectDecision.subject,
     });
     await sql`update public.content_variants set
       visual_provider=${visualDecision.provider},
@@ -336,6 +357,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
 
     if(reusable){
       imageAssetId=reusable.asset.id;
+      await sql`update public.content_items set subject_strategy='REAL_ASSET',visual_archetype='REAL_ASSET_FEATURE',updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
       await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb,reuse_count=reuse_count+1,last_used_at=now(),updated_at=now() where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;
       await sql`update public.content_variants set visual_actual_cost_eur=0 where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
     }
@@ -352,7 +374,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:visualDecision.mustAvoidSyntheticPerson?"Do not depict or invent a synthetic person. Use objects, environment, typography or non-identifying visual elements only.":null});
+        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:brandVisual.colors,brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, typography, infographic or other non-identifying elements only.":null});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
@@ -393,7 +415,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     }
   }
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
-  if(variant.eligible){const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
+  if(variant.eligible){await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
   }catch(reason){if(imageEventId&&!imageCommitted){if(imageAssetId)await sql`delete from public.assets where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`.catch(()=>undefined);await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);}if(reason instanceof OpenAITextPipelineError)await meter.persistTechnicalEvents(profile.id,logicalEventId,reason.technicalEvents).catch(()=>undefined);if(!logicalCommitted)await meter.release(logicalEventId,reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED").catch(()=>undefined);throw reason;}
 }
 
