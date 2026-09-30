@@ -741,4 +741,84 @@ export async function runContentQa(input:{
       runId,profileId:input.profileId,contentId:item.id,variantId:variant.id,fingerprint,cached:false,
       overallStatus:"FAIL",brandStatus:"FAIL",copyStatus:"FAIL",visualStatus:"FAIL",factStatus:"FAIL",platformStatus:"FAIL",
       duplicateStatus:"FAIL",budgetStatus:"FAIL",reason:budget.reason??"AI_BUDGET_HARD_STOP",slides:[],checkedAt,
-      d
+      details:{result:null,budget:{allowed:false,reason:budget.reason,remainingEur:budget.remainingEur,otherAiRemainingEur:budget.otherAiRemainingEur}},
+    };
+    result.details.result=result;
+    await persist(sql,{result,actorType:input.actorType});
+    return result;
+  }
+
+  const usage=new EntitlementUsageService(input.databaseUrl);
+  const reservation=await usage.reserveUsage({
+    profileId:input.profileId,capabilityKey:"content.qa.run",quantity:1,
+    idempotencyKey:`content-qa:v1:${variant.id}:${fingerprint}`,
+    source:`CONTENT_QA_${input.actorType}`,referenceId:variant.id,
+    metadata:{cost_bucket:"OTHER_AI",execution_state:"RESERVED",fingerprint},
+  });
+  if(!reservation.allowed||!reservation.result?.event_id)throw new Error(reservation.reason??"CONTENT_QA_CAPABILITY_DENIED");
+  const eventId=reservation.result.event_id;
+  if(reservation.result.duplicate){
+    const existing=await usage.getUsageEvent(eventId);
+    const metadata=object(existing?.metadata);
+    if(existing?.state==="COMMITTED"&&metadata.cached_result&&typeof metadata.cached_result==="object")return {...metadata.cached_result,cached:true} as ContentQaResult;
+    if(existing?.state==="RESERVED")throw new Error("CONTENT_QA_IN_PROGRESS");
+  }
+
+  try{
+    await usage.markProviderStarted(eventId,projectedUsd);
+    const {content,variant:generatedVariant}=asGenerated(item,variant,slides);
+    const sources=externalSources(item.source_refs);
+
+    const editorial=await runOpenAIEditorialQA({
+      apiKey:input.apiKey,profileName:profile.name,industry:profile.industry,tone:brandContext.brand.tone,
+      provider:variant.provider,format:variant.format,objective:item.objective,content,variant:generatedVariant,
+      verification:{researchAgentRan:false,factCheckAgentRan:false,factCheckVerdict:null},externalSources:sources,
+    });
+
+    const factPayload={
+      generated:content,
+      brandFacts:{
+        name:brandContext.brand.profileName,industry:brandContext.brand.industry,websiteUrl:brandContext.brand.websiteUrl,
+        description:brandContext.brand.description,businessModel:brandContext.brand.businessModel,location:brandContext.brand.location,
+        serviceArea:brandContext.brand.serviceArea,target:brandContext.brand.target,tone:brandContext.brand.tone,goals:brandContext.brand.goals,
+        userProvidedContext:brandContext.brand.userContext??null,
+      },
+      confirmedWebsiteSources:brandContext.brand.confirmedWebsiteContent,
+      factProvenance:item.fact_provenance,
+      factualBasis:variant.factual_basis,
+      decisionRecord:item.decision_record,
+    };
+    const fact=await runOpenAIFactCheckAgent({
+      apiKey:input.apiKey,topic:item.topic,content:factPayload,research:null,existingSources:sources,
+      allowWebSearch:contentNeedsFactCheck(content,"BALANCED")&&sources.length===0,
+    });
+
+    const visualResults=new Map<string,OpenAIVisualQaResult>();
+    const qaAsset=async(asset:AssetRow|null,brief:string,alt:string|null)=>{
+      if(!asset||visualTechnicalStatus(asset,variant.format)==="FAIL")return null;
+      const result=await runOpenAIVisualQa({
+        apiKey:input.apiKey,imageUrl:asset.storage_url,profileName:profile.name,industry:profile.industry,
+        provider:variant.provider,format:variant.format,visualBrief:brief,altText:alt,
+      });
+      visualResults.set(asset.id,result);
+      if(result.verdict==="PASS"&&asset.quality_status==="PENDING"){
+        await sql`update public.assets set quality_status='PASS',metadata=coalesce(metadata,'{}'::jsonb)||
+          ${JSON.stringify({visual_qa:"PASS",visual_qa_checked_at:checkedAt})}::jsonb,updated_at=now()
+          where id=${asset.id}::uuid and profile_id=${input.profileId}::uuid and quality_status='PENDING'`;
+        asset.quality_status="PASS";
+      }
+      if(asset.provider==="HIGGSFIELD"&&variant.visual_identity_qa_status==="PASS"&&asset.identity_status==="PENDING"){
+        await sql`update public.assets set identity_status='PASS',updated_at=now()
+          where id=${asset.id}::uuid and profile_id=${input.profileId}::uuid and identity_status='PENDING'`;
+        asset.identity_status="PASS";
+      }
+      return result;
+    };
+
+    if(variant.format==="CAROUSEL"){
+      for(const slide of slides)await qaAsset(slide.asset_id?assetMap.get(slide.asset_id)??null:null,slide.visual_brief,slide.alt_text);
+    }else{
+      await qaAsset(variant.image_asset_id?assetMap.get(variant.image_asset_id)??null:null,variant.visual_brief??"",variant.alt_text);
+    }
+
+    const recent=a
