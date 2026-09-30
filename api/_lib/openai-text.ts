@@ -583,6 +583,37 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       fetcher,
     });
     factCheckRuns.push(factCheck);
+
+    if (factCheck.verdict === "NEEDS_SOURCE") {
+      const repairSources = [...new Set([...combinedSources, ...factCheck.sources])].slice(0, 20);
+      copyRepair = await repairUnsupportedContent({
+        apiKey: options.apiKey,
+        model,
+        topic: options.topic,
+        objective: options.objective ?? null,
+        providers: options.providers,
+        formats: options.formats,
+        brand: options.brand,
+        websiteContext,
+        content,
+        checkedClaims: factCheck.checkedClaims,
+        sources: repairSources,
+        fetcher,
+      });
+      content = copyRepair.content;
+      await reportProgress(options, 88, "VERIFYING");
+      factCheck = await runOpenAIFactCheckAgent({
+        apiKey: options.apiKey,
+        topic: options.topic,
+        content: factCheckEnvelope(content, options.brand, websiteContext),
+        research: dedicatedResearch,
+        existingSources: repairSources,
+        allowWebSearch: research.useWebSearch,
+        requireWebSearch: false,
+        fetcher,
+      });
+      factCheckRuns.push(factCheck);
+    }
     // Persist technical cost before surfacing a blocking fact-check verdict.
   }
   await reportProgress(options, 92, "VERIFIED");
