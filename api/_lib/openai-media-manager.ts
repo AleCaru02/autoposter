@@ -1,5 +1,6 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
+import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
 
 export type MediaManagerResult = {
   visualIntent: string;
@@ -89,7 +90,9 @@ export async function runOpenAIMediaManager(input: {
         "Se il brief richiede esplicitamente testo nell'immagine, usa SOLO il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, label, numeri, pseudo-dati, didascalie o altri testi inventati.",
         "Il testo richiesto deve avere forte contrasto, margini generosi e leggibilità immediata su smartphone; niente testo piccolo su sfondi complessi. Per POST/CAROUSEL mantieni gli elementi essenziali lontani almeno circa l'8% dai bordi.",
         "Per STORY costruisci una gerarchia verticale forte e lascia ampie zone sicure sopra e sotto per l'interfaccia social; concentra testo e soggetto nella parte centrale e mantieni gli elementi essenziali nella zona centrale anche in caso di ritaglio 9:16.",
-        "Adatta composizione e densità alla piattaforma e al formato. Per POST/CAROUSEL una composizione quadrata capace di fermare lo scroll; per STORY una composizione verticale semplice da leggere in meno di due secondi.",
+        "Adatta composizione e densità alla piattaforma e al formato; la strategia visuale della piattaforma è un vincolo, non un suggerimento.",
+        platformVisualStrategyPrompt(input.provider),
+        "Per POST/CAROUSEL usa una composizione quadrata coerente con la piattaforma; per STORY una composizione verticale semplice da leggere in meno di due secondi.",
         "Non inventare sedi, persone reali, prodotti, risultati, certificazioni, prezzi, loghi o caratteristiche specifiche del brand che non siano presenti nel contesto.",
         "Non usare ricerca web. Non scrivere copy social: occupati soltanto del visual.",
         "Evita watermark, marchi di terzi, claim visivi non verificati, collage casuali, elementi decorativi senza funzione, fondi eccessivamente vuoti e look da template generico.",
@@ -106,6 +109,7 @@ export async function runOpenAIMediaManager(input: {
           visualStyle: input.brandVisualStyle ?? null,
         },
         placement: { provider: input.provider, format: input.format },
+        platformStrategy: socialPlatformStrategy(input.provider),
         visualBrief: input.visualBrief,
         captionContext: input.caption ?? null,
         additionalDirection: input.additionalDirection ?? null,
