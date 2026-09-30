@@ -151,10 +151,11 @@ export function runProfileSmmCertificationSimulation(
     const pillar=memory.balance.underusedPillars[0]??pillars[index%pillars.length];
     const followContinuity=Boolean(memory.continuity.suggestedNextTopicIntent)&&index%5===0;
     const motif=MOTIFS[index%MOTIFS.length];
+    const secondaryMotif=MOTIFS[(index+7)%MOTIFS.length];
     const topic=followContinuity
       ? memory.continuity.suggestedNextTopicIntent!
-      : `${pillar}: ${motif}`;
-    const hook=hookFor(intent,pillar,motif,index);
+      : `${pillar}: ${motif} — ${secondaryMotif}`;
+    const hook=`${hookFor(intent,pillar,motif,index)} · ${secondaryMotif}`;
     const cta=platformCta(provider,Math.floor(index/PROVIDERS.length));
     const visualBrief=visualBriefFor(fixture.profileType,contentType,intent,pillar,index);
 
