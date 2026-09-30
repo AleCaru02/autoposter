@@ -512,7 +512,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       freshnessDays: research.freshnessDays,
       fetcher,
     });
-    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && (research.mode === "NEWS" || comparisonRequested)) {
+    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && research.mode === "NEWS") {
       const researchCostUsd = agentCost(dedicatedResearch);
       throw new OpenAITextPipelineError("OPENAI_RESEARCH_BLOCKED", [{
         operation: "AGENT_RESEARCH",
@@ -596,7 +596,12 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       reasoning: { effort: "medium" },
       instructions,
       input: userContext,
-      ...(copyUsesWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
+      ...(copyUsesWebSearch ? {
+        tools: [{ type: "web_search", search_context_size: "low" }],
+        max_tool_calls: comparisonRequested ? 3 : 1,
+        include: ["web_search_call.action.sources"],
+        ...(comparisonRequested ? { tool_choice: "required" } : {}),
+      } : {}),
       prompt_cache_key: options.cacheKey || undefined,
       text: { verbosity: "medium", format: { type: "json_schema", name: "post_automatici_social_content", strict: true, schema: OUTPUT_SCHEMA } },
       max_output_tokens: MAX_TEXT_OUTPUT_TOKENS,
