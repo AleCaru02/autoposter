@@ -488,6 +488,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       research: dedicatedResearch,
       existingSources: combinedSources,
       allowWebSearch: research.useWebSearch && combinedSources.length === 0,
+      requireWebSearch: research.useWebSearch && combinedSources.length === 0,
       fetcher,
     });
     // Persist technical cost before surfacing a blocking fact-check verdict.

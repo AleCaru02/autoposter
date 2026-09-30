@@ -118,6 +118,10 @@ assert.match(store, /from\("content_carousel_slides"\)\.insert\(carouselRows\)/,
 assert.match(store, /decision_record/, "content must persist an auditable decision record");
 assert.match(workerText, /normalizeEditorialResearchMode\(body\.researchMode\)/, "Cloudflare manual generation must honor the selected editorial mode");
 assert.match(workerText, /handleWorkerGenerateTextStatus/, "Cloudflare must expose generation status for resume");
+const statusHandlerSource = workerText.slice(workerText.indexOf("export async function handleWorkerGenerateTextStatus"), workerText.indexOf("async function recentContentForDedupe"));
+assert.match(statusHandlerSource, /profiles\?id=eq\./, "progress polling must use the lightweight tenant-scoped Data API check");
+assert.doesNotMatch(statusHandlerSource, /verifiedCustomerAuthUserId|loadEditorialProfile/, "progress polling must not redo the full managed-auth/profile load every 1.2 seconds");
+assert.match(statusHandlerSource, /STATUS_UNAVAILABLE/, "status polling must fail explicitly instead of silently looking frozen");
 assert.match(workerText, /FACTCHECK_NEEDS_SOURCE/, "factual verification failures must no longer collapse into a generic error");
 assert.match(workerText, /onProgress:/, "server must persist actual pipeline stages");
 assert.match(metering, /client_operation_identity/, "metering must persist client operation identity for navigation resume");

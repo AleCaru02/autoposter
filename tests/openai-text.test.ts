@@ -133,6 +133,54 @@ assert.equal(factCheckPayload?.content?.brandFacts?.name, "QA Property 7", "fact
 assert.equal(factCheckPayload?.content?.brandFacts?.userProvidedContext, brand.userContext, "fact-check must receive user-confirmed facts too");
 assert.equal(brandFactResult.verification.factCheckVerdict, "PASS");
 
+let forcedSourceCall = 0;
+let forcedSourceFactCheckBody: Record<string, any> | null = null;
+const comparisonContent = {
+  ...generated,
+  editorialTopic: "Airbnb e Booking",
+  variants: [{ ...generated.variants[0], caption: "Airbnb e Booking: 5 differenze da valutare prima di scegliere.", factualBasis: ["BASE BRAND/SITO"] }],
+};
+const forcedSourceFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+  forcedSourceCall += 1;
+  const request = JSON.parse(String(init?.body)) as Record<string, any>;
+  if (forcedSourceCall === 1) {
+    return new Response(JSON.stringify({
+      id: "resp_comparison",
+      model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(comparisonContent) }] }],
+      usage: { input_tokens: 25, output_tokens: 40, total_tokens: 65 },
+    }), { status: 200 });
+  }
+  forcedSourceFactCheckBody = request;
+  const checked = {
+    verdict: "PASS",
+    checkedClaims: [{ claim: "5 differenze", claimType: "EDITORIAL", slideNumber: null, sourceRequired: false, status: "NOT_FACTUAL", reason: "Il numero descrive la struttura editoriale del post." }],
+  };
+  return new Response(JSON.stringify({
+    id: "resp_comparison_factcheck",
+    model: "gpt-5.6-terra",
+    output: [
+      { type: "web_search_call", action: { sources: [{ url: "https://example.org/platform-comparison" }] } },
+      { type: "message", content: [{ type: "output_text", text: JSON.stringify(checked) }] },
+    ],
+    usage: { input_tokens: 20, output_tokens: 20, total_tokens: 40 },
+  }), { status: 200 });
+}) as typeof fetch;
+const forcedSourceResult = await generateSocialText({
+  apiKey: "test-key",
+  topic: "booking vs airbnb",
+  objective: "le maggiori 5 differenze fra tutti e due",
+  providers: ["INSTAGRAM"],
+  formats: ["POST"],
+  brand,
+  fetcher: forcedSourceFetcher,
+  researchMode: "BALANCED",
+});
+assert.equal(forcedSourceCall, 2, "a factual BALANCED request with no sources must proceed to fact-check");
+assert.equal(forcedSourceFactCheckBody?.tool_choice, "required", "fact-check must not be allowed to skip web search when there are no sources");
+assert.equal(forcedSourceResult.verification.factCheckVerdict, "PASS");
+assert.equal(forcedSourceResult.usage.webSearchCalls, 1, "the forced verification search must be tracked in usage");
+
 const carouselGenerated = {
   editorialTopic: "Checklist per preparare un immobile",
   pillar: "Affitti brevi",
