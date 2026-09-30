@@ -109,7 +109,8 @@
     "test:carousel-content": "tsx tests/carousel-content-foundation.test.ts",
     "test:content-qa": "tsx tests/content-qa.test.ts",
     "test:approval-workflow-v2": "tsx tests/approval-workflow-v2.test.ts",
-    "test:calendar-views": "tsx tests/calendar-view-modes.test.ts"
+    "test:calendar-views": "tsx tests/calendar-view-modes.test.ts",
+    "test:publication-qa-guard": "tsx tests/publication-qa-guard.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",
