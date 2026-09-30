@@ -5,9 +5,12 @@ export type EditorialQAResult = {
   reasons: string[];
   checks: {
     brandConsistency: "PASS" | "FAIL";
+    copyQuality: "PASS" | "FAIL";
+    grammar: "PASS" | "FAIL";
     platformFit: "PASS" | "FAIL";
     formatFit: "PASS" | "FAIL";
     ctaFit: "PASS" | "FAIL";
+    hashtagFit: "PASS" | "FAIL";
     claimSafety: "PASS" | "FAIL";
     visualSafety: "PASS" | "FAIL";
   };
@@ -28,13 +31,16 @@ const QA_SCHEMA = {
       additionalProperties: false,
       properties: {
         brandConsistency: { type: "string", enum: ["PASS", "FAIL"] },
+        copyQuality: { type: "string", enum: ["PASS", "FAIL"] },
+        grammar: { type: "string", enum: ["PASS", "FAIL"] },
         platformFit: { type: "string", enum: ["PASS", "FAIL"] },
         formatFit: { type: "string", enum: ["PASS", "FAIL"] },
         ctaFit: { type: "string", enum: ["PASS", "FAIL"] },
+        hashtagFit: { type: "string", enum: ["PASS", "FAIL"] },
         claimSafety: { type: "string", enum: ["PASS", "FAIL"] },
         visualSafety: { type: "string", enum: ["PASS", "FAIL"] },
       },
-      required: ["brandConsistency", "platformFit", "formatFit", "ctaFit", "claimSafety", "visualSafety"],
+      required: ["brandConsistency", "copyQuality", "grammar", "platformFit", "formatFit", "ctaFit", "hashtagFit", "claimSafety", "visualSafety"],
     },
   },
   required: ["verdict", "reasons", "checks"],
