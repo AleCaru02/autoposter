@@ -28,6 +28,7 @@ type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
+type CarouselSlideImageRow = { id: string; content_id: string; variant_id: string; visual_brief: string; headline: string; body: string; alt_text: string; asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
 
 function json(body: unknown, status = 200) {
@@ -270,8 +271,9 @@ async function handleGenerateImage(request: Request, env: Env) {
   const provider = typeof body.provider === "string" && VALID_IMAGE_PROVIDERS.has(body.provider as ImageSocialProvider) ? body.provider as ImageSocialProvider : null;
   const format = typeof body.format === "string" && VALID_IMAGE_FORMATS.has(body.format as ImageSocialFormat) ? body.format as ImageSocialFormat : null;
   const contentVariantId = typeof body.contentVariantId === "string" ? body.contentVariantId : null;
-  const visualBrief = typeof body.visualBrief === "string" ? body.visualBrief.trim().slice(0, 2_000) : "";
-  const caption = typeof body.caption === "string" ? body.caption.trim().slice(0, 1_500) : null;
+  const carouselSlideId = typeof body.carouselSlideId === "string" ? body.carouselSlideId : null;
+  let visualBrief = typeof body.visualBrief === "string" ? body.visualBrief.trim().slice(0, 2_000) : "";
+  let caption = typeof body.caption === "string" ? body.caption.trim().slice(0, 1_500) : null;
   const additionalDirection = typeof body.additionalDirection === "string" ? body.additionalDirection.trim().slice(0, 700) : null;
   const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
@@ -292,6 +294,16 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
+    let savedSlide: CarouselSlideImageRow | null = null;
+    if (carouselSlideId) {
+      if (!savedVariant || savedVariant.format !== "CAROUSEL") return json({ error: "CAROUSEL_VARIANT_REQUIRED" }, 409);
+      const slideRows = await rows<CarouselSlideImageRow>(`content_carousel_slides?id=eq.${encodeURIComponent(carouselSlideId)}&profile_id=eq.${encodeURIComponent(profileId)}&variant_id=eq.${encodeURIComponent(savedVariant.id)}&select=id,content_id,variant_id,visual_brief,headline,body,alt_text,asset_id&limit=1`, token);
+      savedSlide = slideRows[0] ?? null;
+      if (!savedSlide) return json({ error: "CAROUSEL_SLIDE_NOT_FOUND" }, 404);
+      visualBrief = savedSlide.visual_brief.trim().slice(0, 2_000);
+      caption = [savedSlide.headline, savedSlide.body].filter(Boolean).join(" — ").slice(0, 1_500);
+      if (!visualBrief) return json({ error: "CAROUSEL_SLIDE_VISUAL_BRIEF_REQUIRED" }, 409);
+    }
     const aspectRatio = format === "STORY" ? "2:3" : "1:1";
     const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,reuse_count,created_at&order=created_at.desc&limit=100`, token);
     const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
@@ -302,8 +314,10 @@ async function handleGenerateImage(request: Request, env: Env) {
         const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
         const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now }, reuse_count: Number(asset.reuse_count ?? 0) + 1, last_used_at: now, updated_at: now }) });
         if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
-        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
-        if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
+        const link = savedSlide
+          ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
+          : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+        if (!link.ok) throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       }
       return json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
@@ -314,8 +328,8 @@ async function handleGenerateImage(request: Request, env: Env) {
       profileId,
       source: "MANUAL",
       operationIdentity,
-      referenceId: savedVariant?.id ?? null,
-      requestFingerprint: { contentVariantId, provider, format, visualBrief, caption, additionalDirection },
+      referenceId: savedSlide?.id ?? savedVariant?.id ?? null,
+      requestFingerprint: { contentVariantId, carouselSlideId, provider, format, visualBrief, caption, additionalDirection },
     });
     if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
     if (reservation.status === "COMPLETED") return json(reservation.cached.response);
@@ -363,7 +377,7 @@ async function handleGenerateImage(request: Request, env: Env) {
         content_id: savedVariant.content_id,
         source: "AI_IMAGE",
         kind: "IMAGE",
-        name: `${provider}-${format}-${savedVariant.id}.png`,
+        name: savedSlide ? `${provider}-CAROUSEL-${savedSlide.id}.png` : `${provider}-${format}-${savedVariant.id}.png`,
         storage_url: dataUrl,
         mime_type: result.mimeType,
         tags: [provider, format, "AI_GENERATED"],
@@ -383,13 +397,15 @@ async function handleGenerateImage(request: Request, env: Env) {
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
       const now = new Date().toISOString();
-      const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+      const link = savedSlide
+        ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
+        : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
       if (!link.ok) {
         await deleteRow(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
-        throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
+        throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
       }
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
-      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
+      if (!savedSlide && savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
     }
     const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
     const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
