@@ -18,6 +18,28 @@ export type TechnicalAiEvent = {
 type UsageEventState = "RESERVED" | "COMMITTED" | "RELEASED";
 type CachedResult = { response: unknown; contentId?: string | null; variantId?: string | null };
 
+export type TextGenerationProgressStage =
+  | "PREPARING"
+  | "ANALYZING"
+  | "RESEARCHING"
+  | "WRITING"
+  | "COPY_READY"
+  | "VERIFYING"
+  | "VERIFIED"
+  | "FINALIZING"
+  | "COMMITTED"
+  | "RELEASED";
+
+export type TextGenerationOperationStatus = {
+  eventId: string;
+  state: UsageEventState;
+  stage: TextGenerationProgressStage;
+  percent: number;
+  releaseReason: string | null;
+  cached: CachedResult | null;
+  createdAt: string;
+};
+
 export type TextGenerationReservation =
   | { status: "RESERVED"; eventId: string; operationKey: string }
   | { status: "COMPLETED"; eventId: string; operationKey: string; cached: CachedResult }
@@ -74,7 +96,15 @@ export class TextGenerationMetering {
       idempotencyKey: operationKey,
       source: `AI_TEXT_${input.source}`,
       referenceId: input.referenceId ?? null,
-      metadata: { logical_unit: 1, source: input.source, execution_state: "RESERVED" },
+      metadata: {
+        logical_unit: 1,
+        source: input.source,
+        execution_state: "RESERVED",
+        client_operation_identity: input.operationIdentity,
+        progress_stage: "PREPARING",
+        progress_percent: 10,
+        progress_updated_at: new Date().toISOString(),
+      },
     });
     if (!reserved.allowed) {
       return {
@@ -98,6 +128,52 @@ export class TextGenerationMetering {
 
   async markProviderStarted(eventId: string, providerCostReserveUsd?: number | null) {
     return this.usage.markProviderStarted(eventId, providerCostReserveUsd);
+  }
+
+  async setProgress(eventId: string, percent: number, stage: TextGenerationProgressStage) {
+    const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+    return this.usage.mergeUsageEventMetadata(eventId, {
+      progress_stage: stage,
+      progress_percent: safePercent,
+      progress_updated_at: new Date().toISOString(),
+    });
+  }
+
+  async getOperationStatus(profileId: string, source: TextGenerationSource, operationIdentity: string): Promise<TextGenerationOperationStatus | null> {
+    if (!profileId || !operationIdentity) return null;
+    const rows = await this.sql`
+      select id, state, metadata, created_at
+      from public.capability_usage_events
+      where profile_id=${profileId}::uuid
+        and capability_key=${AI_CONTENT_TEXT_CAPABILITY}
+        and source=${`AI_TEXT_${source}`}
+        and metadata->>'client_operation_identity'=${operationIdentity}
+      order by created_at desc
+      limit 1
+    ` as unknown as Array<{ id: string; state: UsageEventState; metadata: unknown; created_at: string }>;
+    const row = rows[0];
+    if (!row) return null;
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, unknown> : {};
+    const cached = metadata.cached_result && typeof metadata.cached_result === "object" ? metadata.cached_result as CachedResult : null;
+    const rawStage = typeof metadata.progress_stage === "string" ? metadata.progress_stage : null;
+    const rawPercent = typeof metadata.progress_percent === "number" ? metadata.progress_percent : null;
+    const stage: TextGenerationProgressStage = row.state === "COMMITTED"
+      ? "COMMITTED"
+      : row.state === "RELEASED"
+        ? "RELEASED"
+        : rawStage === "PREPARING" || rawStage === "ANALYZING" || rawStage === "RESEARCHING" || rawStage === "WRITING" || rawStage === "COPY_READY" || rawStage === "VERIFYING" || rawStage === "VERIFIED" || rawStage === "FINALIZING"
+          ? rawStage
+          : "PREPARING";
+    const percent = row.state === "COMMITTED" ? 100 : row.state === "RELEASED" ? Math.min(rawPercent ?? 95, 99) : Math.max(1, Math.min(rawPercent ?? 10, 99));
+    return {
+      eventId: row.id,
+      state: row.state,
+      stage,
+      percent,
+      releaseReason: typeof metadata.release_reason === "string" ? metadata.release_reason : null,
+      cached,
+      createdAt: row.created_at,
+    };
   }
 
   async persistTechnicalEvents(profileId: string, eventId: string, events: TechnicalAiEvent[]) {
@@ -156,19 +232,29 @@ export class TextGenerationMetering {
   async storeResult(eventId: string, cached: CachedResult) {
     await this.usage.mergeUsageEventMetadata(eventId, {
       execution_state: "OUTPUT_PERSISTED",
+      progress_stage: "FINALIZING",
+      progress_percent: 98,
+      progress_updated_at: new Date().toISOString(),
       cached_result: cached,
     });
   }
 
   async commit(eventId: string) {
     await this.usage.commitUsage(eventId);
-    await this.usage.mergeUsageEventMetadata(eventId, { execution_state: "COMMITTED" });
+    await this.usage.mergeUsageEventMetadata(eventId, {
+      execution_state: "COMMITTED",
+      progress_stage: "COMMITTED",
+      progress_percent: 100,
+      progress_updated_at: new Date().toISOString(),
+    });
   }
 
   async release(eventId: string, reason: string) {
     await this.usage.mergeUsageEventMetadata(eventId, {
       execution_state: "RELEASED",
+      progress_stage: "RELEASED",
       release_reason: reason.slice(0, 200),
+      progress_updated_at: new Date().toISOString(),
     }).catch(() => undefined);
     await this.usage.releaseUsage(eventId);
   }
