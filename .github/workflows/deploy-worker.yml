@@ -56,6 +56,7 @@ jobs:
       - { name: Content semantic dedupe regression, run: "npm run test:content-dedupe" }
       - { name: Asset library runtime regression, run: "npm run test:asset-library" }
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
+      - { name: Blocked calendar reschedule regression, run: "npm run test:blocked-calendar-reschedule" }
       - { name: FASE 7F safe publication engine regression, run: "npm run test:fase7f-publication-engine" }
       - { name: Immutable publication QA boundary regression, run: "npm run test:publication-qa-guard" }
       - { name: Social integration contract, run: "npm run test:social" }
