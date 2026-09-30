@@ -95,3 +95,96 @@ function normalizeFactStatus(result:FactCheckAgentResult):ContentQaStatus{
 }
 
 function factStatusForSlide(result:FactCheckAgentResult,slideNumber:number):ContentQaStatus{
+  const claims=result.checkedClaims.filter((claim)=>claim.slideNumber===slideNumber);
+  if(!claims.length)return "PASS";
+  if(claims.some((claim)=>claim.status==="CONTRADICTED"))return "FAIL";
+  if(claims.some((claim)=>claim.status==="UNSUPPORTED"&&(claim.claimType==="BRAND"||claim.claimType==="INTERNAL")))return "FAIL";
+  if(claims.some((claim)=>claim.sourceRequired&&(claim.status==="UNSUPPORTED"||claim.status==="TIME_SENSITIVE")))return "NEEDS_SOURCE";
+  return "PASS";
+}
+
+function combine(statuses:ContentQaStatus[]):ContentQaStatus{
+  if(statuses.includes("FAIL"))return "FAIL";
+  if(statuses.includes("NEEDS_SOURCE"))return "NEEDS_SOURCE";
+  return "PASS";
+}
+
+function expectedAspect(format:SocialFormat){return format==="STORY"?"2:3":"1:1";}
+
+function platformRuntimeSupports(provider:SocialProvider,format:SocialFormat){
+  return (providerCapabilities(provider).publish as readonly string[]).includes(format);
+}
+
+function visualIdentityStatus(profileType:string,asset:AssetRow|null,variant:VariantRow){
+  if(!asset)return "FAIL" as const;
+  if(profileType!=="PERSONAL_BRAND")return "PASS" as const;
+  if(asset.provider!=="HIGGSFIELD")return asset.identity_status==="BLOCK"?"FAIL" as const:"PASS" as const;
+  if(asset.identity_status==="PASS"||variant.visual_identity_qa_status==="PASS")return "PASS" as const;
+  return "FAIL" as const;
+}
+
+function visualTechnicalStatus(asset:AssetRow|null,format:SocialFormat){
+  if(!asset||asset.kind!=="IMAGE"||!asset.storage_url)return "FAIL" as const;
+  if(asset.quality_status==="BLOCK"||asset.quality_status==="FAILED")return "FAIL" as const;
+  if(!asset.width||!asset.height||asset.width<=0||asset.height<=0)return "FAIL" as const;
+  if(asset.format&&asset.format!==expectedAspect(format))return "FAIL" as const;
+  return "PASS" as const;
+}
+
+function visualStatus(result:OpenAIVisualQaResult|null,technical:"PASS"|"FAIL",identity:"PASS"|"FAIL"){
+  return technical==="PASS"&&identity==="PASS"&&result?.verdict==="PASS"?"PASS" as const:"FAIL" as const;
+}
+
+async function recentContent(sql:Sql,profileId:string,contentId:string){
+  return await sql`
+    select ci.id::text,ci.topic,ci.title,cv.hook,cv.caption
+    from public.content_items ci
+    join lateral (
+      select hook,caption from public.content_variants
+      where content_id=ci.id and profile_id=ci.profile_id
+      order by created_at asc limit 1
+    ) cv on true
+    where ci.profile_id=${profileId}::uuid and ci.id<>${contentId}::uuid
+    order by ci.created_at desc limit 40
+  ` as unknown as RecentRow[];
+}
+
+function asGenerated(item:ContentItemRow,variant:VariantRow,slides:SlideRow[]):{content:GeneratedSocialContent;variant:GeneratedVariant}{
+  const carouselSlides:GeneratedCarouselSlide[]=slides.map((slide)=>({
+    position:slide.position,purpose:slide.purpose,headline:slide.headline,body:slide.body,hierarchy:slide.hierarchy,
+    visualBrief:slide.visual_brief,altText:slide.alt_text,
+  }));
+  const generatedVariant:GeneratedVariant={
+    provider:variant.provider,format:variant.format,eligible:variant.eligible,hook:variant.hook??"",caption:variant.caption??"",
+    cta:variant.cta,hashtags:stringArray(variant.hashtags),visualBrief:variant.visual_brief??"",altText:variant.alt_text??"",
+    factualBasis:stringArray(variant.factual_basis),carouselSlides:variant.format==="CAROUSEL"?carouselSlides:[],
+  };
+  const decision=object(item.decision_record);
+  return {
+    variant:generatedVariant,
+    content:{
+      editorialTopic:item.topic,
+      pillar:item.pillar??undefined,
+      editorialAngle:item.title??item.topic,
+      strategySummary:typeof decision.strategySummary==="string"?decision.strategySummary:item.title??item.topic,
+      variants:[generatedVariant],
+    },
+  };
+}
+
+async function persist(sql:Sql,input:{
+  result:ContentQaResult;actorType:"MANUAL"|"AUTOPILOT"|"SYSTEM";
+}){
+  const r=input.result;
+  await sql`select public.persist_content_qa_result(
+    ${r.profileId}::uuid,${r.contentId}::uuid,${r.variantId}::uuid,${r.runId}::uuid,${r.fingerprint},
+    ${r.overallStatus},${r.brandStatus},${r.copyStatus},${r.visualStatus},${r.factStatus},${r.platformStatus},
+    ${r.duplicateStatus},${r.budgetStatus},${r.reason},${JSON.stringify(r.details)}::jsonb,${input.actorType},
+    ${JSON.stringify(r.slides)}::jsonb
+  )`;
+}
+
+function cachedResult(row:VariantRow,fingerprint:string):ContentQaResult|null{
+  if(row.qa_fingerprint!==fingerprint||row.qa_status==="PENDING")return null;
+  const qa=object(row.qa_result);
+  const result=object(qa.result
