@@ -40,8 +40,8 @@ function textSignals(text: string) {
 }
 
 function archetype(subject: ContentSubject, format: SocialFormat) {
-  if (format === "CAROUSEL") return subject === "CANONICAL_PERSON" ? "EDITORIAL_PERSON_CAROUSEL" : "EDUCATIONAL_CAROUSEL";
-  if (format === "STORY") return subject === "CANONICAL_PERSON" ? "PERSON_STORY" : "FAST_VERTICAL_STORY";
+  if (format === "CAROUSEL") return subject === "CANONICAL_PERSON" ? "EDITORIAL_PERSON_CAROUSEL" : `${subject}_CAROUSEL`;
+  if (format === "STORY") return subject === "CANONICAL_PERSON" ? "PERSON_STORY" : `${subject}_STORY`;
   const map: Record<ContentSubject,string> = {
     CANONICAL_PERSON:"EDITORIAL_PORTRAIT",
     PRODUCT:"PRODUCT_EDITORIAL",
