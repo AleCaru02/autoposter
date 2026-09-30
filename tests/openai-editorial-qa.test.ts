@@ -42,6 +42,9 @@ assert.equal(requestBody?.store, false);
 assert.equal(requestBody?.reasoning.effort, "low");
 assert.equal("tools" in (requestBody ?? {}), false, "Editorial QA must not use web search");
 assert.equal(requestBody?.text.format.strict, true);
+assert.match(String(requestBody?.instructions), /STRATEGIA COPY LinkedIn/);
+assert.match(String(requestBody?.instructions), /professionale e business/i);
+assert.match(String(requestBody?.instructions), /pochissimi hashtag/i);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "QA")?.mayUseOpenAI, true);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "QA")?.mayUseWeb, false);
 
