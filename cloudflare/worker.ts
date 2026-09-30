@@ -9,6 +9,7 @@ import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { AiBudgetRecommendationEngine } from "../api/_lib/ai-budget-recommendation.js";
 import { assetContentHashFromBase64, findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "../api/_lib/asset-intelligence.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
+import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
@@ -22,8 +23,8 @@ interface Env {
   OPENAI_API_KEY?: string;
 }
 
-type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
-type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown };
+type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null; profile_type?: "BUSINESS" | "PERSONAL_BRAND" };
+type BrandRow = { description: string | null; business_model: string | null; location: string | null; service_area: string | null; target_audience: unknown; tone_of_voice: unknown; goals: unknown; visual_identity?: unknown };
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
@@ -283,10 +284,11 @@ async function handleGenerateImage(request: Request, env: Env) {
   let activeEventId: string | null = null;
   let logicalCommitted = false;
   try {
-    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
+    const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry,profile_type&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
-    const brands = await rows<Pick<BrandRow, "tone_of_voice">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice&limit=1`, token);
+    const brands = await rows<Pick<BrandRow, "tone_of_voice" | "visual_identity">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
+    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
       const variantRows = await rows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id&limit=1`, token);
@@ -354,8 +356,12 @@ async function handleGenerateImage(request: Request, env: Env) {
       budget: activityBudget,
       importance: routeImportance,
       profileName: profile.name,
+      profileType: profile.profile_type ?? "BUSINESS",
       industry: profile.industry,
       tone: summaryField(brands[0]?.tone_of_voice),
+      brandColors: brandVisual.colors,
+      brandFonts: brandVisual.fonts,
+      brandVisualStyle: brandVisual.visualStyle,
       provider,
       format,
       visualBrief,
@@ -381,7 +387,7 @@ async function handleGenerateImage(request: Request, env: Env) {
         storage_url: dataUrl,
         mime_type: result.mimeType,
         tags: [provider, format, "AI_GENERATED"],
-        metadata: { provider: "OPENAI", model: result.model, quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
         provider: "OPENAI",
         model: result.model,
         cost_eur: actualEur,
