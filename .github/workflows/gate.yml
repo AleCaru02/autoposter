@@ -93,6 +93,7 @@ jobs:
       - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
       - { name: OpenAI editorial QA regression, run: "npm run test:openai-editorial-qa" }
       - { name: Structured Content QA regression, run: "npm run test:content-qa" }
+      - { name: Profile Autonomous SMM certification simulation, run: "npm run test:profile-smm-certification" }
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
       - { name: Autopilot AI plan runtime regression, run: "npm run test:autopilot-ai-plan" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
