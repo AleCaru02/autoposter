@@ -1,5 +1,40 @@
 BEGIN;
 
+INSERT INTO public.entitlement_package_capabilities(
+  package_key,package_version,capability_key,enabled,limit_type,limit_value,period_type,provider_attempt_reserve_usd,metadata
+) VALUES
+  ('personal_operator',1,'content.qa.run',true,'COUNT_PER_MONTH',500,'MONTH',0.10,'{"block":"CONTENT_QA","personalFirst":true}'::jsonb),
+  ('commercial_guarded',1,'content.qa.run',false,'COUNT_PER_MONTH',NULL,'NONE',NULL,'{"block":"CONTENT_QA","commercialNotReady":true}'::jsonb)
+ON CONFLICT (package_key,package_version,capability_key) DO UPDATE SET
+  enabled=EXCLUDED.enabled,
+  limit_type=EXCLUDED.limit_type,
+  limit_value=EXCLUDED.limit_value,
+  period_type=EXCLUDED.period_type,
+  provider_attempt_reserve_usd=EXCLUDED.provider_attempt_reserve_usd,
+  metadata=EXCLUDED.metadata;
+
+INSERT INTO public.profile_entitlements(
+  profile_id,capability_key,enabled,limit_type,limit_value,period_type,source,metadata
+)
+SELECT assignment.profile_id,'content.qa.run',cap.enabled,cap.limit_type,cap.limit_value,cap.period_type,
+       'PACKAGE:'||assignment.package_key||':v'||assignment.package_version::text,
+       jsonb_build_object('package_key',assignment.package_key,'package_version',assignment.package_version,
+                          'package_assignment_id',assignment.id,'provider_attempt_reserve_usd',cap.provider_attempt_reserve_usd)
+FROM public.profile_entitlement_package_assignments assignment
+JOIN public.entitlement_package_capabilities cap
+  ON cap.package_key=assignment.package_key
+ AND cap.package_version=assignment.package_version
+ AND cap.capability_key='content.qa.run'
+WHERE assignment.revoked_at IS NULL
+ON CONFLICT (profile_id,capability_key) DO UPDATE SET
+  enabled=EXCLUDED.enabled,
+  limit_type=EXCLUDED.limit_type,
+  limit_value=EXCLUDED.limit_value,
+  period_type=EXCLUDED.period_type,
+  source=EXCLUDED.source,
+  metadata=EXCLUDED.metadata,
+  updated_at=now();
+
 ALTER TABLE public.content_variants
   ADD COLUMN IF NOT EXISTS factual_basis jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS qa_status text NOT NULL DEFAULT 'PENDING',
