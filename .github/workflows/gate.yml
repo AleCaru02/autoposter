@@ -101,6 +101,7 @@ jobs:
       - { name: Content semantic dedupe regression, run: "npm run test:content-dedupe" }
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
       - { name: Calendar month week day regression, run: "npm run test:calendar-views" }
+      - { name: Blocked calendar reschedule regression, run: "npm run test:blocked-calendar-reschedule" }
       - { name: Social integration contract, run: "npm run test:social" }
       - { name: Social runtime preflight regression, run: "npm run test:social-runtime-preflight" }
       - { name: Global social Safe Mode regression, run: "npm run test:safe-mode" }
