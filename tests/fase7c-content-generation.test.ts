@@ -99,6 +99,8 @@ assert.match(composer, /sessionStorage/, "manual composer must survive navigatio
 assert.match(composer, /aria-valuenow=\{progress\.percent\}/, "manual composer must expose a real progress percentage");
 assert.match(composer, /Puoi aprire Calendario/, "manual composer must explain that navigation no longer cancels the operation");
 assert.match(composer, /operation: op/, "pending operation must be persisted instead of being lost on navigation");
+assert.match(composer, /canonical\.state === "FAILED"/, "request failures must be reconciled with the canonical backend operation state");
+assert.match(composer, /friendlyGenerationError\(canonical\.error\)/, "the UI must show the real verified failure reason instead of a generic provider error");
 assert.match(composer, /saveGeneratedContent/, "generated content must be persistible");
 assert.match(composer, /INSTAGRAM/);
 assert.match(composer, /FACEBOOK/);
