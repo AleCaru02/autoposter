@@ -40,6 +40,10 @@ assert.match(runtime,/NEEDS_SOURCE/);
 assert.match(runtime,/costBucket:"OTHER_AI"/);
 assert.match(runtime,/identityStatus\(profile\.profile_type/);
 assert.match(runtime,/content\.qa\.run/);
+assert.match(runtime,/normalizeBrandVisualIdentity/);
+assert.match(runtime,/brandColors:brandVisual\.colors/);
+assert.match(runtime,/brandFonts:brandVisual\.fonts/);
+assert.match(runtime,/brandVisualStyle:brandVisual\.visualStyle/);
 
 assert.match(endpoint,/verifiedCustomerAuthUserId/);
 assert.match(endpoint,/actorType: "MANUAL"/);
@@ -54,6 +58,10 @@ assert.match(worker,/content_carousel_slides/);
 assert.match(worker,/CAROUSEL_SLIDE_IMAGE_LINK/);
 assert.match(vercelImage,/carouselSlideId/);
 assert.match(vercelImage,/CAROUSEL_SLIDE_IMAGE_LINK/);
+assert.match(vercelImage,/select=tone_of_voice,visual_identity/);
+assert.match(vercelImage,/normalizeBrandVisualIdentity/);
+assert.match(vercelImage,/generation_prompt/);
+assert.match(vercelImage,/brand_palette/);
 assert.match(page,/generateCarouselSlideImage/);
 assert.match(page,/Genera visuale slide/);
 
@@ -86,6 +94,9 @@ const visual = await runOpenAIVisualQa({
   format:"POST",
   visualBrief:"Interno professionale e ordinato",
   altText:"Interno ordinato",
+  brandColors:["#112233","#F5F1E8"],
+  brandFonts:["Inter"],
+  brandVisualStyle:"Minimal premium",
   fetcher:(async (_url:string|URL|Request,init?:RequestInit)=>{
     requestBody=JSON.parse(String(init?.body??"{}"));
     return new Response(JSON.stringify({
@@ -98,6 +109,12 @@ const visual = await runOpenAIVisualQa({
 });
 assert.equal(visual.verdict,"PASS");
 assert.equal(requestBody?.input?.[0]?.content?.[1]?.type,"input_image");
+const visualQaContext=JSON.parse(String(requestBody?.input?.[0]?.content?.[0]?.text??"{}"));
+assert.deepEqual(visualQaContext.brandIdentity.colors,["#112233","#F5F1E8"]);
+assert.deepEqual(visualQaContext.brandIdentity.fonts,["Inter"]);
+assert.equal(visualQaContext.brandIdentity.visualStyle,"Minimal premium");
+assert.match(String(requestBody?.instructions),/mappe, linee metro, percorsi/i);
+assert.match(String(requestBody?.instructions),/microcopy, label, quartieri/i);
 assert.equal(requestBody?.store,false);
 
 console.log("Content QA regression: PASS — structured global/slide QA, factual classification, visual inspection, budget and fail-closed approval.");
