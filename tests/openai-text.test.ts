@@ -72,13 +72,16 @@ assert.equal(body.text.format.strict, true);
 assert.equal(body.tools[0].type, "web_search");
 assert.equal(body.tools[0].search_context_size, "low", "ricerca web a contesto basso per contenere il costo");
 assert.ok(body.text.format.schema.required.includes("editorialTopic"));
+assert.ok(body.text.format.schema.required.includes("pillar"));
 assert.ok(body.text.format.schema.required.includes("editorialAngle"));
+assert.ok(body.text.format.schema.properties.variants.items.required.includes("carouselSlides"));
 assert.ok(String(body.instructions).includes("non inventare"));
 assert.ok(String(body.instructions).includes("Perimetro editoriale"));
 assert.ok(String(body.instructions).includes("non è l'unico universo di argomenti"));
 assert.ok(String(body.input).includes("https://example.test/servizi/property-management"));
 assert.ok(String(body.input).includes("Gestiamo pochi appartamenti selezionati"), "manual brand context must reach OpenAI generation");
 assert.ok(String(body.instructions).includes("userProvidedContext"), "the model must be told how to treat manual brand context safely");
+assert.ok(String(body.instructions).includes("vero carosello nativo"), "carousel generation must explicitly forbid collage-style fake carousels");
 assert.equal(String(capturedInit?.body).includes("sk-test-only"), false, "la chiave non deve finire nel body/prompt");
 assert.equal(result.researchMode, "BALANCED");
 assert.deepEqual(result.externalSources, ["https://example.org/industry-report"]);
@@ -129,6 +132,68 @@ assert.equal(brandFactCall, 2, "a material numbered brand claim must still run f
 assert.equal(factCheckPayload?.content?.brandFacts?.name, "QA Property 7", "fact-check must receive the same authoritative brand facts used for generation");
 assert.equal(factCheckPayload?.content?.brandFacts?.userProvidedContext, brand.userContext, "fact-check must receive user-confirmed facts too");
 assert.equal(brandFactResult.verification.factCheckVerdict, "PASS");
+
+const carouselGenerated = {
+  editorialTopic: "Checklist per preparare un immobile",
+  pillar: "Affitti brevi",
+  editorialAngle: "Una verifica pratica prima di pubblicare l'annuncio",
+  strategySummary: "Carosello educativo progressivo.",
+  variants: [{
+    provider: "INSTAGRAM",
+    format: "CAROUSEL",
+    eligible: true,
+    hook: "Prima di pubblicare, controlla questi 4 punti",
+    caption: "Una checklist concreta da scorrere slide per slide.",
+    cta: "Salva la checklist",
+    hashtags: ["#affittibrevi"],
+    visualBrief: "Sistema grafico coerente per quattro slide quadrate",
+    altText: "Checklist in quattro slide",
+    factualBasis: ["BASE BRAND/SITO"],
+    carouselSlides: [
+      { position: 1, purpose: "Hook", headline: "Prima di pubblicare", body: "Controlla questi 4 punti.", hierarchy: "Titolo dominante", visualBrief: "Copertina pulita con numero 4", altText: "Copertina checklist" },
+      { position: 2, purpose: "Controllo 1", headline: "Descrizione chiara", body: "Spiega cosa trova davvero l'ospite.", hierarchy: "Titolo + testo breve", visualBrief: "Scheda testuale con icona documento", altText: "Slide sulla descrizione" },
+      { position: 3, purpose: "Controllo 2", headline: "Foto coerenti", body: "Mostra gli spazi senza promesse non supportate.", hierarchy: "Titolo + visuale", visualBrief: "Interno luminoso senza persone", altText: "Slide sulle fotografie" },
+      { position: 4, purpose: "CTA", headline: "Checklist pronta", body: "Salvala e usala prima della pubblicazione.", hierarchy: "CTA dominante", visualBrief: "Chiusura grafica con checklist", altText: "Slide finale con invito a salvare" },
+    ],
+  }],
+} as const;
+let carouselBody: Record<string, any> | null = null;
+let carouselCalls = 0;
+const carouselFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+  carouselCalls += 1;
+  const request = JSON.parse(String(init?.body));
+  if (carouselCalls === 1) {
+    carouselBody = request;
+    return new Response(JSON.stringify({
+      id: "resp_carousel",
+      model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(carouselGenerated) }] }],
+      usage: { input_tokens: 30, output_tokens: 120, total_tokens: 150 },
+    }), { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    id: "resp_carousel_factcheck",
+    model: "gpt-5.6-terra",
+    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+      verdict: "PASS",
+      checkedClaims: [{ claim: "4 punti", status: "VERIFIED", reason: "Il numero descrive la struttura editoriale del carosello, non un fatto esterno." }],
+    }) }] }],
+    usage: { input_tokens: 20, output_tokens: 30, total_tokens: 50 },
+  }), { status: 200 });
+}) as typeof fetch;
+const carouselResult = await generateSocialText({
+  apiKey: "sk-test-only",
+  topic: "Checklist preparazione immobile",
+  providers: ["INSTAGRAM"],
+  formats: ["CAROUSEL"],
+  brand,
+  fetcher: carouselFetcher,
+  researchMode: "WEBSITE_ONLY",
+});
+assert.equal(carouselResult.content.pillar, "Affitti brevi");
+assert.equal(carouselResult.content.variants[0].carouselSlides?.length, 4);
+assert.deepEqual(carouselResult.content.variants[0].carouselSlides?.map((slide) => slide.position), [1, 2, 3, 4]);
+assert.equal(carouselBody?.text.format.schema.properties.variants.items.properties.carouselSlides.maxItems, 10);
 
 const upperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"], formats: ["POST"], brand, researchMode: "BALANCED" });
 const websiteOnlyUpperBound = estimateTextRequestUpperBoundUsd({ topic: "property manager", objective: "lead", providers: ["INSTAGRAM"], formats: ["POST"], brand, researchMode: "WEBSITE_ONLY" });

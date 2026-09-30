@@ -9,6 +9,7 @@ import {
   type AssetRow,
   type ContentItemRow,
   type ContentVariantRow,
+  type ContentCarouselSlideRow,
   type StoredMasterDecision,
 } from "../features/content/content-store";
 import "../approvals.css";
@@ -64,6 +65,7 @@ export function ApprovalsPage() {
   const { selectedProfile } = useProfiles();
   const [items, setItems] = useState<ContentItemRow[]>([]);
   const [variants, setVariants] = useState<ContentVariantRow[]>([]);
+  const [carouselSlides, setCarouselSlides] = useState<ContentCarouselSlideRow[]>([]);
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [masterDecisions, setMasterDecisions] = useState<Record<string, StoredMasterDecision>>({});
   const [drafts, setDrafts] = useState<Record<string, DraftFields>>({});
@@ -86,6 +88,7 @@ export function ApprovalsPage() {
       setItems(workflow.items);
       setVariants(workflow.variants);
       variantsRef.current = workflow.variants;
+      setCarouselSlides(workflow.carouselSlides);
       setAssets(workflow.assets);
       setMasterDecisions(workflow.masterDecisions);
       setDrafts(nextDrafts);
@@ -102,6 +105,12 @@ export function ApprovalsPage() {
   useEffect(() => { void reload(); }, [reload]);
 
   const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
+  const slidesByVariant = useMemo(() => {
+    const map = new Map<string, ContentCarouselSlideRow[]>();
+    for (const slide of carouselSlides) map.set(slide.variant_id, [...(map.get(slide.variant_id) ?? []), slide].sort((a, b) => a.position - b.position));
+    return map;
+  }, [carouselSlides]);
+
   const variantsByContent = useMemo(() => {
     const map = new Map<string, ContentVariantRow[]>();
     for (const variant of variants) map.set(variant.content_id, [...(map.get(variant.content_id) ?? []), variant]);
@@ -184,6 +193,14 @@ export function ApprovalsPage() {
 
   async function approve(variant: ContentVariantRow, approvalStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED") {
     if (!selectedProfile) return;
+    if (variant.format === "CAROUSEL" && approvalStatus === "APPROVED") {
+      const slides = slidesByVariant.get(variant.id) ?? [];
+      const ready = slides.length >= 4 && slides.length <= 10 && slides.every((slide) => slide.asset_id && slide.qa_status === "PASS");
+      if (!ready) {
+        setError("Il carosello non può essere approvato finché ogni slide non ha un visuale e QA PASS.");
+        return;
+      }
+    }
     await run(`approval-${variant.id}`, async () => {
       const timer = saveTimersRef.current[variant.id];
       if (timer) clearTimeout(timer);
@@ -210,6 +227,10 @@ export function ApprovalsPage() {
 
   async function generateImage(variant: ContentVariantRow) {
     if (!selectedProfile) return;
+    if (variant.format === "CAROUSEL") {
+      setError("Il carosello richiede un visuale distinto per ogni slide. La generazione singola è bloccata per evitare un falso carosello.");
+      return;
+    }
     const draft = draftsRef.current[variant.id] ?? draftFromVariant(variant);
     if (!draft.visualBrief.trim()) {
       setError("Inserisci prima un brief visivo.");
@@ -267,6 +288,8 @@ export function ApprovalsPage() {
             {itemVariants.map((variant) => {
               const draft = drafts[variant.id] ?? draftFromVariant(variant);
               const asset = variant.image_asset_id ? assetMap.get(variant.image_asset_id) : undefined;
+              const slides = slidesByVariant.get(variant.id) ?? [];
+              const carouselReady = variant.format !== "CAROUSEL" || (slides.length >= 4 && slides.length <= 10 && slides.every((slide) => slide.asset_id && slide.qa_status === "PASS"));
               const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset, masterDecision: masterDecisions[item.id] });
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
@@ -279,11 +302,25 @@ export function ApprovalsPage() {
                   <label className="full">Brief immagine<textarea rows={3} value={draft.visualBrief} onChange={(event) => setDraftField(variant, "visualBrief", event.target.value)} /></label>
                   <label className="full">Alt text<input value={draft.altText} onChange={(event) => setDraftField(variant, "altText", event.target.value)} /></label>
                 </div>
-                {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                {variant.format === "CAROUSEL" ? <div className="carousel-review-slides">
+                  <h3>Slide carosello · {slides.length}</h3>
+                  {slides.map((slide) => {
+                    const slideAsset = slide.asset_id ? assetMap.get(slide.asset_id) : undefined;
+                    return <article className="carousel-review-slide" key={slide.id}>
+                      <header><strong>Slide {slide.position} · {slide.headline}</strong><span>QA {slide.qa_status}</span></header>
+                      <p><strong>Scopo:</strong> {slide.purpose}</p>
+                      <p>{slide.body}</p>
+                      <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
+                      <p><strong>Visuale:</strong> {slide.visual_brief}</p>
+                      {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
+                    </article>;
+                  })}
+                  {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
+                </div> : asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
-                  <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>
-                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
+                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
+                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
                   {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
                 </div>

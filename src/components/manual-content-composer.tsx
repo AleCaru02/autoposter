@@ -111,6 +111,18 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     if (status === "SAVED") setStatus("READY");
   }
 
+  function updateCarouselSlide(variantIndex: number, slideIndex: number, patch: Partial<NonNullable<GeneratedVariant["carouselSlides"]>[number]>) {
+    setContent((current) => {
+      if (!current) return current;
+      const variant = current.variants[variantIndex];
+      const slides = [...(variant.carouselSlides ?? [])];
+      if (!slides[slideIndex]) return current;
+      slides[slideIndex] = { ...slides[slideIndex], ...patch };
+      return replaceVariant(current, variantIndex, { carouselSlides: slides });
+    });
+    if (status === "SAVED") setStatus("READY");
+  }
+
   return <section className="panel manual-composer" aria-labelledby="manual-composer-title">
     <div className="manual-composer-heading"><div><p className="eyebrow">Creazione guidata</p><h2 id="manual-composer-title">Crea un contenuto ora</h2><p>Scegli tema, social e formato. Il copy userà il brand e le informazioni confermate del sito di {props.profileName}.</p></div><Sparkles size={23} /></div>
     <div className="manual-composer-form">
@@ -118,14 +130,14 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
       <label className="full">Di cosa vuoi parlare?<textarea rows={3} value={topic} maxLength={1000} placeholder="Es. Tre errori da evitare quando si affitta una casa" onChange={(event) => { setTopic(event.target.value); clearGenerated(); }} /></label>
       <label className="full">Obiettivo {props.profileType === "PERSONAL_BRAND" ? <span>(richiesto)</span> : <span>(opzionale)</span>}<input value={objective} maxLength={500} placeholder="Es. Ricevere richieste di consulenza" onChange={(event) => { setObjective(event.target.value); clearGenerated(); }} /></label>
       <fieldset className="full"><legend>Social</legend><div className="manual-choice-grid providers">{PROVIDERS.map((provider) => <label key={provider.value} className={providers.includes(provider.value) ? "selected" : ""}><input type="checkbox" checked={providers.includes(provider.value)} onChange={() => toggleProvider(provider.value)} /><span>{provider.label}</span></label>)}</div></fieldset>
-      <fieldset className="full"><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); clearGenerated(); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); clearGenerated(); }} /><span>Storia</span></label><label className="disabled" title="Richiede più visual distinti"><input type="radio" name="manual-format" disabled /><span>Carosello · in preparazione</span></label></div></fieldset>
+      <fieldset className="full"><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); clearGenerated(); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); clearGenerated(); }} /><span>Storia</span></label><label className={format === "CAROUSEL" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "CAROUSEL"} onChange={() => { setFormat("CAROUSEL"); clearGenerated(); }} /><span>Carosello</span></label></div></fieldset>
     </div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {!content && <button className="primary-button manual-generate" type="button" disabled={status === "GENERATING"} onClick={() => void generate()}>{status === "GENERATING" ? <><LoaderCircle className="spin" size={17} /> Creazione in corso…</> : <><Sparkles size={17} /> Genera contenuto</>}</button>}
     {content && <div className="manual-result" aria-live="polite">
       <div className="manual-result-summary"><div><small>PROPOSTA EDITORIALE</small><h3>{content.editorialTopic}</h3><p>{content.editorialAngle}</p></div><span>{content.variants.length} {content.variants.length === 1 ? "variante" : "varianti"}</span></div>
       <div className="manual-variant-list">{content.variants.map((variant, index) => <article key={`${variant.provider}-${variant.format}`} className="manual-variant">
-        <header><strong>{PROVIDERS.find((provider) => provider.value === variant.provider)?.label ?? variant.provider}</strong><span>{variant.format === "STORY" ? "Storia" : "Post"}</span></header>
+        <header><strong>{PROVIDERS.find((provider) => provider.value === variant.provider)?.label ?? variant.provider}</strong><span>{variant.format === "STORY" ? "Storia" : variant.format === "CAROUSEL" ? "Carosello" : "Post"}</span></header>
         {!variant.eligible && <p className="manual-warning">Questa proposta richiede una revisione particolare per il social scelto.</p>}
         <div className="manual-edit-grid">
           <label>Hook<input value={variant.hook} onChange={(event) => updateVariant(index, { hook: event.target.value })} /></label>
@@ -135,6 +147,21 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
           <label className="full">Indicazioni per l’immagine<textarea rows={3} value={variant.visualBrief} onChange={(event) => updateVariant(index, { visualBrief: event.target.value })} /></label>
           <label className="full">Descrizione accessibile<input value={variant.altText} onChange={(event) => updateVariant(index, { altText: event.target.value })} /></label>
         </div>
+        {variant.format === "CAROUSEL" && <div className="manual-carousel-slides">
+          <h4>Slide del carosello · {variant.carouselSlides?.length ?? 0}</h4>
+          <p>Ogni slide è un elemento separato del carosello, non un collage.</p>
+          {(variant.carouselSlides ?? []).map((slide, slideIndex) => <section className="manual-carousel-slide" key={slide.position}>
+            <header><strong>Slide {slide.position}</strong><span>{slide.purpose}</span></header>
+            <div className="manual-edit-grid">
+              <label>Scopo<input value={slide.purpose} onChange={(event) => updateCarouselSlide(index, slideIndex, { purpose: event.target.value })} /></label>
+              <label>Gerarchia<input value={slide.hierarchy} onChange={(event) => updateCarouselSlide(index, slideIndex, { hierarchy: event.target.value })} /></label>
+              <label className="full">Titolo<input value={slide.headline} onChange={(event) => updateCarouselSlide(index, slideIndex, { headline: event.target.value })} /></label>
+              <label className="full">Testo<textarea rows={3} value={slide.body} onChange={(event) => updateCarouselSlide(index, slideIndex, { body: event.target.value })} /></label>
+              <label className="full">Visuale<textarea rows={2} value={slide.visualBrief} onChange={(event) => updateCarouselSlide(index, slideIndex, { visualBrief: event.target.value })} /></label>
+              <label className="full">Alt text<input value={slide.altText} onChange={(event) => updateCarouselSlide(index, slideIndex, { altText: event.target.value })} /></label>
+            </div>
+          </section>)}
+        </div>}
       </article>)}</div>
       <div className="manual-result-actions">{status === "SAVED" ? <><span className="manual-saved"><Check size={16} /> Salvato nelle Revisioni</span><NavLink className="primary-button" to="/app/approvazioni">Aggiungi immagine e approva <ArrowRight size={16} /></NavLink></> : <><button className="secondary-button" type="button" disabled={status === "SAVING"} onClick={() => clearGenerated()}>Cambia richiesta</button><button className="primary-button" type="button" disabled={status === "SAVING"} onClick={() => void save()}>{status === "SAVING" ? <><LoaderCircle className="spin" size={16} /> Salvataggio…</> : "Salva per la revisione"}</button></>}</div>
     </div>}
