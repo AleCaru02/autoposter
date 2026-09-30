@@ -53,7 +53,7 @@ assert.equal(research.evidence[0].sourceType, "OFFICIAL");
 let factCheckBody: Record<string, any> | null = null;
 const factCheckFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
   factCheckBody = JSON.parse(String(init?.body));
-  const output = { verdict: "PASS", checkedClaims: [{ claim: "Aggiornamento confermato", status: "VERIFIED", reason: "Supportato dall'evidenza ufficiale." }] };
+  const output = { verdict: "PASS", checkedClaims: [{ claim: "Aggiornamento confermato", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "VERIFIED", reason: "Supportato dall'evidenza ufficiale." }] };
   return new Response(JSON.stringify({
     id: "resp_factcheck",
     model: "gpt-5.6-terra",
@@ -73,6 +73,10 @@ const checked = await runOpenAIFactCheckAgent({
 });
 assert.equal(checked.verdict, "PASS");
 assert.equal(checked.checkedClaims[0].status, "VERIFIED");
+assert.equal(checked.checkedClaims[0].claimType, "EXTERNAL");
+assert.equal(checked.checkedClaims[0].sourceRequired, true);
+assert.equal(factCheckBody?.text.format.schema.properties.verdict.enum.includes("NEEDS_SOURCE"), true);
+assert.equal(String(factCheckBody?.instructions).includes("EDITORIAL"), true);
 assert.equal(factCheckBody && "tools" in factCheckBody, false, "Fact-check must reuse existing evidence instead of paying for another web search");
 
 console.log("OpenAI Research + Fact-check agents regression: PASS");

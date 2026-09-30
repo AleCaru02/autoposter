@@ -42,6 +42,7 @@ const enabledPersonalOperatorCapabilities: Partial<Record<CapabilityKey, Omit<Pa
   "ai.research.web": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.05 },
   "ai.research.factcheck": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.05 },
   "ai.strategy.generate": { limitType: "COUNT_PER_MONTH", limitValue: 50, periodType: "MONTH", providerAttemptReserveUsd: 0.10 },
+  "content.qa.run": { limitType: "COUNT_PER_MONTH", limitValue: 500, periodType: "MONTH", providerAttemptReserveUsd: 0.10 },
   "ai.image.generate": { limitType: "COUNT_PER_MONTH", limitValue: 100, periodType: "MONTH", providerAttemptReserveUsd: 0.25 },
   "visual.higgsfield.api": { limitType: "COUNT_PER_MONTH", limitValue: 200, periodType: "MONTH", providerAttemptReserveUsd: 0.25 },
   "visual.higgsfield.soul_id": { limitType: "COUNT_PER_MONTH", limitValue: 4, periodType: "MONTH", providerAttemptReserveUsd: 2.50 },

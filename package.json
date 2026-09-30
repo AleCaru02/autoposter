@@ -106,7 +106,8 @@
     "test:asset-library": "tsx tests/asset-library-runtime.test.ts",
     "test:visual-routing-persistence": "tsx tests/visual-routing-persistence.test.ts",
     "test:identity-qa-runtime": "tsx tests/identity-qa-runtime.test.ts",
-    "test:carousel-content": "tsx tests/carousel-content-foundation.test.ts"
+    "test:carousel-content": "tsx tests/carousel-content-foundation.test.ts",
+    "test:content-qa": "tsx tests/content-qa.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",

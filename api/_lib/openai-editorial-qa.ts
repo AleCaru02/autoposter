@@ -5,12 +5,22 @@ export type EditorialQAResult = {
   reasons: string[];
   checks: {
     brandConsistency: "PASS" | "FAIL";
+    copyQuality: "PASS" | "FAIL";
+    grammar: "PASS" | "FAIL";
     platformFit: "PASS" | "FAIL";
     formatFit: "PASS" | "FAIL";
     ctaFit: "PASS" | "FAIL";
+    hashtagFit: "PASS" | "FAIL";
     claimSafety: "PASS" | "FAIL";
     visualSafety: "PASS" | "FAIL";
   };
+  slideChecks: Array<{
+    slideNumber: number;
+    copyStatus: "PASS" | "FAIL";
+    brandStatus: "PASS" | "FAIL";
+    platformStatus: "PASS" | "FAIL";
+    reason: string;
+  }>;
   responseId: string;
   requestId: string | null;
   model: "gpt-5.6-terra";
@@ -28,16 +38,35 @@ const QA_SCHEMA = {
       additionalProperties: false,
       properties: {
         brandConsistency: { type: "string", enum: ["PASS", "FAIL"] },
+        copyQuality: { type: "string", enum: ["PASS", "FAIL"] },
+        grammar: { type: "string", enum: ["PASS", "FAIL"] },
         platformFit: { type: "string", enum: ["PASS", "FAIL"] },
         formatFit: { type: "string", enum: ["PASS", "FAIL"] },
         ctaFit: { type: "string", enum: ["PASS", "FAIL"] },
+        hashtagFit: { type: "string", enum: ["PASS", "FAIL"] },
         claimSafety: { type: "string", enum: ["PASS", "FAIL"] },
         visualSafety: { type: "string", enum: ["PASS", "FAIL"] },
       },
-      required: ["brandConsistency", "platformFit", "formatFit", "ctaFit", "claimSafety", "visualSafety"],
+      required: ["brandConsistency", "copyQuality", "grammar", "platformFit", "formatFit", "ctaFit", "hashtagFit", "claimSafety", "visualSafety"],
+    },
+    slideChecks: {
+      type: "array",
+      maxItems: 10,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          slideNumber: { type: "integer", minimum: 1, maximum: 10 },
+          copyStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          brandStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          platformStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          reason: { type: "string", maxLength: 300 },
+        },
+        required: ["slideNumber", "copyStatus", "brandStatus", "platformStatus", "reason"],
+      },
     },
   },
-  required: ["verdict", "reasons", "checks"],
+  required: ["verdict", "reasons", "checks", "slideChecks"],
 } as const;
 
 function outputText(body: Record<string, unknown>) {
@@ -80,9 +109,10 @@ export async function runOpenAIEditorialQA(input: {
         "Sei l'Editorial QA Agent di Post Automatici.",
         "Sei l'ultimo controllo semantico prima che un contenuto possa procedere automaticamente verso media e pubblicazione.",
         "Non riscrivere il contenuto e non fare ricerca web. Devi soltanto PASS oppure BLOCK.",
-        "Blocca se il copy è incoerente con brand/obiettivo, inadatto alla piattaforma o al formato, ha CTA ingannevole/forzata, introduce claim specifici non sostenuti dalla factualBasis/verifica disponibile, oppure se il visualBrief può introdurre fatti del brand non verificati.",
+        "Valuta separatamente coerenza di brand, qualità del copy, grammatica, fit piattaforma/formato, CTA, hashtag, sicurezza dei claim e sicurezza del visual. Blocca i problemi materiali.",
         "Non bocciare per preferenze stilistiche minori: BLOCK solo per problemi materiali che rendono rischiosa o scadente la pubblicazione automatica.",
         "Per GBP richiedi utilità aziendale/locale concreta e niente engagement bait. Per LinkedIn richiedi tono professionale autonomo. Per Story richiedi brevità e leggibilità mobile.",
+        "Per CAROUSEL restituisci una slideCheck per ogni slide ricevuta, nello stesso ordine. Ogni slide deve avere un solo compito, copy leggibile, coerenza di brand e fit piattaforma. Per formati non CAROUSEL restituisci slideChecks vuoto.",
         "Se Fact-check è stato eseguito e non risulta PASS, verdict deve essere BLOCK.",
         "Restituisci esclusivamente JSON conforme allo schema.",
       ].join("\n"),
@@ -104,7 +134,7 @@ export async function runOpenAIEditorialQA(input: {
   const body = JSON.parse(raw) as Record<string, unknown>;
   const text = outputText(body);
   if (!text) throw new Error("OPENAI_EDITORIAL_QA_EMPTY_OUTPUT");
-  const parsed = JSON.parse(text) as Pick<EditorialQAResult, "verdict" | "reasons" | "checks">;
+  const parsed = JSON.parse(text) as Pick<EditorialQAResult, "verdict" | "reasons" | "checks" | "slideChecks">;
   const rawUsage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const inputTokens = n(rawUsage.input_tokens);
   const outputTokens = n(rawUsage.output_tokens);

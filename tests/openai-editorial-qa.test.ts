@@ -12,7 +12,8 @@ const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
     output_text: JSON.stringify({
       verdict: "PASS",
       reasons: [],
-      checks: { brandConsistency: "PASS", platformFit: "PASS", formatFit: "PASS", ctaFit: "PASS", claimSafety: "PASS", visualSafety: "PASS" },
+      checks: { brandConsistency: "PASS", copyQuality: "PASS", grammar: "PASS", platformFit: "PASS", formatFit: "PASS", ctaFit: "PASS", hashtagFit: "PASS", claimSafety: "PASS", visualSafety: "PASS" },
+      slideChecks: [],
     }),
     usage: { input_tokens: 120, output_tokens: 60, total_tokens: 180 },
   }), { status: 200, headers: { "x-request-id": "req_qa" } });
@@ -27,7 +28,7 @@ const qa = await runOpenAIEditorialQA({
   format: "POST",
   objective: "Lead",
   content: { editorialTopic: "Gestione affitti brevi", editorialAngle: "Ridurre il carico operativo", strategySummary: "Educare", variants: [] },
-  variant: { provider: "LINKEDIN", format: "POST", eligible: true, hook: "Gestire meglio", caption: "Un insight professionale.", cta: "Approfondisci", hashtags: [], visualBrief: "Interno ordinato", altText: "Interno ordinato", factualBasis: ["BASE BRAND/SITO: servizio confermato"] },
+  variant: { provider: "LINKEDIN", format: "POST", eligible: true, hook: "Gestire meglio", caption: "Un insight professionale.", cta: "Approfondisci", hashtags: [], visualBrief: "Interno ordinato", altText: "Interno ordinato", factualBasis: ["BASE BRAND/SITO: servizio confermato"], carouselSlides: [] },
   verification: { researchAgentRan: false, factCheckAgentRan: false, factCheckVerdict: null },
   externalSources: [],
   fetcher,

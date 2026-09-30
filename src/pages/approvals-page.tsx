@@ -6,6 +6,7 @@ import {
   deleteContent,
   loadContentWorkflow,
   reviewVariant,
+  runVariantQa,
   type AssetRow,
   type ContentItemRow,
   type ContentVariantRow,
@@ -140,8 +141,28 @@ export function ApprovalsPage() {
       });
       dirtyVariantIdsRef.current.delete(variant.id);
       setSaveStatus((current) => ({ ...current, [variant.id]: "SAVED" }));
+      const changed = currentVariant.hook !== (draft.hook || null)
+        || currentVariant.caption !== draft.caption
+        || currentVariant.cta !== (draft.cta || null)
+        || currentVariant.hashtags.join(" ") !== parseHashtags(draft.hashtags).join(" ")
+        || currentVariant.visual_brief !== (draft.visualBrief || null)
+        || currentVariant.alt_text !== (draft.altText || null);
       setVariants((current) => {
-        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? { ...row, hook: draft.hook || null, caption: draft.caption, cta: draft.cta || null, hashtags: parseHashtags(draft.hashtags), visual_brief: draft.visualBrief || null, alt_text: draft.altText || null, approval_status: result.approvalStatus, updated_at: result.updatedAt } : row);
+        const next: ContentVariantRow[] = current.map((row) => row.id === variant.id ? {
+          ...row,
+          hook: draft.hook || null,
+          caption: draft.caption,
+          cta: draft.cta || null,
+          hashtags: parseHashtags(draft.hashtags),
+          visual_brief: draft.visualBrief || null,
+          alt_text: draft.altText || null,
+          approval_status: result.approvalStatus,
+          qa_status: changed ? "PENDING" : row.qa_status,
+          qa_fingerprint: changed ? null : row.qa_fingerprint,
+          qa_result: changed ? {} : row.qa_result,
+          qa_checked_at: changed ? null : row.qa_checked_at,
+          updated_at: result.updatedAt,
+        } : row);
         variantsRef.current = next;
         return next;
       });
@@ -193,6 +214,10 @@ export function ApprovalsPage() {
 
   async function approve(variant: ContentVariantRow, approvalStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED") {
     if (!selectedProfile) return;
+    if (approvalStatus === "APPROVED" && variant.qa_status !== "PASS") {
+      setError("Il contenuto non può essere approvato finché il Content QA non è PASS.");
+      return;
+    }
     if (variant.format === "CAROUSEL" && approvalStatus === "APPROVED") {
       const slides = slidesByVariant.get(variant.id) ?? [];
       const ready = slides.length >= 4 && slides.length <= 10 && slides.every((slide) => slide.asset_id && slide.qa_status === "PASS");
@@ -225,7 +250,25 @@ export function ApprovalsPage() {
     });
   }
 
-  async function generateImage(variant: ContentVariantRow) {
+  async function runQa(variant: ContentVariantRow) {
+    if (!selectedProfile) return;
+    await run(`qa-${variant.id}`, async () => {
+      const timer = saveTimersRef.current[variant.id];
+      if (timer) clearTimeout(timer);
+      delete saveTimersRef.current[variant.id];
+      if (dirtyVariantIdsRef.current.has(variant.id)) {
+        await persistVariant(variant, draftsRef.current[variant.id] ?? draftFromVariant(variant));
+      }
+      await runVariantQa({
+        profileId: selectedProfile.id,
+        contentId: variant.content_id,
+        variantId: variant.id,
+      });
+      await reload();
+    });
+  }
+
+    async function generateImage(variant: ContentVariantRow) {
     if (!selectedProfile) return;
     if (variant.format === "CAROUSEL") {
       setError("Il carosello richiede un visuale distinto per ogni slide. La generazione singola è bloccata per evitare un falso carosello.");
@@ -257,7 +300,30 @@ export function ApprovalsPage() {
     });
   }
 
-  async function removeItem(item: ContentItemRow) {
+  async function generateCarouselSlideImage(variant: ContentVariantRow, slide: ContentCarouselSlideRow) {
+    if (!selectedProfile || variant.format !== "CAROUSEL") return;
+    await run(`slide-image-${slide.id}`, async () => {
+      const token = await authenticatedApiToken();
+      const response = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },
+        body: JSON.stringify({
+          profileId: selectedProfile.id,
+          contentVariantId: variant.id,
+          carouselSlideId: slide.id,
+          provider: variant.provider,
+          format: "CAROUSEL",
+          visualBrief: slide.visual_brief,
+          caption: [slide.headline, slide.body].filter(Boolean).join(" — "),
+        }),
+      });
+      const body = await response.json() as ImageResponse;
+      if (!response.ok || !body.asset?.id) throw new Error("Visuale della slide non salvato. Riprova tra poco.");
+      await reload();
+    });
+  }
+
+    async function removeItem(item: ContentItemRow) {
     if (!selectedProfile || !window.confirm("Eliminare questo contenuto e tutte le sue varianti?")) return;
     await run(`delete-${item.id}`, async () => {
       await deleteContent(selectedProfile.id, item.id);
@@ -293,7 +359,7 @@ export function ApprovalsPage() {
               const decision = buildEditorialDecisionRecord({ topic: item.topic, objective: item.objective, provider: variant.provider, format: variant.format, eligible: variant.eligible, approvalStatus: variant.approval_status, asset, masterDecision: masterDecisions[item.id] });
               const currentSaveStatus = saveStatus[variant.id] ?? "SAVED";
               return <article className="approval-variant" key={variant.id}>
-                <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
+                <header><div><strong>{providerLabel(variant.provider)}</strong><span>{variant.format}</span></div><div className="variant-header-status"><span className={`variant-status variant-${variant.approval_status.toLowerCase()}`}>{statusLabel(variant.approval_status)}</span><span className={`variant-status variant-${variant.qa_status.toLowerCase()}`}>QA {variant.qa_status}</span><span className={`autosave-mini ${currentSaveStatus.toLowerCase()}`}>{currentSaveStatus === "WAITING" || currentSaveStatus === "SAVING" ? <><LoaderCircle className="spin" size={12} /> Salvataggio…</> : currentSaveStatus === "ERROR" ? "Errore salvataggio" : <><Check size={12} /> Salvato</>}</span></div></header>
                 <div className="approval-grid" onBlurCapture={() => void persistVariant(variant).catch((reason) => setError(reason instanceof Error ? reason.message : "Salvataggio automatico non riuscito."))}>
                   <label>Hook<input value={draft.hook} onChange={(event) => setDraftField(variant, "hook", event.target.value)} /></label>
                   <label>CTA<input value={draft.cta} onChange={(event) => setDraftField(variant, "cta", event.target.value)} /></label>
@@ -313,14 +379,22 @@ export function ApprovalsPage() {
                       <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
                       <p><strong>Visuale:</strong> {slide.visual_brief}</p>
                       {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
+                      <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`]} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] ? "Generazione…" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
                     </article>;
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
                 </div> : asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                <details className="decision-record"><summary>Content QA · {variant.qa_status}</summary>
+                  <dl>
+                    {Object.entries(variant.qa_result ?? {}).filter(([key]) => ["brandStatus","copyStatus","visualStatus","factStatus","platformStatus","duplicateStatus","budgetStatus"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
+                  </dl>
+                  {Array.isArray((variant.qa_result as { reasons?: unknown[] })?.reasons) && <p>{((variant.qa_result as { reasons?: unknown[] }).reasons ?? []).map(String).join(" · ")}</p>}
+                </details>
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
                   {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
-                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
+                  <button className="secondary-button" type="button" disabled={busy[`qa-${variant.id}`] || currentSaveStatus === "SAVING" || currentSaveStatus === "WAITING"} onClick={() => void runQa(variant)}><CheckCircle2 size={16} /> {busy[`qa-${variant.id}`] ? "QA in corso…" : variant.qa_status === "PASS" ? "Riesegui QA" : "Esegui QA"}</button>
+                  <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady || variant.qa_status !== "PASS"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Da correggere</button>
                   {variant.approval_status !== "PENDING" && <button className="approval-button pending" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "PENDING")}><Undo2 size={16} /> Riapri</button>}
                 </div>

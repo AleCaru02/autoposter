@@ -41,6 +41,11 @@ export type ContentVariantRow = {
   image_asset_id: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
+  factual_basis: string[];
+  qa_status: "PENDING" | "PASS" | "FAIL" | "NEEDS_SOURCE";
+  qa_fingerprint: string | null;
+  qa_result: Record<string, unknown>;
+  qa_checked_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -94,6 +99,35 @@ export type SavedGeneration = {
   variantIds: Record<string, string>;
 };
 
+export type ContentQaApiResult = {
+  runId: string;
+  profileId: string;
+  contentId: string;
+  variantId: string;
+  contentFingerprint: string;
+  overallStatus: "PASS" | "FAIL" | "NEEDS_SOURCE";
+  brandStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  copyStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  visualStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  factStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  platformStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  duplicateStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  budgetStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+  reasons: string[];
+  slides: Array<{
+    slideId: string;
+    slideNumber: number;
+    copyStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    visualStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    factStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    brandStatus: "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
+    qualityStatus: "PASS" | "FAIL" | "NEEDS_SOURCE";
+    reason: string;
+  }>;
+  checkedAt: string;
+  reused: boolean;
+};
+
 type ReviewResponse = {
   variantId?: string;
   approvalStatus?: ApprovalStatus;
@@ -124,6 +158,7 @@ export async function saveGeneratedContent(input: {
     hashtags: variant.hashtags,
     visual_brief: variant.visualBrief,
     alt_text: variant.altText,
+    factual_basis: variant.factualBasis,
     approval_status: "PENDING" as ApprovalStatus,
     updated_at: now,
     _key: variantKey(variant.provider, variant.format, index),
@@ -229,7 +264,7 @@ export async function loadContentWorkflow(profileId: string) {
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
-    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,created_at,updated_at")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
@@ -303,4 +338,22 @@ export async function deleteContent(profileId: string, contentId: string) {
   if (result.error) throw new Error("Impossibile eliminare il contenuto. Riprova.");
   // Gli asset restano nella Libreria: content_id usa ON DELETE SET NULL e l'immagine
   // può essere riutilizzata da contenuti futuri invece di essere distrutta col post.
+}
+
+
+export async function runVariantQa(input: { profileId: string; contentId: string; variantId: string; force?: boolean }) {
+  const token = await authenticatedApiToken();
+  const response = await fetch("/api/content-qa", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json() as ContentQaApiResult & { error?: string };
+  if (!response.ok || !body.runId || !body.overallStatus) {
+    if (response.status === 409) throw new Error("Il QA è già in corso o deve essere riavviato.");
+    if (response.status === 429) throw new Error("Budget o limite QA raggiunto per questa attività.");
+    if (response.status === 404) throw new Error("Contenuto non trovato.");
+    throw new Error("Content QA non completato. Riprova.");
+  }
+  return body;
 }

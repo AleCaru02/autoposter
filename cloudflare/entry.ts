@@ -6,6 +6,7 @@ import { handleWorkerOnboardingComplete } from "./onboarding-complete.js";
 import { handleWorkerProfileBootstrap } from "./profile-bootstrap.js";
 import { handleWorkerProfileArchive } from "./profile-archive.js";
 import { handleWorkerContentReview } from "./content-review.js";
+import { handleContentQa } from "./content-qa.js";
 import { handleWorkerCalendar } from "./calendar.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
@@ -185,6 +186,7 @@ export default {
     if (path === "/api/onboarding-complete") return handleWorkerOnboardingComplete(request, env);
     if (path === "/api/onboarding-analyze") return handleWorkerOnboardingAnalyze(request, env);
     if (path === "/api/content-review") return handleWorkerContentReview(request, env);
+    if (path === "/api/content-qa") return handleContentQa(request, env);
     if (path === "/api/calendar") return handleWorkerCalendar(request, env);
     if (path.startsWith("/api/social/")) {
       try {
