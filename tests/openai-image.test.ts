@@ -37,8 +37,8 @@ const normalizedBrand = normalizeBrandVisualIdentity({
   observedFonts: ["Inter", "Inter", "Georgia"],
   summary: "Minimal, premium, sobrio.",
 });
-assert.deepEqual(normalizedBrand.colors, ["#112233", "#F5F1E8", "#112233"]);
-assert.deepEqual(normalizedBrand.fonts, ["Inter", "Inter", "Georgia"]);
+assert.deepEqual(normalizedBrand.colors, ["#112233", "#F5F1E8"]);
+assert.deepEqual(normalizedBrand.fonts, ["Inter", "Georgia"]);
 assert.equal(normalizedBrand.visualStyle, "Minimal, premium, sobrio.");
 
 const prompt = buildImagePrompt({
