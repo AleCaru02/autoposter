@@ -144,7 +144,16 @@ export function chooseSubjectStrategy(input: {
   if (signals.typographic) ranked.push("TYPOGRAPHIC");
   if (signals.environment) ranked.push("ENVIRONMENT");
   if (input.profileType === "BUSINESS" && signals.person) ranked.push("GENERIC_PERSON");
-  ranked.push("INFOGRAPHIC","TYPOGRAPHIC","ENVIRONMENT","OBJECT");
+
+  // The fallback pool is intentionally broader than four templates: a real SMM must
+  // preserve semantic fit while preventing the feed from collapsing into the same
+  // subject/composition every few posts.
+  if (input.profileType === "BUSINESS") {
+    ranked.push("INFOGRAPHIC","TYPOGRAPHIC","ENVIRONMENT","OBJECT","GENERIC_PERSON","TEAM","SERVICE");
+  } else {
+    ranked.push("INFOGRAPHIC","TYPOGRAPHIC","ENVIRONMENT","OBJECT","SERVICE");
+    if (input.canonicalIdentityReady) ranked.push("CANONICAL_PERSON");
+  }
 
   const subject = [...new Set(ranked)]
     .sort((a,b) => recentCount(input.memory ?? null,a)-recentCount(input.memory ?? null,b))[0] ?? "OBJECT";
