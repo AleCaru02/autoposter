@@ -141,7 +141,7 @@ assert.equal(business.proof.memoryChangedNextDecision,true);
 assert.equal(personal.proof.memoryChangedNextDecision,true);
 assert.equal(business.proof.continuityNChangesNPlus1,true);
 assert.equal(personal.proof.continuityNChangesNPlus1,true);
-assert.equal(business.status,"PASS",JSON.stringify({gates:business.gates,failed:business.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype}))},null,2));
+assert.equal(business.status,"PASS",JSON.stringify({gates:business.gates,failed:business.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype,antiRepetitionReasons:row.antiRepetitionReasons,duplicateScore:row.duplicateScore}))},null,2));
 assert.equal(personal.status,"PASS",JSON.stringify({gates:personal.gates,failed:personal.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype}))},null,2));
 const comparison=compareProfileTypeCertification(business,personal);
 assert.equal(comparison.pass,true,JSON.stringify(comparison));
