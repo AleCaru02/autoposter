@@ -55,6 +55,12 @@ export type OpenAIImageResult = {
   technicalEvents: OpenAIImageTechnicalEvent[];
 };
 
+export type ImageGenerationProgressUpdate = {
+  phase: "PREPARING_PROMPT" | "PROMPT_READY" | "OPENAI_IMAGE_GENERATING" | "OPENAI_IMAGE_RECEIVED";
+  progress: number;
+  message: string;
+};
+
 export type GenerateImageOptions = {
   apiKey: string;
   profileName: string;
@@ -66,6 +72,7 @@ export type GenerateImageOptions = {
   caption?: string | null;
   additionalDirection?: string | null;
   fetcher?: typeof fetch;
+  onProgress?: (update: ImageGenerationProgressUpdate) => void | Promise<void>;
 };
 
 export function imageSizeForFormat(format: ImageSocialFormat): ImageSize {
@@ -107,6 +114,7 @@ export function estimateImageCostUsd(inputTokens: number, outputTokens: number) 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
   const fetcher = options.fetcher ?? fetch;
   const size = imageSizeForFormat(options.format);
+  await options.onProgress?.({ phase: "PREPARING_PROMPT", progress: 40, message: "Sto preparando il prompt visivo con OpenAI." });
   const mediaManager = await runOpenAIMediaManager({
     apiKey: options.apiKey,
     profileName: options.profileName,
@@ -119,6 +127,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     additionalDirection: options.additionalDirection,
     fetcher,
   });
+  await options.onProgress?.({ phase: "PROMPT_READY", progress: 50, message: "Prompt visivo pronto." });
   const mediaManagerEvent: OpenAIImageTechnicalEvent = {
     operation: "AGENT_MEDIA_MANAGER",
     model: mediaManager.model,
@@ -129,6 +138,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   };
   const fallbackPrompt = buildImagePrompt(options);
   const prompt = mediaManager.imagePrompt.trim() || fallbackPrompt;
+  await options.onProgress?.({ phase: "OPENAI_IMAGE_GENERATING", progress: 60, message: "OpenAI Immagini 2 sta generando il visuale." });
   const response = await fetcher("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
@@ -146,6 +156,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   });
   const requestId = response.headers.get("x-request-id");
   const raw = await response.text();
+  if (response.ok) await options.onProgress?.({ phase: "OPENAI_IMAGE_RECEIVED", progress: 85, message: "Immagine ricevuta da OpenAI. La sto salvando." });
   if (!response.ok) {
     let message = `OPENAI_IMAGE_HTTP_${response.status}`;
     try {
