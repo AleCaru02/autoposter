@@ -1,4 +1,5 @@
 import { estimateTerraCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
+import { platformCopyStrategyPrompt } from "./social-platform-strategy.js";
 
 export type EditorialQAResult = {
   verdict: "PASS" | "BLOCK";
@@ -111,7 +112,9 @@ export async function runOpenAIEditorialQA(input: {
         "Non riscrivere il contenuto e non fare ricerca web. Devi soltanto PASS oppure BLOCK.",
         "Valuta separatamente coerenza di brand, qualità del copy, grammatica, fit piattaforma/formato, CTA, hashtag, sicurezza dei claim e sicurezza del visual. Blocca i problemi materiali.",
         "Non bocciare per preferenze stilistiche minori: BLOCK solo per problemi materiali che rendono rischiosa o scadente la pubblicazione automatica.",
-        "Per GBP richiedi utilità aziendale/locale concreta e niente engagement bait. Per LinkedIn richiedi tono professionale autonomo. Per Story richiedi brevità e leggibilità mobile.",
+        "Il fit piattaforma deve rispettare la strategia nativa seguente; non approvare una semplice riscrittura cross-platform:",
+        platformCopyStrategyPrompt(input.provider),
+        "Per Story richiedi brevità e leggibilità mobile. Se il formato non è realmente coerente o supportabile sul canale, platformFit/formatFit devono fallire invece di fingere equivalenza.",
         "Per CAROUSEL restituisci una slideCheck per ogni slide ricevuta, nello stesso ordine. Ogni slide deve avere un solo compito, copy leggibile, coerenza di brand e fit piattaforma. Per formati non CAROUSEL restituisci slideChecks vuoto.",
         "Se Fact-check è stato eseguito e non risulta PASS, verdict deve essere BLOCK.",
         "Restituisci esclusivamente JSON conforme allo schema.",
