@@ -1,5 +1,6 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
+import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -60,6 +61,7 @@ export type OpenAIImageResult = {
 export type GenerateImageOptions = {
   apiKey: string;
   profileName: string;
+  profileType?: "BUSINESS" | "PERSONAL_BRAND";
   industry: string | null;
   tone: string | null;
   brandColors?: string[];
@@ -85,6 +87,7 @@ function cleanList(values: string[] | undefined, maxItems: number, itemMax = 120
   return [...new Set((values ?? []).map((value) => clean(value, itemMax)).filter(Boolean))].slice(0, maxItems);
 }
 
+
 export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
   const colors = cleanList(options.brandColors, 8, 64);
   const fonts = cleanList(options.brandFonts, 6, 100);
@@ -96,6 +99,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
     fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
     options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
+    personalBrandVisualSystem(options.profileType),
     platformVisualStrategyPrompt(options.provider),
     "Il visual deve comunicare l'idea centrale del contenuto, non limitarsi a decorare il luogo o il settore.",
     "Una sola gerarchia principale e al massimo tre elementi secondari. Niente composizioni affollate, collage casuali, infografiche improvvisate o troppi punti focali.",
@@ -115,6 +119,7 @@ function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" 
   return [
     "Crea un'immagine social originale e professionale per il brand indicato.",
     `Brand: ${clean(options.profileName, 160)}.`,
+    `Tipo profilo: ${options.profileType === "PERSONAL_BRAND" ? "Personal Brand" : "Attività/Business"}.`,
     options.industry ? `Settore: ${clean(options.industry, 200)}.` : "",
     options.tone ? `Tono visivo: ${clean(options.tone, 300)}.` : "",
     `Piattaforma: ${options.provider}. Formato: ${options.format}.`,
@@ -141,11 +146,12 @@ export function estimateImageCostUsd(inputTokens: number, outputTokens: number) 
 }
 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher: typeof fetch = options.fetcher ?? ((input, init) => globalThis.fetch(input, init));
   const size = imageSizeForFormat(options.format);
   const mediaManager = await runOpenAIMediaManager({
     apiKey: options.apiKey,
     profileName: options.profileName,
+    profileType: options.profileType ?? "BUSINESS",
     industry: options.industry,
     tone: options.tone,
     brandColors: options.brandColors ?? [],

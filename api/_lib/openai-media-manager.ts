@@ -1,5 +1,6 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
+import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
 
 export type MediaManagerResult = {
@@ -55,6 +56,7 @@ function n(value: unknown) { return typeof value === "number" && Number.isFinite
 export async function runOpenAIMediaManager(input: {
   apiKey: string;
   profileName: string;
+  profileType?: "BUSINESS" | "PERSONAL_BRAND";
   industry: string | null;
   tone: string | null;
   brandColors?: string[];
@@ -67,7 +69,7 @@ export async function runOpenAIMediaManager(input: {
   additionalDirection?: string | null;
   fetcher?: typeof fetch;
 }): Promise<MediaManagerResult> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
   const response = await fetcher("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
@@ -83,6 +85,7 @@ export async function runOpenAIMediaManager(input: {
         "Il visual deve comunicare prima di tutto l'IDEA CENTRALE del contenuto. Non limitarti a mostrare il luogo o il settore come decorazione: scegli una scena o metafora che renda visibile il messaggio.",
         "Mantieni una sola gerarchia principale e al massimo tre elementi secondari. Evita sovraccarico, infografiche improvvisate, collage, mappe affollate e troppi punti focali.",
         "La brand identity fornita nel campo brand è un vincolo reale del profilo: usa i colori osservati/confermati come palette dominante e di accento, scegliendo 2-4 colori coerenti invece di usarli tutti. Non sostituirli con una palette arbitraria; bianco, nero e neutri sono ammessi per contrasto.",
+        personalBrandVisualSystem(input.profileType),
         "Se sono forniti font o indicazioni di stile visivo, rispettane il carattere tipografico e l'estetica generale. Non inventare un'identità editoriale diversa solo perché sembra più elegante.",
         "Quando il contenuto è concettuale o informativo, traduci il concetto in una metafora visuale concreta e pertinente al settore invece di produrre una semplice icona, mappa o sfondo decorativo.",
         "Per luoghi reali, quartieri, mappe, metropolitane, strade, landmark o percorsi: NON inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o etichette fattuali. Se non sono forniti dati geografici verificati o un asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale senza pretendere accuratezza geografica.",
@@ -102,6 +105,7 @@ export async function runOpenAIMediaManager(input: {
       input: JSON.stringify({
         brand: {
           name: input.profileName,
+          profileType: input.profileType ?? "BUSINESS",
           industry: input.industry,
           tone: input.tone,
           colors: input.brandColors ?? [],

@@ -9,6 +9,7 @@ export type RoutedImageOptions = {
   budget: ActivityBudgetPreflight;
   importance?: ContentImportance;
   profileName: string;
+  profileType?: "BUSINESS" | "PERSONAL_BRAND";
   industry?: string | null;
   tone?: string | null;
   brandColors?: string[];
@@ -45,6 +46,7 @@ export async function generateRoutedImage(options: RoutedImageOptions): Promise<
   return generateOpenAIImage({
     apiKey: options.env.OPENAI_API_KEY,
     profileName: options.profileName,
+    profileType: options.profileType ?? "BUSINESS",
     industry: options.industry ?? null,
     tone: options.tone ?? null,
     brandColors: options.brandColors ?? [],
