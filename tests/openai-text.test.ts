@@ -158,13 +158,27 @@ const carouselGenerated = {
   }],
 } as const;
 let carouselBody: Record<string, any> | null = null;
+let carouselCalls = 0;
 const carouselFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
-  carouselBody = JSON.parse(String(init?.body));
+  carouselCalls += 1;
+  const request = JSON.parse(String(init?.body));
+  if (carouselCalls === 1) {
+    carouselBody = request;
+    return new Response(JSON.stringify({
+      id: "resp_carousel",
+      model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(carouselGenerated) }] }],
+      usage: { input_tokens: 30, output_tokens: 120, total_tokens: 150 },
+    }), { status: 200 });
+  }
   return new Response(JSON.stringify({
-    id: "resp_carousel",
+    id: "resp_carousel_factcheck",
     model: "gpt-5.6-terra",
-    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(carouselGenerated) }] }],
-    usage: { input_tokens: 30, output_tokens: 120, total_tokens: 150 },
+    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+      verdict: "PASS",
+      checkedClaims: [{ claim: "4 punti", status: "VERIFIED", reason: "Il numero descrive la struttura editoriale del carosello, non un fatto esterno." }],
+    }) }] }],
+    usage: { input_tokens: 20, output_tokens: 30, total_tokens: 50 },
   }), { status: 200 });
 }) as typeof fetch;
 const carouselResult = await generateSocialText({
