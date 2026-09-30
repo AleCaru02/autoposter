@@ -60,6 +60,7 @@ export type OpenAIImageResult = {
 export type GenerateImageOptions = {
   apiKey: string;
   profileName: string;
+  profileType?: "BUSINESS" | "PERSONAL_BRAND";
   industry: string | null;
   tone: string | null;
   brandColors?: string[];
@@ -85,6 +86,22 @@ function cleanList(values: string[] | undefined, maxItems: number, itemMax = 120
   return [...new Set((values ?? []).map((value) => clean(value, itemMax)).filter(Boolean))].slice(0, maxItems);
 }
 
+export function personalBrandVisualSystem(profileType: "BUSINESS" | "PERSONAL_BRAND" | undefined) {
+  if (profileType !== "PERSONAL_BRAND") return "";
+  return [
+    "SISTEMA VISIVO PERSONAL BRAND:",
+    "Tratta il singolo contenuto come parte di un feed editoriale coerente e riconoscibile, non come una card isolata o un template social generico.",
+    "Mantieni una grammatica visiva ricorrente: palette del profilo, personalità tipografica, margini generosi, gerarchia pulita, accenti grafici coerenti e qualità fotografica/editoriale premium.",
+    "Non copiare una palette standard per tutti i Personal Brand: colori, font e stile devono provenire dal profilo attivo. Un riferimento estetico esterno serve solo per livello qualitativo, struttura e varietà, non per imporre rosa, beige, viola o altri colori.",
+    "Alterna in modo naturale archetipi diversi in base al contenuto: ritratto/editoriale personale, card educativa o carosello, prodotto/servizio, dietro le quinte, community/evento, CTA o scelta guidata. Non usare sempre la stessa composizione.",
+    "Per i visual tipografici: look da magazine moderno, headline dominante, eventuale sottotitolo breve, molto spazio negativo, elementi decorativi minimi e funzionali, icone lineari semplici quando servono.",
+    "Per i visual fotografici: composizione curata, luce credibile, profondità reale, posa naturale e spazio negativo progettato per il testo; evita fotografie stock, pose plastiche e fondali artificialmente vuoti.",
+    "Per CAROUSEL: ogni slide deve sembrare parte dello stesso sistema editoriale, con griglia, palette e gerarchia coerenti ma variazioni reali di composizione; niente collage unico o sette slide tutte identiche.",
+    "Non inventare il volto del titolare del Personal Brand. Se non viene fornito o riutilizzato un asset reale approvato della persona, non creare un volto sintetico fingendo che sia lei/lui: preferisci visual tipografici, dettagli, mani non identificabili, ambienti, oggetti, prodotto confermato o scene editoriali senza identità personale falsa.",
+    "Non inventare confezioni, loghi o prodotti di marca. Un prodotto specifico può essere mostrato come reale solo se il brief o un asset confermato lo supporta.",
+  ].join("\n");
+}
+
 export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
   const colors = cleanList(options.brandColors, 8, 64);
   const fonts = cleanList(options.brandFonts, 6, 100);
@@ -96,6 +113,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
     fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
     options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
+    personalBrandVisualSystem(options.profileType),
     platformVisualStrategyPrompt(options.provider),
     "Il visual deve comunicare l'idea centrale del contenuto, non limitarsi a decorare il luogo o il settore.",
     "Una sola gerarchia principale e al massimo tre elementi secondari. Niente composizioni affollate, collage casuali, infografiche improvvisate o troppi punti focali.",
@@ -115,6 +133,7 @@ function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" 
   return [
     "Crea un'immagine social originale e professionale per il brand indicato.",
     `Brand: ${clean(options.profileName, 160)}.`,
+    `Tipo profilo: ${options.profileType === "PERSONAL_BRAND" ? "Personal Brand" : "Attività/Business"}.`,
     options.industry ? `Settore: ${clean(options.industry, 200)}.` : "",
     options.tone ? `Tono visivo: ${clean(options.tone, 300)}.` : "",
     `Piattaforma: ${options.provider}. Formato: ${options.format}.`,
@@ -141,11 +160,12 @@ export function estimateImageCostUsd(inputTokens: number, outputTokens: number) 
 }
 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher: typeof fetch = options.fetcher ?? ((input, init) => globalThis.fetch(input, init));
   const size = imageSizeForFormat(options.format);
   const mediaManager = await runOpenAIMediaManager({
     apiKey: options.apiKey,
     profileName: options.profileName,
+    profileType: options.profileType ?? "BUSINESS",
     industry: options.industry,
     tone: options.tone,
     brandColors: options.brandColors ?? [],
