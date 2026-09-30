@@ -29,11 +29,22 @@ type DraftFields = {
 type DraftSaveStatus = "SAVED" | "WAITING" | "SAVING" | "ERROR";
 
 type ImageResponse = {
-  image?: { dataUrl: string; model: string; size: string; quality: string };
-  asset?: { id: string };
+  image?: { model?: string | null; size?: string | null; quality?: string | null };
+  asset?: { id: string } | null;
   error?: string;
   message?: string;
   detail?: string;
+};
+
+type ImageProgressState = {
+  state: "RUNNING" | "COMPLETED" | "FAILED";
+  phase: string;
+  progress: number;
+  message: string;
+  assetId: string | null;
+  errorCode: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
 };
 
 function draftFromVariant(variant: ContentVariantRow): DraftFields {
@@ -81,6 +92,7 @@ export function ApprovalsPage() {
   const [saveStatus, setSaveStatus] = useState<Record<string, DraftSaveStatus>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [imageProgress, setImageProgress] = useState<Record<string, ImageProgressState>>({});
   const [error, setError] = useState<string | null>(null);
   const draftsRef = useRef<Record<string, DraftFields>>({});
   const variantsRef = useRef<ContentVariantRow[]>([]);
@@ -112,6 +124,42 @@ export function ApprovalsPage() {
   }, [selectedProfile?.id]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  function progressElapsedLabel(progress: ImageProgressState | undefined) {
+    if (!progress?.startedAt) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - new Date(progress.startedAt).getTime()) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}m ${seconds % 60}s`;
+  }
+
+  async function pollImageProgress(input: { key: string; operationId: string; profileId: string; token: string; stop: () => boolean }) {
+    while (!input.stop()) {
+      try {
+        const response = await fetch(`/api/image-generation-status?operationId=${encodeURIComponent(input.operationId)}&profileId=${encodeURIComponent(input.profileId)}`, {
+          headers: { authorization: `Bearer ${input.token}` },
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const progress = await response.json() as ImageProgressState & { operationId?: string };
+          setImageProgress((current) => ({ ...current, [input.key]: {
+            state: progress.state,
+            phase: progress.phase,
+            progress: progress.progress,
+            message: progress.message,
+            assetId: progress.assetId,
+            errorCode: progress.errorCode,
+            startedAt: progress.startedAt,
+            updatedAt: progress.updatedAt,
+          } }));
+          if (progress.state === "COMPLETED" || progress.state === "FAILED") return;
+        }
+      } catch {
+        // The POST request remains authoritative; progress polling must never cancel generation.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
 
   const assetMap = useMemo(() => new Map(assets.map((asset) => [asset.id, asset])), [assets]);
   const slidesByVariant = useMemo(() => {
@@ -307,21 +355,50 @@ export function ApprovalsPage() {
     await run(`image-${variant.id}`, async () => {
       await persistVariant(variant, draft);
       const token = await authenticatedApiToken();
-      const response = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },
-        body: JSON.stringify({
-          profileId: selectedProfile.id,
-          contentVariantId: variant.id,
-          provider: variant.provider,
-          format: variant.format,
-          visualBrief: draft.visualBrief,
-          caption: draft.caption,
-        }),
-      });
-      const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
-      await reload();
+      const key = `image-${variant.id}`;
+      const operationId = crypto.randomUUID();
+      let stopPolling = false;
+      setImageProgress((current) => ({ ...current, [key]: {
+        state: "RUNNING",
+        phase: "STARTING",
+        progress: 1,
+        message: "Avvio generazione immagine.",
+        assetId: null,
+        errorCode: null,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } }));
+      const poller = pollImageProgress({ key, operationId, profileId: selectedProfile.id, token, stop: () => stopPolling });
+      try {
+        const response = await fetch("/api/generate-image", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": operationId },
+          body: JSON.stringify({
+            profileId: selectedProfile.id,
+            contentVariantId: variant.id,
+            provider: variant.provider,
+            format: variant.format,
+            visualBrief: draft.visualBrief,
+            caption: draft.caption,
+          }),
+        });
+        const body = await response.json() as ImageResponse;
+        if (!response.ok || !body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
+        setImageProgress((current) => ({ ...current, [key]: {
+          state: "COMPLETED",
+          phase: "COMPLETED",
+          progress: 100,
+          message: "Immagine generata e salvata.",
+          assetId: body.asset?.id ?? null,
+          errorCode: null,
+          startedAt: current[key]?.startedAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } }));
+        await reload();
+      } finally {
+        stopPolling = true;
+        await poller.catch(() => undefined);
+      }
     });
   }
 
@@ -329,22 +406,51 @@ export function ApprovalsPage() {
     if (!selectedProfile || variant.format !== "CAROUSEL") return;
     await run(`slide-image-${slide.id}`, async () => {
       const token = await authenticatedApiToken();
-      const response = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": crypto.randomUUID() },
-        body: JSON.stringify({
-          profileId: selectedProfile.id,
-          contentVariantId: variant.id,
-          carouselSlideId: slide.id,
-          provider: variant.provider,
-          format: "CAROUSEL",
-          visualBrief: slide.visual_brief,
-          caption: [slide.headline, slide.body].filter(Boolean).join(" — "),
-        }),
-      });
-      const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error("Visuale della slide non salvato. Riprova tra poco.");
-      await reload();
+      const key = `slide-image-${slide.id}`;
+      const operationId = crypto.randomUUID();
+      let stopPolling = false;
+      setImageProgress((current) => ({ ...current, [key]: {
+        state: "RUNNING",
+        phase: "STARTING",
+        progress: 1,
+        message: "Avvio generazione visuale della slide.",
+        assetId: null,
+        errorCode: null,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } }));
+      const poller = pollImageProgress({ key, operationId, profileId: selectedProfile.id, token, stop: () => stopPolling });
+      try {
+        const response = await fetch("/api/generate-image", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-post-automatici-operation-id": operationId },
+          body: JSON.stringify({
+            profileId: selectedProfile.id,
+            contentVariantId: variant.id,
+            carouselSlideId: slide.id,
+            provider: variant.provider,
+            format: "CAROUSEL",
+            visualBrief: slide.visual_brief,
+            caption: [slide.headline, slide.body].filter(Boolean).join(" — "),
+          }),
+        });
+        const body = await response.json() as ImageResponse;
+        if (!response.ok || !body.asset?.id) throw new Error("Visuale della slide non salvato. Riprova tra poco.");
+        setImageProgress((current) => ({ ...current, [key]: {
+          state: "COMPLETED",
+          phase: "COMPLETED",
+          progress: 100,
+          message: "Visuale della slide generato e salvato.",
+          assetId: body.asset?.id ?? null,
+          errorCode: null,
+          startedAt: current[key]?.startedAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } }));
+        await reload();
+      } finally {
+        stopPolling = true;
+        await poller.catch(() => undefined);
+      }
     });
   }
 
@@ -404,6 +510,15 @@ export function ApprovalsPage() {
                       <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
                       <p><strong>Visuale:</strong> {slide.visual_brief}</p>
                       {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
+                      {busy[`slide-image-${slide.id}`] && (() => {
+                        const progress = imageProgress[`slide-image-${slide.id}`];
+                        const value = progress?.progress ?? 1;
+                        return <div className="image-generation-progress" aria-live="polite">
+                          <div className="image-progress-heading"><strong>Avanzamento per fasi</strong><span>{value}%</span></div>
+                          <div className="image-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><span style={{ width: `${value}%` }} /></div>
+                          <div className="image-progress-meta"><span>{progress?.message ?? "Avvio generazione…"}</span><small>{progressElapsedLabel(progress)}</small></div>
+                        </div>;
+                      })()}
                       <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`]} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] ? "Generazione…" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
                     </article>;
                   })}
@@ -424,8 +539,17 @@ export function ApprovalsPage() {
                   {Array.isArray((variant.qa_result as { reasons?: unknown[] })?.reasons) && <p>{((variant.qa_result as { reasons?: unknown[] }).reasons ?? []).map(String).join(" · ")}</p>}
                 </details>
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
+                {variant.format !== "CAROUSEL" && busy[`image-${variant.id}`] && (() => {
+                  const progress = imageProgress[`image-${variant.id}`];
+                  const value = progress?.progress ?? 1;
+                  return <div className="image-generation-progress" aria-live="polite">
+                    <div className="image-progress-heading"><strong>Avanzamento per fasi</strong><span>{value}%</span></div>
+                    <div className="image-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}><span style={{ width: `${value}%` }} /></div>
+                    <div className="image-progress-meta"><span>{progress?.message ?? "Avvio generazione…"}</span><small>{progressElapsedLabel(progress)}</small></div>
+                  </div>;
+                })()}
                 <div className="approval-actions">
-                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
+                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? `${imageProgress[`image-${variant.id}`]?.progress ?? 1}% · Generazione` : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
                   <button className="secondary-button" type="button" disabled={busy[`qa-${variant.id}`] || currentSaveStatus === "SAVING" || currentSaveStatus === "WAITING"} onClick={() => void runQa(variant)}><CheckCircle2 size={16} /> {busy[`qa-${variant.id}`] ? "QA in corso…" : variant.qa_status === "PASS" ? "Riesegui QA" : "Esegui QA"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady || variant.qa_status !== "PASS"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Rifiuta</button>
