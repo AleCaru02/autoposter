@@ -821,4 +821,64 @@ export async function runContentQa(input:{
       await qaAsset(variant.image_asset_id?assetMap.get(variant.image_asset_id)??null:null,variant.visual_brief??"",variant.alt_text);
     }
 
-    const recent=a
+    const recent=await recentContent(sql,input.profileId,item.id);
+    const duplicate=findNearDuplicate(
+      {id:item.id,topic:item.topic,angle:item.title,hook:variant.hook,caption:variant.caption},
+      recent as ContentDedupeCandidate[],
+    );
+
+    const semanticCopy=editorial.checks.copyQuality==="PASS"&&editorial.checks.grammar==="PASS"&&
+      editorial.checks.formatFit==="PASS"&&editorial.checks.ctaFit==="PASS"&&editorial.checks.hashtagFit==="PASS"?"PASS" as const:"FAIL" as const;
+    const semanticBrand=editorial.checks.brandConsistency==="PASS"&&editorial.checks.claimSafety==="PASS"?"PASS" as const:"FAIL" as const;
+    const platformStatus=editorial.checks.platformFit==="PASS"&&platformRuntimeSupports(variant.provider,variant.format)&&variant.eligible?"PASS" as const:"FAIL" as const;
+    const factStatus=normalizeFactStatus(fact);
+
+    const slideQa:CarouselSlideQaResult[]=variant.format==="CAROUSEL"?slides.map((slide)=>{
+      const semantic=editorial.slideChecks.find((check)=>check.slideNumber===slide.position);
+      const asset=slide.asset_id?assetMap.get(slide.asset_id)??null:null;
+      const identity=visualIdentityStatus(profile.profile_type,asset,variant);
+      const technical=visualTechnicalStatus(asset,variant.format);
+      const visual=asset?visualResults.get(asset.id)??null:null;
+      const slideVisual=visualStatus(visual,technical,identity);
+      const slideFact=factStatusForSlide(fact,slide.position);
+      const copyStatus:ContentQaStatus=semantic?.copyStatus==="PASS"&&Boolean(slide.headline.trim())&&Boolean(slide.purpose.trim())?"PASS":"FAIL";
+      const brandStatus:ContentQaStatus=semantic?.brandStatus==="PASS"&&identity==="PASS"?"PASS":"FAIL";
+      const slidePlatform:ContentQaStatus=semantic?.platformStatus==="PASS"?"PASS":"FAIL";
+      const qualityStatus=combine([copyStatus,slideVisual,slideFact,brandStatus,slidePlatform]);
+      const reasons=[
+        semantic?.reason,
+        slideVisual!=="PASS"?"Visuale/asset non conforme":null,
+        slideFact==="NEEDS_SOURCE"?"Claim esterno senza fonte verificabile":slideFact==="FAIL"?"Claim non verificato o contraddetto":null,
+        identity==="FAIL"?"Identità Personal Brand non certificata":null,
+      ].filter((value):value is string=>Boolean(value));
+      return {slideId:slide.id,slideNumber:slide.position,copyStatus,visualStatus:slideVisual,factStatus:slideFact,brandStatus,qualityStatus,reason:reasons.join(" | ")||"PASS"};
+    }):[];
+
+    let visualStatusGlobal:ContentQaStatus;
+    if(variant.format==="CAROUSEL")visualStatusGlobal=combine(slideQa.map((slide)=>slide.visualStatus));
+    else{
+      const asset=variant.image_asset_id?assetMap.get(variant.image_asset_id)??null:null;
+      visualStatusGlobal=visualStatus(asset?visualResults.get(asset.id)??null:null,visualTechnicalStatus(asset,variant.format),visualIdentityStatus(profile.profile_type,asset,variant));
+    }
+
+    const brandStatus:ContentQaStatus=combine([semanticBrand,...slideQa.map((slide)=>slide.brandStatus)]);
+    const copyStatus:ContentQaStatus=combine([semanticCopy,...slideQa.map((slide)=>slide.copyStatus)]);
+    const duplicateStatus:ContentQaStatus=duplicate?"FAIL":"PASS";
+    const budgetStatus:ContentQaStatus="PASS";
+    const slideOverall=slideQa.length?combine(slideQa.map((slide)=>slide.qualityStatus)):"PASS";
+    const overallStatus=combine([brandStatus,copyStatus,visualStatusGlobal,factStatus,platformStatus,duplicateStatus,budgetStatus,slideOverall]);
+    const reasonParts=[
+      editorial.verdict!=="PASS"?editorial.reasons.slice(0,3).join(" | "):null,
+      factStatus==="NEEDS_SOURCE"?"Fact QA: fonte necessaria":factStatus==="FAIL"?"Fact QA: claim bloccato":null,
+      visualStatusGlobal!=="PASS"?"Visual QA non superato":null,
+      platformStatus!=="PASS"?"Formato/provider non certificato per publishing":null,
+      duplicate?`Duplicate QA: similarità ${duplicate.score.toFixed(3)}`:null,
+      slideOverall!=="PASS"?"Una o più slide non superano il QA":null,
+    ].filter((value):value is string=>Boolean(value));
+    const reason=reasonParts.join(" | ")||"PASS";
+
+    const editorialCost=editorial.usage.estimatedCostUsd;
+    const factCost=estimateTerraCostUsd(fact.usage.inputTokens,fact.usage.outputTokens)+fact.usage.webSearchCalls*0.01;
+    const visualCost=[...visualResults.values()].reduce((total,result)=>total+result.usage.estimatedCostUsd,0);
+    const usageRows=[
+      {operation:"AGENT_CONTENT_QA",model:editorial.model,input_tokens:editorial.usage.inputTokens,o
