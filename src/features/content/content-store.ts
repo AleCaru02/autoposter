@@ -41,6 +41,11 @@ export type ContentVariantRow = {
   image_asset_id: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
+  factual_basis: string[];
+  qa_status: "PENDING" | "PASS" | "FAIL" | "NEEDS_SOURCE";
+  qa_fingerprint: string | null;
+  qa_result: Record<string, unknown>;
+  qa_checked_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -124,6 +129,7 @@ export async function saveGeneratedContent(input: {
     hashtags: variant.hashtags,
     visual_brief: variant.visualBrief,
     alt_text: variant.altText,
+    factual_basis: variant.factualBasis,
     approval_status: "PENDING" as ApprovalStatus,
     updated_at: now,
     _key: variantKey(variant.provider, variant.format, index),
@@ -229,7 +235,7 @@ export async function loadContentWorkflow(profileId: string) {
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
-    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,created_at,updated_at")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
