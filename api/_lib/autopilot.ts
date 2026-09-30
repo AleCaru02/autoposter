@@ -18,6 +18,10 @@ import { decideMasterEditorial, type MasterEditorialDecision } from "./master-ed
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
 import { higgsfieldConfigured } from "./higgsfield.js";
 import { decideVisualRuntime } from "./visual-runtime-decision.js";
+import { buildEditorialMemoryInstruction, refreshProfileEditorialMemory } from "./editorial-memory.js";
+import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
+import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { semanticContentSimilarity } from "./content-dedupe.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -155,6 +159,8 @@ export async function currentSpend(sql:Sql,profileId:string){const rows=await sq
 async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const learning=await activeLearningInsights(sql,profile.id);const planItem=selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,AUTOPILOT_PUBLISH_FORMATS[provider],learning);const format=chooseAutopilotPublishFormat(provider,count,planItem?.format,learnedFormat);const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;const objective=planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
+  const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
+  const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
   if(profile.profile_type==="PERSONAL_BRAND"&&!objective)throw new Error("PERSONAL_BRAND_OBJECTIVE_REQUIRED");
   const configuredResearch=normalizeEditorialResearchMode(asObject(strategy?.platform_strategy).researchMode);
   const researchMode=planItem?.intent==="NEWS"?"NEWS":configuredResearch;
@@ -205,11 +211,24 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       analyticsSampleCount:Number(metricRows[0]?.count??0),
       learningSignalCount:usableLearningDecisions(profile.id,learning).length,
       reusableAssetCount:Number(assetRows[0]?.count??0),
+      editorialMemory:{
+        activeSeriesCount:memory.continuity.activeSeries.length,
+        suggestedNextTopicIntent:memory.continuity.suggestedNextTopicIntent,
+        underusedPillars:memory.balance.underusedPillars,
+        overusedPillars:memory.balance.overusedPillars,
+        feedbackSignalCount:memory.feedback.weightedSignals.length,
+        recentSubjects:memory.recent.subjects,
+        recentVisualArchetypes:memory.recent.visualArchetypes,
+      },
     },
   });
   master.timing={scheduledAt,source:timingSource};
   if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
-  const baseTopicRequest=effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);const topicRequest=[baseTopicRequest,learningInstruction].filter(Boolean).join(" ");
+  const baseTopicRequest=effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");
+  const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);
+  const profileStrategyInstruction=profileTypeStrategyInstruction({profileType:profile.profile_type,industry:profile.industry,businessModel:context.businessModel,offer:context.description,audience:context.target,objective,provider});
+  const memoryInstruction=buildEditorialMemoryInstruction(memory);
+  const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction].filter(Boolean).join("\n\n");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
   const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
   const reservation=await meter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity,requestFingerprint:{provider,format,scheduledAt,topicRequest,objective,researchMode}});
