@@ -43,6 +43,8 @@ export type SimulatedSmmContent = {
   memoryBeforeCount: number;
   memoryAfterCount: number;
   memoryInstructionChanged: boolean;
+  antiRepetitionReasons: string[];
+  duplicateScore: number | null;
   gates: Record<SmmCertificationGate,"PASS"|"FAIL">;
 };
 
@@ -249,7 +251,7 @@ export function runProfileSmmCertificationSimulation(
       subject:subjectDecision.subject,visualArchetype:subjectDecision.visualArchetype,
       seriesId:continuity.seriesId,seriesSequence:continuity.sequenceNumber,previousContentId:continuity.previousContentId,
       nextTopicIntent:continuity.nextTopicIntent,memoryBeforeCount:memory.sourceContentCount,memoryAfterCount:nextMemory.sourceContentCount,
-      memoryInstructionChanged:instructionChanged,gates,
+      memoryInstructionChanged:instructionChanged,antiRepetitionReasons:repetition.reasons,duplicateScore:duplicate?.score??null,gates,
     });
     memory=nextMemory;
   }
