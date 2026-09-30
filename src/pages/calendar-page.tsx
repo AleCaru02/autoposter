@@ -168,7 +168,7 @@ function jobStatus(job: CalendarJobRow, timezone: string) {
   if (job.state === "PROCESSING") return "In pubblicazione";
   if (job.state === "PUBLISHED") return job.published_at ? `Pubblicato · ${timeLabel(job.published_at, timezone)}` : "Pubblicato";
   if (job.state === "BLOCKED_APPROVAL") return "Revisione richiesta";
-  if (job.state === "FAILED" && job.outcome_unknown) return "Esito remoto da verificare";
+  if (job.state === "FAILED" && job.outcome_unknown) return "Da verificare sul social";
   if (job.state === "FAILED") return "Pubblicazione fallita";
   if (job.next_attempt_at) return `Da riprovare · ${timeLabel(job.next_attempt_at, timezone)}`;
   return "Programmato";
