@@ -10,9 +10,9 @@ function record(value: unknown): Record<string, unknown> {
 
 function strings(value: unknown, max: number) {
   return Array.isArray(value)
-    ? value
+    ? [...new Set(value
         .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-        .map((item) => item.trim())
+        .map((item) => item.trim()))]
         .slice(0, max)
     : [];
 }
