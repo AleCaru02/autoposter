@@ -8,7 +8,7 @@ function json(body: unknown, status = 200) {
 }
 
 function statusForError(detail: string) {
-  if (detail.includes("CONTENT_REVIEW_INPUT_INVALID")) return 400;
+  if (detail.includes("CONTENT_REVIEW_INPUT_INVALID") || detail.includes("CONTENT_REJECTION_REASON_REQUIRED") || detail.includes("CONTENT_QA_PASS_REQUIRED") || detail.includes("CONTENT_SAVE_BEFORE_APPROVAL")) return 400;
   if (detail.includes("CONTENT_REVIEW_NOT_FOUND")) return 404;
   if (detail.includes("CONTENT_REVIEW_STALE")) return 409;
   if (detail.includes("CONTENT_REVIEW_FORBIDDEN")) return 403;
