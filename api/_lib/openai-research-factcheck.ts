@@ -232,34 +232,91 @@ export async function runOpenAIFactCheckAgent(input: {
   requireWebSearch?: boolean;
   fetcher?: typeof fetch;
 }): Promise<FactCheckAgentResult> {
-  const result = await callStructured({
+  const baseInstructions = [
+    "Sei il Fact-check Agent di Post Automatici.",
+    "Classifica ogni affermazione materiale come EXTERNAL, BRAND, INTERNAL oppure EDITORIAL.",
+    "EXTERNAL: fatti sul mondo, norme, date, prezzi di mercato, dati, news o statistiche. Devono avere una fonte verificabile; se manca o non è verificabile usa UNSUPPORTED e verdict=NEEDS_SOURCE.",
+    "BRAND: informazioni specifiche dell'attività o Personal Brand. Possono essere verificate solo con brandFacts, sito confermato, userProvidedContext o provenance esplicita forniti nel payload; una fonte generale non basta.",
+    "INTERNAL: metriche, risultati o dati interni del profilo. Sono verificati solo se l'evidenza interna è presente nel payload; altrimenti usa UNSUPPORTED.",
+    "EDITORIAL: opinioni, consigli, hook, CTA o formulazioni non fattuali. Usa status=NOT_FACTUAL, sourceRequired=false e non inventare una verifica.",
+    "Per un carosello valorizza slideNumber quando il claim appartiene chiaramente a una slide; usa null per claim globali.",
+    "Se una fonte contraddice il claim usa CONTRADICTED e verdict=BLOCK. Per fatti che possono cambiare usa TIME_SENSITIVE e richiedi evidenza attuale.",
+    "Non approvare per plausibilità e non inventare fonti. Se un claim esterno richiede fonte e non può essere verificato, verdict=NEEDS_SOURCE.",
+    "Quando usi la ricerca web per un confronto fra più piattaforme, aziende, prodotti o soggetti, cerca evidenze per TUTTI i soggetti citati: non fermarti alla prima entità trovata.",
+  ].join("\n");
+
+  const first = await callStructured({
     apiKey: input.apiKey,
     fetcher: input.fetcher,
     useWebSearch: input.allowWebSearch,
     requireWebSearch: input.requireWebSearch,
     schema: FACTCHECK_SCHEMA,
     schemaName: "post_automatici_fact_check_agent",
-    instructions: [
-      "Sei il Fact-check Agent di Post Automatici.",
-      "Classifica ogni affermazione materiale come EXTERNAL, BRAND, INTERNAL oppure EDITORIAL.",
-      "EXTERNAL: fatti sul mondo, norme, date, prezzi di mercato, dati, news o statistiche. Devono avere una fonte verificabile; se manca o non è verificabile usa UNSUPPORTED e verdict=NEEDS_SOURCE.",
-      "BRAND: informazioni specifiche dell'attività o Personal Brand. Possono essere verificate solo con brandFacts, sito confermato, userProvidedContext o provenance esplicita forniti nel payload; una fonte generale non basta.",
-      "INTERNAL: metriche, risultati o dati interni del profilo. Sono verificati solo se l'evidenza interna è presente nel payload; altrimenti usa UNSUPPORTED.",
-      "EDITORIAL: opinioni, consigli, hook, CTA o formulazioni non fattuali. Usa status=NOT_FACTUAL, sourceRequired=false e non inventare una verifica.",
-      "Per un carosello valorizza slideNumber quando il claim appartiene chiaramente a una slide; usa null per claim globali.",
-      "Se una fonte contraddice il claim usa CONTRADICTED e verdict=BLOCK. Per fatti che possono cambiare usa TIME_SENSITIVE e richiedi evidenza attuale.",
-      "Non approvare per plausibilità e non inventare fonti. Se un claim esterno richiede fonte e non può essere verificato, verdict=NEEDS_SOURCE.",
-    ].join("\n"),
+    instructions: baseInstructions,
     payload: { topic: input.topic, content: input.content, research: input.research, existingSources: input.existingSources },
   });
-  const parsed = result.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
+  const firstParsed = first.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
+  const firstClaims = Array.isArray(firstParsed.checkedClaims) ? firstParsed.checkedClaims : [];
+  const firstSources = [...new Set([...input.existingSources, ...sources(first.body)])].slice(0, 20);
+  const firstUsage = usage(first.body);
+
+  if (firstParsed.verdict !== "NEEDS_SOURCE" || !input.allowWebSearch) {
+    return {
+      verdict: firstParsed.verdict,
+      checkedClaims: firstClaims,
+      sources: firstSources,
+      responseId: typeof first.body.id === "string" ? first.body.id : "",
+      requestId: first.requestId,
+      model: typeof first.body.model === "string" ? first.body.model : "gpt-5.6-terra",
+      usage: firstUsage,
+    };
+  }
+
+  const repairFocus = firstClaims
+    .filter((claim) => claim.sourceRequired && (claim.status === "UNSUPPORTED" || claim.status === "TIME_SENSITIVE"))
+    .map((claim) => ({ claim: claim.claim, claimType: claim.claimType, slideNumber: claim.slideNumber, reason: claim.reason }))
+    .slice(0, 12);
+
+  const second = await callStructured({
+    apiKey: input.apiKey,
+    fetcher: input.fetcher,
+    useWebSearch: true,
+    requireWebSearch: true,
+    schema: FACTCHECK_SCHEMA,
+    schemaName: "post_automatici_fact_check_repair",
+    instructions: [
+      baseInstructions,
+      "Questo è un secondo pass di riparazione perché il primo controllo ha trovato claim senza fonte.",
+      "Usa obbligatoriamente la ricerca web per cercare in modo mirato evidenza per ogni claim in repairFocus.",
+      "Se il contenuto confronta più soggetti, copri esplicitamente ciascun soggetto mancante nelle fonti precedenti.",
+      "Rivaluta l'intero contenuto alla luce delle nuove fonti: PASS solo se tutti i claim materiali sono verificati; BLOCK se contraddetti; NEEDS_SOURCE solo se restano davvero senza prova.",
+    ].join("\n"),
+    payload: {
+      topic: input.topic,
+      content: input.content,
+      research: input.research,
+      existingSources: firstSources,
+      previousCheckedClaims: firstClaims,
+      repairFocus,
+    },
+  });
+  const secondParsed = second.parsed as unknown as { verdict: "PASS" | "BLOCK" | "NEEDS_SOURCE"; checkedClaims: FactCheckClaim[] };
+  const secondClaims = Array.isArray(secondParsed.checkedClaims) ? secondParsed.checkedClaims : [];
+  const secondSources = [...new Set([...firstSources, ...sources(second.body)])].slice(0, 20);
+  const secondUsage = usage(second.body);
+
   return {
-    verdict: parsed.verdict,
-    checkedClaims: Array.isArray(parsed.checkedClaims) ? parsed.checkedClaims : [],
-    sources: [...new Set([...input.existingSources, ...sources(result.body)])].slice(0, 20),
-    responseId: typeof result.body.id === "string" ? result.body.id : "",
-    requestId: result.requestId,
-    model: typeof result.body.model === "string" ? result.body.model : "gpt-5.6-terra",
-    usage: usage(result.body),
+    verdict: secondParsed.verdict,
+    checkedClaims: secondClaims,
+    sources: secondSources,
+    responseId: typeof second.body.id === "string" ? second.body.id : "",
+    requestId: second.requestId,
+    model: typeof second.body.model === "string" ? second.body.model : "gpt-5.6-terra",
+    usage: {
+      inputTokens: firstUsage.inputTokens + secondUsage.inputTokens,
+      outputTokens: firstUsage.outputTokens + secondUsage.outputTokens,
+      totalTokens: firstUsage.totalTokens + secondUsage.totalTokens,
+      webSearchCalls: firstUsage.webSearchCalls + secondUsage.webSearchCalls,
+    },
   };
 }
