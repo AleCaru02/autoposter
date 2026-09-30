@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { buildImagePrompt, estimateImageCostUsd, generateOpenAIImage, imageSizeForFormat } from "../api/_lib/openai-image.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
@@ -143,5 +144,13 @@ assert.equal(result.usage.inputTokens, 150);
 assert.equal(result.usage.outputTokens, 1280);
 assert.equal(result.usage.totalTokens, 1430);
 assert.equal(result.usage.estimatedCostUsd, imageCost + mediaCost);
+
+const workerRuntime = fs.readFileSync("cloudflare/worker.ts", "utf8");
+assert.match(workerRuntime, /select=id,name,industry,profile_type/, "production Worker image route must load profile type");
+assert.match(workerRuntime, /select=tone_of_voice,visual_identity/, "production Worker image route must load the selected profile visual identity");
+assert.match(workerRuntime, /profileType:\s*profile\.profile_type/, "production Worker must propagate Personal Brand vs Business");
+assert.match(workerRuntime, /brandColors:\s*brandVisual\.colors/, "production Worker must pass profile colors to OpenAI Images");
+assert.match(workerRuntime, /brandFonts:\s*brandVisual\.fonts/, "production Worker must pass profile fonts to OpenAI Images");
+assert.match(workerRuntime, /brandVisualStyle:\s*brandVisual\.visualStyle/, "production Worker must pass profile visual style to OpenAI Images");
 
 console.log("PASS OpenAI image contract: Media Manager OpenAI precede esclusivamente gpt-image-2; qualità high e costo totale tracciato.");
