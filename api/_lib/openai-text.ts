@@ -1,6 +1,6 @@
 import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
 import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
-import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, type ResearchAgentResult } from "./openai-research-factcheck.js";
+import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
 import { platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -568,8 +568,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const cachedInputTokens = typeof inputDetails.cached_tokens === "number" ? inputDetails.cached_tokens : 0;
   const cacheWriteTokens = typeof inputDetails.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0;
   const mainWebSearchCalls = countWebSearchCalls(body);
-  const mainSources = copyUsesWebSearch ? extractWebSearchSources(body) : [];
-  const combinedSources = [...new Set([...(dedicatedResearch?.sources ?? []), ...mainSources])].slice(0, 20);
+  const mainSources = copyUsesWebSearch ? trustedVerificationSources(extractWebSearchSources(body)) : [];
+  const combinedSources = trustedVerificationSources([...(dedicatedResearch?.sources ?? []), ...mainSources]);
 
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
   const factCheckRuns: Array<Awaited<ReturnType<typeof runOpenAIFactCheckAgent>>> = [];
