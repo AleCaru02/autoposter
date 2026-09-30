@@ -58,6 +58,9 @@ assert.equal(calls[1].body.size, "1024x1024");
 assert.equal(calls[1].body.n, 1);
 assert.equal(calls[1].body.output_format, "png");
 assert.match(calls[1].body.prompt, /PROMPT MEDIA MANAGER/);
+assert.ok(String(calls[1].body.prompt).length >= 600, "un prompt visuale troppo corto deve essere arricchito prima di gpt-image-2");
+assert.match(String(calls[1].body.prompt), /Composizione e gerarchia:/);
+assert.match(String(calls[1].body.prompt), /Stile, luce e atmosfera:/);
 assert.equal(JSON.stringify(calls.map((call) => call.body)).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
 
 const mediaCost = estimateTerraCostUsd(100, 80);
