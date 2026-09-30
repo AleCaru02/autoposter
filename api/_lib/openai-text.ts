@@ -290,8 +290,13 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
   }
   const count = requestedStructuralCount(topic, objective);
   if (count) {
+    const countWords: Record<number, string> = { 2: "due", 3: "tre", 4: "quattro", 5: "cinque", 6: "sei", 7: "sette", 8: "otto", 9: "nove", 10: "dieci" };
     for (const variant of content.variants) {
-      if (variant.format === "POST" && !hasNumberedStructure(variant.caption, count)) {
+      if (variant.format !== "POST") continue;
+      const copy = variant.caption.toLowerCase();
+      const word = countWords[count] ?? "";
+      const countMentioned = copy.includes(String(count)) || (word ? copy.includes(word) : false);
+      if (!countMentioned && !hasNumberedStructure(variant.caption, count)) {
         issues.push(`REQUESTED_COUNT_MISSING:${variant.provider}:${count}`);
       }
     }
