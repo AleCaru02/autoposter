@@ -14,6 +14,13 @@ export type EditorialQAResult = {
     claimSafety: "PASS" | "FAIL";
     visualSafety: "PASS" | "FAIL";
   };
+  slideChecks: Array<{
+    slideNumber: number;
+    copyStatus: "PASS" | "FAIL";
+    brandStatus: "PASS" | "FAIL";
+    platformStatus: "PASS" | "FAIL";
+    reason: string;
+  }>;
   responseId: string;
   requestId: string | null;
   model: "gpt-5.6-terra";
@@ -42,8 +49,24 @@ const QA_SCHEMA = {
       },
       required: ["brandConsistency", "copyQuality", "grammar", "platformFit", "formatFit", "ctaFit", "hashtagFit", "claimSafety", "visualSafety"],
     },
+    slideChecks: {
+      type: "array",
+      maxItems: 10,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          slideNumber: { type: "integer", minimum: 1, maximum: 10 },
+          copyStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          brandStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          platformStatus: { type: "string", enum: ["PASS", "FAIL"] },
+          reason: { type: "string", maxLength: 300 },
+        },
+        required: ["slideNumber", "copyStatus", "brandStatus", "platformStatus", "reason"],
+      },
+    },
   },
-  required: ["verdict", "reasons", "checks"],
+  required: ["verdict", "reasons", "checks", "slideChecks"],
 } as const;
 
 function outputText(body: Record<string, unknown>) {
@@ -89,6 +112,7 @@ export async function runOpenAIEditorialQA(input: {
         "Valuta separatamente coerenza di brand, qualità del copy, grammatica, fit piattaforma/formato, CTA, hashtag, sicurezza dei claim e sicurezza del visual. Blocca i problemi materiali.",
         "Non bocciare per preferenze stilistiche minori: BLOCK solo per problemi materiali che rendono rischiosa o scadente la pubblicazione automatica.",
         "Per GBP richiedi utilità aziendale/locale concreta e niente engagement bait. Per LinkedIn richiedi tono professionale autonomo. Per Story richiedi brevità e leggibilità mobile.",
+        "Per CAROUSEL restituisci una slideCheck per ogni slide ricevuta, nello stesso ordine. Ogni slide deve avere un solo compito, copy leggibile, coerenza di brand e fit piattaforma. Per formati non CAROUSEL restituisci slideChecks vuoto.",
         "Se Fact-check è stato eseguito e non risulta PASS, verdict deve essere BLOCK.",
         "Restituisci esclusivamente JSON conforme allo schema.",
       ].join("\n"),
@@ -110,7 +134,7 @@ export async function runOpenAIEditorialQA(input: {
   const body = JSON.parse(raw) as Record<string, unknown>;
   const text = outputText(body);
   if (!text) throw new Error("OPENAI_EDITORIAL_QA_EMPTY_OUTPUT");
-  const parsed = JSON.parse(text) as Pick<EditorialQAResult, "verdict" | "reasons" | "checks">;
+  const parsed = JSON.parse(text) as Pick<EditorialQAResult, "verdict" | "reasons" | "checks" | "slideChecks">;
   const rawUsage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const inputTokens = n(rawUsage.input_tokens);
   const outputTokens = n(rawUsage.output_tokens);
