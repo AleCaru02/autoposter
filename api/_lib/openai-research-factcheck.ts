@@ -204,9 +204,8 @@ async function callStructured(input: {
   return { parsed: JSON.parse(output) as Record<string, unknown>, body, requestId };
 }
 
-export function shouldRunResearchAgent(mode: EditorialResearchMode, topic = "") {
-  if (mode === "WEBSITE_ONLY") return false;
-  return mode === "NEWS" || comparisonNeedsCrossCheck(topic);
+export function shouldRunResearchAgent(mode: EditorialResearchMode, _topic = "") {
+  return mode === "NEWS";
 }
 
 export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchMode) {
