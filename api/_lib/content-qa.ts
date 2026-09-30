@@ -682,3 +682,63 @@ export async function runContentQa(input: {
     throw reason;
   }
 }
+);
+  if(result.fingerprint!==fingerprint||typeof result.runId!=="string")return null;
+  return {...result,cached:true} as unknown as ContentQaResult;
+}
+
+export async function runContentQa(input:{
+  databaseUrl:string;
+  apiKey:string;
+  profileId:string;
+  variantId:string;
+  authUserId?:string|null;
+  actorType:"MANUAL"|"AUTOPILOT"|"SYSTEM";
+}):Promise<ContentQaResult>{
+  const sql=neon(input.databaseUrl);
+  const profile=await loadEditorialProfile(sql,input.profileId,input.authUserId??null);
+  const [items,variants,slides,brandContext]=await Promise.all([
+    sql`select id::text,profile_id::text,topic,objective,title,pillar,source_refs,fact_provenance,decision_record
+        from public.content_items where profile_id=${input.profileId}::uuid
+          and id=(select content_id from public.content_variants where id=${input.variantId}::uuid and profile_id=${input.profileId}::uuid)
+        limit 1` as unknown as ContentItemRow[],
+    sql`select id::text,content_id::text,profile_id::text,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,
+               image_asset_id::text,approval_status,factual_basis,qa_status,qa_fingerprint,qa_result,visual_identity_qa_status
+        from public.content_variants where id=${input.variantId}::uuid and profile_id=${input.profileId}::uuid limit 1` as unknown as VariantRow[],
+    sql`select id::text,profile_id::text,content_id::text,variant_id::text,position,purpose,headline,body,hierarchy,visual_brief,alt_text,
+               asset_id::text,width,height,qa_status,updated_at::text
+        from public.content_carousel_slides where variant_id=${input.variantId}::uuid and profile_id=${input.profileId}::uuid order by position` as unknown as SlideRow[],
+    loadProfileBrandContext(sql,profile),
+  ]);
+  const item=items[0],variant=variants[0];
+  if(!item||!variant)throw new Error("CONTENT_QA_VARIANT_NOT_FOUND");
+  if(variant.format==="CAROUSEL"&&(slides.length<4||slides.length>10))throw new Error("CONTENT_QA_CAROUSEL_SLIDES_INVALID");
+
+  const assetIds=[...new Set([variant.image_asset_id,...slides.map((slide)=>slide.asset_id)].filter((id):id is string=>Boolean(id)))];
+  const assets=assetIds.length?await sql`
+    select id::text,profile_id::text,kind,storage_url,mime_type,provider,model,width,height,format,quality_status,identity_status,metadata,updated_at::text
+    from public.assets where profile_id=${input.profileId}::uuid and id=any(${assetIds}::uuid[])
+  ` as unknown as AssetRow[]:[];
+  const assetMap=new Map(assets.map((asset)=>[asset.id,asset]));
+  const fingerprint=await sha256(stable({
+    item:{topic:item.topic,objective:item.objective,title:item.title,pillar:item.pillar,sourceRefs:item.source_refs,factProvenance:item.fact_provenance},
+    variant:{provider:variant.provider,format:variant.format,eligible:variant.eligible,hook:variant.hook,caption:variant.caption,cta:variant.cta,hashtags:variant.hashtags,visualBrief:variant.visual_brief,altText:variant.alt_text,factualBasis:variant.factual_basis,imageAssetId:variant.image_asset_id},
+    slides:slides.map((slide)=>({id:slide.id,position:slide.position,purpose:slide.purpose,headline:slide.headline,body:slide.body,hierarchy:slide.hierarchy,visualBrief:slide.visual_brief,altText:slide.alt_text,assetId:slide.asset_id,width:slide.width,height:slide.height})),
+    assets:assets.map((asset)=>({id:asset.id,provider:asset.provider,model:asset.model,width:asset.width,height:asset.height,format:asset.format,quality:asset.quality_status,identity:asset.identity_status,updatedAt:asset.updated_at})).sort((a,b)=>a.id.localeCompare(b.id)),
+  }));
+  const cached=cachedResult(variant,fingerprint);
+  if(cached)return cached;
+
+  const runId=crypto.randomUUID();
+  const checkedAt=new Date().toISOString();
+  const visualCount=variant.format==="CAROUSEL"?slides.length:1;
+  const projectedUsd=0.12+Math.max(1,visualCount)*0.06;
+  const budget=await new ActivityBudgetEngine(input.databaseUrl).preflight({
+    profileId:input.profileId,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:projectedUsd,costBucket:"OTHER_AI",
+  });
+  if(!budget.allowed){
+    const result:ContentQaResult={
+      runId,profileId:input.profileId,contentId:item.id,variantId:variant.id,fingerprint,cached:false,
+      overallStatus:"FAIL",brandStatus:"FAIL",copyStatus:"FAIL",visualStatus:"FAIL",factStatus:"FAIL",platformStatus:"FAIL",
+      duplicateStatus:"FAIL",budgetStatus:"FAIL",reason:budget.reason??"AI_BUDGET_HARD_STOP",slides:[],checkedAt,
+      d
