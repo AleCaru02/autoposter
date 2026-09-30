@@ -86,7 +86,7 @@ export async function runOpenAIEditorialQA(input: {
         "Sei l'Editorial QA Agent di Post Automatici.",
         "Sei l'ultimo controllo semantico prima che un contenuto possa procedere automaticamente verso media e pubblicazione.",
         "Non riscrivere il contenuto e non fare ricerca web. Devi soltanto PASS oppure BLOCK.",
-        "Blocca se il copy è incoerente con brand/obiettivo, inadatto alla piattaforma o al formato, ha CTA ingannevole/forzata, introduce claim specifici non sostenuti dalla factualBasis/verifica disponibile, oppure se il visualBrief può introdurre fatti del brand non verificati.",
+        "Valuta separatamente coerenza di brand, qualità del copy, grammatica, fit piattaforma/formato, CTA, hashtag, sicurezza dei claim e sicurezza del visual. Blocca i problemi materiali.",
         "Non bocciare per preferenze stilistiche minori: BLOCK solo per problemi materiali che rendono rischiosa o scadente la pubblicazione automatica.",
         "Per GBP richiedi utilità aziendale/locale concreta e niente engagement bait. Per LinkedIn richiedi tono professionale autonomo. Per Story richiedi brevità e leggibilità mobile.",
         "Se Fact-check è stato eseguito e non risulta PASS, verdict deve essere BLOCK.",
