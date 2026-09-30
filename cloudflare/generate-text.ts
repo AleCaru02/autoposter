@@ -69,13 +69,22 @@ export async function handleWorkerGenerateTextStatus(request: Request, env: Env)
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   const operationIdentity = (request.headers.get("x-post-automatici-operation-id") || "").trim();
   if (!profileId || !/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return json({ error: "OPERATION_ID_REQUIRED" }, 400);
-  const authUserId = await verifiedCustomerAuthUserId(token, env.DATABASE_URL);
-  if (!authUserId) return json({ error: "AUTH_REQUIRED" }, 401);
-  const sql = neon(env.DATABASE_URL);
-  try { await loadEditorialProfile(sql, profileId, authUserId); }
-  catch { return json({ error: "PROFILE_NOT_FOUND" }, 404); }
+  let accessible: Array<{ id: string }> = [];
+  try {
+    accessible = await rows<{ id: string }>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, token);
+  } catch (reason) {
+    console.error("generate-text-status-profile", { profileId, detail: reason instanceof Error ? reason.message : "UNKNOWN" });
+    return json({ error: "STATUS_UNAVAILABLE" }, 503);
+  }
+  if (!accessible.some((profile) => profile.id === profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
   const meter = new TextGenerationMetering(env.DATABASE_URL);
-  const status = await meter.getOperationStatus(profileId, "MANUAL", operationIdentity);
+  let status;
+  try {
+    status = await meter.getOperationStatus(profileId, "MANUAL", operationIdentity);
+  } catch (reason) {
+    console.error("generate-text-status", { profileId, detail: reason instanceof Error ? reason.message : "UNKNOWN" });
+    return json({ error: "STATUS_UNAVAILABLE" }, 503);
+  }
   if (!status) return json({ state: "NOT_FOUND", percent: 0, stage: "PREPARING" }, 200);
   const result = status.cached?.response && typeof status.cached.response === "object" ? status.cached.response : null;
   return json({
