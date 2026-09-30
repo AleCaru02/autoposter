@@ -1,4 +1,5 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
+import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
 
 export type VisualQaStatus = "PASS" | "FAIL";
 
@@ -102,6 +103,8 @@ export async function runOpenAIVisualQa(input:{
         "composition: una gerarchia principale chiara, massimo pochi elementi secondari, buon uso dello spazio, nessun sovraccarico, mappa affollata o collage improvvisato.",
         "technicalQuality: artefatti, anatomia quando visibile, nitidezza, prospettiva, coerenza di luce/ombre e qualità generale.",
         "socialFormat: idoneità al formato richiesto, margini sicuri, leggibilità immediata su smartphone; per STORY penalizza elementi essenziali troppo vicini a bordi/altezze occupate dalla UI.",
+        "Il visual deve inoltre essere nativo della piattaforma selezionata; usa le regole seguenti come parte del controllo socialFormat:",
+        platformVisualStrategyPrompt(input.provider as "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP"),
         "brandSafety: se sono forniti colori/font/stile del profilo, il visual deve rispettarli in modo riconoscibile. Penalizza palette arbitrarie o identità visiva scollegata. Nessun logo, prezzo, recensione, certificazione, prodotto o fatto del brand inventato/non richiesto.",
         "brandSafety deve inoltre penalizzare rappresentazioni sintetiche presentate come prove reali del brand: appartamenti, uffici, viste, prodotti, persone o risultati non confermati.",
         "Per luoghi reali, penalizza mappe, linee metro, percorsi, pin, label geografiche, edifici o relazioni spaziali aggiunti senza essere richiesti dal brief: una grafica plausibile non equivale a un dato verificato.",

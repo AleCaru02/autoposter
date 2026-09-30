@@ -119,6 +119,8 @@ assert.deepEqual(visualQaContext.brandIdentity.fonts,["Inter"]);
 assert.equal(visualQaContext.brandIdentity.visualStyle,"Minimal premium");
 assert.match(String(requestBody?.instructions),/mappe, linee metro, percorsi/i);
 assert.match(String(requestBody?.instructions),/microcopy, label, quartieri/i);
+assert.match(String(requestBody?.instructions),/STRATEGIA VISUAL Instagram/);
+assert.match(String(requestBody?.instructions),/fermare lo scroll/i);
 assert.equal(requestBody?.store,false);
 
 console.log("Content QA regression: PASS — structured global/slide QA, factual classification, visual inspection, budget and fail-closed approval.");

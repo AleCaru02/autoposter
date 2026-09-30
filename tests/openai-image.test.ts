@@ -89,6 +89,8 @@ assert.match(String(calls[0].body.instructions), /illuminazione, ombre e atmosfe
 assert.match(String(calls[0].body.instructions), /700-1800 caratteri/i);
 assert.match(String(calls[0].body.instructions), /NON inventare cartografia/i);
 assert.match(String(calls[0].body.instructions), /massimo un headline/i);
+assert.match(String(calls[0].body.instructions), /STRATEGIA VISUAL Instagram/);
+assert.match(String(calls[0].body.instructions), /fermare lo scroll/i);
 const mediaInput = JSON.parse(String(calls[0].body.input));
 assert.deepEqual(mediaInput.brand.colors, ["#112233", "#F5F1E8"]);
 assert.deepEqual(mediaInput.brand.fonts, ["Inter", "Georgia"]);
@@ -108,6 +110,8 @@ assert.match(String(calls[1].body.prompt), /Stile, luce e atmosfera:/);
 assert.match(String(calls[1].body.prompt), /Palette del profilo da rispettare: #112233, #F5F1E8/);
 assert.match(String(calls[1].body.prompt), /non inventare cartografia/i);
 assert.match(String(calls[1].body.prompt), /massimo un headline/i);
+assert.match(String(calls[1].body.prompt), /STRATEGIA VISUAL Instagram/);
+assert.match(String(calls[1].body.prompt), /fermare lo scroll/i);
 assert.equal(JSON.stringify(calls.map((call) => call.body)).includes("sk-image-test-only"), false, "la chiave non deve entrare nei body/prompt");
 
 const mediaCost = estimateTerraCostUsd(100, 80);

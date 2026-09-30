@@ -1,4 +1,5 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
+import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
 
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -95,6 +96,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
     fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
     options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
+    platformVisualStrategyPrompt(options.provider),
     "Il visual deve comunicare l'idea centrale del contenuto, non limitarsi a decorare il luogo o il settore.",
     "Una sola gerarchia principale e al massimo tre elementi secondari. Niente composizioni affollate, collage casuali, infografiche improvvisate o troppi punti focali.",
     "Per luoghi reali, quartieri, mappe, metro, strade, landmark o percorsi: non inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o label fattuali. Senza dati geografici verificati o asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale.",

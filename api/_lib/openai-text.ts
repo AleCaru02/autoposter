@@ -1,6 +1,7 @@
 import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
 import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, type ResearchAgentResult } from "./openai-research-factcheck.js";
+import { platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type SocialFormat = "POST" | "CAROUSEL" | "STORY";
@@ -381,7 +382,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     options.brand.authorizedSource ? "Questo è un Personal Brand. Mantieni identità, voce, pubblico e obiettivi del Personal Brand. authorizedSource è una singola attività sorgente esplicitamente autorizzata: usala solo come fonte fattuale per il pillar indicato. Non attribuire al Personal Brand servizi, sedi o risultati dell'attività come se fossero propri. Rispetta allowedTopics, allowedClaims e allowedCtas; liste vuote significano nessuna restrizione aggiuntiva. Non introdurre dati di altre attività." : "",
     copyUsesWebSearch ? "Per conoscenze di settore, consigli, dati generali, aggiornamenti e news puoi usare esclusivamente informazioni trovate tramite la ricerca web disponibile in questa richiesta. Se una fonte non è sufficientemente affidabile o pertinente, non usarla." : "Non introdurre fatti esterni diversi dalle evidenze esplicitamente fornite.",
     "Se il contesto non supporta un claim, omettilo. factualBasis deve distinguere sinteticamente BASE BRAND/SITO da BASE ESTERNA quando vengono usate informazioni web.",
-    "Adatta davvero il copy a Instagram, Facebook, LinkedIn e Google Business Profile: non fare semplice copia-incolla cross-platform.",
+    "Ogni piattaforma ha una strategia editoriale distinta e vincolante: non fare semplice copia-incolla cross-platform e non limitarti a cambiare poche parole.",
+    ...options.providers.map((provider) => platformStrategyPrompt(provider)),
+    "Per lo stesso tema puoi mantenere il nucleo informativo, ma hook, struttura, lunghezza, CTA, hashtag, ritmo, angolo di presentazione e visualBrief devono essere nativi della piattaforma.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
     "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
     "pillar deve indicare il pilastro editoriale concreto a cui appartiene il contenuto, non una categoria generica come 'social'.",
@@ -396,6 +399,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   ].filter(Boolean).join("\n");
   const userContext = JSON.stringify({
     task: { topic: options.topic, objective: options.objective ?? null, providers: options.providers, formats: options.formats, researchMode: research.mode, freshnessGuidanceDays: research.freshnessDays },
+    platformStrategies: selectedPlatformStrategies(options.providers),
     brand: {
       name: options.brand.profileName,
       industry: options.brand.industry,
