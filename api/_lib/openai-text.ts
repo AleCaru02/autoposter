@@ -406,6 +406,27 @@ async function repairUnsupportedContent(input: {
   };
 }
 
+function factCheckEnvelope(content: GeneratedSocialContent, brand: BrandContext, websiteContext: string) {
+  return {
+    generated: content,
+    brandFacts: {
+      name: brand.profileName,
+      industry: brand.industry,
+      websiteUrl: brand.websiteUrl,
+      description: brand.description,
+      businessModel: brand.businessModel,
+      location: brand.location,
+      serviceArea: brand.serviceArea,
+      target: brand.target,
+      tone: brand.tone,
+      goals: brand.goals,
+      userProvidedContext: brand.userContext?.trim() || null,
+      authorizedSource: brand.authorizedSource ?? null,
+    },
+    confirmedWebsiteSources: websiteContext,
+  };
+}
+
 export async function generateSocialText(options: GenerateOptions): Promise<OpenAITextResult> {
   const fetcher = options.fetcher ?? fetch;
   const model = options.model ?? "gpt-5.6-terra";
