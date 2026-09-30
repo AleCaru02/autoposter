@@ -30,6 +30,21 @@ type PageRow = { url: string; title: string | null; content_text: string | null 
 type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
 type CarouselSlideImageRow = { id: string; content_id: string; variant_id: string; visual_brief: string; headline: string; body: string; alt_text: string; asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
+type ImageGenerationOperationRow = {
+  operation_id: string;
+  profile_id: string;
+  content_variant_id: string | null;
+  carousel_slide_id: string | null;
+  state: "RUNNING" | "COMPLETED" | "FAILED";
+  phase: string;
+  progress: number;
+  message: string;
+  asset_id: string | null;
+  error_code: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -66,6 +81,68 @@ async function rows<T>(path: string, token: string): Promise<T[]> {
 async function deleteRow(path: string, token: string) {
   const response = await dataApi(path, token, { method: "DELETE" });
   if (!response.ok) console.error("data-api-delete", { path, status: response.status });
+}
+
+async function writeImageProgress(token: string, input: {
+  operationId: string;
+  profileId: string;
+  contentVariantId?: string | null;
+  carouselSlideId?: string | null;
+  state?: "RUNNING" | "COMPLETED" | "FAILED";
+  phase: string;
+  progress: number;
+  message: string;
+  assetId?: string | null;
+  errorCode?: string | null;
+}) {
+  const now = new Date().toISOString();
+  const response = await dataApi("image_generation_operations?on_conflict=operation_id", token, {
+    method: "POST",
+    headers: { prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      operation_id: input.operationId,
+      profile_id: input.profileId,
+      content_variant_id: input.contentVariantId ?? null,
+      carousel_slide_id: input.carouselSlideId ?? null,
+      state: input.state ?? "RUNNING",
+      phase: input.phase,
+      progress: Math.max(0, Math.min(100, Math.round(input.progress))),
+      message: input.message.slice(0, 500),
+      asset_id: input.assetId ?? null,
+      error_code: input.errorCode ?? null,
+      updated_at: now,
+      completed_at: input.state === "COMPLETED" || input.state === "FAILED" ? now : null,
+    }),
+  });
+  if (!response.ok) throw new Error(`IMAGE_PROGRESS_WRITE_${response.status}`);
+}
+
+async function handleImageGenerationStatus(request: Request) {
+  if (request.method !== "GET") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const token = bearer(request);
+  if (!token) return json({ error: "AUTH_REQUIRED" }, 401);
+  const url = new URL(request.url);
+  const operationId = (url.searchParams.get("operationId") || "").trim();
+  const profileId = (url.searchParams.get("profileId") || "").trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationId) || !profileId) return json({ error: "PROGRESS_INPUT_REQUIRED" }, 400);
+  const result = await rows<ImageGenerationOperationRow>(
+    `image_generation_operations?operation_id=eq.${encodeURIComponent(operationId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=operation_id,profile_id,content_variant_id,carousel_slide_id,state,phase,progress,message,asset_id,error_code,started_at,updated_at,completed_at&limit=1`,
+    token,
+  );
+  const operation = result[0];
+  if (!operation) return json({ error: "PROGRESS_NOT_FOUND" }, 404);
+  return json({
+    operationId: operation.operation_id,
+    state: operation.state,
+    phase: operation.phase,
+    progress: operation.progress,
+    message: operation.message,
+    assetId: operation.asset_id,
+    errorCode: operation.error_code,
+    startedAt: operation.started_at,
+    updatedAt: operation.updated_at,
+    completedAt: operation.completed_at,
+  });
 }
 
 function summaryField(value: unknown) {
