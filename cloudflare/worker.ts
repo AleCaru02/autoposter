@@ -297,6 +297,15 @@ async function handleGenerateText(request: Request, env: Env) {
     activeEventId = eventId;
 
     const upperUsd = estimateTextRequestUpperBoundUsd({ topic, objective, providers, formats, brand: context });
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      phase: "BUDGET_CHECK",
+      progress: 28,
+      message: "Controllo il budget AI dell'attività.",
+    });
     const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL).preflight({
       profileId,
       task: "COPY_FINAL",
@@ -363,6 +372,15 @@ async function handleGenerateImage(request: Request, env: Env) {
     const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId,
+      carouselSlideId,
+      phase: "VALIDATING",
+      progress: 5,
+      message: "Controllo contenuto, profilo e formato.",
+    });
     const brands = await rows<Pick<BrandRow, "tone_of_voice">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice&limit=1`, token);
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -381,6 +399,15 @@ async function handleGenerateImage(request: Request, env: Env) {
       caption = [savedSlide.headline, savedSlide.body].filter(Boolean).join(" — ").slice(0, 1_500);
       if (!visualBrief) return json({ error: "CAROUSEL_SLIDE_VISUAL_BRIEF_REQUIRED" }, 409);
     }
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      phase: "CHECKING_ASSETS",
+      progress: 15,
+      message: "Controllo se esiste già un visuale riutilizzabile.",
+    });
     const aspectRatio = format === "STORY" ? "2:3" : "1:1";
     const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,reuse_count,created_at&order=created_at.desc&limit=100`, token);
     const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
@@ -397,8 +424,35 @@ async function handleGenerateImage(request: Request, env: Env) {
         if (!link.ok) throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       }
-      return json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
+      await writeImageProgress(token, {
+        operationId: operationIdentity,
+        profileId,
+        contentVariantId: savedVariant?.id ?? contentVariantId,
+        carouselSlideId: savedSlide?.id ?? carouselSlideId,
+        state: "COMPLETED",
+        phase: "COMPLETED",
+        progress: 100,
+        message: "Visuale riutilizzato e salvato.",
+        assetId: asset.id,
+      });
+      return json({
+        image: { mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio },
+        asset: { id: asset.id },
+        reused: true,
+        reuseReason: reusable.reason,
+        usage: { estimatedCostUsd: 0 },
+        budget: { currency: "EUR", avoidedCostEur: 0.25 },
+      });
     }
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      phase: "METERING",
+      progress: 22,
+      message: "Verifico limiti e consumo AI.",
+    });
     const meter = new ImageGenerationMetering(env.DATABASE_URL);
     activeMeter = meter;
     const reservation = await meter.reserve({
@@ -426,6 +480,15 @@ async function handleGenerateImage(request: Request, env: Env) {
     }
     const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
     await meter.markProviderStarted(eventId, 0.25);
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      phase: "OPENAI_STARTING",
+      progress: 35,
+      message: "Avvio OpenAI Immagini 2.",
+    });
     const result = await generateRoutedImage({
       env: { OPENAI_API_KEY: env.OPENAI_API_KEY },
       budget: activityBudget,
@@ -438,8 +501,28 @@ async function handleGenerateImage(request: Request, env: Env) {
       visualBrief,
       caption,
       additionalDirection,
+      onProgress: async (update) => {
+        await writeImageProgress(token, {
+          operationId: operationIdentity,
+          profileId,
+          contentVariantId: savedVariant?.id ?? contentVariantId,
+          carouselSlideId: savedSlide?.id ?? carouselSlideId,
+          phase: update.phase,
+          progress: update.progress,
+          message: update.message,
+        });
+      },
     });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      phase: "PERSISTING_USAGE",
+      progress: 90,
+      message: "Immagine pronta. Registro utilizzo e costo.",
+    });
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
     let asset: AssetRow | null = null;
     if (savedVariant) {
@@ -473,6 +556,16 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!assetWrite.ok) throw new Error(`ASSET_WRITE_${assetWrite.status}`);
       asset = ((await assetWrite.json()) as AssetRow[])[0] ?? null;
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
+      await writeImageProgress(token, {
+        operationId: operationIdentity,
+        profileId,
+        contentVariantId: savedVariant.id,
+        carouselSlideId: savedSlide?.id ?? carouselSlideId,
+        phase: "SAVING_ASSET",
+        progress: 95,
+        message: "Salvo il visuale nella libreria dell'attività.",
+        assetId: asset.id,
+      });
       const now = new Date().toISOString();
       const link = savedSlide
         ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
@@ -484,15 +577,42 @@ async function handleGenerateImage(request: Request, env: Env) {
       await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       if (!savedSlide && savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
     }
-    const responseBody = { image: { dataUrl, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur } };
-    const cachedResponse = { image: { dataUrl: null, mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio }, asset, usage: result.usage, budget: responseBody.budget, duplicate: true };
+    const responseBody = {
+      image: { mimeType: result.mimeType, model: result.model, size: result.size, quality: result.quality, provider: result.provider, aspectRatio: result.aspectRatio },
+      asset: asset ? { id: asset.id } : null,
+      usage: result.usage,
+      budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
+    };
+    const cachedResponse = { ...responseBody, duplicate: true };
     await meter.storeResult(eventId, { response: cachedResponse, assetId: asset?.id ?? null, variantId: savedVariant?.id ?? null });
     await meter.commit(eventId);
     logicalCommitted = true;
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId: savedVariant?.id ?? contentVariantId,
+      carouselSlideId: savedSlide?.id ?? carouselSlideId,
+      state: "COMPLETED",
+      phase: "COMPLETED",
+      progress: 100,
+      message: "Immagine generata e salvata.",
+      assetId: asset?.id ?? null,
+    });
     return json(responseBody);
   } catch (reason) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
+    await writeImageProgress(token, {
+      operationId: operationIdentity,
+      profileId,
+      contentVariantId,
+      carouselSlideId,
+      state: "FAILED",
+      phase: "FAILED",
+      progress: 100,
+      message: "Generazione non completata. Puoi riprovare.",
+      errorCode: detail.slice(0, 160),
+    }).catch(() => undefined);
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return json({ error: "BLOCKED_PROVIDER" }, 503);
@@ -691,6 +811,7 @@ async function routeApi(request: Request, env: Env) {
   if (path === "/api/ai-budget-recommendation") return handleAiBudgetRecommendation(request, env);
   if (path === "/api/generate-text") return handleGenerateText(request, env);
   if (path === "/api/generate-image") return handleGenerateImage(request, env);
+  if (path === "/api/image-generation-status") return handleImageGenerationStatus(request);
   if (path === "/api/website-scan") return handleWebsiteScan(request);
   return json({ error: "API_NOT_FOUND" }, 404);
 }
