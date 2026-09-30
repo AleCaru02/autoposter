@@ -3,7 +3,7 @@ import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { OpenAITextResult } from "./openai-text.js";
 
 export const AI_CONTENT_TEXT_CAPABILITY = "ai.content.generate_text" as const;
-export const TEXT_COST_OPERATIONS = ["GENERATE_SOCIAL_TEXT","AGENT_RESEARCH","AGENT_FACTCHECK","AGENT_EDITORIAL_QA"] as const;
+export const TEXT_COST_OPERATIONS = ["GENERATE_SOCIAL_TEXT","AGENT_RESEARCH","AGENT_FACTCHECK","AGENT_COPY_REPAIR","AGENT_EDITORIAL_QA"] as const;
 
 export type TextGenerationSource = "MANUAL" | "AUTOPILOT";
 export type TechnicalAiEvent = {

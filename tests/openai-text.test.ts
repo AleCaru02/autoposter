@@ -187,6 +187,75 @@ assert.equal(forcedSourceFactCheckBody?.tool_choice, "required", "fact-check mus
 assert.equal(forcedSourceResult.verification.factCheckVerdict, "PASS");
 assert.equal(forcedSourceResult.usage.webSearchCalls, 1, "the forced verification search must be tracked in usage");
 
+let repairFlowCall = 0;
+let repairRequestBody: Record<string, any> | null = null;
+const unsafeComparisonContent = {
+  ...generated,
+  editorialTopic: "Airbnb e Booking",
+  variants: [{ ...generated.variants[0], caption: "Airbnb trattiene il 99% e Booking il 12%: 5 differenze.", factualBasis: ["BASE ESTERNA"] }],
+};
+const repairedComparisonContent = {
+  ...generated,
+  editorialTopic: "Airbnb e Booking",
+  variants: [{ ...generated.variants[0], caption: "Airbnb e Booking hanno aspetti diversi da valutare: costi, regole, operatività, pubblico e gestione del canale.", factualBasis: ["BASE BRAND/SITO"] }],
+};
+const repairFlowFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
+  repairFlowCall += 1;
+  const request = JSON.parse(String(init?.body)) as Record<string, any>;
+  if (repairFlowCall === 1) {
+    return new Response(JSON.stringify({
+      id: "resp_repair_generation", model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(unsafeComparisonContent) }] }],
+      usage: { input_tokens: 20, output_tokens: 20, total_tokens: 40 },
+    }), { status: 200 });
+  }
+  if (repairFlowCall === 2) {
+    const checked = {
+      verdict: "NEEDS_SOURCE",
+      checkedClaims: [{ claim: "Airbnb 99% e Booking 12%", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "UNSUPPORTED", reason: "Percentuali non supportate." }],
+    };
+    return new Response(JSON.stringify({
+      id: "resp_repair_factcheck_1", model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(checked) }] }],
+      usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 },
+    }), { status: 200 });
+  }
+  if (repairFlowCall === 3) {
+    repairRequestBody = request;
+    return new Response(JSON.stringify({
+      id: "resp_copy_repair", model: "gpt-5.6-terra",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(repairedComparisonContent) }] }],
+      usage: { input_tokens: 30, output_tokens: 20, total_tokens: 50 },
+    }), { status: 200 });
+  }
+  const checked = {
+    verdict: "PASS",
+    checkedClaims: [{ claim: "5 differenze", claimType: "EDITORIAL", slideNumber: null, sourceRequired: false, status: "NOT_FACTUAL", reason: "Struttura editoriale." }],
+  };
+  return new Response(JSON.stringify({
+    id: "resp_repair_factcheck_2", model: "gpt-5.6-terra",
+    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(checked) }] }],
+    usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 },
+  }), { status: 200 });
+}) as typeof fetch;
+const repairedResult = await generateSocialText({
+  apiKey: "test-key",
+  topic: "booking vs airbnb",
+  objective: "le maggiori 5 differenze fra tutti e due",
+  providers: ["INSTAGRAM"],
+  formats: ["POST"],
+  brand,
+  fetcher: repairFlowFetcher,
+  researchMode: "WEBSITE_ONLY",
+});
+assert.equal(repairFlowCall, 4, "a NEEDS_SOURCE result must get one copy repair and one final verification");
+assert.match(String(repairRequestBody?.instructions), /Copy Repair Agent/);
+assert.doesNotMatch(repairedResult.content.variants[0].caption, /99%|12%/);
+assert.equal(repairedResult.verification.factCheckVerdict, "PASS");
+assert.ok(repairedResult.technicalEvents.some((event) => event.operation === "AGENT_COPY_REPAIR"));
+assert.equal(repairedResult.usage.inputTokens, 70);
+assert.equal(repairedResult.usage.outputTokens, 60);
+
 const carouselGenerated = {
   editorialTopic: "Checklist per preparare un immobile",
   pillar: "Affitti brevi",
