@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
-import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent } from "../api/_lib/openai-research-factcheck.js";
+import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources } from "../api/_lib/openai-research-factcheck.js";
 
 assert.equal(shouldRunResearchAgent("NEWS"), true);
-assert.equal(shouldRunResearchAgent("BALANCED"), false);
+assert.equal(shouldRunResearchAgent("BALANCED"), true);
+assert.equal(shouldRunResearchAgent("TIPS"), true);
+assert.equal(shouldRunResearchAgent("EVERGREEN"), true);
+assert.equal(shouldRunResearchAgent("WEBSITE_ONLY"), false);
+assert.deepEqual(
+  trustedVerificationSources([
+    "https://www.airbnb.com/help/article/1",
+    "https://reddit.com/r/airbnb/comments/test",
+    "https://www.booking.com/content/test.html",
+    "https://x.com/example/status/1",
+  ]),
+  ["https://www.airbnb.com/help/article/1", "https://www.booking.com/content/test.html"],
+);
 assert.equal(contentNeedsFactCheck({ caption: "Contenuto editoriale senza dati numerici sensibili." }, "BALANCED"), false);
 assert.equal(contentNeedsFactCheck({ caption: "3 consigli pratici per gestire meglio un immobile." }, "WEBSITE_ONLY"), false, "structural list counts must not trigger external fact-checking");
 assert.equal(contentNeedsFactCheck({ caption: "Abbiamo seguito 100 clienti." }, "WEBSITE_ONLY"), true, "material bare-number claims must still require fact-checking");
@@ -17,7 +29,8 @@ const researchFetcher = (async (_url: string | URL | Request, init?: RequestInit
   const request = JSON.parse(String(init?.body)) as Record<string, any>;
   assert.equal(request.model, "gpt-5.6-terra");
   assert.equal(request.store, false);
-  assert.equal(request.max_tool_calls, 1);
+  assert.equal(request.max_tool_calls, 3);
+  assert.equal(request.tool_choice, "required");
   assert.equal(request.tools[0].type, "web_search");
   const output = {
     status: "READY",
@@ -49,6 +62,47 @@ assert.equal(research.status, "READY");
 assert.equal(research.sources[0], "https://example.org/official-update");
 assert.equal(research.usage.webSearchCalls, 1);
 assert.equal(research.evidence[0].sourceType, "OFFICIAL");
+
+let comparisonResearchBody: Record<string, any> | null = null;
+const comparisonResearch = await runOpenAIResearchAgent({
+  apiKey: "sk-test-only",
+  topic: "Airbnb vs Booking: differenze",
+  industry: "Property management",
+  businessDescription: "Gestione immobili",
+  target: "Proprietari",
+  freshnessDays: 30,
+  fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+    comparisonResearchBody = JSON.parse(String(init?.body));
+    const output = {
+      status: "READY",
+      summary: "Confronto supportato da fonti primarie.",
+      evidence: [
+        { claim: "Airbnb", evidenceSummary: "Documentazione Airbnb.", sourceType: "PRIMARY", datedAt: null, reliability: "HIGH" },
+        { claim: "Booking", evidenceSummary: "Documentazione Booking.", sourceType: "PRIMARY", datedAt: null, reliability: "HIGH" },
+      ],
+    };
+    return new Response(JSON.stringify({
+      id: "resp_comparison_research",
+      model: "gpt-5.6-terra",
+      output: [
+        { type: "web_search_call", action: { sources: [
+          { url: "https://www.airbnb.com/help/article/1" },
+          { url: "https://www.booking.com/content/partners.html" },
+          { url: "https://reddit.com/r/travel/comments/noise" },
+        ] } },
+        { type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] },
+      ],
+      usage: { input_tokens: 120, output_tokens: 60, total_tokens: 180 },
+    }), { status: 200 });
+  }) as typeof fetch,
+});
+assert.equal(comparisonResearch.status, "READY");
+assert.deepEqual(comparisonResearch.sources, [
+  "https://www.airbnb.com/help/article/1",
+  "https://www.booking.com/content/partners.html",
+]);
+assert.match(String(comparisonResearchBody?.instructions), /Gerarchia fonti/i);
+assert.match(String(comparisonResearchBody?.instructions), /Reddit/i);
 
 let factCheckBody: Record<string, any> | null = null;
 const factCheckFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
