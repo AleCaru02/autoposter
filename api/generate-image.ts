@@ -20,6 +20,7 @@ type VariantRow = {
   format: ImageSocialFormat;
   image_asset_id: string | null;
 };
+type CarouselSlideImageRow = { id: string; content_id: string; variant_id: string; visual_brief: string; headline: string; body: string; alt_text: string; asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
 
 function bearer(req: VercelRequest) {
@@ -67,8 +68,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestedProvider = typeof req.body?.provider === "string" && VALID_PROVIDERS.has(req.body.provider as ImageSocialProvider) ? req.body.provider as ImageSocialProvider : null;
   const requestedFormat = typeof req.body?.format === "string" && VALID_FORMATS.has(req.body.format as ImageSocialFormat) ? req.body.format as ImageSocialFormat : null;
   const contentVariantId = typeof req.body?.contentVariantId === "string" ? req.body.contentVariantId : null;
-  const visualBrief = typeof req.body?.visualBrief === "string" ? req.body.visualBrief.trim().slice(0, 2_000) : "";
-  const caption = typeof req.body?.caption === "string" ? req.body.caption.trim().slice(0, 1_500) : null;
+  const carouselSlideId = typeof req.body?.carouselSlideId === "string" ? req.body.carouselSlideId : null;
+  let visualBrief = typeof req.body?.visualBrief === "string" ? req.body.visualBrief.trim().slice(0, 2_000) : "";
+  let caption = typeof req.body?.caption === "string" ? req.body.caption.trim().slice(0, 1_500) : null;
   const additionalDirection = typeof req.body?.additionalDirection === "string" ? req.body.additionalDirection.trim().slice(0, 700) : null;
   const operationIdentityHeader = req.headers["x-post-automatici-operation-id"];
   const operationIdentity = (Array.isArray(operationIdentityHeader) ? operationIdentityHeader[0] : operationIdentityHeader || "").trim();
@@ -91,6 +93,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!savedVariant) return res.status(404).json({ error: "CONTENT_VARIANT_NOT_FOUND" });
       if (savedVariant.provider !== requestedProvider || savedVariant.format !== requestedFormat) return res.status(409).json({ error: "CONTENT_VARIANT_MISMATCH" });
     }
+    let savedSlide: CarouselSlideImageRow | null = null;
+    if (carouselSlideId) {
+      if (!savedVariant || savedVariant.format !== "CAROUSEL") return res.status(409).json({ error: "CAROUSEL_VARIANT_REQUIRED" });
+      const slideRows = await readRows<CarouselSlideImageRow>(`content_carousel_slides?id=eq.${encodeURIComponent(carouselSlideId)}&profile_id=eq.${encodeURIComponent(profileId)}&variant_id=eq.${encodeURIComponent(savedVariant.id)}&select=id,content_id,variant_id,visual_brief,headline,body,alt_text,asset_id&limit=1`, token);
+      savedSlide = slideRows[0] ?? null;
+      if (!savedSlide) return res.status(404).json({ error: "CAROUSEL_SLIDE_NOT_FOUND" });
+      visualBrief = savedSlide.visual_brief.trim().slice(0,2_000);
+      caption = [savedSlide.headline,savedSlide.body].filter(Boolean).join(" — ").slice(0,1_500);
+      if (!visualBrief) return res.status(409).json({ error: "CAROUSEL_SLIDE_VISUAL_BRIEF_REQUIRED" });
+    }
 
     // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
     const aspectRatio = requestedFormat === "STORY" ? "2:3" : "1:1";
@@ -103,8 +115,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
         const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now } }) });
         if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
-        const link = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
-        if (!link.ok) throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
+        const link = savedSlide
+          ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
+          : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+        if (!link.ok) throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       }
       return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
@@ -116,8 +130,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileId,
       source: "MANUAL",
       operationIdentity,
-      referenceId: savedVariant?.id ?? null,
-      requestFingerprint: { contentVariantId, provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection },
+      referenceId: savedSlide?.id ?? savedVariant?.id ?? null,
+      requestFingerprint: { contentVariantId, carouselSlideId, provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection },
     });
     if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
     if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);
@@ -166,7 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           profile_id: profileId,
           source: "AI_IMAGE",
           kind: "IMAGE",
-          name: `${requestedProvider}-${requestedFormat}-${savedVariant.id}.png`,
+          name: savedSlide ? `${requestedProvider}-CAROUSEL-${savedSlide.id}.png` : `${requestedProvider}-${requestedFormat}-${savedVariant.id}.png`,
           storage_url: dataUrl,
           mime_type: result.mimeType,
           tags: [requestedProvider, requestedFormat, "AI_GENERATED"],
@@ -179,14 +193,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
 
       const now = new Date().toISOString();
-      const variantWrite = await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
-        method: "PATCH",
-        headers: { prefer: "return=minimal" },
-        body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }),
-      });
+      const variantWrite = savedSlide
+        ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+            method: "PATCH",
+            headers: { prefer: "return=minimal" },
+            body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }),
+          })
+        : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
+            method: "PATCH",
+            headers: { prefer: "return=minimal" },
+            body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }),
+          });
       if (!variantWrite.ok) {
         await deleteRow(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
-        throw new Error(`CONTENT_VARIANT_IMAGE_LINK_${variantWrite.status}`);
+        throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${variantWrite.status}` : `CONTENT_VARIANT_IMAGE_LINK_${variantWrite.status}`);
       }
       const parentWrite = await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, {
         method: "PATCH",
@@ -194,7 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }),
       });
       if (!parentWrite.ok) console.error("content-parent-reopen", { contentId: savedVariant.content_id, status: parentWrite.status });
-      if (savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) {
+      if (!savedSlide && savedVariant.image_asset_id && savedVariant.image_asset_id !== asset.id) {
         await deleteRow(`assets?id=eq.${encodeURIComponent(savedVariant.image_asset_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
       }
     }
