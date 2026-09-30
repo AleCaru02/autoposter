@@ -62,6 +62,10 @@ assert.match(vercelImage,/select=tone_of_voice,visual_identity/);
 assert.match(vercelImage,/normalizeBrandVisualIdentity/);
 assert.match(vercelImage,/generation_prompt/);
 assert.match(vercelImage,/brand_palette/);
+assert.match(vercelImage,/forceNewImage/);
+assert.match(vercelImage,/forceNewImage \? null : await findReusableAsset/);
+assert.match(page,/forceNewImage: Boolean\(variant\.image_asset_id\)/);
+assert.match(page,/forceNewImage: Boolean\(slide\.asset_id\)/);
 assert.match(page,/generateCarouselSlideImage/);
 assert.match(page,/Genera visuale slide/);
 
