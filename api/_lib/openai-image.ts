@@ -131,7 +131,18 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     metadata: { openai_response_id: mediaManager.responseId, openai_request_id: mediaManager.requestId },
   };
   const fallbackPrompt = buildImagePrompt(options);
-  const prompt = mediaManager.imagePrompt.trim() || fallbackPrompt;
+  const mediaPrompt = mediaManager.imagePrompt.trim();
+  const prompt = mediaPrompt.length >= 600
+    ? mediaPrompt
+    : [
+        mediaPrompt,
+        mediaManager.visualIntent ? `Intento visivo: ${clean(mediaManager.visualIntent, 400)}.` : "",
+        mediaManager.subject ? `Soggetto e dettagli: ${clean(mediaManager.subject, 600)}.` : "",
+        mediaManager.environment ? `Ambiente: ${clean(mediaManager.environment, 600)}.` : "",
+        mediaManager.composition ? `Composizione e gerarchia: ${clean(mediaManager.composition, 700)}.` : "",
+        mediaManager.style ? `Stile, luce e atmosfera: ${clean(mediaManager.style, 700)}.` : "",
+        fallbackPrompt,
+      ].filter(Boolean).join("\n");
   const response = await fetcher("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
