@@ -351,3 +351,61 @@ export async function refreshProfileEditorialMemory(input: {
 
   return snapshot;
 }
+
+
+export type ContinuityDecision =
+  | { mode: "STANDALONE"; seriesId: null; sequenceNumber: null; previousContentId: null; nextTopicIntent: null; continuityReason: null }
+  | { mode: "START_SERIES"; seriesId: string; sequenceNumber: 1; previousContentId: null; nextTopicIntent: string; continuityReason: string }
+  | { mode: "CONTINUE_SERIES"; seriesId: string; sequenceNumber: number; previousContentId: string; nextTopicIntent: string | null; continuityReason: string };
+
+function topicTokens(value: string) {
+  return new Set(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").split(/[^a-z0-9]+/).filter((part)=>part.length>=4));
+}
+
+function topicOverlap(a: string, b: string) {
+  const left=topicTokens(a); const right=topicTokens(b);
+  if(!left.size||!right.size)return 0;
+  let common=0; for(const token of left) if(right.has(token)) common+=1;
+  return common/Math.min(left.size,right.size);
+}
+
+export function deriveContinuityDecision(input:{
+  memory:EditorialMemorySnapshot;
+  profileType:ProfileType;
+  contentType:string;
+  intent:string;
+  topic:string;
+}):ContinuityDecision {
+  const active=input.memory.continuity.activeSeries
+    .map((series)=>({series,score:topicOverlap(input.topic,series.nextTopicIntent)}))
+    .sort((a,b)=>b.score-a.score)[0];
+  if(active && active.score>=0.34){
+    const shouldContinueAgain = input.contentType==="STORYTELLING" || input.intent==="CASE_STUDY";
+    return {
+      mode:"CONTINUE_SERIES",
+      seriesId:active.series.seriesId,
+      sequenceNumber:active.series.sequenceNumber+1,
+      previousContentId:active.series.lastContentId,
+      nextTopicIntent:shouldContinueAgain
+        ? `Prosegui naturalmente dopo “${clean(input.topic,180)}” mostrando il passaggio, la conseguenza o la lezione successiva senza ripetere ciò che è già stato detto.`
+        : null,
+      continuityReason:`Il nuovo tema sviluppa il nextTopicIntent della serie attiva (overlap ${active.score.toFixed(2)}).`,
+    };
+  }
+
+  const seriesWorthy=input.contentType==="STORYTELLING" || input.intent==="CASE_STUDY";
+  if(seriesWorthy){
+    return {
+      mode:"START_SERIES",
+      seriesId:crypto.randomUUID(),
+      sequenceNumber:1,
+      previousContentId:null,
+      nextTopicIntent:input.profileType==="PERSONAL_BRAND"
+        ? `Continua il percorso personale dopo “${clean(input.topic,180)}” con ciò che è successo, ciò che è stato imparato o il passaggio successivo.`
+        : `Approfondisci “${clean(input.topic,180)}” con il processo, la conseguenza o il caso successivo senza ripetere il contenuto iniziale.`,
+      continuityReason:`Contenuto ${input.contentType}/${input.intent} adatto a una serie; la serie nasce solo perché esiste un naturale passo successivo.`,
+    };
+  }
+
+  return {mode:"STANDALONE",seriesId:null,sequenceNumber:null,previousContentId:null,nextTopicIntent:null,continuityReason:null};
+}
