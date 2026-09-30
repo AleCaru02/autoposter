@@ -28,6 +28,9 @@ export type CalendarVariantRow = {
   hook: string | null;
   caption: string;
   approval_status: string;
+  approval_mode: "MANUAL" | "AUTO";
+  workflow_status: "DRAFT" | "REVIEW" | "REVIEW_REQUIRED" | "APPROVED" | "REJECTED";
+  qa_status: "PENDING" | "PASS" | "FAIL" | "NEEDS_SOURCE";
   eligible: boolean;
 };
 
@@ -104,7 +107,7 @@ export async function loadCalendarState(profileId: string): Promise<CalendarStat
       .not("provider", "is", null)
       .order("provider", { ascending: true }),
     neonClient.from("content_variants")
-      .select("id,content_id,profile_id,provider,format,hook,caption,approval_status,eligible")
+      .select("id,content_id,profile_id,provider,format,hook,caption,approval_status,approval_mode,workflow_status,qa_status,eligible")
       .eq("profile_id", profileId)
       .eq("eligible", true)
       .order("updated_at", { ascending: false })
