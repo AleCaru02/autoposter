@@ -13,27 +13,13 @@ const generated = {
 const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
   capturedUrl = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
   capturedInit = init;
-  const request = JSON.parse(String(init?.body)) as Record<string, any>;
-  if (request.text?.format?.name === "post_automatici_research_agent") {
-    const researchOutput = {
-      status: "READY",
-      summary: "Fonte esterna affidabile disponibile.",
-      evidence: [{ claim: "Property management", evidenceSummary: "Fonte editoriale affidabile.", sourceType: "SECONDARY", datedAt: null, reliability: "HIGH" }],
-    };
-    return new Response(JSON.stringify({
-      id: "resp_research_main_test",
-      model: "gpt-5.6-terra",
-      output: [
-        { type: "web_search_call", action: { type: "search", sources: [{ type: "url", url: "https://example.org/industry-report" }, { type: "url", url: "javascript:alert(1)" }] } },
-        { type: "message", content: [{ type: "output_text", text: JSON.stringify(researchOutput) }] },
-      ],
-      usage: { input_tokens: 40, output_tokens: 20, total_tokens: 60 },
-    }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "req_research_main_test" } });
-  }
   return new Response(JSON.stringify({
     id: "resp_test",
     model: "gpt-5.6-terra",
-    output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(generated) }] }],
+    output: [
+      { type: "web_search_call", action: { type: "search", sources: [{ type: "url", url: "https://example.org/industry-report" }, { type: "url", url: "javascript:alert(1)" }] } },
+      { type: "message", content: [{ type: "output_text", text: JSON.stringify(generated) }] },
+    ],
     usage: { input_tokens: 120, input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10 }, output_tokens: 80, total_tokens: 200 },
   }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "req_test" } });
 }) as typeof fetch;
@@ -79,10 +65,12 @@ assert.equal(body.store, false);
 assert.equal(body.reasoning.effort, "medium", "manteniamo reasoning medio per la qualità editoriale finale");
 assert.equal(body.prompt_cache_key, "post-automatici:qa-profile");
 assert.equal(body.max_output_tokens, 5000);
-assert.equal("tools" in body, false, "il copy finale non deve rifare la ricerca: la ricerca web è delegata al Research Agent dedicato");
-assert.equal("max_tool_calls" in body, false, "il copy finale non deve spendere una seconda volta per web search");
+assert.equal(body.max_tool_calls, 1, "una generazione può fare al massimo una ricerca web per contenere la spesa");
+assert.deepEqual(body.include, ["web_search_call.action.sources"]);
 assert.equal(body.text.format.type, "json_schema");
 assert.equal(body.text.format.strict, true);
+assert.equal(body.tools[0].type, "web_search");
+assert.equal(body.tools[0].search_context_size, "low", "ricerca web a contesto basso per contenere il costo");
 assert.ok(body.text.format.schema.required.includes("editorialTopic"));
 assert.ok(body.text.format.schema.required.includes("pillar"));
 assert.ok(body.text.format.schema.required.includes("editorialAngle"));
@@ -108,13 +96,13 @@ assert.equal(result.content.editorialAngle, "Perché delegare la gestione riduce
 assert.equal(result.content.variants[0].caption, "Un testo social verificato.");
 assert.equal(result.model, "gpt-5.6-terra");
 assert.equal(result.requestId, "req_test");
-assert.equal(result.usage.inputTokens, 160);
+assert.equal(result.usage.inputTokens, 120);
 assert.equal(result.usage.cachedInputTokens, 20);
 assert.equal(result.usage.cacheWriteTokens, 10);
-assert.equal(result.usage.outputTokens, 100);
-assert.equal(result.usage.totalTokens, 260);
+assert.equal(result.usage.outputTokens, 80);
+assert.equal(result.usage.totalTokens, 200);
 assert.equal(result.usage.webSearchCalls, 1);
-assert.equal(result.usage.estimatedCostUsd, estimateTerraCostUsd(120, 80, 20, 10) + 0.01 + estimateTerraCostUsd(40, 20));
+assert.equal(result.usage.estimatedCostUsd, 0.011169);
 assert.equal(estimateTerraCostUsd(120, 80, 20, 10), 0.001169);
 assert.equal(countWebSearchCalls({ output: [{ type: "web_search_call" }, { type: "message" }] }), 1);
 assert.deepEqual(extractWebSearchSources({ output: [{ type: "web_search_call", action: { sources: [{ url: "https://example.org/a" }, { url: "ftp://bad.example/file" }] } }] }), ["https://example.org/a"]);
