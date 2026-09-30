@@ -29,7 +29,7 @@ assert.match(autopilot, /technicalEventsFromTextResult\(generated,[\s\S]*externa
 const openaiText = readFileSync(new URL("../api/_lib/openai-text.ts", import.meta.url), "utf8");
 assert.match(openaiText, /web_search_calls\s*:\s*mainWebSearchCalls/, "Main generation technical event must retain web-search call telemetry");
 assert.match(openaiText, /web_search_calls\s*:\s*dedicatedResearch\.usage\.webSearchCalls/, "Research technical event must retain web-search call telemetry");
-assert.match(openaiText, /web_search_calls\s*:\s*factCheck\.usage\.webSearchCalls/, "Fact-check technical event must retain web-search call telemetry");
+assert.match(openaiText, /web_search_calls\s*:\s*factCheckWebSearchCalls/, "Fact-check technical event must retain aggregate web-search call telemetry across verification passes");
 assert.match(autopilot, /planItem\?\.intent==="NEWS"\?"NEWS":configuredResearch/, "Planner NEWS intent must force the verified NEWS research path");
 assert.doesNotMatch(autopilot, /Usa esclusivamente i fatti confermati dal sito e dal brand/);
 
