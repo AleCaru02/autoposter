@@ -99,12 +99,24 @@ export function selectedPlatformStrategies(providers: SocialPlatform[]) {
   return providers.map((provider) => ({ provider, ...STRATEGIES[provider] }));
 }
 
-export function platformStrategyPrompt(provider: SocialPlatform) {
+export function platformCopyStrategyPrompt(provider: SocialPlatform) {
   const strategy = STRATEGIES[provider];
   return [
-    `STRATEGIA ${strategy.label}:`,
-    ...strategy.copy.map((rule) => `COPY — ${rule}`),
-    ...strategy.visual.map((rule) => `VISUAL — ${rule}`),
-    ...strategy.format.map((rule) => `FORMATO — ${rule}`),
+    `STRATEGIA COPY ${strategy.label}:`,
+    ...strategy.copy.map((rule) => `- ${rule}`),
+    ...strategy.format.map((rule) => `- ${rule}`),
   ].join("\n");
+}
+
+export function platformVisualStrategyPrompt(provider: SocialPlatform) {
+  const strategy = STRATEGIES[provider];
+  return [
+    `STRATEGIA VISUAL ${strategy.label}:`,
+    ...strategy.visual.map((rule) => `- ${rule}`),
+    ...strategy.format.map((rule) => `- ${rule}`),
+  ].join("\n");
+}
+
+export function platformStrategyPrompt(provider: SocialPlatform) {
+  return [platformCopyStrategyPrompt(provider), platformVisualStrategyPrompt(provider)].join("\n");
 }
