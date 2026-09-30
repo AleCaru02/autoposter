@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
+import { findEditorialRepetition, findNearDuplicate, semanticContentSimilarity, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./editorial-research.js";
 import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan.js";
@@ -18,10 +18,9 @@ import { decideMasterEditorial, type MasterEditorialDecision } from "./master-ed
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
 import { higgsfieldConfigured } from "./higgsfield.js";
 import { decideVisualRuntime } from "./visual-runtime-decision.js";
-import { buildEditorialMemoryInstruction, refreshProfileEditorialMemory } from "./editorial-memory.js";
+import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
-import { semanticContentSimilarity } from "./content-dedupe.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -38,7 +37,7 @@ export type AutopilotCandidateSlot = { scheduledAt: string; timingSource: "USER_
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type JobRow = { provider: SocialProvider; scheduled_at: string };
 type RecentItemRow = { topic: string };
-type RecentContentRow = { id: string; topic: string; title: string | null; hook: string | null; caption: string | null };
+type RecentContentRow = { id: string; topic: string; title: string | null; pillar: string | null; visual_archetype: string | null; subject_strategy: string | null; narrative_structure: string | null; hook: string | null; caption: string | null; cta: string | null };
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
@@ -151,7 +150,7 @@ export function chooseAutopilotPublishFormat(provider:SocialProvider,recentCount
 export function chooseAutopilotContentType(format:SocialFormat):ContentType{return format==="STORY"?"SINGLE_STORY":format==="CAROUSEL"?"CAROUSEL":"SINGLE_POST";}
 async function recentTopics(sql:Sql,profileId:string){const rows=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 24` as unknown as RecentItemRow[];return rows.map(r=>r.topic).filter(Boolean);}
 async function activeLearningInsights(sql:Sql,profileId:string){return await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and source_type='PROVIDER_API' and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];}
-async function recentContentForDedupe(sql:Sql,profileId:string):Promise<ContentDedupeCandidate[]>{const rows=await sql`select ci.id,ci.topic,ci.title,cv.hook,cv.caption from public.content_items ci left join lateral (select hook,caption from public.content_variants where profile_id=${profileId}::uuid and content_id=ci.id order by updated_at desc limit 1) cv on true where ci.profile_id=${profileId}::uuid order by ci.created_at desc limit 40` as unknown as RecentContentRow[];return rows.map(r=>({id:r.id,topic:r.topic??"",angle:r.title,hook:r.hook,caption:r.caption}));}
+async function recentContentForDedupe(sql:Sql,profileId:string):Promise<ContentDedupeCandidate[]>{const rows=await sql`select ci.id,ci.topic,ci.title,ci.pillar,ci.visual_archetype,ci.subject_strategy,ci.decision_record->>'contentType' as narrative_structure,cv.hook,cv.caption,cv.cta from public.content_items ci left join lateral (select hook,caption,cta from public.content_variants where profile_id=${profileId}::uuid and content_id=ci.id order by updated_at desc limit 1) cv on true where ci.profile_id=${profileId}::uuid order by ci.created_at desc limit 40` as unknown as RecentContentRow[];return rows.map(r=>({id:r.id,topic:r.topic??"",angle:r.title,hook:r.hook,caption:r.caption,cta:r.cta,pillar:r.pillar,visualArchetype:r.visual_archetype,subjectStrategy:r.subject_strategy,narrativeStructure:r.narrative_structure}));}
 async function recentVariantCount(sql:Sql,profileId:string,provider:SocialProvider){const rows=await sql`select count(*)::int as count from public.content_variants where profile_id=${profileId}::uuid and provider=${provider}` as unknown as CountRow[];return Number(rows[0]?.count??0);}
 async function persistMasterDecision(sql:Sql,profileId:string,strategy:StrategyRow|undefined,decision:MasterEditorialDecision){const existing=asObject(strategy?.platform_strategy);const previous=asObject(existing.masterEditorialDecisions);const entries=Object.entries(previous).slice(-39);await sql`update public.content_strategies set platform_strategy=${JSON.stringify({...existing,masterEditorialDecisions:Object.fromEntries([...entries,[decision.id,decision]])})}::jsonb,updated_at=now() where profile_id=${profileId}::uuid`;}
 export async function currentSpend(sql:Sql,profileId:string){const rows=await sql`select coalesce(sum(cost_usd),0)::float8 as spend from public.ai_usage_events where profile_id=${profileId}::uuid and created_at>=${monthStartIso()}::timestamptz and operation in ('GENERATE_SOCIAL_TEXT','AGENT_RESEARCH','AGENT_FACTCHECK','AGENT_EDITORIAL_QA')` as unknown as SpendRow[];return Number(rows[0]?.spend??0)||0;}
@@ -244,12 +243,37 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   await meter.markProviderStarted(logicalEventId);
   const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
+  const identityRowsForSubject=profile.profile_type==="PERSONAL_BRAND"
+    ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
+    : [];
+  const canonicalIdentityState=identityRowsForSubject[0]?.status??"NOT_CONFIGURED";
+  const subjectDecision=chooseSubjectStrategy({
+    profileType:profile.profile_type,
+    provider,
+    format,
+    topic:generated.content.editorialTopic,
+    angle:generated.content.editorialAngle,
+    visualBrief:variant.visualBrief,
+    memory,
+    suitableRealAssetAvailable:false,
+    canonicalIdentityReady:canonicalIdentityState==="COMPLETED",
+  });
+  const continuityDecision=deriveContinuityDecision({
+    memory,
+    profileType:profile.profile_type,
+    contentType:master.contentType,
+    intent:master.intent,
+    topic:generated.content.editorialTopic,
+  });
   if(loaded.personalBrand){
     const allowed=Array.isArray(loaded.personalBrand.relation?.allowed_ctas)?loaded.personalBrand.relation?.allowed_ctas.filter((item):item is string=>typeof item==="string"&&Boolean(item.trim())).map((item)=>item.trim().toLowerCase()):[];
     if(allowed.length&&variant.cta&&!allowed.includes(variant.cta.trim().toLowerCase()))throw new Error("AUTOPILOT_PERSONAL_BRAND_CTA_NOT_ALLOWED");
   }
   await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,timing_source:timingSource,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
-  const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},await recentContentForDedupe(sql,profile.id));if(duplicate)throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
+  const recentDedupe=await recentContentForDedupe(sql,profile.id);
+  const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},recentDedupe);if(duplicate)throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
+  const repetition=findEditorialRepetition({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption,cta:variant.cta,pillar:generated.content.pillar??null,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:master.contentType},recentDedupe);
+  if(repetition.blocked)throw new Error(`AUTOPILOT_REPETITION_BLOCKED:${repetition.reasons.join(",")}`);
   if(approvalMode==="AUTOMATIC"&&variant.eligible){const qa=await runOpenAIEditorialQA({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider,format,objective,content:generated.content,variant,verification:generated.verification,externalSources:generated.externalSources});const qaEvent:TechnicalAiEvent={operation:"AGENT_EDITORIAL_QA",model:qa.model,inputTokens:qa.usage.inputTokens,outputTokens:qa.usage.outputTokens,costUsd:qa.usage.estimatedCostUsd,metadata:{openai_response_id:qa.responseId,openai_request_id:qa.requestId,source:"AUTOPILOT",provider,format,verdict:qa.verdict,reasons:qa.reasons,checks:qa.checks}};await meter.persistTechnicalEvents(profile.id,logicalEventId,[qaEvent]);if(qa.verdict!=="PASS")throw new Error(`AUTOPILOT_EDITORIAL_QA_BLOCKED:${qa.reasons.slice(0,2).join(" | ")||"material issue"}`);}
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
