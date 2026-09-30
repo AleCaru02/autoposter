@@ -57,6 +57,7 @@ jobs:
       - { name: Asset library runtime regression, run: "npm run test:asset-library" }
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
       - { name: FASE 7F safe publication engine regression, run: "npm run test:fase7f-publication-engine" }
+      - { name: Immutable publication QA boundary regression, run: "npm run test:publication-qa-guard" }
       - { name: Social integration contract, run: "npm run test:social" }
       - { name: Social runtime preflight regression, run: "npm run test:social-runtime-preflight" }
       - { name: Global social Safe Mode regression, run: "npm run test:safe-mode" }
