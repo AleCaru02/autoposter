@@ -73,6 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let visualBrief = typeof req.body?.visualBrief === "string" ? req.body.visualBrief.trim().slice(0, 2_000) : "";
   let caption = typeof req.body?.caption === "string" ? req.body.caption.trim().slice(0, 1_500) : null;
   const additionalDirection = typeof req.body?.additionalDirection === "string" ? req.body.additionalDirection.trim().slice(0, 700) : null;
+  const forceNewImage = req.body?.forceNewImage === true;
   const operationIdentityHeader = req.headers["x-post-automatici-operation-id"];
   const operationIdentity = (Array.isArray(operationIdentityHeader) ? operationIdentityHeader[0] : operationIdentityHeader || "").trim();
   if (!/^[A-Za-z0-9._:-]{16,128}$/.test(operationIdentity)) return res.status(400).json({ error: "OPERATION_ID_REQUIRED" });
@@ -109,7 +110,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
     const aspectRatio = requestedFormat === "STORY" ? "2:3" : "1:1";
     const candidates = await readRows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
-    const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
+    const reusable = forceNewImage ? null : await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {
       const asset = reusable.asset;
       if (savedVariant) {
@@ -133,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       source: "MANUAL",
       operationIdentity,
       referenceId: savedSlide?.id ?? savedVariant?.id ?? null,
-      requestFingerprint: { contentVariantId, carouselSlideId, provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection },
+      requestFingerprint: { contentVariantId, carouselSlideId, provider: requestedProvider, format: requestedFormat, visualBrief, caption, additionalDirection, forceNewImage },
     });
     if (reservation.status === "DENIED") return res.status(429).json({ error: reservation.code });
     if (reservation.status === "COMPLETED") return res.status(200).json(reservation.cached.response);

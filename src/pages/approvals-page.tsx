@@ -317,6 +317,7 @@ export function ApprovalsPage() {
           format: variant.format,
           visualBrief: draft.visualBrief,
           caption: draft.caption,
+          forceNewImage: Boolean(variant.image_asset_id),
         }),
       });
       const body = await response.json() as ImageResponse;
@@ -340,6 +341,7 @@ export function ApprovalsPage() {
           format: "CAROUSEL",
           visualBrief: slide.visual_brief,
           caption: [slide.headline, slide.body].filter(Boolean).join(" — "),
+          forceNewImage: Boolean(slide.asset_id),
         }),
       });
       const body = await response.json() as ImageResponse;
