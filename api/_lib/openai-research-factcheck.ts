@@ -205,12 +205,14 @@ async function callStructured(input: {
 }
 
 export function shouldRunResearchAgent(mode: EditorialResearchMode) {
-  return mode !== "WEBSITE_ONLY";
+  return mode === "NEWS";
 }
 
 export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchMode) {
   if (mode === "NEWS") return true;
-  const text = JSON.stringify(content ?? "").replace(/\b\d+\s+(?:consigli|passi|idee|errori|modi|motivi|strategie|azioni|domande|suggerimenti|slide)\b/gi, "");
+  const serialized = JSON.stringify(content ?? "");
+  if (/BASE ESTERNA/i.test(serialized)) return true;
+  const text = serialized.replace(/\b\d+\s+(?:consigli|passi|idee|errori|modi|motivi|strategie|azioni|domande|suggerimenti|slide)\b/gi, "");
   return /\b\d+(?:[.,]\d+)?\s*(?:%|€|eur|euro|usd|km|kg|ore|giorni|anni)?\b|\b(?:legge|norma|regolamento|obbligo|scadenza|dal\s+\d|entro\s+il|202\d)\b/i.test(text);
 }
 
