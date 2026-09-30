@@ -106,5 +106,60 @@ assert.equal(forcedFactCheckBody?.tool_choice, "required", "when verification ha
 assert.equal(forcedFactCheck.usage.webSearchCalls, 1);
 assert.equal(forcedFactCheck.sources[0], "https://example.org/platform-source");
 
+let repairCalls = 0;
+const repaired = await runOpenAIFactCheckAgent({
+  apiKey: "test-key",
+  topic: "Airbnb vs Booking",
+  content: { caption: "Confronto tra Airbnb e Booking con differenze operative." },
+  research: null,
+  existingSources: [],
+  allowWebSearch: true,
+  requireWebSearch: true,
+  fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+    repairCalls += 1;
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.tool_choice, "required");
+    if (repairCalls === 1) {
+      return new Response(JSON.stringify({
+        id: "resp_factcheck_missing_booking",
+        model: "gpt-5.6-terra",
+        output: [
+          { type: "web_search_call", action: { sources: [{ url: "https://example.org/airbnb-source" }] } },
+          { type: "message", content: [{ type: "output_text", text: JSON.stringify({
+            verdict: "NEEDS_SOURCE",
+            checkedClaims: [
+              { claim: "Airbnb claim", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "VERIFIED", reason: "Fonte disponibile." },
+              { claim: "Booking claim", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "UNSUPPORTED", reason: "Manca fonte Booking." },
+            ],
+          }) }] },
+        ],
+        usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+      }), { status: 200 });
+    }
+    const repairPayload = JSON.parse(String(request.input));
+    assert.match(JSON.stringify(repairPayload.repairFocus), /Booking claim/);
+    return new Response(JSON.stringify({
+      id: "resp_factcheck_repaired",
+      model: "gpt-5.6-terra",
+      output: [
+        { type: "web_search_call", action: { sources: [{ url: "https://example.org/booking-source" }] } },
+        { type: "message", content: [{ type: "output_text", text: JSON.stringify({
+          verdict: "PASS",
+          checkedClaims: [
+            { claim: "Airbnb claim", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "VERIFIED", reason: "Fonte disponibile." },
+            { claim: "Booking claim", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "VERIFIED", reason: "Fonte Booking trovata nel secondo pass." },
+          ],
+        }) }] },
+      ],
+      usage: { input_tokens: 110, output_tokens: 55, total_tokens: 165 },
+    }), { status: 200 });
+  }) as typeof fetch,
+});
+assert.equal(repairCalls, 2, "NEEDS_SOURCE with web enabled must receive exactly one targeted repair pass");
+assert.equal(repaired.verdict, "PASS");
+assert.deepEqual(repaired.sources, ["https://example.org/airbnb-source", "https://example.org/booking-source"]);
+assert.equal(repaired.usage.webSearchCalls, 2);
+assert.equal(repaired.usage.inputTokens, 210);
+
 
 console.log("OpenAI Research + Fact-check agents regression: PASS");
