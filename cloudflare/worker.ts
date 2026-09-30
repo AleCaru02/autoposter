@@ -314,6 +314,7 @@ async function handleGenerateText(request: Request, env: Env) {
     });
     if (!activityBudget.allowed) {
       await meter.release(eventId, activityBudget.reason ?? "AI_BUDGET_HARD_STOP");
+      await writeImageProgress(token, { operationId: operationIdentity, profileId, contentVariantId: savedVariant?.id ?? null, carouselSlideId: savedSlide?.id ?? null, state: "FAILED", phase: "FAILED", progress: 100, message: "Budget AI insufficiente per generare l'immagine.", errorCode: activityBudget.reason ?? "AI_BUDGET_HARD_STOP" });
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
 
@@ -375,8 +376,8 @@ async function handleGenerateImage(request: Request, env: Env) {
     await writeImageProgress(token, {
       operationId: operationIdentity,
       profileId,
-      contentVariantId,
-      carouselSlideId,
+      contentVariantId: null,
+      carouselSlideId: null,
       phase: "VALIDATING",
       progress: 5,
       message: "Controllo contenuto, profilo e formato.",
@@ -462,10 +463,20 @@ async function handleGenerateImage(request: Request, env: Env) {
       referenceId: savedSlide?.id ?? savedVariant?.id ?? null,
       requestFingerprint: { contentVariantId, carouselSlideId, provider, format, visualBrief, caption, additionalDirection },
     });
-    if (reservation.status === "DENIED") return json({ error: reservation.code }, 429);
-    if (reservation.status === "COMPLETED") return json(reservation.cached.response);
+    if (reservation.status === "DENIED") {
+      await writeImageProgress(token, { operationId: operationIdentity, profileId, contentVariantId: savedVariant?.id ?? null, carouselSlideId: savedSlide?.id ?? null, state: "FAILED", phase: "FAILED", progress: 100, message: "Limite generazione immagini raggiunto.", errorCode: reservation.code });
+      return json({ error: reservation.code }, 429);
+    }
+    if (reservation.status === "COMPLETED") {
+      const cached = reservation.cached.response as { asset?: { id?: string } | null };
+      await writeImageProgress(token, { operationId: operationIdentity, profileId, contentVariantId: savedVariant?.id ?? null, carouselSlideId: savedSlide?.id ?? null, state: "COMPLETED", phase: "COMPLETED", progress: 100, message: "Immagine già generata e salvata.", assetId: cached.asset?.id ?? null });
+      return json(reservation.cached.response);
+    }
     if (reservation.status === "IN_PROGRESS") return json({ error: "IMAGE_GENERATION_IN_PROGRESS" }, 409);
-    if (reservation.status === "RELEASED") return json({ error: "METERING_FAILED" }, 409);
+    if (reservation.status === "RELEASED") {
+      await writeImageProgress(token, { operationId: operationIdentity, profileId, contentVariantId: savedVariant?.id ?? null, carouselSlideId: savedSlide?.id ?? null, state: "FAILED", phase: "FAILED", progress: 100, message: "La generazione precedente non è stata completata.", errorCode: "METERING_FAILED" });
+      return json({ error: "METERING_FAILED" }, 409);
+    }
     const eventId = reservation.eventId;
     activeEventId = eventId;
     const activityBudget = await new ActivityBudgetEngine(env.DATABASE_URL).preflight({
