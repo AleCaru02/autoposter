@@ -229,7 +229,7 @@ export async function handleWorkerGenerateText(request: Request, env: Env) {
       brand: context,
       researchMode,
       cacheKey: `post-automatici:${profileId}`,
-      onProgress: ({ percent, stage }) => meter.setProgress(eventId, percent, stage),
+      onProgress: async ({ percent, stage }) => { await meter.setProgress(eventId, percent, stage); },
     });
     await meter.setProgress(eventId, 95, "FINALIZING");
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
