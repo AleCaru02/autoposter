@@ -714,6 +714,18 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         fetcher,
       });
       content = copyRepair.content;
+      const repairedRequestedCount = requestedStructuralCount(options.topic, options.objective);
+      if (repairedRequestedCount) {
+        content = {
+          ...content,
+          variants: content.variants.map((variant) => {
+            if (variant.format !== "POST") return variant;
+            const caption = variant.caption.trim();
+            if (caption.includes(String(repairedRequestedCount)) || hasNumberedStructure(caption, repairedRequestedCount)) return variant;
+            return { ...variant, caption: `${repairedRequestedCount} punti da confrontare:\n${caption}` };
+          }),
+        };
+      }
       const repairedQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
       if (repairedQualityIssues.length) {
         const repairCostUsd = estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens);
