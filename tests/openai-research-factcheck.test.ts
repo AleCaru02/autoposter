@@ -79,4 +79,32 @@ assert.equal(factCheckBody?.text.format.schema.properties.verdict.enum.includes(
 assert.equal(String(factCheckBody?.instructions).includes("EDITORIAL"), true);
 assert.equal(factCheckBody && "tools" in factCheckBody, false, "Fact-check must reuse existing evidence instead of paying for another web search");
 
+let forcedFactCheckBody: Record<string, any> | null = null;
+const forcedFactCheck = await runOpenAIFactCheckAgent({
+  apiKey: "test-key",
+  topic: "Airbnb vs Booking",
+  content: { caption: "Confronto tra piattaforme con affermazioni da verificare." },
+  research: null,
+  existingSources: [],
+  allowWebSearch: true,
+  requireWebSearch: true,
+  fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+    forcedFactCheckBody = JSON.parse(String(init?.body));
+    const output = { verdict: "PASS", checkedClaims: [{ claim: "Confronto piattaforme", claimType: "EXTERNAL", slideNumber: null, sourceRequired: true, status: "VERIFIED", reason: "Verificato con fonte ufficiale." }] };
+    return new Response(JSON.stringify({
+      id: "resp_factcheck_forced",
+      model: "gpt-5.6-terra",
+      output: [
+        { type: "web_search_call", action: { sources: [{ url: "https://example.org/platform-source" }] } },
+        { type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] },
+      ],
+      usage: { input_tokens: 90, output_tokens: 40, total_tokens: 130 },
+    }), { status: 200 });
+  }) as typeof fetch,
+});
+assert.equal(forcedFactCheckBody?.tool_choice, "required", "when verification has no sources the fact-check must actually perform the allowed web lookup");
+assert.equal(forcedFactCheck.usage.webSearchCalls, 1);
+assert.equal(forcedFactCheck.sources[0], "https://example.org/platform-source");
+
+
 console.log("OpenAI Research + Fact-check agents regression: PASS");
