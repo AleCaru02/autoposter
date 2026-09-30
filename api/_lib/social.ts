@@ -79,6 +79,12 @@ type VariantRecord = {
   alt_text: string | null;
   image_asset_id: string | null;
   approval_status: string;
+  workflow_status: string;
+  qa_status: string;
+  qa_fingerprint: string | null;
+  approved_fingerprint: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
   eligible: boolean;
   storage_url: string | null;
   mime_type: string | null;
@@ -353,7 +359,7 @@ export function providerConfigured(provider: SocialProvider, env: SocialEnv) {
 }
 
 export function providerCapabilities(provider: SocialProvider) {
-  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY"], note: "Carosello disponibile quando il contenuto contiene più media reali." };
+  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY"], note: "Il carosello è strutturato e revisionabile, ma la pubblicazione multi-media Instagram resta disabilitata finché il runtime provider non la supporta realmente." };
   if (provider === "FACEBOOK") return { publish: ["POST"], note: "Storie e caroselli non vengono simulati finché il contenuto non ha gli asset richiesti dalle API." };
   if (provider === "LINKEDIN") return { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." };
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
@@ -1178,7 +1184,8 @@ async function publishGoogle(variant: VariantRecord, connection: StoredConnectio
 
 async function loadVariant(sql: Sql, variantId: string, profileId: string): Promise<VariantRecord | null> {
   const rows = await sql`
-    select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id, v.approval_status, v.eligible,
+    select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id,
+           v.approval_status, v.workflow_status, v.qa_status, v.qa_fingerprint, v.approved_fingerprint, v.approved_by, v.approved_at, v.eligible,
            a.storage_url, a.mime_type
     from public.content_variants v
     left join public.assets a on a.id = v.image_asset_id and a.profile_id = v.profile_id
@@ -1188,9 +1195,20 @@ async function loadVariant(sql: Sql, variantId: string, profileId: string): Prom
   return rows[0] ?? null;
 }
 
+export function variantReadyForPublishing(variant: Pick<VariantRecord,"approval_status"|"workflow_status"|"qa_status"|"qa_fingerprint"|"approved_fingerprint"|"approved_by"|"approved_at"|"eligible">) {
+  return variant.eligible === true
+    && variant.approval_status === "APPROVED"
+    && variant.workflow_status === "APPROVED"
+    && variant.qa_status === "PASS"
+    && Boolean(variant.qa_fingerprint)
+    && variant.approved_fingerprint === variant.qa_fingerprint
+    && Boolean(variant.approved_by?.trim())
+    && Boolean(variant.approved_at);
+}
+
 async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
   assertSocialPublishingAllowed(env);
-  if (variant.approval_status !== "APPROVED" || !variant.eligible) throw new Error("CONTENT_NOT_APPROVED");
+  if (!variantReadyForPublishing(variant)) throw new Error("CONTENT_NOT_APPROVED");
   const connection = await storedConnection(sql, variant.profile_id, variant.provider);
   if (!connection || connection.status !== "ACTIVE" || !connection.token_reference || !connection.provider_account_id) throw new Error("SOCIAL_NOT_CONNECTED");
   const bundle = await decryptTokenBundle(connection.token_reference, env.SOCIAL_TOKEN_KEY!);
@@ -1279,7 +1297,7 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
       const rows = await sql`select public.mark_publication_request_started(${job.id}::uuid,${job.claim_token}::uuid) started` as unknown as Array<{ started: boolean }>;
       if (rows[0]?.started !== true) {
         const current = await loadVariant(sql, job.variant_id, job.profile_id);
-        if (!current || current.approval_status !== "APPROVED" || !current.eligible) throw terminalPublishError("CONTENT_NOT_APPROVED");
+        if (!current || !variantReadyForPublishing(current)) throw terminalPublishError("CONTENT_NOT_APPROVED");
         throw publishError("STALE_PUBLICATION_CLAIM", { outcomeUnknown: false, customerMessage: "La pubblicazione è stata presa in carico da un altro processo." });
       }
     };
