@@ -1,5 +1,6 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
-import { personalBrandVisualSystem, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
+import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
+import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
 
 export type MediaManagerResult = {
