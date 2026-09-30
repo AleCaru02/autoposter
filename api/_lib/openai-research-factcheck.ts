@@ -141,6 +141,18 @@ export function trustedVerificationSources(values: string[]) {
   return [...new Set(accepted)].slice(0, 20);
 }
 
+function independentHostCount(values: string[]) {
+  const hosts = new Set<string>();
+  for (const value of values) {
+    try { hosts.add(new URL(value).hostname.toLowerCase().replace(/^www\./,"")); } catch { /* ignore */ }
+  }
+  return hosts.size;
+}
+
+function comparisonNeedsCrossCheck(topic: string) {
+  return /\b(?:vs\.?|versus|confront|compar|differenz|meglio\s+tra)\b/i.test(topic);
+}
+
 function usage(body: Record<string, unknown>) {
   const raw = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const output = Array.isArray(body.output) ? body.output : [];
@@ -238,8 +250,9 @@ export async function runOpenAIResearchAgent(input: {
   const acceptedSources = trustedVerificationSources(sources(result.body));
   const evidence = Array.isArray(parsed.evidence) ? parsed.evidence : [];
   const usableEvidence = evidence.filter((item) => item.reliability !== "LOW" && item.sourceType !== "UNKNOWN");
+  const minimumHosts = comparisonNeedsCrossCheck(input.topic) ? 2 : 1;
   return {
-    status: parsed.status === "READY" && acceptedSources.length > 0 && usableEvidence.length > 0 ? "READY" : "BLOCKED",
+    status: parsed.status === "READY" && independentHostCount(acceptedSources) >= minimumHosts && usableEvidence.length > 0 ? "READY" : "BLOCKED",
     summary: parsed.summary,
     evidence: usableEvidence,
     sources: acceptedSources,
