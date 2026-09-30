@@ -142,6 +142,7 @@ async function callStructured(input: {
   schema: typeof RESEARCH_SCHEMA | typeof FACTCHECK_SCHEMA;
   schemaName: string;
   useWebSearch: boolean;
+  requireWebSearch?: boolean;
   fetcher?: typeof fetch;
 }) {
   const fetcher = input.fetcher ?? fetch;
@@ -154,7 +155,12 @@ async function callStructured(input: {
       reasoning: { effort: "medium" },
       instructions: input.instructions,
       input: JSON.stringify(input.payload),
-      ...(input.useWebSearch ? { tools: [{ type: "web_search", search_context_size: "low" }], max_tool_calls: 1, include: ["web_search_call.action.sources"] } : {}),
+      ...(input.useWebSearch ? {
+        tools: [{ type: "web_search", search_context_size: "low" }],
+        max_tool_calls: 1,
+        include: ["web_search_call.action.sources"],
+        ...(input.requireWebSearch ? { tool_choice: "required" } : {}),
+      } : {}),
       text: { verbosity: "low", format: { type: "json_schema", name: input.schemaName, strict: true, schema: input.schema } },
       max_output_tokens: 2400,
     }),
@@ -223,12 +229,14 @@ export async function runOpenAIFactCheckAgent(input: {
   research: ResearchAgentResult | null;
   existingSources: string[];
   allowWebSearch: boolean;
+  requireWebSearch?: boolean;
   fetcher?: typeof fetch;
 }): Promise<FactCheckAgentResult> {
   const result = await callStructured({
     apiKey: input.apiKey,
     fetcher: input.fetcher,
     useWebSearch: input.allowWebSearch,
+    requireWebSearch: input.requireWebSearch,
     schema: FACTCHECK_SCHEMA,
     schemaName: "post_automatici_fact_check_agent",
     instructions: [
