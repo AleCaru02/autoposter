@@ -404,7 +404,9 @@ async function repairUnsupportedContent(input: {
           : "Rimuovi, riscrivi o generalizza ogni claim UNSUPPORTED o TIME_SENSITIVE indicato in checkedClaims.",
         "Non aggiungere nuovi fatti esterni, numeri, percentuali, commissioni, performance, regole di piattaforma, sedi, risultati o promesse che non siano supportati dal contesto fornito.",
         "Puoi mantenere i claim VERIFIED, i dati BRAND supportati dal brand/sito e le formulazioni EDITORIAL non fattuali.",
-        "Se non puoi dimostrare una differenza specifica tra due piattaforme, trasformala in un criterio decisionale verificabile o in una domanda/considerazione editoriale, invece di inventare.",
+        input.repairReason === "EDITORIAL_QUALITY"
+          ? "Per un confronto richiesto, usa le evidenze disponibili per scrivere differenze concrete. Non sostituire il confronto con una premessa generica."
+          : "Se una differenza specifica non è supportata, sostituiscila prima con un'altra differenza concreta supportata dalle evidenze disponibili. Solo se non esiste alcuna alternativa supportata, generalizza senza inventare.",
         "Mantieni esattamente una variante per ogni combinazione provider/formato richiesta.",
         ...input.providers.map((provider) => platformStrategyPrompt(provider)),
         "Preserva il tema e l'obiettivo dell'utente, ma la sicurezza fattuale ha priorità sulla ricchezza del copy.",
@@ -497,6 +499,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
 
   let dedicatedResearch: ResearchAgentResult | null = null;
   const researchTopic = [options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
+  const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(researchTopic);
   if (shouldRunResearchAgent(research.mode, researchTopic)) {
     await reportProgress(options, 35, "RESEARCHING");
     dedicatedResearch = await runOpenAIResearchAgent({
@@ -508,7 +511,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       freshnessDays: research.freshnessDays,
       fetcher,
     });
-    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && research.mode === "NEWS") {
+    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && (research.mode === "NEWS" || comparisonRequested)) {
       const researchCostUsd = agentCost(dedicatedResearch);
       throw new OpenAITextPipelineError("OPENAI_RESEARCH_BLOCKED", [{
         operation: "AGENT_RESEARCH",
@@ -700,6 +703,18 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         fetcher,
       });
       content = copyRepair.content;
+      const repairedQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+      if (repairedQualityIssues.length) {
+        const repairCostUsd = estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens);
+        throw new OpenAITextPipelineError("OPENAI_EDITORIAL_QUALITY_BLOCKED", [{
+          operation: "AGENT_COPY_REPAIR",
+          model: copyRepair.model,
+          inputTokens: copyRepair.usage.inputTokens,
+          outputTokens: copyRepair.usage.outputTokens,
+          costUsd: repairCostUsd,
+          metadata: { reason: "FACTCHECK_REPAIR_QUALITY", quality_issues: repairedQualityIssues },
+        }]);
+      }
       await reportProgress(options, 88, "VERIFYING");
       factCheck = await runOpenAIFactCheckAgent({
         apiKey: options.apiKey,
