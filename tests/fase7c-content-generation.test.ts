@@ -67,15 +67,23 @@ const progressResult = await requestManualContentStatus("11111111-1111-4111-8111
   const statusHeaders = new Headers(init?.headers);
   assert.equal(statusHeaders.get("x-post-automatici-operation-id"), "operation-000000000001");
   return new Response(JSON.stringify({
+    jobId: "22222222-2222-4222-8222-222222222222",
+    operationId: "operation-000000000001",
     state: "COMPLETED",
     percent: 100,
     stage: "COMMITTED",
+    startedAt: "2026-10-01T12:00:00.000Z",
+    updatedAt: "2026-10-01T12:00:05.000Z",
     result: { content: generated, editorialContext },
   }), { status: 200, headers: { "content-type": "application/json" } });
 });
 assert.equal(progressResult.state, "COMPLETED");
 assert.equal(progressResult.percent, 100);
 assert.equal(progressResult.result?.content.editorialTopic, generated.editorialTopic);
+assert.equal(progressResult.jobId, "22222222-2222-4222-8222-222222222222");
+assert.equal(progressResult.operationId, "operation-000000000001");
+assert.equal(progressResult.startedAt, "2026-10-01T12:00:00.000Z");
+assert.equal(progressResult.updatedAt, "2026-10-01T12:00:05.000Z");
 
 await assert.rejects(
   requestManualContent(baseRequest, "test-jwt", "operation-000000000001", async () => new Response(JSON.stringify({ error: "FACTCHECK_NEEDS_SOURCE" }), { status: 422 })),
@@ -129,6 +137,14 @@ assert.match(workerText, /onProgress:/, "server must persist actual pipeline sta
 assert.match(metering, /client_operation_identity/, "metering must persist client operation identity for navigation resume");
 assert.match(metering, /getOperationStatus/, "metering must support operation progress lookup");
 assert.match(metering, /progress_percent/, "metering must persist real progress percentage");
+assert.match(metering, /progress_updated_at/, "server progress must persist updatedAt instead of relying on frontend timers");
+assert.match(workerText, /jobId: status\.eventId/, "status response must expose a durable server job id");
+assert.match(workerText, /startedAt: status\.createdAt/, "status response must expose server startedAt");
+assert.match(workerText, /updatedAt: status\.updatedAt/, "status response must expose server updatedAt");
+for (const stage of ["CHANNEL_STRATEGY","VISUAL_BRIEF","SOURCE_VALIDATION"]) assert.match(metering + workerText, new RegExp(stage), `real progress stage missing: ${stage}`);
+assert.match(composer, /Adatto la strategia ai canali/, "UI must show the channel-strategy step");
+assert.match(composer, /Preparo i brief visuali/, "UI must show visual-brief creation separately");
+assert.match(composer, /Normalizzo e valido le fonti/, "UI must show source validation separately");
 assert.match(workerText, /requestFingerprint: \{ topic, objective, providers, formats, researchMode, sourceProfileId: editorialContext\.sourceProfileId, pillar: editorialContext\.pillar \}/, "research mode and Personal Brand source context must be part of idempotency identity");
 assert.match(workerText, /brand:\s*context,[\s\S]{0,160}researchMode,[\s\S]{0,160}cacheKey/, "Cloudflare must pass customer research mode into the real AI prompt");
 assert.ok(entry.indexOf('path === "/api/generate-text/status"') < entry.indexOf('path === "/api/generate-text"'), "status route must not be swallowed by the main generation route");
