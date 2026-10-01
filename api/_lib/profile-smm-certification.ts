@@ -4,6 +4,7 @@ import { findEditorialRepetition, findNearDuplicate, type ContentDedupeCandidate
 import { evaluateFeedCoherence } from "./feed-coherence.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction, type ContentSubject } from "./subject-strategy.js";
 import type { SocialFormat, SocialProvider } from "./openai-text.js";
+import { decideVisualRuntime } from "./visual-runtime-decision.js";
 
 export const SMM_CERTIFICATION_GATES = [
   "COPY","FACT","BRAND","VISUAL","IDENTITY","CONTINUITY","ANTI_REPETITION",
@@ -36,6 +37,7 @@ export type SimulatedSmmContent = {
   cta: string;
   subject: ContentSubject;
   visualArchetype: string;
+  visualProvider: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD";
   seriesId: string | null;
   seriesSequence: number | null;
   previousContentId: string | null;
@@ -70,6 +72,10 @@ export type ProfileSmmCertificationResult = {
     distinctPillarCount: number;
     canonicalPersonCount: number;
     genericPersonCount: number;
+    higgsfieldRouteCount: number;
+    openAiRouteCount: number;
+    distinctContentTypeCount: number;
+    distinctCtaCount: number;
     publicationJobsCreated: 0;
     realHiggsfieldGenerations: 0;
   };
@@ -87,11 +93,32 @@ function count(values:string[]|undefined,value:string){return values?.filter((it
 function recentCandidate(row:EditorialMemoryRecentContent):ContentDedupeCandidate{
   return {id:row.id,topic:row.topic,angle:row.angle,hook:row.hook,cta:row.cta,pillar:row.pillar,visualArchetype:row.visualArchetype,subjectStrategy:row.subjectStrategy,narrativeStructure:null};
 }
-function platformCta(provider:SocialProvider,providerOccurrence:number){
+function platformCta(profileType:ProfileType,provider:SocialProvider,providerOccurrence:number){
+  if(profileType==="PERSONAL_BRAND"){
+    if(provider==="INSTAGRAM")return providerOccurrence%2?"Salva questo passaggio del mio percorso":"Scrivimi quale parte vuoi che approfondisca nel prossimo contenuto";
+    if(provider==="FACEBOOK")return providerOccurrence%2?"Raccontami nei commenti come vivi questa situazione":"Scrivimi se vuoi confrontarti sul tuo caso";
+    if(provider==="LINKEDIN")return providerOccurrence%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci su questo approccio";
+    return providerOccurrence%2?"Scopri come lavoro e richiedi informazioni":"Visita il profilo attività per il prossimo passo disponibile";
+  }
   if(provider==="INSTAGRAM")return providerOccurrence%2?"Salva il post per riprenderlo quando ti serve":"Condividilo con chi sta affrontando questa scelta";
-  if(provider==="FACEBOOK")return providerOccurrence%2?"Scrivici per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
-  if(provider==="LINKEDIN")return providerOccurrence%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci sul metodo nei commenti";
+  if(provider==="FACEBOOK")return providerOccurrence%2?"Contattaci per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
+  if(provider==="LINKEDIN")return providerOccurrence%2?"Confrontiamoci sul metodo nei commenti":"Contatta il team per approfondire il processo";
   return providerOccurrence%2?"Scopri il servizio e richiedi informazioni":"Visita il sito per il prossimo passo disponibile";
+}
+
+function profileContentType(profileType:ProfileType,provider:SocialProvider,index:number){
+  const base=chooseContentType(provider,index);
+  if(profileType==="PERSONAL_BRAND"&&provider!=="GBP"&&index%5===0)return "STORYTELLING" as const;
+  if(profileType==="BUSINESS"&&base==="STORYTELLING"&&index%6===0)return "SINGLE_POST" as const;
+  return base;
+}
+
+function profileTopic(profileType:ProfileType,contentType:string,pillar:string,motif:string,secondaryMotif:string){
+  if(profileType==="PERSONAL_BRAND"){
+    if(contentType==="STORYTELLING")return `Il mio percorso in ${pillar}: ${motif} — ${secondaryMotif}`;
+    return `Dal mio punto di vista su ${pillar}: ${motif} — ${secondaryMotif}`;
+  }
+  return `${pillar}: ${motif} — ${secondaryMotif} nel processo dell'attività`;
 }
 function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number){
   const templates:Record<EditorialIntent,string> = {
@@ -145,7 +172,7 @@ export function runProfileSmmCertificationSimulation(
 
   for(let index=0;index<target;index+=1){
     const provider=PROVIDERS[index%PROVIDERS.length];
-    const contentType=chooseContentType(provider,index);
+    const contentType=profileContentType(fixture.profileType,provider,index);
     const format=mapContentTypeToSocialFormat(provider,contentType);
     const intent=chooseEditorialIntent(index);
     const pillar=memory.balance.underusedPillars[0]??pillars[index%pillars.length];
@@ -154,9 +181,11 @@ export function runProfileSmmCertificationSimulation(
     const secondaryMotif=MOTIFS[(index+7)%MOTIFS.length];
     const topic=followContinuity
       ? memory.continuity.suggestedNextTopicIntent!
-      : `${pillar}: ${motif} — ${secondaryMotif}`;
-    const hook=`${hookFor(intent,pillar,motif,index)} · ${secondaryMotif}`;
-    const cta=platformCta(provider,Math.floor(index/PROVIDERS.length));
+      : profileTopic(fixture.profileType,contentType,pillar,motif,secondaryMotif);
+    const hook=fixture.profileType==="PERSONAL_BRAND"
+      ? `${hookFor(intent,pillar,motif,index)} · cosa ho imparato su ${secondaryMotif}`
+      : `${hookFor(intent,pillar,motif,index)} · ${secondaryMotif} nel metodo operativo`;
+    const cta=platformCta(fixture.profileType,provider,Math.floor(index/PROVIDERS.length));
     const visualBrief=visualBriefFor(fixture.profileType,contentType,intent,pillar,index);
 
     const subjectDecision=chooseSubjectStrategy({
@@ -181,7 +210,18 @@ export function runProfileSmmCertificationSimulation(
     const duplicateBlocked=Boolean(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78));
     const repetition=findEditorialRepetition(candidate,recent);
     const identityStatus=subjectDecision.subject==="CANONICAL_PERSON"?"PASS":"NOT_REQUIRED";
-    const assetProvider=subjectDecision.subject==="CANONICAL_PERSON"?"HIGGSFIELD":"OPENAI";
+    const visualDecision=decideVisualRuntime({
+      profileType:fixture.profileType,
+      visualBrief,
+      suitableRealAssetAvailable:false,
+      higgsfieldConfigured:true,
+      soulIdentityState:fixture.canonicalIdentityReady??fixture.profileType==="PERSONAL_BRAND"?"COMPLETED":"NOT_CONFIGURED",
+      higgsfieldBudgetRemainingEur:50,
+      estimatedHiggsfieldCostEur:0.25,
+      estimatedOpenAiCostEur:0.08,
+      subject:subjectDecision.subject,
+    });
+    const assetProvider=visualDecision.provider;
     const feed=evaluateFeedCoherence({
       profileType:fixture.profileType,
       subject:subjectDecision.subject,
@@ -249,7 +289,7 @@ export function runProfileSmmCertificationSimulation(
     };
     contents.push({
       sequence:index+1,simulatedAt:createdAt,provider,format,contentType,intent,pillar,topic,hook,cta,
-      subject:subjectDecision.subject,visualArchetype:subjectDecision.visualArchetype,
+      subject:subjectDecision.subject,visualArchetype:subjectDecision.visualArchetype,visualProvider:assetProvider,
       seriesId:continuity.seriesId,seriesSequence:continuity.sequenceNumber,previousContentId:continuity.previousContentId,
       nextTopicIntent:continuity.nextTopicIntent,memoryBeforeCount:memory.sourceContentCount,memoryAfterCount:nextMemory.sourceContentCount,
       memoryInstructionChanged:instructionChanged,antiRepetitionReasons:repetition.reasons,duplicateScore:duplicate?.score??null,gates,
@@ -286,6 +326,10 @@ export function runProfileSmmCertificationSimulation(
       distinctPillarCount:usedPillars.length,
       canonicalPersonCount:count(contents.map((row)=>row.subject),"CANONICAL_PERSON"),
       genericPersonCount:count(contents.map((row)=>row.subject),"GENERIC_PERSON"),
+      higgsfieldRouteCount:count(contents.map((row)=>row.visualProvider),"HIGGSFIELD"),
+      openAiRouteCount:count(contents.map((row)=>row.visualProvider),"OPENAI"),
+      distinctContentTypeCount:new Set(contents.map((row)=>row.contentType)).size,
+      distinctCtaCount:new Set(contents.map((row)=>row.cta)).size,
       publicationJobsCreated:0,
       realHiggsfieldGenerations:0,
     },
@@ -302,15 +346,28 @@ export function compareProfileTypeCertification(
   const subjectDifference=[...businessSubjects].some((item)=>!personalSubjects.has(item))
     || [...personalSubjects].some((item)=>!businessSubjects.has(item));
   const identityDifference=business.proof.canonicalPersonCount===0&&personalBrand.proof.canonicalPersonCount>0;
-  const storytellingDifference=business.contents.filter((row)=>row.subject==="CANONICAL_PERSON").length
-    !== personalBrand.contents.filter((row)=>row.subject==="CANONICAL_PERSON").length;
-  const substantiallyDifferent=subjectDifference&&identityDifference&&storytellingDifference;
+  const storytellingDifference=business.contents.filter((row)=>row.contentType==="STORYTELLING").length
+    !== personalBrand.contents.filter((row)=>row.contentType==="STORYTELLING").length;
+  const topicDifference=business.contents.some((row,index)=>row.topic!==personalBrand.contents[index]?.topic);
+  const ctaDifference=business.contents.some((row,index)=>row.cta!==personalBrand.contents[index]?.cta);
+  const visualStrategyDifference=business.contents.some((row,index)=>row.visualArchetype!==personalBrand.contents[index]?.visualArchetype);
+  const providerRoutingDifference=business.proof.higgsfieldRouteCount===0&&personalBrand.proof.higgsfieldRouteCount>0;
+  const memoryDifference=business.contents.some((row,index)=>row.memoryInstructionChanged!==personalBrand.contents[index]?.memoryInstructionChanged)
+    || business.contents.some((row,index)=>row.nextTopicIntent!==personalBrand.contents[index]?.nextTopicIntent);
+  const continuityProven=business.proof.continuityNChangesNPlus1&&personalBrand.proof.continuityNChangesNPlus1;
+  const substantiallyDifferent=subjectDifference&&identityDifference&&storytellingDifference&&topicDifference&&ctaDifference&&visualStrategyDifference&&providerRoutingDifference&&continuityProven;
   return {
     sameIndustry:true,
     substantiallyDifferent,
     subjectDifference,
     identityDifference,
     storytellingDifference,
+    topicDifference,
+    ctaDifference,
+    visualStrategyDifference,
+    providerRoutingDifference,
+    memoryDifference,
+    continuityProven,
     pass:business.status==="PASS"&&personalBrand.status==="PASS"&&substantiallyDifferent,
   };
 }
