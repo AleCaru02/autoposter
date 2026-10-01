@@ -1,6 +1,37 @@
 const MAX_REFERENCE_BYTES = 5 * 1024 * 1024;
-export const MIN_REFERENCE_COUNT = 3;
-export const MAX_REFERENCE_COUNT = 12;
+export const ONBOARDING_REFERENCE_COUNT = 3;
+export const SOUL_ID_PRODUCTION_REFERENCE_COUNT = 20;
+export const RECOMMENDED_REFERENCE_COUNT_MAX = 40;
+export const MAX_REFERENCE_COUNT = 80;
+/**
+ * Backward-compatible name: MIN_REFERENCE_COUNT now means the minimum
+ * production-ready Soul ID training set, never the onboarding minimum.
+ */
+export const MIN_REFERENCE_COUNT = SOUL_ID_PRODUCTION_REFERENCE_COUNT;
+
+export type PersonalBrandReferenceReadiness =
+  | "REFERENCES_INSUFFICIENT"
+  | "ONBOARDING_MINIMUM"
+  | "REFERENCES_QUALITY_REVIEW"
+  | "READY_FOR_SOUL_ID"
+  | "SOUL_ID_CREATING"
+  | "SOUL_ID_READY"
+  | "SOUL_ID_FAILED";
+
+export function referenceReadiness(input: {
+  validCount: number;
+  totalCount: number;
+  rejectedCount?: number;
+  soulStatus?: string | null;
+}): PersonalBrandReferenceReadiness {
+  if (input.soulStatus === "CREATING") return "SOUL_ID_CREATING";
+  if (input.soulStatus === "COMPLETED") return "SOUL_ID_READY";
+  if (input.soulStatus === "FAILED") return "SOUL_ID_FAILED";
+  if (input.validCount >= SOUL_ID_PRODUCTION_REFERENCE_COUNT) return "READY_FOR_SOUL_ID";
+  if ((input.rejectedCount ?? 0) > 0 && input.totalCount >= ONBOARDING_REFERENCE_COUNT) return "REFERENCES_QUALITY_REVIEW";
+  if (input.validCount >= ONBOARDING_REFERENCE_COUNT) return "ONBOARDING_MINIMUM";
+  return "REFERENCES_INSUFFICIENT";
+}
 
 export type ReferenceTechnicalQuality = {
   status: "PASS" | "REJECTED";
