@@ -42,6 +42,7 @@ type CandidateRow = {
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V5";
+const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_2";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -201,7 +202,7 @@ async function regenerateSafeVisual(input:{
     throw new Error("PREPUBLISH_VISUAL_SCOPE_MISMATCH");
   }
 
-  const operationIdentity=`prepublish-visual:${variantId}:${SAFE_VISUAL_VERSION}`;
+  const operationIdentity=`prepublish-visual:${variantId}:${SAFE_VISUAL_VERSION}:${SAFE_VISUAL_METERING_ATTEMPT}`;
   const meter=new ImageGenerationMetering(env.DATABASE_URL!);
   const reservation=await meter.reserve({
     profileId,
@@ -210,7 +211,7 @@ async function regenerateSafeVisual(input:{
     referenceId:variantId,
     requestFingerprint:{
       contentId,variantId,provider:candidate.provider,format:candidate.format,
-      visualBrief:SAFE_VISUAL_BRIEF,version:SAFE_VISUAL_VERSION,
+      visualBrief:SAFE_VISUAL_BRIEF,version:SAFE_VISUAL_VERSION,meteringAttempt:SAFE_VISUAL_METERING_ATTEMPT,
     },
   });
   if(reservation.status==="DENIED") throw new Error(reservation.code);
