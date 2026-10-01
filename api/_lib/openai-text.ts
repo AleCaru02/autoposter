@@ -2,7 +2,7 @@ import { buildSectorResearchInstruction, type EditorialResearchMode } from "./ed
 import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
 import { platformDiversityIssues, platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
-import { languageQualityPrompt } from "./language-quality.js";
+import { languageQualityIssues, languageQualityPrompt } from "./language-quality.js";
 import { buildSourceIntelligence, hasCriticalUnsupportedClaim, type SourceIntelligenceSummary } from "./source-intelligence.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -276,9 +276,25 @@ export function requestedStructuralCount(topic: string, objective?: string | nul
   return word ? words[word[1]] ?? null : null;
 }
 
+function numberedItemSegments(text: string, count: number) {
+  const markers = Array.from({ length: count }, (_, index) => {
+    const number = index + 1;
+    const match = new RegExp(`(?:^|\\n)\\s*${number}\\s*[.)\\-:]\\s*`, "m").exec(text);
+    return match ? { index: match.index + (match[0].startsWith("\n") ? 1 : 0), end: match.index + match[0].length } : null;
+  });
+  if (markers.some((marker) => !marker)) return null;
+  const resolved = markers as Array<{ index: number; end: number }>;
+  for (let index = 1; index < resolved.length; index += 1) {
+    if (resolved[index].index <= resolved[index - 1].index) return null;
+  }
+  return resolved.map((marker, index) => text.slice(marker.end, resolved[index + 1]?.index ?? text.length).trim());
+}
+
 function hasNumberedStructure(text: string, count: number) {
-  return Array.from({ length: count }, (_, index) => index + 1)
-    .every((number) => new RegExp(`(?:^|\\n|\\s)${number}\\s*[.)\\-:]`, "m").test(text));
+  const segments = numberedItemSegments(text, count);
+  if (!segments) return false;
+  if (new RegExp(`(?:^|\\n)\\s*${count + 1}\\s*[.)\\-:]\\s*`, "m").test(text)) return false;
+  return segments.every((segment) => segment.replace(/[#*_>`]/g, "").trim().split(/\s+/).filter(Boolean).length >= 4);
 }
 
 function normalizedCopy(value: string) {
@@ -288,19 +304,32 @@ function normalizedCopy(value: string) {
 export function editorialQualityIssues(content: GeneratedSocialContent, topic: string, objective?: string | null) {
   const issues: string[] = [];
   const angle = content.editorialAngle.trim();
-  if (angle.length >= 150 && !/[.!?…]$/.test(angle)) {
+  const incompleteEnding = /(?:\b(?:e|ed|o|oppure|ma|però|che|di|a|da|in|con|su|per|tra|fra|il|lo|la|i|gli|le|un|uno|una|del|della|dei|degli|delle|al|alla|ai|agli|alle|nel|nella|nei|negli|nelle)\s*)$/i;
+  if ((angle.length >= 150 && !/[.!?…]$/.test(angle)) || incompleteEnding.test(angle)) {
     issues.push("EDITORIAL_ANGLE_INCOMPLETE");
   }
+
+  issues.push(...languageQualityIssues(content));
+
+  const requestText = `${topic} ${objective ?? ""}`.normalize("NFKC").toLowerCase();
+  const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(requestText);
+  const differencesRequested = /\bdifferenz\w*\b/i.test(requestText);
+  if (comparisonRequested) {
+    const framing = `${content.editorialTopic} ${content.editorialAngle}`.toLowerCase();
+    if (/\b(?:non esiste (?:un )?vincitore|nessun vincitore|più che cercare un vincitore|aspetti da confrontare|criteri da valutare)\b/i.test(framing)) {
+      issues.push("COMPARISON_FRAMING_EVASIVE");
+    }
+    if (differencesRequested && !/\bdifferenz\w*\b/i.test(framing)) {
+      issues.push("DIFFERENCE_REQUEST_DILUTED");
+    }
+  }
+
   const count = requestedStructuralCount(topic, objective);
   if (count) {
-    const countWords: Record<number, string> = { 2: "due", 3: "tre", 4: "quattro", 5: "cinque", 6: "sei", 7: "sette", 8: "otto", 9: "nove", 10: "dieci" };
     for (const variant of content.variants) {
-      if (variant.format !== "POST") continue;
-      const copy = variant.caption.toLowerCase();
-      const word = countWords[count] ?? "";
-      const countMentioned = copy.includes(String(count)) || (word ? copy.includes(word) : false);
-      if (!countMentioned && !hasNumberedStructure(variant.caption, count)) {
-        issues.push(`REQUESTED_COUNT_MISSING:${variant.provider}:${count}`);
+      if (variant.format !== "POST" || !variant.eligible) continue;
+      if (!hasNumberedStructure(variant.caption, count)) {
+        issues.push(`REQUESTED_COUNT_STRUCTURE_INVALID:${variant.provider}:${count}`);
       }
     }
   }
@@ -412,7 +441,7 @@ async function repairUnsupportedContent(input: {
           ? "Il contenuto non ha superato il controllo editoriale deterministico. Riparalo rispettando esattamente qualityIssues e la richiesta originale, senza cambiare tema."
           : "Il contenuto è stato bloccato dal fact-check. Devi ripararlo, non difenderlo.",
         input.repairReason === "EDITORIAL_QUALITY"
-          ? "Se l'utente chiede un numero preciso di differenze/punti, ogni POST deve contenerli tutti, distinti e numerati 1..N. Non sostituire differenze richieste con formule vaghe come 'aspetti da valutare'. editorialAngle deve essere una frase completa e non deve finire con parole tagliate."
+          ? "Se l'utente chiede un numero preciso di differenze/punti, ogni POST deve contenerli tutti, distinti, sostanziali e numerati su righe separate 1..N. Citare soltanto il numero N nel titolo non soddisfa la richiesta. Non sostituire differenze richieste con formule vaghe come 'aspetti da valutare', 'criteri da confrontare' o premesse sul vincitore non richieste. Correggi anche ogni issue ITALIAN_* o TITLE_* indicata in qualityIssues. editorialAngle deve essere una frase completa."
           : "Rimuovi, riscrivi o generalizza ogni claim UNSUPPORTED o TIME_SENSITIVE indicato in checkedClaims.",
         "Non aggiungere nuovi fatti esterni, numeri, percentuali, commissioni, performance, regole di piattaforma, sedi, risultati o promesse che non siano supportati dal contesto fornito.",
         "Puoi mantenere i claim VERIFIED, i dati BRAND supportati dal brand/sito e le formulazioni EDITORIAL non fattuali.",
@@ -566,10 +595,10 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Non creare quattro parafrasi dello stesso post. Instagram, Facebook, LinkedIn e GBP devono risultare distinguibili anche rimuovendo il nome della piattaforma: cambia apertura, sviluppo e chiusura secondo la logica nativa del canale.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
     "task.objective può contenere sia un obiettivo marketing sia vincoli editoriali espliciti. Numeri, confronti, elementi richiesti e taglio indicati dall'utente sono requisiti da rispettare, non suggerimenti da reinterpretare.",
-    "Se topic o objective chiedono N differenze/punti/consigli/errori, produci esattamente N elementi sostanziali e distinti. Nei POST numerali chiaramente 1..N; non trasformarli in un elenco vago di criteri.",
-    "Nei confronti tra piattaforme/prodotti/servizi rispondi direttamente al confronto richiesto. Evita premesse evasive o formule tipo 'non esiste un vincitore' se l'utente non lo ha chiesto; usa invece differenze concrete supportate dalle fonti.",
+    "Se topic o objective chiedono N differenze/punti/consigli/errori, produci esattamente N elementi sostanziali e distinti. Nei POST ogni elemento deve stare su una voce numerata separata 1..N con una spiegazione utile: citare N nel titolo o in una frase non basta. Non aggiungere una voce N+1.",
+    "Nei confronti tra piattaforme/prodotti/servizi rispondi direttamente al confronto richiesto. Se l'utente chiede differenze, usa esplicitamente il concetto di differenze nel titolo/angolo e nel copy: non diluirlo in 'aspetti da confrontare' o 'criteri da valutare'. Evita premesse tipo 'non esiste un vincitore' se non richieste; usa differenze concrete supportate dalle fonti.",
     "editorialAngle deve essere una frase completa e leggibile. Non troncare mai una parola o una frase per rientrare nei limiti.",
-    "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni, piattaforme o formule promozionali.",
+    "editorialTopic deve essere il tema canonico e specifico del contenuto in 3-12 parole, senza istruzioni o formule promozionali. Deve essere naturale, specifico, utile e orientato al target: evita titoli scolastici o formule AI generiche come '5 differenze principali', '5 consigli utili', 'guida definitiva' o 'tutto quello che devi sapere' quando puoi esprimere un beneficio, una decisione o un contesto più preciso.",
     "pillar deve indicare il pilastro editoriale concreto a cui appartiene il contenuto, non una categoria generica come 'social'.",
     "editorialAngle deve descrivere in modo conciso il punto di vista concreto usato per trattare quel tema; due copy sullo stesso tema ma con angoli realmente diversi devono avere angoli diversi.",
     "Non usare in editorialTopic o editorialAngle frasi come 'scegli', 'crea', 'evita di ripetere', 'contenuto destinato' o riferimenti alla richiesta tecnica.",
@@ -723,18 +752,6 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         fetcher,
       });
       content = copyRepair.content;
-      const repairedRequestedCount = requestedStructuralCount(options.topic, options.objective);
-      if (repairedRequestedCount) {
-        content = {
-          ...content,
-          variants: content.variants.map((variant) => {
-            if (variant.format !== "POST") return variant;
-            const caption = variant.caption.trim();
-            if (caption.includes(String(repairedRequestedCount)) || hasNumberedStructure(caption, repairedRequestedCount)) return variant;
-            return { ...variant, caption: `${repairedRequestedCount} punti da confrontare:\n${caption}` };
-          }),
-        };
-      }
       const repairedQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
       if (repairedQualityIssues.length) {
         const repairCostUsd = estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens);

@@ -146,8 +146,9 @@ let forcedSourceCall = 0;
 let forcedSourceFactCheckBody: Record<string, any> | null = null;
 const comparisonContent = {
   ...generated,
-  editorialTopic: "Airbnb e Booking",
-  variants: [{ ...generated.variants[0], caption: "Airbnb e Booking: 5 differenze da valutare prima di scegliere.", factualBasis: ["BASE BRAND/SITO"] }],
+  editorialTopic: "Airbnb e Booking: cinque differenze operative",
+  editorialAngle: "Cinque differenze concrete aiutano il proprietario a capire come cambia la gestione sui due canali.",
+  variants: [{ ...generated.variants[0], caption: "1. Commissioni: cambia la struttura dei costi.\n2. Tariffa: cambia il modo di costruire il prezzo.\n3. Cancellazioni: cambiano regole e flessibilità.\n4. Pagamenti: cambia il flusso degli incassi.\n5. Operatività: cambia il lavoro quotidiano di gestione.", factualBasis: ["BASE BRAND/SITO"] }],
 };
 const forcedSourceFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
   forcedSourceCall += 1;
@@ -194,13 +195,15 @@ let repairFlowCall = 0;
 let repairRequestBody: Record<string, any> | null = null;
 const unsafeComparisonContent = {
   ...generated,
-  editorialTopic: "Airbnb e Booking",
-  variants: [{ ...generated.variants[0], caption: "Airbnb trattiene il 99% e Booking il 12%: 5 differenze.", factualBasis: ["BASE ESTERNA"] }],
+  editorialTopic: "Airbnb e Booking: cinque differenze operative",
+  editorialAngle: "Cinque differenze concrete aiutano il proprietario a confrontare i due canali.",
+  variants: [{ ...generated.variants[0], caption: "1. Commissioni: Airbnb trattiene il 99% e Booking il 12%.\n2. Tariffa: i due canali gestiscono il prezzo in modo diverso.\n3. Cancellazioni: le policy possono cambiare.\n4. Pagamenti: i flussi di incasso non sono identici.\n5. Operatività: cambiano alcuni passaggi di gestione.", factualBasis: ["BASE ESTERNA"] }],
 };
 const repairedComparisonContent = {
   ...generated,
-  editorialTopic: "Airbnb e Booking",
-  variants: [{ ...generated.variants[0], caption: "Airbnb e Booking hanno aspetti diversi da valutare: costi, regole, operatività, pubblico e gestione del canale.", factualBasis: ["BASE BRAND/SITO"] }],
+  editorialTopic: "Airbnb e Booking: cinque differenze operative",
+  editorialAngle: "Cinque differenze concrete aiutano il proprietario a confrontare i due canali senza usare dati non verificati.",
+  variants: [{ ...generated.variants[0], caption: "1. Commissioni: confronta sempre la struttura dei costi applicabile al tuo account.\n2. Tariffa: valuta come costruire il prezzo finale.\n3. Cancellazioni: verifica le policy disponibili per il tuo annuncio.\n4. Pagamenti: controlla tempi e modalità di incasso.\n5. Operatività: considera il lavoro necessario per gestire il canale.", factualBasis: ["BASE BRAND/SITO"] }],
 };
 const repairFlowFetcher = (async (_url: string | URL | Request, init?: RequestInit) => {
   repairFlowCall += 1;
