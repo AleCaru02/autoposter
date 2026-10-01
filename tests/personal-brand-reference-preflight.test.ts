@@ -5,6 +5,9 @@ import {
   imageDimensions,
   MIN_REFERENCE_COUNT,
   MAX_REFERENCE_COUNT,
+  ONBOARDING_REFERENCE_COUNT,
+  referenceReadiness,
+  SOUL_ID_PRODUCTION_REFERENCE_COUNT,
 } from "../api/_lib/personal-brand-reference.js";
 
 const png = new Uint8Array(24);
@@ -17,13 +20,22 @@ const quality = evaluateReferenceImage(new Uint8Array([...png, ...new Uint8Array
 assert.equal(quality.status,"PASS");
 assert.equal(quality.width,1200);
 assert.equal(quality.height,1200);
-assert.equal(MIN_REFERENCE_COUNT,3);
-assert.equal(MAX_REFERENCE_COUNT,12);
+assert.equal(ONBOARDING_REFERENCE_COUNT,3);
+assert.equal(MIN_REFERENCE_COUNT,20);
+assert.equal(SOUL_ID_PRODUCTION_REFERENCE_COUNT,20);
+assert.equal(MAX_REFERENCE_COUNT,80);
+assert.equal(referenceReadiness({validCount:2,totalCount:2}),"REFERENCES_INSUFFICIENT");
+assert.equal(referenceReadiness({validCount:3,totalCount:3}),"ONBOARDING_MINIMUM");
+assert.equal(referenceReadiness({validCount:19,totalCount:19}),"ONBOARDING_MINIMUM");
+assert.equal(referenceReadiness({validCount:20,totalCount:20}),"READY_FOR_SOUL_ID");
+assert.equal(referenceReadiness({validCount:18,totalCount:20,rejectedCount:2}),"REFERENCES_QUALITY_REVIEW");
 
 const handler = fs.readFileSync("cloudflare/personal-brand-reference.ts","utf8");
 assert.match(handler,/owner_auth_user_id/, "reference runtime must remain owner scoped");
 assert.match(handler,/profile_type='PERSONAL_BRAND'/, "reference runtime must be Personal Brand only");
 assert.match(handler,/requiresExplicitConfirmation:\s*true/, "Soul ID preflight must require explicit confirmation");
+assert.match(handler,/SOUL_ID_PRODUCTION_REFERENCE_COUNT/, "Soul ID runtime must enforce the 20-real-photo production gate");
+assert.match(handler,/syntheticReferenceExpansionAllowed:\s*false/, "runtime must never fabricate synthetic training references to reach 20");
 assert.match(handler,/providerCallExecuted:\s*false/, "preflight must prove no provider call occurred");
 const preflightSource = handler.slice(handler.indexOf("export async function handleSoulIdPreflight"), handler.indexOf("export async function handleSoulIdCreate"));
 assert.doesNotMatch(preflightSource,/createHiggsfieldSoulId\(/, "non-billable preflight must not create a Soul ID");
@@ -39,6 +51,9 @@ assert.match(handler,/costBucket:\s*"HIGGSFIELD"/, "Soul ID preflight must use t
 
 const ui = fs.readFileSync("src/components/personal-brand-visual-identity-panel.tsx","utf8");
 assert.match(ui,/reference-images/, "Personal Brand UI must manage reference images");
+assert.match(ui,/3 foto reali servono solo per completare l’onboarding/, "UI must explain that 3 photos are onboarding only");
+assert.match(ui,/almeno \{required\} foto reali valide/, "UI must communicate the production-ready threshold");
+assert.match(ui,/Non vengono generate foto artificiali/, "UI must explicitly reject synthetic reference expansion");
 assert.match(ui,/soul-id\/preflight/, "Personal Brand UI must expose non-billable Soul ID readiness");
 assert.doesNotMatch(ui,/soul-id\/create|createHiggsfieldSoulId/, "UI must not expose billable Soul ID creation yet");
 
