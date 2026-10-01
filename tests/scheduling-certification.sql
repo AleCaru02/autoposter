@@ -276,7 +276,8 @@ BEGIN
   SELECT pg_get_functiondef('public.claim_due_publication_jobs(integer,integer)'::regprocedure)
   INTO v_function;
   IF position('FOR UPDATE SKIP LOCKED' in upper(v_function))=0
-     OR position('CLAIM_TOKEN=GEN_RANDOM_UUID()' in replace(upper(v_function),' ',''))=0 THEN
+     OR position('GEN_RANDOM_UUID()' in upper(v_function))=0
+     OR position('STATE=''PROCESSING''' in upper(v_function))=0 THEN
     RAISE EXCEPTION 'CONCURRENT_CLAIM_PROTECTION_FAILED';
   END IF;
 
