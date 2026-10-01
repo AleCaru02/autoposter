@@ -1,7 +1,36 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { spawn } from "node:child_process";
 
 const base = (process.env.UI_SMOKE_BASE || "http://127.0.0.1:4173").replace(/\/$/, "");
+
+let localServer = null;
+async function startLocalServer() {
+  if (process.env.UI_SMOKE_START_LOCAL !== "1") return;
+  localServer = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", "4173"], {
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    let timeout;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      callback(value);
+    };
+    const onData = (chunk) => {
+      const output = String(chunk);
+      if (/Local:|ready in/i.test(output)) finish(resolve);
+    };
+    localServer.stdout?.on("data", onData);
+    localServer.stderr?.on("data", onData);
+    localServer.once("exit", (code) => finish(reject, new Error("UI_QA_VITE_EXIT_" + code)));
+    timeout = setTimeout(() => finish(reject, new Error("UI_QA_VITE_START_TIMEOUT")), 15000);
+  });
+}
+
 const dataApiHost = "ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech";
 const profileId = "10000000-0000-4000-8000-000000000001";
 const contentId = "10000000-0000-4000-8000-000000000002";
@@ -370,6 +399,8 @@ async function verifyLoginValidation(browser) {
   }
 }
 
+await startLocalServer();
+
 const browser = await chromium.launch({ headless: true });
 try {
   for (const item of [
@@ -383,4 +414,5 @@ try {
   console.log("MOBILE_DESKTOP_UI_BROWSER_QA = PASS");
 } finally {
   await browser.close();
+  if (localServer && !localServer.killed) localServer.kill("SIGTERM");
 }
