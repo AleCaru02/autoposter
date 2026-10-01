@@ -280,7 +280,7 @@ function numberedItemSegments(text: string, count: number) {
   const markers = Array.from({ length: count }, (_, index) => {
     const number = index + 1;
     const match = new RegExp(`(?:^|\\n)\\s*${number}\\s*[.)\\-:]\\s*`, "m").exec(text);
-    return match ? { index: match.index + (match[0].startsWith("\\n") ? 1 : 0), end: match.index + match[0].length } : null;
+    return match ? { index: match.index + (match[0].startsWith("\n") ? 1 : 0), end: match.index + match[0].length } : null;
   });
   if (markers.some((marker) => !marker)) return null;
   const resolved = markers as Array<{ index: number; end: number }>;
@@ -294,7 +294,7 @@ function hasNumberedStructure(text: string, count: number) {
   const segments = numberedItemSegments(text, count);
   if (!segments) return false;
   if (new RegExp(`(?:^|\\n)\\s*${count + 1}\\s*[.)\\-:]\\s*`, "m").test(text)) return false;
-  return segments.every((segment) => segment.replace(/[#*_>`]/g, "").trim().split(/\\s+/).filter(Boolean).length >= 4);
+  return segments.every((segment) => segment.replace(/[#*_>`]/g, "").trim().split(/\s+/).filter(Boolean).length >= 4);
 }
 
 function normalizedCopy(value: string) {
@@ -304,7 +304,7 @@ function normalizedCopy(value: string) {
 export function editorialQualityIssues(content: GeneratedSocialContent, topic: string, objective?: string | null) {
   const issues: string[] = [];
   const angle = content.editorialAngle.trim();
-  const incompleteEnding = /(?:\\b(?:e|ed|o|oppure|ma|però|che|di|a|da|in|con|su|per|tra|fra|il|lo|la|i|gli|le|un|uno|una|del|della|dei|degli|delle|al|alla|ai|agli|alle|nel|nella|nei|negli|nelle)\\s*)$/i;
+  const incompleteEnding = /(?:\b(?:e|ed|o|oppure|ma|però|che|di|a|da|in|con|su|per|tra|fra|il|lo|la|i|gli|le|un|uno|una|del|della|dei|degli|delle|al|alla|ai|agli|alle|nel|nella|nei|negli|nelle)\s*)$/i;
   if ((angle.length >= 150 && !/[.!?…]$/.test(angle)) || incompleteEnding.test(angle)) {
     issues.push("EDITORIAL_ANGLE_INCOMPLETE");
   }
@@ -312,11 +312,11 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
   issues.push(...languageQualityIssues(content));
 
   const requestText = `${topic} ${objective ?? ""}`.normalize("NFKC").toLowerCase();
-  const comparisonRequested = /\\b(?:vs\\.?|versus|confront\\w*|compar\\w*|differenz\\w*|meglio\\s+tra)\\b/i.test(requestText);
-  const differencesRequested = /\\bdifferenz\\w*\\b/i.test(requestText);
+  const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(requestText);
+  const differencesRequested = /\bdifferenz\w*\b/i.test(requestText);
   if (comparisonRequested) {
     const framing = `${content.editorialTopic} ${content.editorialAngle}`.toLowerCase();
-    if (/\\b(?:non esiste (?:un )?vincitore|nessun vincitore|più che cercare un vincitore|aspetti da confrontare|criteri da valutare)\\b/i.test(framing)) {
+    if (/\b(?:non esiste (?:un )?vincitore|nessun vincitore|più che cercare un vincitore|aspetti da confrontare|criteri da valutare)\b/i.test(framing)) {
       issues.push("COMPARISON_FRAMING_EVASIVE");
     }
     if (differencesRequested && !/\\bdifferenz\\w*\\b/i.test(framing)) {
