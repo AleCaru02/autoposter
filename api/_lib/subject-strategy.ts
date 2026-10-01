@@ -102,8 +102,10 @@ export function chooseSubjectStrategy(input: {
   suitableRealAssetAvailable: boolean;
   canonicalIdentityReady: boolean;
 }): SubjectDecision {
+  const narrativeSignals = textSignals(`${input.topic} ${input.angle ?? ""}`);
+  const visualSignals = textSignals(input.visualBrief);
   const signals = textSignals(`${input.topic} ${input.angle ?? ""} ${input.visualBrief}`);
-  if (input.suitableRealAssetAvailable && (signals.product || input.profileType === "PERSONAL_BRAND" && signals.person)) {
+  if (input.suitableRealAssetAvailable && (signals.product || input.profileType === "PERSONAL_BRAND" && visualSignals.person)) {
     return {
       subject:"REAL_ASSET",
       visualArchetype:archetype("REAL_ASSET",input.format),
@@ -114,7 +116,7 @@ export function chooseSubjectStrategy(input: {
     };
   }
 
-  if (input.profileType === "PERSONAL_BRAND" && signals.person) {
+  if (input.profileType === "PERSONAL_BRAND" && visualSignals.person) {
     if (input.canonicalIdentityReady) {
       return {
         subject:"CANONICAL_PERSON",
@@ -162,7 +164,7 @@ export function chooseSubjectStrategy(input: {
   return {
     subject,
     visualArchetype:archetype(subject,input.format),
-    reason:`Subject scelto per fit semantico e varietà rispetto alla memoria recente: ${subject}.`,
+    reason:`Subject scelto per fit semantico e varietà rispetto alla memoria recente: ${subject}. Il racconto personale da solo non forza il volto: la presenza canonica deve essere richiesta dalla direzione visuale.`,
     canonicalIdentityRequired:false,
     preferRealAsset:subject==="PRODUCT",
     prohibitSyntheticPerson:input.profileType==="PERSONAL_BRAND",
