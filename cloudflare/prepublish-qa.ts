@@ -58,7 +58,7 @@ type CandidateRow = {
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V5";
-const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_3";
+const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_4";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -172,6 +172,15 @@ function numeric(value:unknown){
   return typeof value==="number" && Number.isFinite(value) ? value : null;
 }
 
+function openAiImageErrorKind(raw:string){
+  try{
+    const body=JSON.parse(raw) as Record<string,unknown>;
+    const error=body.error && typeof body.error==="object" ? body.error as Record<string,unknown> : {};
+    const value=typeof error.code==="string"&&error.code.trim()?error.code:typeof error.type==="string"?error.type:"unknown";
+    return value.toLowerCase().replace(/[^a-z0-9_]+/g,"_").slice(0,80)||"unknown";
+  }catch{return "unknown";}
+}
+
 async function generateConfirmedBriefImage(apiKey:string){
   const prompt=[
     SAFE_VISUAL_BRIEF,
@@ -189,7 +198,11 @@ async function generateConfirmedBriefImage(apiKey:string){
     });
     raw=await response.text();
     if(response.ok) break;
-    if(response.status!==429 || attempt===5) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
+    const errorKind=openAiImageErrorKind(raw);
+    const nonRetryable429=new Set(["insufficient_quota","billing_hard_limit_reached","billing_not_active","account_deactivated"]);
+    if(response.status!==429 || attempt===5 || nonRetryable429.has(errorKind)){
+      throw new Error(`OPENAI_IMAGE_HTTP_${response.status}_${errorKind.toUpperCase()}`);
+    }
     const retryAfter=Number(response.headers.get("retry-after")??"0");
     const delayMs=Math.min(Math.max(Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:Math.pow(2,attempt)*2000,2000),30000);
     await new Promise((resolve)=>setTimeout(resolve,delayMs));
