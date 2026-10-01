@@ -1,7 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { runContentQa } from "../api/_lib/content-qa.js";
 import { socialSafeModeState, type SocialEnv } from "../api/_lib/social.js";
-import { generateRoutedImage } from "../api/_lib/routed-image.js";
+import { estimateImageCostUsd } from "../api/_lib/openai-image.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
@@ -28,7 +28,7 @@ type CandidateRow = {
 };
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V3";
+const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V4";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -107,6 +107,46 @@ function metadataObject(value:unknown):Record<string,unknown>{
   return value && typeof value==="object" && !Array.isArray(value) ? value as Record<string,unknown> : {};
 }
 
+function numeric(value:unknown){
+  return typeof value==="number" && Number.isFinite(value) ? value : null;
+}
+
+async function generateConfirmedBriefImage(apiKey:string){
+  const prompt=[
+    SAFE_VISUAL_BRIEF,
+    "Usa esclusivamente questi contenuti e vincoli già confermati. Non aggiungere fatti, luoghi, dati, label, loghi o claim.",
+    "Il testo visibile deve essere esattamente quello richiesto nel brief, in italiano naturale e perfettamente leggibile su smartphone.",
+    "Evita totalmente qualsiasi elemento che possa sembrare cartografia reale. La composizione deve essere editoriale, astratta e chiaramente illustrativa, non una rappresentazione geografica.",
+  ].join("\n\n");
+  const response=await fetch("https://api.openai.com/v1/images/generations",{
+    method:"POST",
+    headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
+    body:JSON.stringify({model:"gpt-image-2",prompt,size:"1024x1024",quality:"high",n:1,output_format:"png"}),
+  });
+  const requestId=response.headers.get("x-request-id");
+  const raw=await response.text();
+  if(!response.ok) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
+  const body=JSON.parse(raw) as Record<string,unknown>;
+  const rows=Array.isArray(body.data)?body.data:[];
+  const first=rows[0] && typeof rows[0]==="object" ? rows[0] as Record<string,unknown> : null;
+  const base64=first && typeof first.b64_json==="string" ? first.b64_json : "";
+  if(!base64) throw new Error("OPENAI_IMAGE_EMPTY_OUTPUT");
+  const usage=body.usage && typeof body.usage==="object" ? body.usage as Record<string,unknown> : {};
+  const inputTokens=numeric(usage.input_tokens);
+  const outputTokens=numeric(usage.output_tokens);
+  const estimatedCostUsd=inputTokens!==null && outputTokens!==null ? estimateImageCostUsd(inputTokens,outputTokens) : null;
+  return {
+    model:"gpt-image-2" as const,mimeType:"image/png" as const,base64,
+    size:"1024x1024" as const,aspectRatio:"1:1" as const,quality:"high" as const,
+    generationPrompt:prompt,requestId,usage:{estimatedCostUsd},
+    technicalEvents:[{
+      operation:"GENERATE_SOCIAL_IMAGE" as const,model:"gpt-image-2",
+      inputTokens,outputTokens,costUsd:estimatedCostUsd,
+      metadata:{openai_request_id:requestId,quality:"high",size:"1024x1024",prepublish_direct_confirmed_brief:true},
+    }],
+  };
+}
+
 async function regenerateSafeVisual(input:{
   env:Env;
   sql:ReturnType<typeof neon>;
@@ -174,32 +214,7 @@ async function regenerateSafeVisual(input:{
 
     await meter.markProviderStarted(eventId,0.25);
     const brandVisual=normalizeBrandVisualIdentity(candidate.visual_identity);
-    const generateVisual=()=>generateRoutedImage({
-      env:{OPENAI_API_KEY:env.OPENAI_API_KEY},
-      budget,
-      importance:"STANDARD",
-      profileName:candidate.profile_name,
-      profileType:candidate.profile_type,
-      industry:candidate.industry,
-      tone:toneSummary(candidate.tone_of_voice),
-      brandColors:brandVisual.colors,
-      brandFonts:brandVisual.fonts,
-      brandVisualStyle:brandVisual.visualStyle,
-      provider:candidate.provider,
-      format:candidate.format,
-      visualBrief:SAFE_VISUAL_BRIEF,
-      caption:candidate.caption,
-      additionalDirection:"Evita totalmente qualsiasi elemento che possa sembrare cartografia reale. La composizione deve essere editoriale, astratta e chiaramente illustrativa, non una rappresentazione geografica.",
-    });
-    let result;
-    try{
-      result=await generateVisual();
-    }catch(reason){
-      const code=reason instanceof Error?reason.message.split(":")[0]:"";
-      if(code!=="OPENAI_MEDIA_MANAGER_HTTP_429") throw reason;
-      await new Promise((resolve)=>setTimeout(resolve,1500));
-      result=await generateVisual();
-    }
+    const result=await generateConfirmedBriefImage(env.OPENAI_API_KEY!);
     if(result.model!=="gpt-image-2") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
 
     await meter.persistTechnicalEvents(profileId,eventId,technicalEventsFromImageResult(result,{
@@ -231,7 +246,7 @@ async function regenerateSafeVisual(input:{
         provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at
       ) values (
         ${profileId}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
-        ${`FACEBOOK-POST-${variantId}-safe-v3.png`},${dataUrl},${result.mimeType},
+        ${`FACEBOOK-POST-${variantId}-safe-v4.png`},${dataUrl},${result.mimeType},
         ${JSON.stringify(["FACEBOOK","POST","AI_GENERATED","PREPUBLISH_SAFE"])}::jsonb,
         ${JSON.stringify(metadata)}::jsonb,
         'OPENAI',${result.model},${actualEur},
