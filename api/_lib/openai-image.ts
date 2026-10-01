@@ -1,6 +1,7 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
+import { visualTextLanguageQualityPrompt } from "./language-quality.js";
 
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -96,6 +97,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     : "POST/CAROUSEL: mantieni headline, soggetto ed elementi essenziali ad almeno circa l'8% dai bordi e leggibili in anteprima mobile.";
   return [
     "VINCOLI VISIVI OBBLIGATORI:",
+    visualTextLanguageQualityPrompt(),
     colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
     fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
     options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
