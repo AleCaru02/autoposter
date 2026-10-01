@@ -1,4 +1,6 @@
 const HIGGSFIELD_BASE_URL = "https://api.higgsfield.ai";
+export const HIGGSFIELD_SOUL_MODEL_VERSION = "v2" as const;
+export const HIGGSFIELD_SOUL_TRAINING_RESERVE_USD = 2.5;
 
 export type HiggsfieldCredentials = { keyId: string; keySecret: string };
 export type HiggsfieldSoulStatus = "not_ready" | "queued" | "in_progress" | "completed" | "failed";
@@ -30,8 +32,7 @@ export function higgsfieldConfigured(value?: string | null) {
 
 function headers(credentials: HiggsfieldCredentials, json = false) {
   const value: Record<string, string> = {
-    "hf-api-key": credentials.keyId,
-    "hf-secret": credentials.keySecret,
+    authorization: `Key ${credentials.keyId}:${credentials.keySecret}`,
   };
   if (json) value["content-type"] = "application/json";
   return value;
@@ -59,11 +60,13 @@ export async function createHiggsfieldSoulId(input: {
     if (url.protocol !== "https:") throw new Error("HIGGSFIELD_SOUL_IMAGE_URL_INVALID");
   }
 
-  const response = await (input.fetcher ?? fetch)(`${HIGGSFIELD_BASE_URL}/v1/custom-references`, {
+  const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
+  const response = await fetcher(`${HIGGSFIELD_BASE_URL}/v1/custom-references`, {
     method: "POST",
     headers: headers(input.credentials, true),
     body: JSON.stringify({
       name,
+      model_version: HIGGSFIELD_SOUL_MODEL_VERSION,
       input_images: imageUrls.map((image_url) => ({ type: "image_url", image_url })),
     }),
   });
@@ -76,7 +79,8 @@ export async function getHiggsfieldSoulId(input: {
   fetcher?: typeof fetch;
 }): Promise<HiggsfieldSoulId> {
   if (!/^[0-9a-f-]{36}$/i.test(input.referenceId)) throw new Error("HIGGSFIELD_SOUL_ID_INVALID");
-  const response = await (input.fetcher ?? fetch)(
+  const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
+  const response = await fetcher(
     `${HIGGSFIELD_BASE_URL}/v1/custom-references/${encodeURIComponent(input.referenceId)}`,
     { headers: headers(input.credentials) },
   );
