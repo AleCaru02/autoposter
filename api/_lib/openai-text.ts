@@ -319,7 +319,7 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
     if (/\b(?:non esiste (?:un )?vincitore|nessun vincitore|più che cercare un vincitore|aspetti da confrontare|criteri da valutare)\b/i.test(framing)) {
       issues.push("COMPARISON_FRAMING_EVASIVE");
     }
-    if (differencesRequested && !/\\bdifferenz\\w*\\b/i.test(framing)) {
+    if (differencesRequested && !/\bdifferenz\w*\b/i.test(framing)) {
       issues.push("DIFFERENCE_REQUEST_DILUTED");
     }
   }
