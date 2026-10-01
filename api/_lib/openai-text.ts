@@ -1,7 +1,7 @@
 import { buildSectorResearchInstruction, type EditorialResearchMode } from "./editorial-research.js";
 import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
-import { platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
+import { platformDiversityIssues, platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
 import { languageQualityPrompt } from "./language-quality.js";
 import { buildSourceIntelligence, hasCriticalUnsupportedClaim, type SourceIntelligenceSummary } from "./source-intelligence.js";
 
@@ -311,6 +311,7 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
     if (previous && previous !== variant.provider) issues.push(`CROSS_PLATFORM_DUPLICATE:${previous}:${variant.provider}`);
     else if (signature) seen.set(signature, variant.provider);
   }
+  issues.push(...platformDiversityIssues(content.variants));
   return [...new Set(issues)];
 }
 
@@ -561,7 +562,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Se il contesto non supporta un claim, omettilo. factualBasis deve distinguere sinteticamente BASE BRAND/SITO da BASE ESTERNA quando vengono usate informazioni web.",
     "Ogni piattaforma ha una strategia editoriale distinta e vincolante: non fare semplice copia-incolla cross-platform e non limitarti a cambiare poche parole.",
     ...options.providers.map((provider) => platformStrategyPrompt(provider)),
-    "Per lo stesso tema puoi mantenere il nucleo informativo, ma hook, struttura, lunghezza, CTA, hashtag, ritmo, angolo di presentazione e visualBrief devono essere nativi della piattaforma.",
+    "Per lo stesso tema puoi mantenere il nucleo informativo e i fatti verificati, ma hook, struttura, lunghezza, CTA, hashtag, ritmo, angolo di presentazione e visualBrief devono essere nativi della piattaforma.",
+    "Non creare quattro parafrasi dello stesso post. Instagram, Facebook, LinkedIn e GBP devono risultare distinguibili anche rimuovendo il nome della piattaforma: cambia apertura, sviluppo e chiusura secondo la logica nativa del canale.",
     "Produci esattamente una variante per ogni combinazione piattaforma/formato richiesta, senza duplicati.",
     "task.objective può contenere sia un obiettivo marketing sia vincoli editoriali espliciti. Numeri, confronti, elementi richiesti e taglio indicati dall'utente sono requisiti da rispettare, non suggerimenti da reinterpretare.",
     "Se topic o objective chiedono N differenze/punti/consigli/errori, produci esattamente N elementi sostanziali e distinti. Nei POST numerali chiaramente 1..N; non trasformarli in un elenco vago di criteri.",

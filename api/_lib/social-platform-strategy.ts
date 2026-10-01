@@ -120,3 +120,46 @@ export function platformVisualStrategyPrompt(provider: SocialPlatform) {
 export function platformStrategyPrompt(provider: SocialPlatform) {
   return [platformCopyStrategyPrompt(provider), platformVisualStrategyPrompt(provider)].join("\n");
 }
+
+
+function copyTokens(value: string) {
+  return new Set(
+    value.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3)
+  );
+}
+
+export function crossPlatformCopySimilarity(a: string, b: string) {
+  const left = copyTokens(a);
+  const right = copyTokens(b);
+  if (!left.size || !right.size) return 0;
+  let intersection = 0;
+  for (const token of left) if (right.has(token)) intersection += 1;
+  const union = new Set([...left, ...right]).size;
+  return union ? intersection / union : 0;
+}
+
+export function platformDiversityIssues(
+  variants: Array<{ provider: SocialPlatform; format: string; hook: string; caption: string; cta?: string | null }>,
+) {
+  const issues: string[] = [];
+  for (let i = 0; i < variants.length; i += 1) {
+    for (let j = i + 1; j < variants.length; j += 1) {
+      const a = variants[i];
+      const b = variants[j];
+      if (a.provider === b.provider || a.format !== b.format) continue;
+      const hookSimilarity = crossPlatformCopySimilarity(a.hook, b.hook);
+      const bodySimilarity = crossPlatformCopySimilarity(a.caption, b.caption);
+      const combinedSimilarity = crossPlatformCopySimilarity(
+        `${a.hook}\n${a.caption}`,
+        `${b.hook}\n${b.caption}`,
+      );
+      if (combinedSimilarity >= 0.82 || (hookSimilarity >= 0.9 && bodySimilarity >= 0.74)) {
+        issues.push(`CROSS_PLATFORM_TOO_SIMILAR:${a.provider}:${b.provider}:${combinedSimilarity.toFixed(2)}`);
+      }
+    }
+  }
+  return [...new Set(issues)];
+}
