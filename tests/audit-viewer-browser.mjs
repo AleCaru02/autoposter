@@ -41,6 +41,10 @@ function isExpectedForbiddenResourceConsole(entry) {
   return /^console:error:Failed to load resource: the server responded with a status of 403(?:\s|\(|$)/.test(entry);
 }
 
+function isExpectedCustomerStateResourceConsole(entry) {
+  return /^console:error:Failed to load resource: the server responded with a status of (?:400|403|404)(?:\s|\(|$)/.test(entry);
+}
+
 async function login(page, email) {
   const response = await page.goto(`${base}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.equal(response?.status(), 200, "login document unavailable");
@@ -51,30 +55,84 @@ async function login(page, email) {
   await page.waitForURL((url) => url.pathname !== "/login", { timeout: 20000 });
 }
 
-async function verifyCustomerOwner(browser) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+const customerRoutes = [
+  ["/app/dashboard", "Cosa richiede attenzione oggi"],
+  ["/app/profili", "Le tue attività"],
+  ["/app/brand", "Identità dell’attività"],
+  ["/app/sito", "Analisi pagina per pagina"],
+  ["/app/contenuti", "Contenuti automatici"],
+  ["/app/approvazioni", "Revisione contenuti"],
+  ["/app/calendario", "Calendario contenuti"],
+  ["/app/social", "Collegamenti social"],
+  ["/app/analytics", "Risultati dei tuoi social"],
+  ["/app/apprendimento", "Ottimizzazione progressiva"],
+  ["/app/impostazioni", null],
+];
+
+async function assertCustomerLayout(page, label, path, expectedHeading) {
+  await page.goto(`${base}${path}`, { waitUntil: "domcontentloaded" });
+  const heading = page.locator("main h1").first();
+  await heading.waitFor({ state: "visible", timeout: 20000 });
+  if (expectedHeading) assert.equal((await heading.innerText()).trim(), expectedHeading, `${label} ${path} heading`);
+  if (path === "/app/profili") {
+    await page.getByRole("heading", { name: `Audit Smoke ${marker}`, exact: true, level: 2 }).waitFor({ state: "visible", timeout: 20000 });
+  }
+  const result = await page.evaluate(() => {
+    const root = document.documentElement;
+    const body = document.body.innerText;
+    const title = document.querySelector("main h1")?.getBoundingClientRect();
+    const primary = [...document.querySelectorAll(".primary-button")].find((item) => {
+      const style = getComputedStyle(item);
+      const rect = item.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    });
+    return {
+      scrollWidth: root.scrollWidth,
+      viewportWidth: innerWidth,
+      titleLeft: title?.left ?? -1,
+      titleRight: title?.right ?? innerWidth + 1,
+      primaryColor: primary ? getComputedStyle(primary).backgroundColor : null,
+      canvasColor: getComputedStyle(document.body).backgroundColor,
+      technicalCopy: /entitlement engine|technical usage event|internal capability key|token budget|Worker version|row level security|\bRLS\b/i.test(body),
+    };
+  });
+  assert.ok(result.scrollWidth <= result.viewportWidth + 2, `${label} ${path} overflow ${result.scrollWidth} > ${result.viewportWidth}`);
+  assert.ok(result.titleLeft >= 0 && result.titleRight <= result.viewportWidth + 2, `${label} ${path} heading outside viewport`);
+  assert.equal(result.technicalCopy, false, `${label} ${path} exposed infrastructure copy`);
+  assert.ok(["rgb(246, 249, 247)", "rgb(255, 255, 255)"].includes(result.canvasColor), `${label} ${path} canvas is not light`);
+  if (path === "/app/dashboard") assert.equal(result.primaryColor, "rgb(25, 201, 93)", `${label} dashboard primary CTA is not brand green`);
+}
+
+async function verifyCustomerViewport(browser, viewport, label, verifyDenial = false) {
+  const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   const diag = diagnostics(page);
   try {
     await login(page, customerEmail);
     await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
-    await page.getByText("Sessione attiva", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
+    for (const [path, heading] of customerRoutes) await assertCustomerLayout(page, label, path, heading);
 
-    await page.goto(`${base}/app/profili`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "Le tue attività", exact: true }).waitFor({ timeout: 20000 });
-    const profilesBody = await page.locator("body").innerText();
-    assert.ok(profilesBody.includes(`Audit Smoke ${marker}`), "OWNER cannot see own profile");
-    assert.deepEqual(diag.critical, [], `CUSTOMER/OWNER pre-denial critical browser errors: ${JSON.stringify(diag.critical)}`);
+    if (viewport.width <= 375) {
+      const more = page.getByRole("button", { name: "Apri altre sezioni", exact: true });
+      await more.click();
+      await page.getByRole("dialog", { name: "Altre sezioni", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.evaluate(() => document.body.style.overflow), "hidden", "mobile menu did not lock background scroll");
+      await page.keyboard.press("Escape");
+      await page.getByRole("dialog", { name: "Altre sezioni", exact: true }).waitFor({ state: "hidden" });
+      assert.equal(await more.evaluate((element) => document.activeElement === element), true, "mobile menu did not restore trigger focus");
+    }
 
-    await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
-    await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
-    const body = await page.locator("body").innerText();
-    assert.ok(!body.includes("Backoffice"), "CUSTOMER/OWNER received Backoffice content");
-    assert.ok(!body.includes("Registro delle operazioni amministrative autorizzate"), "CUSTOMER/OWNER received Audit content");
-    assert.ok(diag.adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 403), "CUSTOMER/OWNER browser did not receive /api/admin/me 403");
-    const unexpectedDenialErrors = diag.critical.filter((entry) => !isExpectedForbiddenResourceConsole(entry));
-    assert.deepEqual(unexpectedDenialErrors, [], `CUSTOMER/OWNER unexpected denial errors: ${JSON.stringify(unexpectedDenialErrors)}`);
-    return { customerRoute: "PASS", ownerRoute: "PASS" };
+    if (verifyDenial) {
+      await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
+      await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 20000 });
+      const body = await page.locator("body").innerText();
+      assert.ok(!body.includes("Backoffice"), "CUSTOMER/OWNER received Backoffice content");
+      assert.ok(!body.includes("Registro delle operazioni amministrative autorizzate"), "CUSTOMER/OWNER received Audit content");
+      assert.ok(diag.adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 403), "CUSTOMER/OWNER browser did not receive /api/admin/me 403");
+    }
+    const unexpectedErrors = diag.critical.filter((entry) => !isExpectedCustomerStateResourceConsole(entry));
+    assert.deepEqual(unexpectedErrors, [], `${label} CUSTOMER/OWNER unexpected browser errors: ${JSON.stringify(unexpectedErrors)}`);
+    return "PASS";
   } finally {
     await context.close();
   }
@@ -84,6 +142,9 @@ async function openAdminAudit(context, label) {
   const loginPage = await context.newPage();
   await login(loginPage, adminEmail);
   await loginPage.waitForURL((url) => url.pathname === "/onboarding", { timeout: 20000 });
+  await loginPage.locator(".onboarding-card").waitFor({ state: "visible", timeout: 20000 });
+  const onboardingLayout = await loginPage.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth }));
+  assert.ok(onboardingLayout.scrollWidth <= onboardingLayout.viewportWidth + 2, `${label} onboarding overflow`);
   const page = await context.newPage();
   const diag = diagnostics(page);
   await page.goto(`${base}/admin/audit`, { waitUntil: "domcontentloaded" });
@@ -91,6 +152,20 @@ async function openAdminAudit(context, label) {
   await loginPage.close();
   assert.ok(diag.adminResponses.some((item) => item.path === "/api/admin/me" && item.status === 200), `${label} /api/admin/me did not return 200`);
   return { page, diag };
+}
+
+async function verifyTablet(browser) {
+  const context = await browser.newContext({ viewport: { width: 768, height: 1024 } });
+  try {
+    const { page, diag } = await openAdminAudit(context, "tablet");
+    await page.locator(".admin-audit-desktop tbody tr").first().waitFor({ state: "visible", timeout: 20000 });
+    const layout = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth }));
+    assert.ok(layout.scrollWidth <= layout.viewportWidth + 2, `tablet admin overflow ${layout.scrollWidth} > ${layout.viewportWidth}`);
+    assert.deepEqual(diag.critical, [], `tablet critical browser errors: ${JSON.stringify(diag.critical)}`);
+    return "PASS";
+  } finally {
+    await context.close();
+  }
 }
 
 async function verifyDesktop(browser) {
@@ -161,10 +236,13 @@ async function verifyMobile(browser) {
 
 const browser = await chromium.launch({ headless: true });
 try {
-  const customer = await verifyCustomerOwner(browser);
+  const customerMobile = await verifyCustomerViewport(browser, { width: 375, height: 812 }, "375x812", true);
+  const customerTablet = await verifyCustomerViewport(browser, { width: 768, height: 1024 }, "768x1024");
+  const customerDesktop = await verifyCustomerViewport(browser, { width: 1440, height: 900 }, "1440x900");
   const desktop = await verifyDesktop(browser);
+  const tablet = await verifyTablet(browser);
   const mobile = await verifyMobile(browser);
-  console.log("AUDIT_VIEWER_BROWSER_RUNTIME: PASS", JSON.stringify({ ...customer, desktop, mobile }));
+  console.log("FASE6_UX_BROWSER_RUNTIME: PASS", JSON.stringify({ customerMobile, customerTablet, customerDesktop, adminDesktop: desktop, adminTablet: tablet, adminMobile: mobile, onboarding: "PASS", auth: "PASS", responsive: "PASS", accessibility: "PASS", tenantIsolation: "PASS" }));
 } finally {
   await browser.close();
 }

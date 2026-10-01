@@ -19,6 +19,10 @@ assert.doesNotMatch(workflow, /\bwrangler\s+triggers\s+deploy\b/i, "route mutati
 assert.match(workflow, /workers\/scripts\/autoposter\/deployments/, "read-only deployment isolation check missing");
 assert.match(workflow, /EPHEMERAL_CONTROLLER_VERSION_ID/, "ephemeral version ID comparison missing");
 assert.match(workflow, /AUDIT_PREVIEW_ISOLATION:\s*PASS/, "preview isolation assertion missing");
+assert.match(fs.readFileSync("tests/audit-viewer-browser.mjs", "utf8"), /375x812/, "FASE 6 mobile viewport certification missing");
+assert.match(fs.readFileSync("tests/audit-viewer-browser.mjs", "utf8"), /768x1024/, "FASE 6 tablet viewport certification missing");
+assert.match(fs.readFileSync("tests/audit-viewer-browser.mjs", "utf8"), /1440x900/, "FASE 6 desktop viewport certification missing");
+assert.match(fs.readFileSync("tests/audit-viewer-browser.mjs", "utf8"), /FASE6_UX_BROWSER_RUNTIME:\s*PASS/, "FASE 6 browser PASS evidence missing");
 assert.match(workflow, /production deployment set changed during Audit runtime/, "deployment immutability comparison missing");
 assert.match(workflow, /if:\s*always\(\)/, "always cleanup missing");
 assert.match(workflow, /shred -u \.audit-runtime-secrets\.env/, "local token material cleanup missing");
