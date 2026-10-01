@@ -113,12 +113,12 @@ function profileContentType(profileType:ProfileType,provider:SocialProvider,inde
   return base;
 }
 
-function profileTopic(profileType:ProfileType,contentType:string,pillar:string,motif:string,secondaryMotif:string){
+function profileTopic(profileType:ProfileType,contentType:string,pillar:string,motif:string,secondaryMotif:string,index:number,provider:SocialProvider){
   if(profileType==="PERSONAL_BRAND"){
-    if(contentType==="STORYTELLING")return `Il mio percorso in ${pillar}: ${motif} — ${secondaryMotif}`;
-    return `Dal mio punto di vista su ${pillar}: ${motif} — ${secondaryMotif}`;
+    if(contentType==="STORYTELLING")return `Il mio percorso in ${pillar}: ${motif} — ${secondaryMotif}; capitolo ${index+1} per ${provider}`;
+    return `Dal mio punto di vista su ${pillar}: ${motif} — ${secondaryMotif}; focus ${index+1} per ${provider}`;
   }
-  return `${pillar}: ${motif} — ${secondaryMotif} nel processo dell'attività`;
+  return `${pillar}: ${motif} — ${secondaryMotif} nel processo dell'attività; focus operativo ${index+1} per ${provider}`;
 }
 function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number){
   const templates:Record<EditorialIntent,string> = {
@@ -181,7 +181,7 @@ export function runProfileSmmCertificationSimulation(
     const secondaryMotif=MOTIFS[(index+7)%MOTIFS.length];
     const topic=followContinuity
       ? memory.continuity.suggestedNextTopicIntent!
-      : profileTopic(fixture.profileType,contentType,pillar,motif,secondaryMotif);
+      : profileTopic(fixture.profileType,contentType,pillar,motif,secondaryMotif,index,provider);
     const hook=fixture.profileType==="PERSONAL_BRAND"
       ? `${hookFor(intent,pillar,motif,index)} · cosa ho imparato su ${secondaryMotif}`
       : `${hookFor(intent,pillar,motif,index)} · ${secondaryMotif} nel metodo operativo`;
