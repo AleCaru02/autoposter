@@ -45,6 +45,8 @@ assert.equal(requestBody?.text.format.strict, true);
 assert.match(String(requestBody?.instructions), /STRATEGIA COPY LinkedIn/);
 assert.match(String(requestBody?.instructions), /professionale e business/i);
 assert.match(String(requestBody?.instructions), /pochissimi hashtag/i);
+assert.match(String(requestBody?.instructions), /copywriter madrelingua italiano/i, "QA must inherit the global language-quality policy");
+assert.match(String(requestBody?.instructions), /grammaticalmente possibile ma suona artificiale/i, "QA must block awkward-but-technically-grammatical copy");
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "QA")?.mayUseOpenAI, true);
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "QA")?.mayUseWeb, false);
 

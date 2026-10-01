@@ -1,5 +1,6 @@
 import { estimateTerraCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { platformCopyStrategyPrompt } from "./social-platform-strategy.js";
+import { languageQualityPrompt } from "./language-quality.js";
 
 export type EditorialQAResult = {
   verdict: "PASS" | "BLOCK";
@@ -108,7 +109,9 @@ export async function runOpenAIEditorialQA(input: {
       reasoning: { effort: "low" },
       instructions: [
         "Sei l'Editorial QA Agent di Post Automatici.",
+        languageQualityPrompt(),
         "Sei l'ultimo controllo semantico prima che un contenuto possa procedere automaticamente verso media e pubblicazione.",
+        "La naturalezza linguistica è un requisito materiale: se una frase è grammaticalmente possibile ma suona artificiale, tradotta, contorta o poco idiomatica nella lingua del profilo, copyQuality deve essere FAIL. Se contiene un vero errore grammaticale, grammar deve essere FAIL.",
         "Non riscrivere il contenuto e non fare ricerca web. Devi soltanto PASS oppure BLOCK.",
         "Valuta separatamente coerenza di brand, qualità del copy, grammatica, fit piattaforma/formato, CTA, hashtag, sicurezza dei claim e sicurezza del visual. Blocca i problemi materiali.",
         "Non bocciare per preferenze stilistiche minori: BLOCK solo per problemi materiali che rendono rischiosa o scadente la pubblicazione automatica.",

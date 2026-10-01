@@ -81,6 +81,9 @@ assert.ok(String(body.instructions).includes("non è l'unico universo di argomen
 assert.ok(String(body.input).includes("https://example.test/servizi/property-management"));
 assert.ok(String(body.input).includes("Gestiamo pochi appartamenti selezionati"), "manual brand context must reach OpenAI generation");
 assert.ok(String(body.instructions).includes("userProvidedContext"), "the model must be told how to treat manual brand context safely");
+assert.match(String(body.instructions), /copywriter madrelingua italiano/i, "all generated copy must follow the global native-language quality rule");
+assert.match(String(body.instructions), /5 cose che ho imparato in 20 anni di network marketing/i, "the global rule must include a concrete idiomatic Italian example");
+assert.match(String(body.instructions), /controllo linguistico finale/i, "the same generation pass must self-check naturalness before returning JSON");
 assert.ok(String(body.instructions).includes("vero carosello nativo"), "carousel generation must explicitly forbid collage-style fake carousels");
 assert.match(String(body.instructions), /STRATEGIA COPY Instagram/);
 assert.match(String(body.instructions), /Visual-first/i);
