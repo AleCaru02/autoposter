@@ -103,6 +103,7 @@ jobs:
       - { name: Calendar workflow regression, run: "npm run test:calendar-workflow" }
       - { name: Calendar month week day regression, run: "npm run test:calendar-views" }
       - { name: Blocked calendar reschedule regression, run: "npm run test:blocked-calendar-reschedule" }
+      - { name: Scheduling certification runtime, run: "npm run test:scheduling-certification" }
       - { name: Social integration contract, run: "npm run test:social" }
       - { name: Social runtime preflight regression, run: "npm run test:social-runtime-preflight" }
       - { name: Global social Safe Mode regression, run: "npm run test:safe-mode" }
@@ -149,3 +150,5 @@ jobs:
       - { name: Checkout, uses: actions/checkout@v4 }
       - name: Fresh database migration chain
         run: bash scripts/ci-fresh-db.sh
+      - name: Scheduling certification database behavior
+        run: psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f tests/scheduling-certification.sql
