@@ -95,6 +95,14 @@ jobs:
           token=$(openssl rand -hex 32)
           echo "::add-mask::$token"
           echo "ADMIN_BOOTSTRAP_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+      - name: Provision ephemeral controlled prepublish QA secret
+        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "PREPUBLISH_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
       - name: Prepare Worker secrets
         shell: bash
         env:
@@ -131,6 +139,8 @@ jobs:
           }
           const bootstrap = process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE?.trim();
           if (bootstrap) secrets.ADMIN_BOOTSTRAP_TOKEN = bootstrap;
+          const prepublishQa = process.env.PREPUBLISH_QA_TOKEN_VALUE?.trim();
+          if (prepublishQa) secrets.PREPUBLISH_QA_TOKEN = prepublishQa;
           fs.writeFileSync('worker-secrets.json', JSON.stringify(secrets), { mode: 0o600 });
           NODE
       - name: Deploy Cloudflare Worker
@@ -195,6 +205,10 @@ jobs:
           }
           if (process.env.ADMIN_BOOTSTRAP_TOKEN_VALUE && !names.has('ADMIN_BOOTSTRAP_TOKEN')) {
             console.error('Cloudflare Worker bootstrap secret was not provisioned');
+            process.exit(1);
+          }
+          if (process.env.PREPUBLISH_QA_TOKEN_VALUE && !names.has('PREPUBLISH_QA_TOKEN')) {
+            console.error('Worker controlled prepublish QA secret was not provisioned');
             process.exit(1);
           }
           console.log('Worker secret bindings and public config: PASS');
@@ -306,6 +320,55 @@ jobs:
           }
           console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
           NODE
+      - name: Controlled prepublish QA
+        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=$(curl --silent --show-error -o controlled-prepublish-qa.json -w "%{http_code}" -X POST \
+            -H "x-prepublish-qa-token: $PREPUBLISH_QA_TOKEN_VALUE" \
+            -H "content-type: application/json" \
+            --data '{"profileId":"73486d3c-dca0-4aaa-a69e-d4b08cc6430f","contentId":"cefc9287-723d-425f-a2bf-d6c987687b35","variantId":"10dc97cd-55a0-4aca-bc7a-6522d18e51fe"}' \
+            "$base/api/internal/prepublish-qa" || true)
+          QA_HTTP_STATUS="$status" node - <<'NODE'
+          const fs=require('node:fs');
+          const body=JSON.parse(fs.readFileSync('controlled-prepublish-qa.json','utf8'));
+          const qa=body?.qa??{};
+          const summary={
+            httpStatus:process.env.QA_HTTP_STATUS,safeMode:body?.safeMode,publicationJobId:body?.publicationJobId,
+            overallStatus:qa?.overallStatus,brandStatus:qa?.brandStatus,copyStatus:qa?.copyStatus,
+            visualStatus:qa?.visualStatus,factStatus:qa?.factStatus,platformStatus:qa?.platformStatus,
+            duplicateStatus:qa?.duplicateStatus,budgetStatus:qa?.budgetStatus,
+            feedCoherenceStatus:qa?.feedCoherenceStatus,profileTypeFitStatus:qa?.profileTypeFitStatus,
+            subjectStrategyStatus:qa?.subjectStrategyStatus,
+            reasons:Array.isArray(qa?.reasons)?qa.reasons:[],
+            sources:Array.isArray(qa?.factCheck?.sources)?qa.factCheck.sources:[],
+          };
+          console.log('controlled prepublish QA result:',JSON.stringify(summary));
+          if(process.env.QA_HTTP_STATUS!=='200'||body?.safeMode!==true||qa?.overallStatus!=='PASS') process.exit(1);
+          console.log('controlled prepublish QA: PASS');
+          NODE
+      - name: Remove ephemeral controlled prepublish QA secret
+        if: always() && contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          printf 'y\n' | npx wrangler secret delete PREPUBLISH_QA_TOKEN
+      - name: Verify controlled prepublish QA route closed
+        if: always() && contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "https://autoposter.02alessandrocaruso.workers.dev/api/internal/prepublish-qa" || true)
+          if [ "$status" != "404" ]; then
+            echo "Controlled prepublish QA route did not fail closed after secret removal: HTTP $status" >&2
+            exit 1
+          fi
+          echo "controlled prepublish QA route closed: PASS"
       - name: Configure initial native SUPER_ADMIN
         if: contains(github.event.workflow_run.head_commit.message, '[bootstrap-admin]')
         shell: bash
