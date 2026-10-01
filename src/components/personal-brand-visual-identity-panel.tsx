@@ -18,9 +18,21 @@ type ReferenceItem = {
 
 type ReferenceState = {
   references: ReferenceItem[];
+  onboardingMinimumRequired: number;
   minimumRequired: number;
+  recommendedMaximum: number;
   maximumAllowed: number;
   passed: number;
+  rejected: number;
+  missingForProduction: number;
+  readinessStatus:
+    | "REFERENCES_INSUFFICIENT"
+    | "ONBOARDING_MINIMUM"
+    | "REFERENCES_QUALITY_REVIEW"
+    | "READY_FOR_SOUL_ID"
+    | "SOUL_ID_CREATING"
+    | "SOUL_ID_READY"
+    | "SOUL_ID_FAILED";
   identityStatus: string;
 };
 
@@ -156,7 +168,10 @@ export function PersonalBrandVisualIdentityPanel(props: { profileId: string }) {
 
   const references = state?.references ?? [];
   const passed = state?.passed ?? 0;
-  const required = state?.minimumRequired ?? 3;
+  const onboardingRequired = state?.onboardingMinimumRequired ?? 3;
+  const required = state?.minimumRequired ?? 20;
+  const recommendedMax = state?.recommendedMaximum ?? 40;
+  const missing = state?.missingForProduction ?? Math.max(0, required - passed);
   return <section className="panel">
     <div className="panel-heading">
       <div>
@@ -168,12 +183,17 @@ export function PersonalBrandVisualIdentityPanel(props: { profileId: string }) {
 
     <div className="status-rows">
       <div><span>Higgsfield</span><strong className={visual?.configured ? "status-ok" : "status-wait"}>{visual?.configured ? "Configurato" : "Da configurare"}</strong></div>
-      <div><span>Reference valide</span><strong>{passed} / {required} minime</strong></div>
-      <div><span>Soul ID</span><strong>{visual?.identity?.status === "COMPLETED" ? "Pronta" : state?.identityStatus === "READY_TO_CREATE" ? "Pronta per la creazione" : "Non ancora pronta"}</strong></div>
+      <div><span>Reference valide</span><strong>{passed} / {required} per Soul ID</strong></div>
+      <div><span>Onboarding</span><strong className={passed >= onboardingRequired ? "status-ok" : "status-wait"}>{passed >= onboardingRequired ? "Minimo completato" : `Servono ${onboardingRequired} foto`}</strong></div>
+      <div><span>Qualità reference</span><strong className={(state?.rejected ?? 0) === 0 ? "status-ok" : "status-wait"}>{state?.rejected ?? 0} rifiutate</strong></div>
+      <div><span>Soul ID</span><strong>{visual?.identity?.status === "COMPLETED" ? "Pronta" : state?.readinessStatus === "READY_FOR_SOUL_ID" ? "Pronta per la creazione" : "Non ancora pronta"}</strong></div>
       <div><span>Stato runtime</span><strong>{visual?.capabilityStatus ?? "Verifica in corso"}</strong></div>
     </div>
 
-    <p className="field-help">Carica almeno {required} foto nitide e diverse, con il volto ben visibile. La verifica qui è tecnica; la coerenza dell’identità verrà controllata anche sulle immagini generate.</p>
+    <p className="field-help">
+      3 foto reali servono solo per completare l’onboarding. Per rendere la Soul ID production-ready servono almeno {required} foto reali valide; target consigliato {required}–{recommendedMax}. Non vengono generate foto artificiali per raggiungere la soglia.
+    </p>
+    {passed >= onboardingRequired && passed < required && <p className="field-help">Onboarding completato. Mancano {missing} fotografie reali valide per attivare l’identità visuale avanzata.</p>}
     <div className="form-actions">
       <label className="compact-action" style={{ cursor: busy ? "wait" : "pointer" }}>
         <ImagePlus size={15} /> {busy ? "Elaborazione…" : "Aggiungi foto"}
@@ -181,7 +201,7 @@ export function PersonalBrandVisualIdentityPanel(props: { profileId: string }) {
           type="file"
           accept="image/jpeg,image/png,image/webp"
           multiple
-          disabled={busy || references.length >= (state?.maximumAllowed ?? 12)}
+          disabled={busy || references.length >= (state?.maximumAllowed ?? 80)}
           style={{ display: "none" }}
           onChange={(event) => { void upload(event.target.files); event.currentTarget.value = ""; }}
         />
