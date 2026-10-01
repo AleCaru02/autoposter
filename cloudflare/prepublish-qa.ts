@@ -2,7 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { runContentQa } from "../api/_lib/content-qa.js";
 import { socialSafeModeState, type SocialEnv } from "../api/_lib/social.js";
 import { estimateImageCostUsd } from "../api/_lib/openai-image.js";
-import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
+import { ImageGenerationMetering } from "../api/_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { assetContentHashFromBase64, visualFingerprint } from "../api/_lib/asset-intelligence.js";
@@ -217,9 +217,10 @@ async function regenerateSafeVisual(input:{
     const result=await generateConfirmedBriefImage(env.OPENAI_API_KEY!);
     if(result.model!=="gpt-image-2") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
 
-    await meter.persistTechnicalEvents(profileId,eventId,technicalEventsFromImageResult(result,{
-      source:"MANUAL",provider:candidate.provider,format:candidate.format,purpose:"FIRST_REAL_PREPUBLISH_QA",
-    }));
+    await meter.persistTechnicalEvents(profileId,eventId,result.technicalEvents.map((event)=>({
+      ...event,
+      metadata:{source:"MANUAL",provider:candidate.provider,format:candidate.format,purpose:"FIRST_REAL_PREPUBLISH_QA",...event.metadata},
+    })));
 
     const actualRows=await sql`
       select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur
