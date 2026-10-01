@@ -26,7 +26,8 @@ export class AnalyticsProviderError extends Error {
 }
 
 function failure(provider: AnalyticsProvider, status: number | null, retryAfterSeconds = 900) {
-  if (status === 401 || status === 403) return new AnalyticsProviderError(`${provider}_ANALYTICS_RECONNECT_REQUIRED`, false, "BLOCKED", "Ricollega il social per aggiornare i risultati.");
+  if (status === 401) return new AnalyticsProviderError(`${provider}_ANALYTICS_RECONNECT_REQUIRED`, false, "BLOCKED", "Ricollega il social per aggiornare i risultati.");
+  if (status === 403) return new AnalyticsProviderError(`${provider}_ANALYTICS_PERMISSION_DENIED`, false, "BLOCKED", "Il social non autorizza la lettura delle analytics per questo account.");
   if (status === 404) return new AnalyticsProviderError(`${provider}_REMOTE_POST_NOT_FOUND`, false, "NOT_FOUND", "Il contenuto remoto non è più disponibile.");
   if (status === 429) return new AnalyticsProviderError(`${provider}_ANALYTICS_RATE_LIMITED`, true, null, "Aggiornamento rimandato per limite del social.", retryAfterSeconds);
   if (status !== null && status >= 400 && status < 500) return new AnalyticsProviderError(`${provider}_ANALYTICS_REQUEST_REJECTED`, false, "BLOCKED", "Il social non consente di leggere questi risultati.");
