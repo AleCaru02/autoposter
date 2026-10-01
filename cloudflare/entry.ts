@@ -224,6 +224,7 @@ export default {
         const failed = Number(result.failed ?? 0);
         const skipped = Math.max(checked - published - failed, 0);
         console.log("social-publication-run", {
+          ...result,
           ...cronMeta,
           state: result.blocked ? "BLOCKED" : result.ready ? "COMPLETED" : "NOT_READY",
           checked,
@@ -232,7 +233,6 @@ export default {
           published,
           skipped,
           error: null,
-          ...result,
         });
       }).catch((reason) => {
         const error = reason instanceof Error ? reason.message.split(":")[0] : "unknown";
