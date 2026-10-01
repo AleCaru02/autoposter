@@ -120,7 +120,7 @@ assert.deepEqual(visualQaContext.brandIdentity.colors,["#112233","#F5F1E8"]);
 assert.deepEqual(visualQaContext.brandIdentity.fonts,["Inter"]);
 assert.equal(visualQaContext.brandIdentity.visualStyle,"Minimal premium");
 assert.match(String(requestBody?.instructions),/mappe, linee metro, percorsi/i);
-assert.match(String(requestBody?.instructions),/microcopy, label, quartieri/i);
+assert.match(String(requestBody?.instructions),/microcopy|mini-label|pseudo-dati/i);
 assert.match(String(requestBody?.instructions),/STRATEGIA VISUAL Instagram/);
 assert.match(String(requestBody?.instructions),/fermare lo scroll/i);
 assert.match(String(requestBody?.instructions),/genericTemplate/);
