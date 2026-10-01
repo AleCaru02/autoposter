@@ -66,6 +66,7 @@ assert.match(prompt, /Inter, Georgia/);
 assert.match(prompt, /Minimal, premium, sobrio/);
 assert.match(prompt, /non inventare cartografia/i);
 assert.match(prompt, /massimo un headline/i);
+assert.match(prompt, /testo destinato a essere visibile nell\'immagine deve essere linguisticamente naturale/i, "image prompts must inherit the approved-language guardrail");
 assert.ok(prompt.includes("primo piano, piano intermedio, sfondo"));
 assert.ok(prompt.includes("illuminazione"));
 
