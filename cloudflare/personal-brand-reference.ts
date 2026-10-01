@@ -11,7 +11,11 @@ import {
   evaluateReferenceImage,
   MAX_REFERENCE_COUNT,
   MIN_REFERENCE_COUNT,
+  ONBOARDING_REFERENCE_COUNT,
+  RECOMMENDED_REFERENCE_COUNT_MAX,
   referenceFingerprint,
+  referenceReadiness,
+  SOUL_ID_PRODUCTION_REFERENCE_COUNT,
   sha256Hex,
   signReferencePath,
 } from "../api/_lib/personal-brand-reference.js";
@@ -93,7 +97,7 @@ async function syncIdentityState(sql: ReturnType<typeof neon>, profileId: string
   const passed = rows.filter((row) => row.quality_status === "PASS");
   const fingerprint = passed.length ? await referenceFingerprint(passed.map((row) => row.sha256)) : null;
   const avg = passed.length ? passed.reduce((total,row) => total + Number(row.quality_score ?? 0), 0) / passed.length : null;
-  const status = passed.length >= MIN_REFERENCE_COUNT ? "READY_TO_CREATE" : rows.length ? "REFERENCES_PENDING" : "NOT_CONFIGURED";
+  const status = passed.length >= SOUL_ID_PRODUCTION_REFERENCE_COUNT ? "READY_TO_CREATE" : rows.length ? "REFERENCES_PENDING" : "NOT_CONFIGURED";
   await sql`
     insert into public.personal_brand_visual_identities(
       profile_id,provider,status,reference_quality,reference_fingerprint,updated_at
@@ -106,7 +110,13 @@ async function syncIdentityState(sql: ReturnType<typeof neon>, profileId: string
       reference_fingerprint=excluded.reference_fingerprint,
       updated_at=now()
   `;
-  return { rows, passed, fingerprint, averageQuality: avg, status };
+  const rejected = rows.filter((row) => row.quality_status === "REJECTED");
+  const readinessStatus = referenceReadiness({
+    validCount: passed.length,
+    totalCount: rows.length,
+    rejectedCount: rejected.length,
+  });
+  return { rows, passed, rejected, fingerprint, averageQuality: avg, status, readinessStatus };
 }
 
 async function signedReferenceUrl(env: Env, referenceId: string, ttlSeconds = 300) {
@@ -148,9 +158,14 @@ export async function handleReferenceImages(request: Request, env: Env): Promise
     return json({
       profileId,
       references,
-      minimumRequired: MIN_REFERENCE_COUNT,
+      onboardingMinimumRequired: ONBOARDING_REFERENCE_COUNT,
+      minimumRequired: SOUL_ID_PRODUCTION_REFERENCE_COUNT,
+      recommendedMaximum: RECOMMENDED_REFERENCE_COUNT_MAX,
       maximumAllowed: MAX_REFERENCE_COUNT,
       passed: state.passed.length,
+      rejected: state.rejected.length,
+      missingForProduction: Math.max(0, SOUL_ID_PRODUCTION_REFERENCE_COUNT - state.passed.length),
+      readinessStatus: state.readinessStatus,
       identityStatus: state.status,
     });
   }
@@ -282,7 +297,7 @@ export async function handleSoulIdPreflight(request: Request, env: Env): Promise
     blockers,
     references: {
       passed: state.passed.length,
-      required: MIN_REFERENCE_COUNT,
+      required: SOUL_ID_PRODUCTION_REFERENCE_COUNT,
       fingerprint: state.fingerprint,
       averageTechnicalQuality: state.averageQuality,
     },
@@ -315,8 +330,14 @@ export async function handleSoulIdCreate(request: Request, env: Env): Promise<Re
   if (!credentials) return json({ error: "HIGGSFIELD_NOT_CONFIGURED" }, 503);
 
   const state = await syncIdentityState(ctx.sql, profileId);
-  if (state.passed.length < MIN_REFERENCE_COUNT) {
-    return json({ error: "REFERENCE_IMAGES_INSUFFICIENT", passed: state.passed.length, required: MIN_REFERENCE_COUNT }, 409);
+  if (state.passed.length < SOUL_ID_PRODUCTION_REFERENCE_COUNT) {
+    return json({
+      error: "REFERENCE_IMAGES_INSUFFICIENT",
+      passed: state.passed.length,
+      required: SOUL_ID_PRODUCTION_REFERENCE_COUNT,
+      onboardingMinimum: ONBOARDING_REFERENCE_COUNT,
+      syntheticReferenceExpansionAllowed: false,
+    }, 409);
   }
 
   const identityRows = await ctx.sql`
@@ -343,6 +364,8 @@ export async function handleSoulIdCreate(request: Request, env: Env): Promise<Re
       provider_cost_reserve_usd: HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
       model_version: "v2",
       reference_fingerprint: state.fingerprint,
+      real_reference_count: state.passed.length,
+      synthetic_reference_expansion_allowed: false,
       explicit_confirmation: true,
     },
   });
@@ -375,7 +398,7 @@ export async function handleSoulIdCreate(request: Request, env: Env): Promise<Re
     await usage.markProviderStarted(eventId, HIGGSFIELD_SOUL_TRAINING_RESERVE_USD);
     const urls = (await Promise.all(state.passed.map((row) => signedReferenceUrl(env, row.id, 1800))))
       .filter((value): value is string => Boolean(value));
-    if (urls.length < MIN_REFERENCE_COUNT) throw new Error("REFERENCE_SIGNING_NOT_CONFIGURED");
+    if (urls.length < SOUL_ID_PRODUCTION_REFERENCE_COUNT) throw new Error("REFERENCE_SIGNING_NOT_CONFIGURED");
 
     const soul = await createHiggsfieldSoulId({
       credentials,
