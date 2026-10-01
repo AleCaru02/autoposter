@@ -26,6 +26,10 @@ function recentCount(memory: EditorialMemorySnapshot | null, subject: ContentSub
   return memory?.recent.subjects.find((item) => item.value === subject)?.count ?? 0;
 }
 
+function recentVisualCount(memory: EditorialMemorySnapshot | null, visualArchetype: string) {
+  return memory?.recent.visualArchetypes.find((item) => item.value === visualArchetype)?.count ?? 0;
+}
+
 function textSignals(text: string) {
   const value = text.normalize("NFKC").toLowerCase();
   return {
@@ -39,9 +43,18 @@ function textSignals(text: string) {
   };
 }
 
-function archetype(subject: ContentSubject, format: SocialFormat) {
-  if (format === "CAROUSEL") return subject === "CANONICAL_PERSON" ? "EDITORIAL_PERSON_CAROUSEL" : `${subject}_CAROUSEL`;
-  if (format === "STORY") return subject === "CANONICAL_PERSON" ? "PERSON_STORY" : `${subject}_STORY`;
+function archetypeCandidates(subject: ContentSubject, format: SocialFormat) {
+  if (subject === "CANONICAL_PERSON" && format === "CAROUSEL") {
+    return ["EDITORIAL_PERSON_CAROUSEL","PERSON_STORY_SEQUENCE","PERSON_INSIGHT_CAROUSEL"];
+  }
+  if (subject === "CANONICAL_PERSON" && format === "STORY") {
+    return ["PERSON_STORY","PERSON_DETAIL_STORY","PERSON_ENVIRONMENT_STORY"];
+  }
+  if (subject === "CANONICAL_PERSON") {
+    return ["EDITORIAL_PORTRAIT","PERSON_ENVIRONMENTAL_PORTRAIT","PERSON_DETAIL_PORTRAIT"];
+  }
+  if (format === "CAROUSEL") return [`${subject}_CAROUSEL`];
+  if (format === "STORY") return [`${subject}_STORY`];
   const map: Record<ContentSubject,string> = {
     CANONICAL_PERSON:"EDITORIAL_PORTRAIT",
     PRODUCT:"PRODUCT_EDITORIAL",
@@ -54,7 +67,12 @@ function archetype(subject: ContentSubject, format: SocialFormat) {
     INFOGRAPHIC:"INFOGRAPHIC",
     REAL_ASSET:"REAL_ASSET_FEATURE",
   };
-  return map[subject];
+  return [map[subject]];
+}
+
+function archetype(subject: ContentSubject, format: SocialFormat, memory: EditorialMemorySnapshot | null = null) {
+  return archetypeCandidates(subject,format)
+    .sort((a,b)=>recentVisualCount(memory,a)-recentVisualCount(memory,b)||a.localeCompare(b))[0];
 }
 
 export function profileTypeStrategyInstruction(input: {
@@ -108,7 +126,7 @@ export function chooseSubjectStrategy(input: {
   if (input.suitableRealAssetAvailable && (signals.product || input.profileType === "PERSONAL_BRAND" && visualSignals.person)) {
     return {
       subject:"REAL_ASSET",
-      visualArchetype:archetype("REAL_ASSET",input.format),
+      visualArchetype:archetype("REAL_ASSET",input.format,input.memory ?? null),
       reason:"Esiste un asset reale adatto: viene preferito per fedeltà e costo.",
       canonicalIdentityRequired:false,
       preferRealAsset:true,
@@ -120,7 +138,7 @@ export function chooseSubjectStrategy(input: {
     if (input.canonicalIdentityReady) {
       return {
         subject:"CANONICAL_PERSON",
-        visualArchetype:archetype("CANONICAL_PERSON",input.format),
+        visualArchetype:archetype("CANONICAL_PERSON",input.format,input.memory ?? null),
         reason:"Il contenuto richiede la persona titolare e l'identità canonica è certificata.",
         canonicalIdentityRequired:true,
         preferRealAsset:false,
@@ -130,7 +148,7 @@ export function chooseSubjectStrategy(input: {
     const fallback: ContentSubject = signals.infographic ? "INFOGRAPHIC" : signals.typographic ? "TYPOGRAPHIC" : signals.product ? "PRODUCT" : "OBJECT";
     return {
       subject:fallback,
-      visualArchetype:archetype(fallback,input.format),
+      visualArchetype:archetype(fallback,input.format,input.memory ?? null),
       reason:"Il contenuto è Personal Brand ma l'identità canonica non è pronta: uso un visual senza sostituto sintetico.",
       canonicalIdentityRequired:false,
       preferRealAsset:false,
@@ -163,7 +181,7 @@ export function chooseSubjectStrategy(input: {
     .sort((a,b) => recentCount(input.memory ?? null,a)-recentCount(input.memory ?? null,b))[0] ?? "OBJECT";
   return {
     subject,
-    visualArchetype:archetype(subject,input.format),
+    visualArchetype:archetype(subject,input.format,input.memory ?? null),
     reason:`Subject scelto per fit semantico e varietà rispetto alla memoria recente: ${subject}. Il racconto personale da solo non forza il volto: la presenza canonica deve essere richiesta dalla direzione visuale.`,
     canonicalIdentityRequired:false,
     preferRealAsset:subject==="PRODUCT",
