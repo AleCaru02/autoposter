@@ -39,6 +39,11 @@ export type ContentVariantRow = {
   hashtags: string[];
   visual_brief: string | null;
   image_asset_id: string | null;
+  visual_generation_status: "NOT_STARTED" | "GENERATING" | "PASS" | "FAIL";
+  visual_generation_error: string | null;
+  visual_generation_operation_id: string | null;
+  visual_generation_started_at: string | null;
+  visual_generation_updated_at: string | null;
   alt_text: string | null;
   approval_status: ApprovalStatus;
   approval_mode: "MANUAL" | "AUTO";
@@ -69,6 +74,11 @@ export type ContentCarouselSlideRow = {
   visual_brief: string;
   alt_text: string;
   asset_id: string | null;
+  visual_generation_status: "NOT_STARTED" | "GENERATING" | "PASS" | "FAIL";
+  visual_generation_error: string | null;
+  visual_generation_operation_id: string | null;
+  visual_generation_started_at: string | null;
+  visual_generation_updated_at: string | null;
   width: number;
   height: number;
   qa_status: "PENDING" | "PASS" | "BLOCK" | "FAILED";
@@ -273,7 +283,7 @@ export async function loadContentWorkflow(profileId: string) {
 
   const contentIds = items.map((item) => item.id);
   const variantsResult = await neonClient.from("content_variants")
-    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,alt_text,approval_status,approval_mode,workflow_status,approved_by,approved_at,rejected_reason,approved_fingerprint,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
+    .select("id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,visual_generation_status,visual_generation_error,visual_generation_operation_id,visual_generation_started_at,visual_generation_updated_at,alt_text,approval_status,approval_mode,workflow_status,approved_by,approved_at,rejected_reason,approved_fingerprint,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at,created_at,updated_at")
     .eq("profile_id", profileId)
     .in("content_id", contentIds)
     .order("created_at", { ascending: true });
@@ -285,7 +295,7 @@ export async function loadContentWorkflow(profileId: string) {
   let carouselSlides: ContentCarouselSlideRow[] = [];
   if (variantIds.length) {
     const slidesResult = await neonClient.from("content_carousel_slides")
-      .select("id,profile_id,content_id,variant_id,position,purpose,headline,body,hierarchy,visual_brief,alt_text,asset_id,width,height,qa_status,created_at,updated_at")
+      .select("id,profile_id,content_id,variant_id,position,purpose,headline,body,hierarchy,visual_brief,alt_text,asset_id,visual_generation_status,visual_generation_error,visual_generation_operation_id,visual_generation_started_at,visual_generation_updated_at,width,height,qa_status,created_at,updated_at")
       .eq("profile_id", profileId)
       .in("variant_id", variantIds)
       .order("position", { ascending: true });

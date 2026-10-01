@@ -51,6 +51,27 @@ assert.doesNotMatch(autopilot, /generateOpenAIImage/);
 assert.match(image, /technicalEvents: \[mediaManagerEvent, imageEvent\]/);
 assert.match(ui, /x-post-automatici-operation-id/);
 
+// Failure isolation: copy remains persisted while only visual generation is retried.
+for (const source of [manual, worker]) {
+  assert.match(source, /visual_generation_status/);
+  assert.match(source, /status:\s*"GENERATING"/);
+  assert.match(source, /status:\s*"FAIL"/);
+  assert.match(source, /visual_generation_error/);
+  assert.match(source, /visual_generation_operation_id/);
+}
+assert.match(manual, /visual_generation_status:\s*"PASS"/);
+assert.match(worker, /visual_generation_status:\s*"PASS"/);
+assert.match(ui, /Il copy è già salvo/);
+assert.match(ui, /Riprova visuale/);
+assert.match(ui, /Testo e struttura restano salvati/);
+assert.doesNotMatch(ui, /requestManualContent|generateSocialText/, "visual retry must never regenerate research, fact-check or copy");
+const contentStore = fs.readFileSync("src/features/content/content-store.ts", "utf8");
+assert.match(contentStore, /visual_generation_status/);
+assert.match(contentStore, /visual_generation_error/);
+const migration = fs.readFileSync("db/migrations/20261001_failure_isolation_visual.sql", "utf8");
+assert.match(migration, /visual_generation_status text not null default 'NOT_STARTED'/);
+assert.match(migration, /content_carousel_slides/);
+
 const request = { source: "MANUAL" as const, operationIdentity: "request-000000000001", requestFingerprint: { provider: "INSTAGRAM", format: "POST", visualBrief: "A" } };
 const keyA = await deriveImageGenerationOperationKey({ profileId: "11111111-1111-4111-8111-111111111111", ...request });
 const keyARepeat = await deriveImageGenerationOperationKey({ profileId: "11111111-1111-4111-8111-111111111111", ...request, requestFingerprint: { visualBrief: "A", format: "POST", provider: "INSTAGRAM" } });

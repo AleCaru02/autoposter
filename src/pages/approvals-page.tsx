@@ -321,7 +321,10 @@ export function ApprovalsPage() {
         }),
       });
       const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error("Immagine non salvata. Riprova tra poco.");
+      if (!response.ok || !body.asset?.id) {
+        await reload();
+        throw new Error("Il visuale non è stato generato. Il copy resta salvato: riprova solo il visuale.");
+      }
       await reload();
     });
   }
@@ -345,7 +348,10 @@ export function ApprovalsPage() {
         }),
       });
       const body = await response.json() as ImageResponse;
-      if (!response.ok || !body.asset?.id) throw new Error("Visuale della slide non salvato. Riprova tra poco.");
+      if (!response.ok || !body.asset?.id) {
+        await reload();
+        throw new Error("Il visuale della slide non è stato generato. Testo e struttura restano salvati: riprova solo questa slide.");
+      }
       await reload();
     });
   }
@@ -406,11 +412,15 @@ export function ApprovalsPage() {
                       <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
                       <p><strong>Visuale:</strong> {slide.visual_brief}</p>
                       {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
-                      <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`]} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] ? "Generazione…" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
+                      {slide.visual_generation_status === "FAIL" && <p className="manual-warning">Visuale fallito. Il testo della slide è salvo e non verrà rigenerato. {slide.visual_generation_error ? `Errore: ${slide.visual_generation_error}` : ""}</p>}
+                      <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`] || slide.visual_generation_status === "GENERATING"} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] || slide.visual_generation_status === "GENERATING" ? "Generazione visuale…" : slide.visual_generation_status === "FAIL" ? "Riprova visuale slide" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
                     </article>;
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
-                </div> : asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                </div> : <>
+                  {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                  {variant.visual_generation_status === "FAIL" && <p className="manual-warning">Generazione visuale fallita. Il copy è già salvo: il retry rigenera solo l'immagine. {variant.visual_generation_error ? `Errore: ${variant.visual_generation_error}` : ""}</p>}
+                </>}
                 <details className="decision-record"><summary>Approvazione · {workflowStatusLabel(variant.workflow_status)}</summary>
                   <dl>
                     <div><dt>Modalità</dt><dd>{variant.approval_mode === "AUTO" ? "Automatica" : "Manuale"}</dd></div>
@@ -427,7 +437,7 @@ export function ApprovalsPage() {
                 </details>
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
-                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`]} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] ? "Generazione…" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
+                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING"} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING" ? "Generazione visuale…" : variant.visual_generation_status === "FAIL" ? "Riprova visuale" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
                   <button className="secondary-button" type="button" disabled={busy[`qa-${variant.id}`] || currentSaveStatus === "SAVING" || currentSaveStatus === "WAITING"} onClick={() => void runQa(variant)}><CheckCircle2 size={16} /> {busy[`qa-${variant.id}`] ? "QA in corso…" : variant.qa_status === "PASS" ? "Riesegui QA" : "Esegui QA"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady || variant.qa_status !== "PASS"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Rifiuta</button>
