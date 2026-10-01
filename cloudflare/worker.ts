@@ -283,20 +283,20 @@ async function handleGenerateImage(request: Request, env: Env) {
   let activeMeter: ImageGenerationMetering | null = null;
   let activeEventId: string | null = null;
   let logicalCommitted = false;
+  let savedVariant: VariantRow | null = null;
+  let savedSlide: CarouselSlideImageRow | null = null;
   try {
     const profiles = await rows<ProfileRow>(`profiles?id=eq.${encodeURIComponent(profileId)}&select=id,name,industry,profile_type&limit=1`, token);
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
     const brands = await rows<Pick<BrandRow, "tone_of_voice" | "visual_identity">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
     const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
-    let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
       const variantRows = await rows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id&limit=1`, token);
       savedVariant = variantRows[0] ?? null;
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
     }
-    let savedSlide: CarouselSlideImageRow | null = null;
     if (carouselSlideId) {
       if (!savedVariant || savedVariant.format !== "CAROUSEL") return json({ error: "CAROUSEL_VARIANT_REQUIRED" }, 409);
       const slideRows = await rows<CarouselSlideImageRow>(`content_carousel_slides?id=eq.${encodeURIComponent(carouselSlideId)}&profile_id=eq.${encodeURIComponent(profileId)}&variant_id=eq.${encodeURIComponent(savedVariant.id)}&select=id,content_id,variant_id,visual_brief,headline,body,alt_text,asset_id&limit=1`, token);
@@ -317,8 +317,8 @@ async function handleGenerateImage(request: Request, env: Env) {
         const assetWrite = await dataApi(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ metadata: { ...assetMetadata, reuse_reason: reusable.reason, last_reused_at: now }, reuse_count: Number(asset.reuse_count ?? 0) + 1, last_used_at: now, updated_at: now }) });
         if (!assetWrite.ok) throw new Error(`ASSET_REUSE_TRACE_${assetWrite.status}`);
         const link = savedSlide
-          ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
-          : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+          ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", visual_generation_status: "PASS", visual_generation_error: null, visual_generation_updated_at: now, updated_at: now }) })
+          : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", qa_status: "PENDING", qa_result: {}, visual_generation_status: "PASS", visual_generation_error: null, visual_generation_updated_at: now, updated_at: now }) });
         if (!link.ok) throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       }
@@ -350,6 +350,18 @@ async function handleGenerateImage(request: Request, env: Env) {
       return json({ error: activityBudget.reason ?? "AI_BUDGET_HARD_STOP", budget: activityBudget }, 429);
     }
     const routeImportance = body.importance === "PREMIUM" || body.importance === "CRITICAL" ? body.importance : "STANDARD";
+    if (savedVariant) {
+      const visualStartedAt = new Date().toISOString();
+      const target = savedSlide
+        ? `content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`
+        : `content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`;
+      const started = await dataApi(target, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({ visual_generation_status: "IN_PROGRESS", visual_generation_error: null, visual_generation_updated_at: visualStartedAt }),
+      });
+      if (!started.ok) throw new Error(`VISUAL_STATUS_START_${started.status}`);
+    }
     await meter.markProviderStarted(eventId, 0.25);
     const result = await generateRoutedImage({
       env: { OPENAI_API_KEY: env.OPENAI_API_KEY },
@@ -404,8 +416,8 @@ async function handleGenerateImage(request: Request, env: Env) {
       if (!asset) throw new Error("ASSET_WRITE_EMPTY");
       const now = new Date().toISOString();
       const link = savedSlide
-        ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", updated_at: now }) })
-        : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", updated_at: now }) });
+        ? await dataApi(`content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ asset_id: asset.id, qa_status: "PENDING", qa_result: {}, visual_generation_status: "PASS", visual_generation_error: null, visual_generation_updated_at: now, updated_at: now }) })
+        : await dataApi(`content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ image_asset_id: asset.id, approval_status: "PENDING", qa_status: "PENDING", qa_result: {}, visual_generation_status: "PASS", visual_generation_error: null, visual_generation_updated_at: now, updated_at: now }) });
       if (!link.ok) {
         await deleteRow(`assets?id=eq.${encodeURIComponent(asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token);
         throw new Error(savedSlide ? `CAROUSEL_SLIDE_IMAGE_LINK_${link.status}` : `CONTENT_VARIANT_IMAGE_LINK_${link.status}`);
@@ -422,6 +434,21 @@ async function handleGenerateImage(request: Request, env: Env) {
   } catch (reason) {
     if (activeMeter && activeEventId && !logicalCommitted) await activeMeter.release(activeEventId, reason instanceof Error ? reason.message : "IMAGE_GENERATION_FAILED").catch(() => undefined);
     const detail = reason instanceof Error ? reason.message : "UNKNOWN_IMAGE_ERROR";
+    if (savedVariant) {
+      const failedAt = new Date().toISOString();
+      const target = savedSlide
+        ? `content_carousel_slides?id=eq.${encodeURIComponent(savedSlide.id)}&profile_id=eq.${encodeURIComponent(profileId)}`
+        : `content_variants?id=eq.${encodeURIComponent(savedVariant.id)}&profile_id=eq.${encodeURIComponent(profileId)}`;
+      await dataApi(target, token, {
+        method: "PATCH",
+        headers: { prefer: "return=minimal" },
+        body: JSON.stringify({
+          visual_generation_status: "FAILED",
+          visual_generation_error: detail.slice(0, 200),
+          visual_generation_updated_at: failedAt,
+        }),
+      }).catch(() => undefined);
+    }
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
     if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return json({ error: "BLOCKED_PROVIDER" }, 503);
