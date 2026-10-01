@@ -117,7 +117,8 @@
     "test:social-platform-strategy": "tsx tests/social-platform-strategy.test.ts",
     "test:language-quality": "tsx tests/language-quality.test.ts",
     "test:scheduling-certification": "tsx tests/scheduling-certification.test.ts",
-    "test:cron-24x7-certification": "tsx tests/cron-24x7-certification.test.ts"
+    "test:cron-24x7-certification": "tsx tests/cron-24x7-certification.test.ts",
+    "test:provider-analytics-certification": "tsx tests/provider-analytics-certification.test.ts"
   },
   "dependencies": {
     "@neondatabase/neon-js": "0.7.0-beta",

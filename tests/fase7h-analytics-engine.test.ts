@@ -107,7 +107,7 @@ await assert.rejects(
 );
 assert.equal(linkedInProviderCalls, 0, "read-only organization admin scope must not claim analytics capability");
 
-for (const [status, expectedCode] of [[401, "LINKEDIN_ANALYTICS_RECONNECT_REQUIRED"], [403, "LINKEDIN_ANALYTICS_RECONNECT_REQUIRED"], [400, "LINKEDIN_ANALYTICS_REQUEST_REJECTED"]] as const) {
+for (const [status, expectedCode] of [[401, "LINKEDIN_ANALYTICS_RECONNECT_REQUIRED"], [403, "LINKEDIN_ANALYTICS_PERMISSION_DENIED"], [400, "LINKEDIN_ANALYTICS_REQUEST_REJECTED"]] as const) {
   await assert.rejects(
     fetchProviderMetrics(linkedInClaim, linkedInConnection, { SOCIAL_TOKEN_KEY: secret }, { fetch: async () => new Response("{}", { status }) }),
     (reason: unknown) => reason instanceof AnalyticsProviderError && reason.code === expectedCode && !reason.retryable && reason.terminalState === "BLOCKED",

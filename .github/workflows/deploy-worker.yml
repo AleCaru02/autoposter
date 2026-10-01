@@ -85,6 +85,7 @@ jobs:
       - { name: Metered Personal Brand Identity QA, run: "npm run test:identity-qa-runtime" }
       - { name: Social metrics contract, run: "npm run test:social-metrics" }
       - { name: FASE 7H analytics engine regression, run: "npm run test:fase7h-analytics-engine" }
+      - { name: Provider analytics certification, run: "npm run test:provider-analytics-certification" }
       - { name: FASE 7J settings and account regression, run: "npm run test:fase7j-settings-account" }
       - { name: Persistent demo tenant infrastructure regression, run: "npm run test:persistent-demo" }
       - { name: Final personal readiness runner regression, run: "npm run test:final-personal-readiness" }
@@ -119,6 +120,14 @@ jobs:
           token=$(openssl rand -hex 32)
           echo "::add-mask::$token"
           echo "PREPUBLISH_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+      - name: Provision ephemeral provider analytics QA secret
+        if: contains(github.event.workflow_run.head_commit.message, '[provider-analytics-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          echo "::add-mask::$token"
+          echo "PROVIDER_ANALYTICS_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
       - name: Prepare Worker secrets
         shell: bash
         env:
@@ -157,6 +166,8 @@ jobs:
           if (bootstrap) secrets.ADMIN_BOOTSTRAP_TOKEN = bootstrap;
           const prepublishQa = process.env.PREPUBLISH_QA_TOKEN_VALUE?.trim();
           if (prepublishQa) secrets.PREPUBLISH_QA_TOKEN = prepublishQa;
+          const providerAnalyticsQa = process.env.PROVIDER_ANALYTICS_QA_TOKEN_VALUE?.trim();
+          if (providerAnalyticsQa) secrets.PROVIDER_ANALYTICS_QA_TOKEN = providerAnalyticsQa;
           fs.writeFileSync('worker-secrets.json', JSON.stringify(secrets), { mode: 0o600 });
           NODE
       - name: Deploy Cloudflare Worker
@@ -336,6 +347,77 @@ jobs:
           }
           console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
           NODE
+      - name: Controlled provider analytics read-only certification
+        if: contains(github.event.workflow_run.head_commit.message, '[provider-analytics-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://autoposter.02alessandrocaruso.workers.dev"
+          status=$(curl --silent --show-error -o provider-analytics-qa.json -w "%{http_code}" -X POST \
+            -H "x-provider-analytics-qa-token: $PROVIDER_ANALYTICS_QA_TOKEN_VALUE" \
+            "$base/api/internal/provider-analytics-certify" || true)
+          ANALYTICS_QA_HTTP_STATUS="$status" node - <<'NODE'
+          const fs=require('node:fs');
+          const body=JSON.parse(fs.readFileSync('provider-analytics-qa.json','utf8'));
+          const calls=Array.isArray(body?.providerCalls)?body.providerCalls:[];
+          const metrics=body?.metricsNormalized&&typeof body.metricsNormalized==='object'?body.metricsNormalized:{};
+          const summary={
+            httpStatus:process.env.ANALYTICS_QA_HTTP_STATUS,
+            certified:body?.certified===true,
+            error:body?.error??null,
+            safeMode:body?.safeMode,
+            requestType:body?.requestType,
+            externalWrite:body?.externalWrite,
+            provider:body?.provider??null,
+            account:body?.account??null,
+            mapping:body?.mapping??null,
+            metricsNormalized:metrics,
+            providerCalls:calls.map((call)=>({
+              endpoint:call?.endpoint??null,
+              metric:call?.metric??null,
+              fields:call?.fields??null,
+              queryType:call?.queryType??null,
+              method:call?.method??null,
+              status:call?.status??null,
+              rawNumericFields:call?.rawNumericFields??{},
+            })),
+          };
+          console.log('controlled provider analytics result:',JSON.stringify(summary));
+          const valid=process.env.ANALYTICS_QA_HTTP_STATUS==='200'
+            && body?.certified===true
+            && body?.safeMode===true
+            && body?.requestType==='READ_ONLY'
+            && body?.externalWrite===false
+            && typeof body?.provider==='string'
+            && typeof body?.mapping?.contentId==='string'
+            && typeof body?.mapping?.publicationJobId==='string'
+            && typeof body?.mapping?.externalPostId==='string'
+            && Object.keys(metrics).length>0
+            && calls.length>0
+            && calls.every((call)=>call?.method==='GET');
+          if(!valid) process.exit(1);
+          console.log('controlled provider analytics read-only certification: PASS');
+          NODE
+      - name: Remove ephemeral provider analytics QA secret
+        if: always() && contains(github.event.workflow_run.head_commit.message, '[provider-analytics-qa]')
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          printf 'y\n' | npx wrangler secret delete PROVIDER_ANALYTICS_QA_TOKEN || true
+      - name: Verify provider analytics certification route closed
+        if: always() && contains(github.event.workflow_run.head_commit.message, '[provider-analytics-qa]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -X POST -o /dev/null -w "%{http_code}" "https://autoposter.02alessandrocaruso.workers.dev/api/internal/provider-analytics-certify" || true)
+          if [ "$status" != "404" ]; then
+            echo "Provider analytics certification route did not fail closed after secret removal: HTTP $status" >&2
+            exit 1
+          fi
+          echo "provider analytics certification route closed: PASS"
       - name: Controlled prepublish QA
         if: steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
