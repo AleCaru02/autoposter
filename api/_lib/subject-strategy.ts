@@ -31,7 +31,7 @@ function textSignals(text: string) {
   return {
     product: /\b(prodotto|product|profumo|bottiglia|packaging|articolo|catalogo|sku)\b/i.test(value),
     service: /\b(servizio|service|consulenza|gestione|offerta|soluzione)\b/i.test(value),
-    person: /\b(persona|volto|ritratto|portrait|founder|titolare|professionista|consulente|io\b|mia storia|mio percorso|personal brand)\b/i.test(value),
+    person: /\b(persona|volto|ritratto|portrait|founder|titolare|professionista|consulente|io|mia storia|mio percorso|personal brand)\b/i.test(value),
     team: /\b(team|squadra|collaborator|community|gruppo)\b/i.test(value),
     environment: /\b(ambiente|location|ufficio|studio|città|evento|casa|immobile|outdoor|indoor)\b/i.test(value),
     infographic: /\b(infografica|grafico|schema|diagramma|checklist|confronto|differenze|step|passi|numeri|dati)\b/i.test(value),
