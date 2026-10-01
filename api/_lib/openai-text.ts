@@ -124,7 +124,7 @@ export type GenerateOptions = {
   fetcher?: typeof fetch;
   model?: string;
   cacheKey?: string;
-  onProgress?: (update: { percent: number; stage: "ANALYZING" | "RESEARCHING" | "WRITING" | "COPY_READY" | "VERIFYING" | "VERIFIED" }) => void | Promise<void>;
+  onProgress?: (update: { percent: number; stage: "ANALYZING" | "RESEARCHING" | "CHANNEL_STRATEGY" | "WRITING" | "VISUAL_BRIEF" | "COPY_READY" | "SOURCE_VALIDATION" | "VERIFYING" | "VERIFIED" }) => void | Promise<void>;
 };
 
 const TERRA_INPUT_PER_MILLION_USD = 2;
@@ -405,7 +405,7 @@ function agentCost(result: ResearchAgentResult | { usage: { inputTokens: number;
   return estimateTerraCostUsd(result.usage.inputTokens, result.usage.outputTokens) + result.usage.webSearchCalls * WEB_SEARCH_PER_RUN_USD;
 }
 
-async function reportProgress(options: GenerateOptions, percent: number, stage: "ANALYZING" | "RESEARCHING" | "WRITING" | "COPY_READY" | "VERIFYING" | "VERIFIED") {
+async function reportProgress(options: GenerateOptions, percent: number, stage: "ANALYZING" | "RESEARCHING" | "CHANNEL_STRATEGY" | "WRITING" | "VISUAL_BRIEF" | "COPY_READY" | "SOURCE_VALIDATION" | "VERIFYING" | "VERIFIED") {
   try { await options.onProgress?.({ percent, stage }); } catch { /* progress telemetry must never break content generation */ }
 }
 
@@ -571,7 +571,8 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     }
   }
 
-  await reportProgress(options, 45, "WRITING");
+  await reportProgress(options, 42, "CHANNEL_STRATEGY");
+  await reportProgress(options, 50, "WRITING");
   const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
@@ -698,6 +699,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       }]);
     }
   }
+  await reportProgress(options, 68, "VISUAL_BRIEF");
   await reportProgress(options, 72, "COPY_READY");
   const brain = brainDecision({
     spendEur: 0,
@@ -715,6 +717,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const mainWebSearchCalls = countWebSearchCalls(body);
   const mainSources = copyUsesWebSearch ? trustedVerificationSources(extractWebSearchSources(body)) : [];
   const combinedSources = trustedVerificationSources([...(dedicatedResearch?.sources ?? []), ...mainSources]);
+  await reportProgress(options, 78, "SOURCE_VALIDATION");
 
   let factCheck = null as Awaited<ReturnType<typeof runOpenAIFactCheckAgent>> | null;
   const factCheckRuns: Array<Awaited<ReturnType<typeof runOpenAIFactCheckAgent>>> = [];
