@@ -4,6 +4,11 @@ export type ContentDedupeCandidate = {
   angle?: string | null;
   hook?: string | null;
   caption?: string | null;
+  cta?: string | null;
+  pillar?: string | null;
+  visualArchetype?: string | null;
+  subjectStrategy?: string | null;
+  narrativeStructure?: string | null;
 };
 
 export type ContentDuplicateMatch = {
@@ -129,4 +134,66 @@ export function findNearDuplicate(
     if (!best || match.score > best.score) best = match;
   }
   return best;
+}
+
+
+export type EditorialRepetitionMatch = {
+  blocked: boolean;
+  reasons: string[];
+  signals: {
+    maxHookSimilarity: number;
+    maxAngleSimilarity: number;
+    repeatedCtaCount: number;
+    repeatedPillarCount: number;
+    repeatedVisualArchetypeCount: number;
+    repeatedSubjectCount: number;
+    repeatedNarrativeStructureCount: number;
+  };
+};
+
+function sameNormalized(a?: string | null, b?: string | null) {
+  const left = normalizeText(a ?? "");
+  const right = normalizeText(b ?? "");
+  return Boolean(left && right && left === right);
+}
+
+export function findEditorialRepetition(
+  candidate: ContentDedupeCandidate,
+  recent: ContentDedupeCandidate[],
+): EditorialRepetitionMatch {
+  const window = recent.slice(0, 12);
+  let maxHookSimilarity = 0;
+  let maxAngleSimilarity = 0;
+  for (const row of window) {
+    if (candidate.hook && row.hook) maxHookSimilarity = Math.max(maxHookSimilarity, lexicalScore(candidate.hook, row.hook));
+    if (candidate.angle && row.angle) maxAngleSimilarity = Math.max(maxAngleSimilarity, lexicalScore(candidate.angle, row.angle));
+  }
+  const repeatedCtaCount = window.filter((row) => sameNormalized(candidate.cta, row.cta)).length;
+  const repeatedPillarCount = window.filter((row) => sameNormalized(candidate.pillar, row.pillar)).length;
+  const repeatedVisualArchetypeCount = window.filter((row) => sameNormalized(candidate.visualArchetype, row.visualArchetype)).length;
+  const repeatedSubjectCount = window.filter((row) => sameNormalized(candidate.subjectStrategy, row.subjectStrategy)).length;
+  const repeatedNarrativeStructureCount = window.filter((row) => sameNormalized(candidate.narrativeStructure, row.narrativeStructure)).length;
+
+  const reasons: string[] = [];
+  if (maxHookSimilarity >= 0.82) reasons.push("HOOK_TOO_SIMILAR");
+  if (maxAngleSimilarity >= 0.82) reasons.push("ANGLE_TOO_SIMILAR");
+  if (candidate.cta && repeatedCtaCount >= 3) reasons.push("CTA_OVERUSED");
+  if (candidate.pillar && repeatedPillarCount >= 5) reasons.push("PILLAR_OVERUSED");
+  if (candidate.visualArchetype && repeatedVisualArchetypeCount >= 3) reasons.push("VISUAL_ARCHETYPE_OVERUSED");
+  if (candidate.subjectStrategy && repeatedSubjectCount >= 4) reasons.push("SUBJECT_OVERUSED");
+  if (candidate.narrativeStructure && repeatedNarrativeStructureCount >= 3) reasons.push("NARRATIVE_STRUCTURE_OVERUSED");
+
+  return {
+    blocked: reasons.length > 0,
+    reasons,
+    signals: {
+      maxHookSimilarity,
+      maxAngleSimilarity,
+      repeatedCtaCount,
+      repeatedPillarCount,
+      repeatedVisualArchetypeCount,
+      repeatedSubjectCount,
+      repeatedNarrativeStructureCount,
+    },
+  };
 }

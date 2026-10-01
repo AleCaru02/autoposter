@@ -26,6 +26,15 @@ export type MasterEditorialContextSnapshot = {
   analyticsSampleCount: number;
   learningSignalCount: number;
   reusableAssetCount: number;
+  editorialMemory?: {
+    activeSeriesCount: number;
+    suggestedNextTopicIntent: string | null;
+    underusedPillars: string[];
+    overusedPillars: string[];
+    feedbackSignalCount: number;
+    recentSubjects: Array<{ value: string; count: number }>;
+    recentVisualArchetypes: Array<{ value: string; count: number }>;
+  };
 };
 
 export type MasterEditorialDecision = {
@@ -94,6 +103,9 @@ function contextSignals(context: MasterEditorialContextSnapshot) {
     `budget=${context.budget.band}; residuo €${context.budget.remainingEur.toFixed(2)}; Higgsfield €${context.budget.higgsfieldRemainingEur.toFixed(2)}; Other AI €${context.budget.otherAiRemainingEur.toFixed(2)}`,
     evidenceText,
     `asset riusabili=${context.reusableAssetCount}; ${events}`,
+    context.editorialMemory
+      ? `memoriaSMM: serieAttive=${context.editorialMemory.activeSeriesCount}; nextIntent=${context.editorialMemory.suggestedNextTopicIntent ?? "nessuno"}; feedbackSignals=${context.editorialMemory.feedbackSignalCount}; pillarTrascurati=${context.editorialMemory.underusedPillars.join(",") || "nessuno"}`
+      : "memoriaSMM non ancora disponibile",
   ];
 }
 
@@ -210,6 +222,9 @@ export function decideMasterEditorial(input: Input): MasterEditorialDecision {
     learningApplied ? "Timing/formato possono usare learning affidabile derivato da metriche provider reali." : "Nessun learning forte viene forzato senza evidenza sufficiente.",
     input.context.recentContentCount > 0 ? "Lo storico recente viene considerato per evitare ripetizioni." : null,
     input.context.calendarScheduledCount > 0 ? "Il carico del calendario futuro è incluso nella decisione." : null,
+    input.context.editorialMemory?.suggestedNextTopicIntent ? `La memoria segnala una continuità possibile: ${input.context.editorialMemory.suggestedNextTopicIntent}. Viene usata solo se coerente con il piano corrente.` : null,
+    input.context.editorialMemory?.underusedPillars.length ? `Il feed balance considera pillar trascurati: ${input.context.editorialMemory.underusedPillars.join(", ")}.` : null,
+    input.context.editorialMemory?.feedbackSignalCount ? "Il feedback storico ponderato entra nella decisione senza trasformare una singola rejection in regola permanente." : null,
     eventTriggered ? "La priorità aumenta per un evento/trigger rilevante già presente nel piano." : null,
   ]);
 

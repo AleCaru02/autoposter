@@ -27,6 +27,7 @@ import { handlePersonalBrandVisualIdentity } from "./personal-brand-visual.js";
 import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdPreflight } from "./personal-brand-reference.js";
 import { handlePersonalBrandSources } from "./personal-brand-sources.js";
 import { handleAssetLibrary } from "./asset-library.js";
+import { handleProfileSmmCertification } from "./profile-smm-certification.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -168,6 +169,7 @@ export default {
       if (response) return response;
     }
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
+    if (path === "/api/autopilot/certify") return handleProfileSmmCertification(request, env);
     if (path === "/api/learning/run") return handleLearningRun(request, env);
     if (path === "/api/personal-brand/visual-identity") return handlePersonalBrandVisualIdentity(request, env);
     if (path === "/api/personal-brand/reference-images") return handleReferenceImages(request, env);

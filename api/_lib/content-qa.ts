@@ -8,6 +8,9 @@ import { runOpenAIFactCheckAgent, type FactCheckAgentResult, type FactCheckClaim
 import { runOpenAIVisualQa, type OpenAIVisualQaResult } from "./openai-visual-qa.js";
 import { loadEditorialProfile, loadProfileBrandContext } from "./personal-brand-sources.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { evaluateFeedCoherence } from "./feed-coherence.js";
+import type { EditorialMemorySnapshot } from "./editorial-memory.js";
+import type { ContentSubject } from "./subject-strategy.js";
 
 export type ContentQaDimensionStatus = "PASS" | "FAIL" | "NEEDS_SOURCE" | "SKIP";
 export type ContentQaOverallStatus = "PASS" | "FAIL" | "NEEDS_SOURCE";
@@ -37,6 +40,9 @@ export type ContentQaRunResult = {
   platformStatus: ContentQaDimensionStatus;
   duplicateStatus: ContentQaDimensionStatus;
   budgetStatus: ContentQaDimensionStatus;
+  feedCoherenceStatus: ContentQaDimensionStatus;
+  profileTypeFitStatus: ContentQaDimensionStatus;
+  subjectStrategyStatus: ContentQaDimensionStatus;
   reasons: string[];
   factCheck: {
     verdict: FactCheckAgentResult["verdict"] | "SKIPPED";
@@ -63,6 +69,13 @@ type ItemRow = {
   source_refs: unknown;
   fact_provenance: unknown;
   decision_record: unknown;
+  series_id: string | null;
+  sequence_number: number | null;
+  previous_content_id: string | null;
+  next_topic_intent: string | null;
+  continuity_reason: string | null;
+  visual_archetype: string | null;
+  subject_strategy: ContentSubject | null;
 };
 
 type VariantRow = {
@@ -215,9 +228,11 @@ function assetDimensionsFit(asset: AssetRow, format: SocialFormat) {
   return Math.abs(asset.width / asset.height - expectedAspect(format)) <= 0.08;
 }
 
-function identityStatus(profileType: "BUSINESS" | "PERSONAL_BRAND", asset: AssetRow): ContentQaDimensionStatus {
+function identityStatus(profileType: "BUSINESS" | "PERSONAL_BRAND", subject: ContentSubject | null, asset: AssetRow): ContentQaDimensionStatus {
   if (profileType !== "PERSONAL_BRAND") return "PASS";
+  if (subject !== "CANONICAL_PERSON") return "PASS";
   if (asset.provider === "REAL_ASSET") return "PASS";
+  if (asset.provider !== "HIGGSFIELD") return "FAIL";
   return asset.identity_status === "PASS" ? "PASS" : "FAIL";
 }
 
@@ -343,7 +358,8 @@ async function persistResult(sql: Sql, result: ContentQaRunResult, actorType: Qa
 
 async function loadInputs(sql: Sql, profileId: string, contentId: string, variantId: string) {
   const items = await sql`
-    select id::text,profile_id::text,topic,objective,title,pillar,source_refs,fact_provenance,decision_record
+    select id::text,profile_id::text,topic,objective,title,pillar,source_refs,fact_provenance,decision_record,
+           series_id::text,sequence_number,previous_content_id::text,next_topic_intent,continuity_reason,visual_archetype,subject_strategy
     from public.content_items
     where id=${contentId}::uuid and profile_id=${profileId}::uuid
     limit 1
@@ -408,6 +424,7 @@ export async function runContentQa(input: {
     slides,
     assets:assets.map((asset)=>({id:asset.id,provider:asset.provider,model:asset.model,width:asset.width,height:asset.height,format:asset.format,identityStatus:asset.identity_status})),
     brandVisual,
+    feedMetadata:{seriesId:item.series_id,sequenceNumber:item.sequence_number,previousContentId:item.previous_content_id,nextTopicIntent:item.next_topic_intent,visualArchetype:item.visual_archetype,subjectStrategy:item.subject_strategy},
   });
 
   if (!input.force && variant.qa_fingerprint===fingerprint && variant.qa_status!=="PENDING") {
@@ -458,6 +475,7 @@ export async function runContentQa(input: {
         runId,profileId:input.profileId,contentId:input.contentId,variantId:input.variantId,contentFingerprint:fingerprint,
         overallStatus:"FAIL",
         brandStatus:"SKIP",copyStatus:"SKIP",visualStatus:"SKIP",factStatus:"SKIP",platformStatus:"SKIP",duplicateStatus:"SKIP",budgetStatus:"FAIL",
+        feedCoherenceStatus:"SKIP",profileTypeFitStatus:"SKIP",subjectStrategyStatus:"SKIP",
         reasons:[budget.reason??"AI_BUDGET_HARD_STOP"],
         factCheck:{verdict:"SKIPPED",claims:[],sources:[]},
         visual:{assetId:variant.image_asset_id,identityStatus:"SKIP",result:null},
@@ -530,7 +548,7 @@ export async function runContentQa(input: {
     if (variant.format!=="CAROUSEL") {
       const asset=variant.image_asset_id?assetMap.get(variant.image_asset_id):null;
       if (asset && assetDimensionsFit(asset,variant.format)) {
-        variantIdentityStatus=identityStatus(profile.profile_type,asset);
+        variantIdentityStatus=identityStatus(profile.profile_type,item.subject_strategy,asset);
         variantVisualResult=await runOpenAIVisualQa({
           apiKey:input.apiKey,
           imageUrl:asset.storage_url,
@@ -571,7 +589,7 @@ export async function runContentQa(input: {
         let visualReason=asset?"":"Asset mancante";
 
         if (asset && assetDimensionsFit(asset,"CAROUSEL")) {
-          const identity=identityStatus(profile.profile_type,asset);
+          const identity=identityStatus(profile.profile_type,item.subject_strategy,asset);
           const visualQa=await runOpenAIVisualQa({
             apiKey:input.apiKey,
             imageUrl:asset.storage_url,
@@ -625,12 +643,35 @@ export async function runContentQa(input: {
       globalVisualStatus=structurallyComplete&&slideResults.every((slide)=>slide.visualStatus==="PASS")?"PASS":"FAIL";
     }
 
+    const memoryRows=await sql`
+      select snapshot
+      from public.profile_editorial_memory
+      where profile_id=${input.profileId}::uuid
+      limit 1
+    ` as unknown as Array<{snapshot:EditorialMemorySnapshot}>;
+    const feedCoherence=evaluateFeedCoherence({
+      profileType:profile.profile_type,
+      subject:item.subject_strategy,
+      visualArchetype:item.visual_archetype,
+      pillar:item.pillar,
+      seriesId:item.series_id,
+      sequenceNumber:item.sequence_number,
+      previousContentId:item.previous_content_id,
+      nextTopicIntent:item.next_topic_intent,
+      assetProvider:(variant.image_asset_id?assetMap.get(variant.image_asset_id)?.provider:null)??null,
+      identityStatus:(variant.image_asset_id?assetMap.get(variant.image_asset_id)?.identity_status:null)??null,
+      memory:memoryRows[0]?.snapshot??null,
+    });
+    const feedCoherenceStatus:ContentQaDimensionStatus=feedCoherence.status==="PASS"?"PASS":"FAIL";
+    const profileTypeFitStatus:ContentQaDimensionStatus=feedCoherence.checks.profileTypeFit?"PASS":"FAIL";
+    const subjectStrategyStatus:ContentQaDimensionStatus=feedCoherence.checks.subjectFit?"PASS":"FAIL";
+
     const brandStatus:ContentQaDimensionStatus=editorialQa.checks.brandConsistency==="PASS"?"PASS":"FAIL";
     const copyStatus=editorialCopyStatus(editorialQa.checks);
     const globalFactStatus=factStatus(factCheck);
     const platformStatus=editorialPlatformStatus(editorialQa.checks);
     const budgetStatus:ContentQaDimensionStatus="PASS";
-    const required:ContentQaDimensionStatus[]=[brandStatus,copyStatus,globalVisualStatus,globalFactStatus,platformStatus,duplicateStatus,budgetStatus];
+    const required:ContentQaDimensionStatus[]=[brandStatus,copyStatus,globalVisualStatus,globalFactStatus,platformStatus,duplicateStatus,budgetStatus,feedCoherenceStatus,profileTypeFitStatus,subjectStrategyStatus];
     if (variant.format==="CAROUSEL") required.push(...slideResults.map((slide)=>slide.qualityStatus));
     const overallStatus=overallFrom(required);
 
@@ -640,6 +681,7 @@ export async function runContentQa(input: {
       globalVisualStatus!=="PASS"?"Visual QA non superato o asset/formato non valido.":"",
       globalFactStatus==="NEEDS_SOURCE"?"Fact QA: una o più claim richiedono una fonte verificabile.":"",
       globalFactStatus==="FAIL"?"Fact QA: una o più claim risultano non supportate o contraddette.":"",
+      ...feedCoherence.reasons.map((reason)=>`Feed coherence: ${reason}`),
       ...slideResults.filter((slide)=>slide.qualityStatus!=="PASS").map((slide)=>`Slide ${slide.slideNumber}: ${slide.reason||"QA non superato"}`),
     ].filter(Boolean).slice(0,20);
 
@@ -653,6 +695,9 @@ export async function runContentQa(input: {
       platformStatus,
       duplicateStatus,
       budgetStatus,
+      feedCoherenceStatus,
+      profileTypeFitStatus,
+      subjectStrategyStatus,
       reasons,
       factCheck:{verdict:factCheck.verdict,claims:factCheck.checkedClaims,sources:factCheck.sources},
       visual:{assetId:variant.image_asset_id,identityStatus:variantIdentityStatus,result:variantVisualResult},

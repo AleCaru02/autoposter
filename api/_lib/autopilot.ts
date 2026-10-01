@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
+import { findEditorialRepetition, findNearDuplicate, semanticContentSimilarity, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./editorial-research.js";
 import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan.js";
@@ -18,6 +18,9 @@ import { decideMasterEditorial, type MasterEditorialDecision } from "./master-ed
 import { buildPersonalBrandEditorialContext, loadProfileBrandContext, resolvePersonalBrandSource, type PersonalBrandSourceRelation } from "./personal-brand-sources.js";
 import { higgsfieldConfigured } from "./higgsfield.js";
 import { decideVisualRuntime } from "./visual-runtime-decision.js";
+import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
+import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
+import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -34,7 +37,7 @@ export type AutopilotCandidateSlot = { scheduledAt: string; timingSource: "USER_
 type PageRow = { url: string; title: string | null; content_text: string | null };
 type JobRow = { provider: SocialProvider; scheduled_at: string };
 type RecentItemRow = { topic: string };
-type RecentContentRow = { id: string; topic: string; title: string | null; hook: string | null; caption: string | null };
+type RecentContentRow = { id: string; topic: string; title: string | null; pillar: string | null; visual_archetype: string | null; subject_strategy: string | null; narrative_structure: string | null; hook: string | null; caption: string | null; cta: string | null };
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
@@ -147,7 +150,7 @@ export function chooseAutopilotPublishFormat(provider:SocialProvider,recentCount
 export function chooseAutopilotContentType(format:SocialFormat):ContentType{return format==="STORY"?"SINGLE_STORY":format==="CAROUSEL"?"CAROUSEL":"SINGLE_POST";}
 async function recentTopics(sql:Sql,profileId:string){const rows=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 24` as unknown as RecentItemRow[];return rows.map(r=>r.topic).filter(Boolean);}
 async function activeLearningInsights(sql:Sql,profileId:string){return await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and source_type='PROVIDER_API' and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];}
-async function recentContentForDedupe(sql:Sql,profileId:string):Promise<ContentDedupeCandidate[]>{const rows=await sql`select ci.id,ci.topic,ci.title,cv.hook,cv.caption from public.content_items ci left join lateral (select hook,caption from public.content_variants where profile_id=${profileId}::uuid and content_id=ci.id order by updated_at desc limit 1) cv on true where ci.profile_id=${profileId}::uuid order by ci.created_at desc limit 40` as unknown as RecentContentRow[];return rows.map(r=>({id:r.id,topic:r.topic??"",angle:r.title,hook:r.hook,caption:r.caption}));}
+async function recentContentForDedupe(sql:Sql,profileId:string):Promise<ContentDedupeCandidate[]>{const rows=await sql`select ci.id,ci.topic,ci.title,ci.pillar,ci.visual_archetype,ci.subject_strategy,concat_ws(':',ci.decision_record->>'contentType',ci.decision_record->>'intent') as narrative_structure,cv.hook,cv.caption,cv.cta from public.content_items ci left join lateral (select hook,caption,cta from public.content_variants where profile_id=${profileId}::uuid and content_id=ci.id order by updated_at desc limit 1) cv on true where ci.profile_id=${profileId}::uuid order by ci.created_at desc limit 40` as unknown as RecentContentRow[];return rows.map(r=>({id:r.id,topic:r.topic??"",angle:r.title,hook:r.hook,caption:r.caption,cta:r.cta,pillar:r.pillar,visualArchetype:r.visual_archetype,subjectStrategy:r.subject_strategy,narrativeStructure:r.narrative_structure}));}
 async function recentVariantCount(sql:Sql,profileId:string,provider:SocialProvider){const rows=await sql`select count(*)::int as count from public.content_variants where profile_id=${profileId}::uuid and provider=${provider}` as unknown as CountRow[];return Number(rows[0]?.count??0);}
 async function persistMasterDecision(sql:Sql,profileId:string,strategy:StrategyRow|undefined,decision:MasterEditorialDecision){const existing=asObject(strategy?.platform_strategy);const previous=asObject(existing.masterEditorialDecisions);const entries=Object.entries(previous).slice(-39);await sql`update public.content_strategies set platform_strategy=${JSON.stringify({...existing,masterEditorialDecisions:Object.fromEntries([...entries,[decision.id,decision]])})}::jsonb,updated_at=now() where profile_id=${profileId}::uuid`;}
 export async function currentSpend(sql:Sql,profileId:string){const rows=await sql`select coalesce(sum(cost_usd),0)::float8 as spend from public.ai_usage_events where profile_id=${profileId}::uuid and created_at>=${monthStartIso()}::timestamptz and operation in ('GENERATE_SOCIAL_TEXT','AGENT_RESEARCH','AGENT_FACTCHECK','AGENT_EDITORIAL_QA')` as unknown as SpendRow[];return Number(rows[0]?.spend??0)||0;}
@@ -155,6 +158,8 @@ export async function currentSpend(sql:Sql,profileId:string){const rows=await sq
 async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const learning=await activeLearningInsights(sql,profile.id);const planItem=selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,AUTOPILOT_PUBLISH_FORMATS[provider],learning);const format=chooseAutopilotPublishFormat(provider,count,planItem?.format,learnedFormat);const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;const objective=planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
+  const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
+  const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
   if(profile.profile_type==="PERSONAL_BRAND"&&!objective)throw new Error("PERSONAL_BRAND_OBJECTIVE_REQUIRED");
   const configuredResearch=normalizeEditorialResearchMode(asObject(strategy?.platform_strategy).researchMode);
   const researchMode=planItem?.intent==="NEWS"?"NEWS":configuredResearch;
@@ -205,11 +210,24 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       analyticsSampleCount:Number(metricRows[0]?.count??0),
       learningSignalCount:usableLearningDecisions(profile.id,learning).length,
       reusableAssetCount:Number(assetRows[0]?.count??0),
+      editorialMemory:{
+        activeSeriesCount:memory.continuity.activeSeries.length,
+        suggestedNextTopicIntent:memory.continuity.suggestedNextTopicIntent,
+        underusedPillars:memory.balance.underusedPillars,
+        overusedPillars:memory.balance.overusedPillars,
+        feedbackSignalCount:memory.feedback.weightedSignals.length,
+        recentSubjects:memory.recent.subjects,
+        recentVisualArchetypes:memory.recent.visualArchetypes,
+      },
     },
   });
   master.timing={scheduledAt,source:timingSource};
   if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
-  const baseTopicRequest=effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);const topicRequest=[baseTopicRequest,learningInstruction].filter(Boolean).join(" ");
+  const baseTopicRequest=effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");
+  const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);
+  const profileStrategyInstruction=profileTypeStrategyInstruction({profileType:profile.profile_type,industry:profile.industry,businessModel:context.businessModel,offer:context.description,audience:context.target,objective,provider});
+  const memoryInstruction=buildEditorialMemoryInstruction(memory);
+  const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction].filter(Boolean).join("\n\n");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
   const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
   const reservation=await meter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity,requestFingerprint:{provider,format,scheduledAt,topicRequest,objective,researchMode}});
@@ -225,16 +243,44 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   await meter.markProviderStarted(logicalEventId);
   const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
+  const identityRowsForSubject=profile.profile_type==="PERSONAL_BRAND"
+    ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
+    : [];
+  const canonicalIdentityState=identityRowsForSubject[0]?.status??"NOT_CONFIGURED";
+  const subjectDecision=chooseSubjectStrategy({
+    profileType:profile.profile_type,
+    provider,
+    format,
+    topic:generated.content.editorialTopic,
+    angle:generated.content.editorialAngle,
+    visualBrief:variant.visualBrief,
+    memory,
+    suitableRealAssetAvailable:false,
+    canonicalIdentityReady:canonicalIdentityState==="COMPLETED",
+  });
+  const continuityDecision=deriveContinuityDecision({
+    memory,
+    profileType:profile.profile_type,
+    contentType:master.contentType,
+    intent:master.intent,
+    topic:generated.content.editorialTopic,
+  });
   if(loaded.personalBrand){
     const allowed=Array.isArray(loaded.personalBrand.relation?.allowed_ctas)?loaded.personalBrand.relation?.allowed_ctas.filter((item):item is string=>typeof item==="string"&&Boolean(item.trim())).map((item)=>item.trim().toLowerCase()):[];
     if(allowed.length&&variant.cta&&!allowed.includes(variant.cta.trim().toLowerCase()))throw new Error("AUTOPILOT_PERSONAL_BRAND_CTA_NOT_ALLOWED");
   }
   await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,timing_source:timingSource,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
-  const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},await recentContentForDedupe(sql,profile.id));if(duplicate)throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
+  const recentDedupe=await recentContentForDedupe(sql,profile.id);
+  const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},recentDedupe);
+  const linkedSeriesContinuation=continuityDecision.mode==="CONTINUE_SERIES"&&Boolean(continuityDecision.previousContentId);
+  if(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78))throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
+  const repetition=findEditorialRepetition({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption,cta:variant.cta,pillar:generated.content.pillar??null,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:`${master.contentType}:${master.intent}`},recentDedupe);
+  if(repetition.blocked)throw new Error(`AUTOPILOT_REPETITION_BLOCKED:${repetition.reasons.join(",")}`);
   if(approvalMode==="AUTOMATIC"&&variant.eligible){const qa=await runOpenAIEditorialQA({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider,format,objective,content:generated.content,variant,verification:generated.verification,externalSources:generated.externalSources});const qaEvent:TechnicalAiEvent={operation:"AGENT_EDITORIAL_QA",model:qa.model,inputTokens:qa.usage.inputTokens,outputTokens:qa.usage.outputTokens,costUsd:qa.usage.estimatedCostUsd,metadata:{openai_response_id:qa.responseId,openai_request_id:qa.requestId,source:"AUTOPILOT",provider,format,verdict:qa.verdict,reasons:qa.reasons,checks:qa.checks}};await meter.persistTechnicalEvents(profile.id,logicalEventId,[qaEvent]);if(qa.verdict!=="PASS")throw new Error(`AUTOPILOT_EDITORIAL_QA_BLOCKED:${qa.reasons.slice(0,2).join(" | ")||"material issue"}`);}
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
+  const brandVisual=normalizeBrandVisualIdentity(loaded.visualIdentity);
   const decisionRecord=JSON.stringify({
     source:"AUTOPILOT",
     masterDecisionId:master.id,
@@ -252,14 +298,37 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     editorialTopic:generated.content.editorialTopic,
     editorialAngle:generated.content.editorialAngle,
     strategySummary:generated.content.strategySummary,
+    profileType:profile.profile_type,
+    subjectStrategy:subjectDecision.subject,
+    visualArchetype:subjectDecision.visualArchetype,
+    subjectReason:subjectDecision.reason,
+    continuity:{
+      mode:continuityDecision.mode,
+      seriesId:continuityDecision.seriesId,
+      sequenceNumber:continuityDecision.sequenceNumber,
+      previousContentId:continuityDecision.previousContentId,
+      nextTopicIntent:continuityDecision.nextTopicIntent,
+      reason:continuityDecision.continuityReason,
+    },
+    memoryProof:{
+      builtAt:memory.builtAt,
+      sourceContentCount:memory.sourceContentCount,
+      suggestedNextTopicIntent:memory.continuity.suggestedNextTopicIntent,
+      underusedPillars:memory.balance.underusedPillars,
+      overusedPillars:memory.balance.overusedPillars,
+      feedbackSignals:memory.feedback.weightedSignals.slice(0,6),
+      recentSubjects:memory.recent.subjects.slice(0,8),
+      recentVisualArchetypes:memory.recent.visualArchetypes.slice(0,8),
+    },
+    antiRepetition:repetition.signals,
     generatedAt:now,
   });
   if(loaded.personalBrand){
     const sourceRefs=[...loaded.personalBrand.sourceRefs,...generated.externalSources.map((url)=>({type:"EXTERNAL_SOURCE",url}))];
     const factProvenance=[...loaded.personalBrand.factProvenance,...generated.externalSources.map((url)=>({source_type:"EXTERNAL_SOURCE",url}))];
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${decisionRecord}::jsonb,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid,case when ${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid is null then '{}'::uuid[] else ARRAY[${loaded.personalBrand.relation?.source_profile_id ?? null}::uuid] end,${JSON.stringify(sourceRefs)}::jsonb,${JSON.stringify(loaded.personalBrand.audience)}::jsonb,${JSON.stringify(factProvenance)}::jsonb,${variant.cta?.trim()||"NONE"},false,${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }else{
-    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${now}::timestamptz)`;
+    await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,approval_mode,workflow_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${approvalMode==="AUTOMATIC"?"AUTO":"MANUAL"},'DRAFT',${now}::timestamptz)`;
   if(variant.eligible&&allowImageGeneration){
@@ -268,19 +337,16 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
     const visualBudget=await budgetEngine.snapshot(profile.id);
-    const identityRows=profile.profile_type==="PERSONAL_BRAND"
-      ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
-      : [];
-    const identityState=identityRows[0]?.status??"NOT_CONFIGURED";
     const visualDecision=decideVisualRuntime({
       profileType:profile.profile_type,
       visualBrief:variant.visualBrief,
       suitableRealAssetAvailable:Boolean(reusable),
       higgsfieldConfigured:higgsfieldConfigured(env.HF_CREDENTIALS),
-      soulIdentityState:identityState,
+      soulIdentityState:canonicalIdentityState,
       higgsfieldBudgetRemainingEur:visualBudget.higgsfieldRemainingEur,
       estimatedHiggsfieldCostEur:0.25,
       estimatedOpenAiCostEur:0.25,
+      subject:subjectDecision.subject,
     });
     await sql`update public.content_variants set
       visual_provider=${visualDecision.provider},
@@ -293,6 +359,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
 
     if(reusable){
       imageAssetId=reusable.asset.id;
+      await sql`update public.content_items set subject_strategy='REAL_ASSET',visual_archetype='REAL_ASSET_FEATURE',updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
       await sql`update public.assets set metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({reuse_reason:reusable.reason,last_reused_at:new Date().toISOString()})}::jsonb,reuse_count=reuse_count+1,last_used_at=now(),updated_at=now() where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`;
       await sql`update public.content_variants set visual_actual_cost_eur=0 where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
     }
@@ -309,7 +376,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,industry:profile.industry,tone:context.tone,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:visualDecision.mustAvoidSyntheticPerson?"Do not depict or invent a synthetic person. Use objects, environment, typography or non-identifying visual elements only.":null});
+        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:brandVisual.colors,brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, typography, infographic or other non-identifying elements only.":null});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
@@ -350,7 +417,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     }
   }
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
-  if(variant.eligible){const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
+  if(variant.eligible){await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
   }catch(reason){if(imageEventId&&!imageCommitted){if(imageAssetId)await sql`delete from public.assets where id=${imageAssetId}::uuid and profile_id=${profile.id}::uuid`.catch(()=>undefined);await imageMeter.release(imageEventId,reason instanceof Error?reason.message:"AUTOPILOT_IMAGE_FAILED").catch(()=>undefined);}if(reason instanceof OpenAITextPipelineError)await meter.persistTechnicalEvents(profile.id,logicalEventId,reason.technicalEvents).catch(()=>undefined);if(!logicalCommitted)await meter.release(logicalEventId,reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED").catch(()=>undefined);throw reason;}
 }
 
