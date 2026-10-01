@@ -25,8 +25,15 @@ assert.match(handler,/owner_auth_user_id/, "reference runtime must remain owner 
 assert.match(handler,/profile_type='PERSONAL_BRAND'/, "reference runtime must be Personal Brand only");
 assert.match(handler,/requiresExplicitConfirmation:\s*true/, "Soul ID preflight must require explicit confirmation");
 assert.match(handler,/providerCallExecuted:\s*false/, "preflight must prove no provider call occurred");
-assert.doesNotMatch(handler,/createHiggsfieldSoulId\(/, "non-billable preflight must not create a Soul ID");
-assert.doesNotMatch(handler,/api\.higgsfield\.ai/, "reference/preflight route must not call Higgsfield directly");
+const preflightSource = handler.slice(handler.indexOf("export async function handleSoulIdPreflight"), handler.indexOf("export async function handleSoulIdCreate"));
+assert.doesNotMatch(preflightSource,/createHiggsfieldSoulId\(/, "non-billable preflight must not create a Soul ID");
+assert.match(handler,/export async function handleSoulIdCreate/, "billable Soul ID creation route must exist behind explicit confirmation");
+assert.match(handler,/body\.confirmed !== true/, "billable Soul ID creation must require explicit confirmation");
+assert.match(handler,/model_version:\s*"v2"/, "Soul ID metering metadata must record v2");
+assert.match(handler,/usage\.markProviderStarted/, "billable call must reserve provider cost before provider execution");
+assert.match(handler,/usage\.reconcileProviderCostAttempt/, "provider cost must reconcile after Soul ID creation");
+assert.match(handler,/usage\.commitUsage/, "successful Soul ID creation must commit logical usage");
+assert.doesNotMatch(preflightSource,/api\.higgsfield\.ai|createHiggsfieldSoulId/, "preflight must remain non-billable and provider-free");
 assert.match(handler,/projectedOperationCostUsd:\s*2\.5/, "Soul ID preflight must account for the expected provider reserve");
 assert.match(handler,/costBucket:\s*"HIGGSFIELD"/, "Soul ID preflight must use the Higgsfield budget bucket");
 
@@ -38,5 +45,6 @@ assert.doesNotMatch(ui,/soul-id\/create|createHiggsfieldSoulId/, "UI must not ex
 const entry = fs.readFileSync("cloudflare/entry.ts","utf8");
 assert.match(entry,/\/api\/personal-brand\/reference-images/);
 assert.match(entry,/\/api\/personal-brand\/soul-id\/preflight/);
+assert.match(entry,/\/api\/personal-brand\/soul-id\/create/);
 
 console.log("Personal Brand reference + Soul ID preflight: PASS");
