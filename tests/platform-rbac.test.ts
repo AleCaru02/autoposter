@@ -58,5 +58,7 @@ assert.equal(adminBootstrapSource.includes("coalesce(mode.tenant_type, 'CUSTOMER
 assert.equal(adminBootstrapSource.includes("p.archived_at is null"), true, "archived customer profiles must not influence initial admin selection");
 assert.equal(deployWorkflow.includes("group: post-automatici-production-deploy"), true, "production deploys must share one concurrency group");
 assert.equal(deployWorkflow.includes("cancel-in-progress: false"), true, "privileged bootstrap deploys must never be cancelled or overlapped by another production deploy");
+assert.equal(deployWorkflow.includes("for attempt in {1..12}"), true, "bootstrap route closure verification must tolerate Cloudflare secret propagation delay");
+assert.equal(deployWorkflow.includes('if [ "$status" = "404" ]; then break; fi'), true, "bootstrap route closure verification must stop as soon as the route fails closed");
 
 console.log("platform RBAC regression: PASS");
