@@ -7,6 +7,7 @@ import { handleWorkerProfileBootstrap } from "./profile-bootstrap.js";
 import { handleWorkerProfileArchive } from "./profile-archive.js";
 import { handleWorkerContentReview } from "./content-review.js";
 import { handleContentQa } from "./content-qa.js";
+import { handleControlledPrepublishQa } from "./prepublish-qa.js";
 import { handleWorkerCalendar } from "./calendar.js";
 import { handleWorkerStrategyPlanner } from "./editorial-agents.js";
 import { handleTenantSecurityAudit } from "./tenant-security.js";
@@ -34,6 +35,7 @@ const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon
 type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
+  PREPUBLISH_QA_TOKEN?: string;
   HF_CREDENTIALS?: string;
   SOCIAL_TOKEN_KEY?: string;
 };
@@ -153,6 +155,7 @@ export default {
     if (path === "/api/auth/account-exists") return json({ error: "API_NOT_FOUND" }, 404);
     const authProxyResponse = await handleSameOriginAuthProxy(request, env);
     if (authProxyResponse) return authProxyResponse;
+    if (path === "/api/internal/prepublish-qa") return handleControlledPrepublishQa(request, env);
     if (path === "/api/security/tenant-audit") return handleTenantSecurityAudit(request, env);
     if (path === "/api/security/managed-auth-capabilities") return handleManagedAuthCapabilities(request, env);
     if (path === "/api/internal/fase3/bootstrap-super-admin") return handleInitialSuperAdminBootstrap(request, env);
