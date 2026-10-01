@@ -1,6 +1,11 @@
 import { neon } from "@neondatabase/serverless";
 import { runContentQa } from "../api/_lib/content-qa.js";
 import { socialSafeModeState, type SocialEnv } from "../api/_lib/social.js";
+import { generateRoutedImage } from "../api/_lib/routed-image.js";
+import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
+import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
+import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
+import { assetContentHashFromBase64, visualFingerprint } from "../api/_lib/asset-intelligence.js";
 
 type Env = Pick<SocialEnv,"SAFE_MODE"> & {
   DATABASE_URL?: string;
@@ -8,7 +13,35 @@ type Env = Pick<SocialEnv,"SAFE_MODE"> & {
   PREPUBLISH_QA_TOKEN?: string;
 };
 
+type CandidateRow = {
+  job_id:string;
+  profile_name:string;
+  industry:string|null;
+  profile_type:"BUSINESS"|"PERSONAL_BRAND";
+  provider:"FACEBOOK"|"INSTAGRAM"|"LINKEDIN"|"GBP";
+  format:"POST"|"CAROUSEL"|"STORY";
+  caption:string|null;
+  current_asset_id:string|null;
+  current_asset_metadata:unknown;
+  tone_of_voice:unknown;
+  visual_identity:unknown;
+};
+
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V2";
+const SAFE_VISUAL_BRIEF=[
+  "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
+  "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
+  "NON riprodurre edifici reali riconoscibili o skyline specifici.",
+  "Costruisci invece una composizione editoriale astratta ispirata all'architettura contemporanea: volumi geometrici tridimensionali morbidi, una griglia-calendario astratta senza date né numeri e un elemento casa/appartamento stilizzato integrati in modo sofisticato.",
+  "La grafica deve comunicare visivamente che il calendario eventi è solo una parte della valutazione, senza inventare dati.",
+  "Titolo esatto: “CityLife/Fiera: il calendario eventi non basta”.",
+  "Sottotitolo esatto: “Conta anche la domanda fuori evento”.",
+  "Palette chiara e neutra con accento blu, gerarchia editoriale forte, testo leggibile su smartphone, molto spazio respirato.",
+  "Nessun altro testo, numero, logo, marchio, recensione, dato, percentuale o icona decorativa casuale.",
+].join(" ");
+
+const SAFE_ALT_TEXT="Grafica editoriale astratta su CityLife/Fiera con volumi architettonici geometrici e un calendario stilizzato, senza mappa né percorsi reali, con il titolo “CityLife/Fiera: il calendario eventi non basta”.";
 
 function json(body:unknown,status=200){
   return new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
@@ -20,25 +53,36 @@ function authorized(request:Request,env:Env){
   return request.headers.get("x-prepublish-qa-token")?.trim()===expected;
 }
 
-export async function handleControlledPrepublishQa(request:Request,env:Env){
-  if(!env.PREPUBLISH_QA_TOKEN) return json({error:"API_NOT_FOUND"},404);
-  if(request.method!=="POST") return json({error:"METHOD_NOT_ALLOWED"},405);
-  if(!authorized(request,env)) return json({error:"API_NOT_FOUND"},404);
-  if(socialSafeModeState(env)!=="ON") return json({error:"SAFE_MODE_REQUIRED"},409);
-  if(!env.DATABASE_URL) return json({error:"DATABASE_NOT_CONFIGURED"},503);
-  if(!env.OPENAI_API_KEY) return json({error:"OPENAI_NOT_CONFIGURED"},503);
+function toneSummary(value:unknown){
+  if(typeof value==="string") return value.trim().slice(0,800)||null;
+  if(value && typeof value==="object" && !Array.isArray(value)){
+    const row=value as Record<string,unknown>;
+    for(const key of ["summary","tone","description"]){
+      if(typeof row[key]==="string" && row[key].trim()) return row[key].trim().slice(0,800);
+    }
+  }
+  return null;
+}
 
-  const body=await request.json().catch(()=>null) as Record<string,unknown>|null;
-  const profileId=typeof body?.profileId==="string"?body.profileId:"";
-  const contentId=typeof body?.contentId==="string"?body.contentId:"";
-  const variantId=typeof body?.variantId==="string"?body.variantId:"";
-  if(![profileId,contentId,variantId].every((value)=>UUID.test(value))) return json({error:"CONTENT_QA_INPUT_INVALID"},400);
-
-  const sql=neon(env.DATABASE_URL);
+async function loadCandidate(sql:ReturnType<typeof neon>,profileId:string,contentId:string,variantId:string){
   const rows=await sql`
-    select j.id::text as job_id
+    select
+      j.id::text as job_id,
+      p.name as profile_name,
+      p.industry,
+      p.profile_type,
+      v.provider,
+      v.format,
+      v.caption,
+      v.image_asset_id::text as current_asset_id,
+      a.metadata as current_asset_metadata,
+      b.tone_of_voice,
+      b.visual_identity
     from public.publication_jobs j
     join public.content_variants v on v.id=j.variant_id and v.profile_id=j.profile_id
+    join public.profiles p on p.id=j.profile_id
+    left join public.assets a on a.id=v.image_asset_id and a.profile_id=v.profile_id
+    left join public.brand_profiles b on b.profile_id=v.profile_id
     where j.profile_id=${profileId}::uuid
       and j.variant_id=${variantId}::uuid
       and v.content_id=${contentId}::uuid
@@ -55,10 +99,191 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
       and v.external_post_id is null
       and v.published_at is null
     limit 1
-  ` as unknown as Array<{job_id:string}>;
-  if(!rows[0]) return json({error:"PREPUBLISH_CANDIDATE_NOT_SAFE"},409);
+  ` as unknown as CandidateRow[];
+  return rows[0]??null;
+}
+
+function metadataObject(value:unknown):Record<string,unknown>{
+  return value && typeof value==="object" && !Array.isArray(value) ? value as Record<string,unknown> : {};
+}
+
+async function regenerateSafeVisual(input:{
+  env:Env;
+  sql:ReturnType<typeof neon>;
+  profileId:string;
+  contentId:string;
+  variantId:string;
+  candidate:CandidateRow;
+}){
+  const {env,sql,profileId,contentId,variantId,candidate}=input;
+  const existingMeta=metadataObject(candidate.current_asset_metadata);
+  if(existingMeta.prepublish_visual_version===SAFE_VISUAL_VERSION){
+    return {regenerated:false,assetId:candidate.current_asset_id,reason:"SAFE_VISUAL_ALREADY_LINKED"};
+  }
+  if(candidate.provider!=="FACEBOOK" || candidate.format!=="POST" || candidate.profile_type!=="BUSINESS"){
+    throw new Error("PREPUBLISH_VISUAL_SCOPE_MISMATCH");
+  }
+
+  const operationIdentity=`prepublish-visual:${variantId}:${SAFE_VISUAL_VERSION}`;
+  const meter=new ImageGenerationMetering(env.DATABASE_URL!);
+  const reservation=await meter.reserve({
+    profileId,
+    source:"MANUAL",
+    operationIdentity,
+    referenceId:variantId,
+    requestFingerprint:{
+      contentId,variantId,provider:candidate.provider,format:candidate.format,
+      visualBrief:SAFE_VISUAL_BRIEF,version:SAFE_VISUAL_VERSION,
+    },
+  });
+  if(reservation.status==="DENIED") throw new Error(reservation.code);
+  if(reservation.status==="IN_PROGRESS") throw new Error("IMAGE_GENERATION_IN_PROGRESS");
+  if(reservation.status==="RELEASED") throw new Error("METERING_FAILED");
+  if(reservation.status==="COMPLETED"){
+    const assetId=typeof reservation.cached.assetId==="string"?reservation.cached.assetId:null;
+    if(!assetId) throw new Error("CACHED_SAFE_VISUAL_MISSING");
+    const linked=await sql`
+      update public.content_variants
+      set image_asset_id=${assetId}::uuid,
+          visual_brief=${SAFE_VISUAL_BRIEF},
+          alt_text=${SAFE_ALT_TEXT},
+          approval_status='PENDING',
+          visual_generation_status='PASS',
+          visual_generation_error=null,
+          visual_generation_operation_id=${operationIdentity},
+          visual_generation_updated_at=now(),
+          updated_at=now()
+      where id=${variantId}::uuid and profile_id=${profileId}::uuid
+        and approval_status='PENDING' and approved_by is null and external_post_id is null
+      returning id
+    `;
+    if(!linked.length) throw new Error("CACHED_SAFE_VISUAL_LINK_FAILED");
+    return {regenerated:false,assetId,reason:"SAFE_VISUAL_RELINKED_FROM_METER"};
+  }
+
+  const eventId=reservation.eventId;
+  let committed=false;
+  try{
+    const budget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({
+      profileId,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,
+    });
+    if(!budget.allowed){
+      await meter.release(eventId,budget.reason??"AI_BUDGET_HARD_STOP");
+      throw new Error(budget.reason??"AI_BUDGET_HARD_STOP");
+    }
+
+    await meter.markProviderStarted(eventId,0.25);
+    const brandVisual=normalizeBrandVisualIdentity(candidate.visual_identity);
+    const result=await generateRoutedImage({
+      env:{OPENAI_API_KEY:env.OPENAI_API_KEY},
+      budget,
+      importance:"STANDARD",
+      profileName:candidate.profile_name,
+      profileType:candidate.profile_type,
+      industry:candidate.industry,
+      tone:toneSummary(candidate.tone_of_voice),
+      brandColors:brandVisual.colors,
+      brandFonts:brandVisual.fonts,
+      brandVisualStyle:brandVisual.visualStyle,
+      provider:candidate.provider,
+      format:candidate.format,
+      visualBrief:SAFE_VISUAL_BRIEF,
+      caption:candidate.caption,
+      additionalDirection:"Evita totalmente qualsiasi elemento che possa sembrare cartografia reale. La composizione deve essere editoriale, astratta e chiaramente illustrativa, non una rappresentazione geografica.",
+    });
+    if(result.model!=="gpt-image-2") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
+
+    await meter.persistTechnicalEvents(profileId,eventId,technicalEventsFromImageResult(result,{
+      source:"MANUAL",provider:candidate.provider,format:candidate.format,purpose:"FIRST_REAL_PREPUBLISH_QA",
+    }));
+
+    const actualRows=await sql`
+      select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur
+      from public.provider_cost_attempts
+      where logical_usage_event_id=${eventId}::uuid
+      limit 1
+    ` as unknown as Array<{actual_eur:number|string}>;
+    const actualEur=Number(actualRows[0]?.actual_eur??Number(result.usage.estimatedCostUsd??0.25)*budget.usdToEurRate);
+    const sizeMatch=/^(\d+)x(\d+)$/.exec(String(result.size??""));
+    const dataUrl=`data:${result.mimeType};base64,${result.base64}`;
+    const contentHash=await assetContentHashFromBase64(result.base64);
+    const fingerprint=await visualFingerprint({visualBrief:SAFE_VISUAL_BRIEF,aspectRatio:result.aspectRatio});
+    const metadata={
+      provider:"OPENAI",model:result.model,profile_type:candidate.profile_type,quality:result.quality,
+      size:result.size,aspect_ratio:result.aspectRatio,visual_brief:SAFE_VISUAL_BRIEF,
+      visual_fingerprint:fingerprint,brand_palette:brandVisual.colors,brand_fonts:brandVisual.fonts,
+      brand_visual_style:brandVisual.visualStyle,generation_prompt:result.generationPrompt.slice(0,8000),
+      provider_request_id:result.requestId,storage_mode:"DATABASE_DATA_URL_V1",
+      prepublish_visual_version:SAFE_VISUAL_VERSION,
+    };
+    const assetRows=await sql`
+      insert into public.assets(
+        profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,
+        provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at
+      ) values (
+        ${profileId}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
+        ${`FACEBOOK-POST-${variantId}-safe-v2.png`},${dataUrl},${result.mimeType},
+        ${JSON.stringify(["FACEBOOK","POST","AI_GENERATED","PREPUBLISH_SAFE"])}::jsonb,
+        ${JSON.stringify(metadata)}::jsonb,
+        'OPENAI',${result.model},${actualEur},
+        ${sizeMatch?Number(sizeMatch[1]):null},${sizeMatch?Number(sizeMatch[2]):null},
+        ${result.aspectRatio},'PENDING','NOT_REQUIRED',${contentHash},now()
+      )
+      returning id::text
+    ` as unknown as Array<{id:string}>;
+    const assetId=assetRows[0]?.id;
+    if(!assetId) throw new Error("SAFE_VISUAL_ASSET_WRITE_FAILED");
+
+    const linked=await sql`
+      update public.content_variants
+      set image_asset_id=${assetId}::uuid,
+          visual_brief=${SAFE_VISUAL_BRIEF},
+          alt_text=${SAFE_ALT_TEXT},
+          approval_status='PENDING',
+          visual_generation_status='PASS',
+          visual_generation_error=null,
+          visual_generation_operation_id=${operationIdentity},
+          visual_generation_updated_at=now(),
+          updated_at=now()
+      where id=${variantId}::uuid and content_id=${contentId}::uuid and profile_id=${profileId}::uuid
+        and approval_status='PENDING' and approved_by is null and external_post_id is null
+      returning id
+    `;
+    if(!linked.length) throw new Error("SAFE_VISUAL_LINK_FAILED");
+
+    await meter.storeResult(eventId,{response:{model:result.model,size:result.size,quality:result.quality},assetId,variantId});
+    await meter.commit(eventId);
+    committed=true;
+    return {regenerated:true,assetId,model:result.model,size:result.size,costEur:actualEur};
+  }catch(reason){
+    if(!committed) await meter.release(eventId,reason instanceof Error?reason.message:"SAFE_VISUAL_FAILED").catch(()=>undefined);
+    throw reason;
+  }
+}
+
+export async function handleControlledPrepublishQa(request:Request,env:Env){
+  if(!env.PREPUBLISH_QA_TOKEN) return json({error:"API_NOT_FOUND"},404);
+  if(request.method!=="POST") return json({error:"METHOD_NOT_ALLOWED"},405);
+  if(!authorized(request,env)) return json({error:"API_NOT_FOUND"},404);
+  if(socialSafeModeState(env)!=="ON") return json({error:"SAFE_MODE_REQUIRED"},409);
+  if(!env.DATABASE_URL) return json({error:"DATABASE_NOT_CONFIGURED"},503);
+  if(!env.OPENAI_API_KEY) return json({error:"OPENAI_NOT_CONFIGURED"},503);
+
+  const body=await request.json().catch(()=>null) as Record<string,unknown>|null;
+  const profileId=typeof body?.profileId==="string"?body.profileId:"";
+  const contentId=typeof body?.contentId==="string"?body.contentId:"";
+  const variantId=typeof body?.variantId==="string"?body.variantId:"";
+  const action=body?.action==="REGENERATE_VISUAL_AND_QA"?"REGENERATE_VISUAL_AND_QA":"QA_ONLY";
+  if(![profileId,contentId,variantId].every((value)=>UUID.test(value))) return json({error:"CONTENT_QA_INPUT_INVALID"},400);
+
+  const sql=neon(env.DATABASE_URL);
+  const candidate=await loadCandidate(sql,profileId,contentId,variantId);
+  if(!candidate) return json({error:"PREPUBLISH_CANDIDATE_NOT_SAFE"},409);
 
   try{
+    const visual=action==="REGENERATE_VISUAL_AND_QA"
+      ? await regenerateSafeVisual({env,sql,profileId,contentId,variantId,candidate})
+      : null;
     const qa=await runContentQa({
       databaseUrl:env.DATABASE_URL,
       apiKey:env.OPENAI_API_KEY,
@@ -69,10 +294,10 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
       authUserId:null,
       force:true,
     });
-    return json({safeMode:true,publicationJobId:rows[0].job_id,qa});
+    return json({safeMode:true,publicationJobId:candidate.job_id,visual,qa});
   }catch(reason){
     const code=reason instanceof Error?reason.message.split(":")[0]:"CONTENT_QA_FAILED";
-    console.error("controlled-prepublish-qa",{profileId,contentId,variantId,code});
+    console.error("controlled-prepublish-qa",{profileId,contentId,variantId,action,code});
     return json({error:code},500);
   }
 }
