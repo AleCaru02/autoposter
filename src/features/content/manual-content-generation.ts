@@ -42,8 +42,11 @@ export type ManualGenerationProgressStage =
   | "PREPARING"
   | "ANALYZING"
   | "RESEARCHING"
+  | "CHANNEL_STRATEGY"
   | "WRITING"
+  | "VISUAL_BRIEF"
   | "COPY_READY"
+  | "SOURCE_VALIDATION"
   | "VERIFYING"
   | "VERIFIED"
   | "FINALIZING"
@@ -56,7 +59,10 @@ export type ManualGenerationOperationStatus = {
   stage: ManualGenerationProgressStage;
   error: string | null;
   result: ManualGenerationResult | null;
-  createdAt: string | null;
+  jobId: string | null;
+  operationId: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
 };
 
 type RawStatusResponse = {
@@ -65,7 +71,10 @@ type RawStatusResponse = {
   stage?: ManualGenerationProgressStage;
   error?: string | null;
   result?: ManualGenerationResponse | null;
-  createdAt?: string | null;
+  jobId?: string | null;
+  operationId?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export class ManualGenerationError extends Error {
@@ -167,6 +176,9 @@ export async function requestManualContentStatus(
     stage: body.stage ?? "PREPARING",
     error: typeof body.error === "string" ? body.error : null,
     result,
-    createdAt: typeof body.createdAt === "string" ? body.createdAt : null,
+    jobId: typeof body.jobId === "string" ? body.jobId : null,
+    operationId: typeof body.operationId === "string" ? body.operationId : null,
+    startedAt: typeof body.startedAt === "string" ? body.startedAt : null,
+    updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : null,
   };
 }
