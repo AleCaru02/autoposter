@@ -1,4 +1,5 @@
 import type { EditorialResearchMode } from "./editorial-research.js";
+import { buildSourceRecords } from "./source-intelligence.js";
 
 export type ResearchEvidence = {
   claim: string;
@@ -124,21 +125,11 @@ function sources(body: Record<string, unknown>) {
   return [...urls].slice(0, 30);
 }
 
-const NON_AUTHORITATIVE_FACT_DOMAINS = new Set([
-  "reddit.com","quora.com","facebook.com","instagram.com","tiktok.com","x.com","twitter.com","pinterest.com"
-]);
-
 export function trustedVerificationSources(values: string[]) {
-  const accepted: string[] = [];
-  for (const value of values) {
-    try {
-      const url = new URL(value);
-      const host = url.hostname.toLowerCase().replace(/^www\./,"");
-      if ([...NON_AUTHORITATIVE_FACT_DOMAINS].some((domain) => host === domain || host.endsWith(`.${domain}`))) continue;
-      accepted.push(url.toString());
-    } catch { /* invalid source is never accepted */ }
-  }
-  return [...new Set(accepted)].slice(0, 20);
+  return buildSourceRecords("", values)
+    .filter((source) => !source.weak)
+    .map((source) => source.canonicalUrl)
+    .slice(0, 40);
 }
 
 function independentHostCount(values: string[]) {
