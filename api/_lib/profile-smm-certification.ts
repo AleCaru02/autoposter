@@ -88,6 +88,12 @@ const MOTIFS=[
   "scelta consapevole","passaggio chiave","segnale","metodo","caso tipico",
   "preparazione","priorità","confronto","miglioramento","prossimo passo",
 ];
+const CERTIFICATION_UNIQUE_ANGLES=[
+  "diagnosi iniziale","mappa delle priorità","protocollo di verifica","scelta del canale","lettura dei segnali",
+  "preparazione operativa","controllo qualità","gestione dell'eccezione","sequenza decisionale","criterio di esclusione",
+  "documentazione essenziale","coordinamento delle attività","revisione periodica","misurazione del risultato","ottimizzazione progressiva",
+  "passaggio di consegne","prevenzione degli errori","validazione finale","retrospettiva pratica","piano del prossimo ciclo",
+];
 
 function count(values:string[]|undefined,value:string){return values?.filter((item)=>item===value).length??0;}
 function recentCandidate(row:EditorialMemoryRecentContent):ContentDedupeCandidate{
@@ -208,10 +214,14 @@ export function runProfileSmmCertificationSimulation(
     let duplicate=findNearDuplicate(candidate,recent);
     const linkedSeriesContinuation=continuity.mode==="CONTINUE_SERIES"&&Boolean(continuity.previousContentId);
     if(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78)){
-      const alternativeMotif=MOTIFS[(index+13)%MOTIFS.length];
-      topic=`${topic} — prospettiva ${provider.toLowerCase()} ${alternativeMotif} ${index+1}`;
-      hook=`${hook} · angolo alternativo: ${alternativeMotif}`;
-      candidate={...candidate,topic,angle:hook,hook,caption:`${hook}. Sviluppo specifico e distinto del tema ${topic}, senza claim esterni simulati.`};
+      const uniqueAngle=CERTIFICATION_UNIQUE_ANGLES[index%CERTIFICATION_UNIQUE_ANGLES.length];
+      topic=fixture.profileType==="PERSONAL_BRAND"
+        ? `${uniqueAngle}: la mia esperienza applicata a ${motif}`
+        : `${uniqueAngle}: applicazione operativa di ${motif}`;
+      hook=fixture.profileType==="PERSONAL_BRAND"
+        ? `Cosa ho capito lavorando sulla ${uniqueAngle}`
+        : `Come gestire la ${uniqueAngle} senza improvvisare`;
+      candidate={...candidate,topic,angle:hook,hook,caption:`${hook}. Approccio dedicato a ${uniqueAngle}, con un criterio concreto collegato a ${motif} e una conclusione operativa distinta.`};
       duplicate=findNearDuplicate(candidate,recent);
     }
     const duplicateBlocked=Boolean(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78));
