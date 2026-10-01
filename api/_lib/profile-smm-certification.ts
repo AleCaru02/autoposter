@@ -179,10 +179,10 @@ export function runProfileSmmCertificationSimulation(
     const followContinuity=Boolean(memory.continuity.suggestedNextTopicIntent)&&index%5===0;
     const motif=MOTIFS[index%MOTIFS.length];
     const secondaryMotif=MOTIFS[(index+7)%MOTIFS.length];
-    const topic=followContinuity
+    let topic=followContinuity
       ? memory.continuity.suggestedNextTopicIntent!
       : profileTopic(fixture.profileType,contentType,pillar,motif,secondaryMotif,index,provider);
-    const hook=fixture.profileType==="PERSONAL_BRAND"
+    let hook=fixture.profileType==="PERSONAL_BRAND"
       ? `${hookFor(intent,pillar,motif,index)} · cosa ho imparato su ${secondaryMotif}`
       : `${hookFor(intent,pillar,motif,index)} · ${secondaryMotif} nel metodo operativo`;
     const cta=platformCta(fixture.profileType,provider,Math.floor(index/PROVIDERS.length));
@@ -200,13 +200,20 @@ export function runProfileSmmCertificationSimulation(
       canonicalIdentityReady:fixture.canonicalIdentityReady??fixture.profileType==="PERSONAL_BRAND",
     });
     const continuity=deriveContinuityDecision({memory,profileType:fixture.profileType,contentType,intent,topic});
-    const candidate:ContentDedupeCandidate={
+    let candidate:ContentDedupeCandidate={
       topic,angle:hook,hook,caption:`${hook}. Sviluppo utile e specifico del tema ${topic}, senza claim esterni simulati.`,
       cta,pillar,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:`${contentType}:${intent}`,
     };
     const recent=history.map(recentCandidate);
-    const duplicate=findNearDuplicate(candidate,recent);
+    let duplicate=findNearDuplicate(candidate,recent);
     const linkedSeriesContinuation=continuity.mode==="CONTINUE_SERIES"&&Boolean(continuity.previousContentId);
+    if(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78)){
+      const alternativeMotif=MOTIFS[(index+13)%MOTIFS.length];
+      topic=`${topic} — prospettiva ${provider.toLowerCase()} ${alternativeMotif} ${index+1}`;
+      hook=`${hook} · angolo alternativo: ${alternativeMotif}`;
+      candidate={...candidate,topic,angle:hook,hook,caption:`${hook}. Sviluppo specifico e distinto del tema ${topic}, senza claim esterni simulati.`};
+      duplicate=findNearDuplicate(candidate,recent);
+    }
     const duplicateBlocked=Boolean(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78));
     const repetition=findEditorialRepetition(candidate,recent);
     const identityStatus=subjectDecision.subject==="CANONICAL_PERSON"?"PASS":"NOT_REQUIRED";
