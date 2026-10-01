@@ -1,5 +1,6 @@
 import type { EditorialResearchMode } from "../../../api/_lib/editorial-research";
 import type { GeneratedSocialContent, SocialFormat, SocialProvider } from "../../../api/_lib/openai-text";
+import type { SourceIntelligenceSummary } from "../../../api/_lib/source-intelligence";
 
 export type ManualGenerationRequest = {
   profileId: string;
@@ -21,6 +22,7 @@ export type ManualEditorialContext = {
   audience: Record<string, unknown>;
   factProvenance: unknown[];
   externalSources: string[];
+  sourceIntelligence?: SourceIntelligenceSummary;
 };
 
 export type ManualGenerationResult = {
