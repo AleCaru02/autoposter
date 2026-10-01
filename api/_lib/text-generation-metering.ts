@@ -22,8 +22,11 @@ export type TextGenerationProgressStage =
   | "PREPARING"
   | "ANALYZING"
   | "RESEARCHING"
+  | "CHANNEL_STRATEGY"
   | "WRITING"
+  | "VISUAL_BRIEF"
   | "COPY_READY"
+  | "SOURCE_VALIDATION"
   | "VERIFYING"
   | "VERIFIED"
   | "FINALIZING"
@@ -38,6 +41,7 @@ export type TextGenerationOperationStatus = {
   releaseReason: string | null;
   cached: CachedResult | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type TextGenerationReservation =
@@ -161,7 +165,7 @@ export class TextGenerationMetering {
       ? "COMMITTED"
       : row.state === "RELEASED"
         ? "RELEASED"
-        : rawStage === "PREPARING" || rawStage === "ANALYZING" || rawStage === "RESEARCHING" || rawStage === "WRITING" || rawStage === "COPY_READY" || rawStage === "VERIFYING" || rawStage === "VERIFIED" || rawStage === "FINALIZING"
+        : rawStage === "PREPARING" || rawStage === "ANALYZING" || rawStage === "RESEARCHING" || rawStage === "CHANNEL_STRATEGY" || rawStage === "WRITING" || rawStage === "VISUAL_BRIEF" || rawStage === "COPY_READY" || rawStage === "SOURCE_VALIDATION" || rawStage === "VERIFYING" || rawStage === "VERIFIED" || rawStage === "FINALIZING"
           ? rawStage
           : "PREPARING";
     const percent = row.state === "COMMITTED" ? 100 : row.state === "RELEASED" ? Math.min(rawPercent ?? 95, 99) : Math.max(1, Math.min(rawPercent ?? 10, 99));
@@ -173,6 +177,7 @@ export class TextGenerationMetering {
       releaseReason: typeof metadata.release_reason === "string" ? metadata.release_reason : null,
       cached,
       createdAt: row.created_at,
+      updatedAt: typeof metadata.progress_updated_at === "string" ? metadata.progress_updated_at : row.created_at,
     };
   }
 
