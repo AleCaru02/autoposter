@@ -107,7 +107,10 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Una sola gerarchia principale e al massimo tre elementi secondari. Niente composizioni affollate, collage casuali, infografiche improvvisate o troppi punti focali.",
     "Per luoghi reali, quartieri, mappe, metro, strade, landmark o percorsi: non inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o label fattuali. Senza dati geografici verificati o asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale.",
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
-    "Se il brief richiede testo nell'immagine, usa esclusivamente il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, label, numeri, pseudo-dati o didascalie inventate.",
+    "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
+    "Se il brief è educativo/informativo e contiene 3-5 punti esplicitamente supportati, puoi usare headline + sottotitolo breve + 3-5 blocchi compatti con mini-title/label già presenti nel brief. Non creare blocchi vuoti con soli numeri o icone.",
+    "Negli altri casi, se il brief richiede testo nell'immagine, usa esclusivamente il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, numeri, pseudo-dati o didascalie inventate.",
+    "Evita titolo enorme con il resto della grafica quasi vuoto: il contenuto visuale deve avere una gerarchia completa, non un header sovradimensionato sopra elementi decorativi deboli.",
     "Testo ad alto contrasto, grande e immediatamente leggibile su smartphone; non sovrapporlo a zone visivamente rumorose.",
     storySafety,
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
@@ -132,6 +135,8 @@ function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" 
     "Costruisci una vera art direction: punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo, profondità, prospettiva, illuminazione, ombre, atmosfera, materiali e texture.",
     "Il risultato deve avere qualità editoriale premium e impatto da social feed, evitando look da stock, template vuoti, composizioni piatte o elementi decorativi casuali.",
     "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente.",
+    "Per una statica educativa con più punti, preferisci una struttura editoriale informativa: headline, subheadline breve, 3-5 blocchi con mini-title/label e icone pertinenti, brand palette e gerarchia forte. Non hardcodare questa struttura quando il contenuto non la richiede.",
+    "Evita props generici o stock-like (chiavi, laptop, tazze, fogli, skyline, strette di mano) se non spiegano davvero il messaggio.",
   ].filter(Boolean).join("\n");
 }
 
