@@ -15,6 +15,22 @@ type Env = Pick<SocialEnv,"SAFE_MODE"> & {
 
 type CandidateRow = {
   job_id:string;
+  job_state:string;
+  execution_mode:string;
+  attempt_count:number;
+  has_idempotency_key:boolean;
+  job_remote_post_id:string|null;
+  job_published_at:string|null;
+  variant_updated_at:string;
+  qa_status:string;
+  qa_fingerprint:string|null;
+  qa_checked_at:string|null;
+  approval_mode:string;
+  approval_status:string;
+  workflow_status:string;
+  approved_by:string|null;
+  approved_at:string|null;
+  variant_external_post_id:string|null;
   profile_name:string;
   industry:string|null;
   profile_type:"BUSINESS"|"PERSONAL_BRAND";
@@ -42,7 +58,7 @@ type CandidateRow = {
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V5";
-const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_2";
+const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_3";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -82,6 +98,22 @@ async function loadCandidate(sql:ReturnType<typeof neon>,profileId:string,conten
   const rows=await sql`
     select
       j.id::text as job_id,
+      j.state as job_state,
+      j.execution_mode,
+      j.attempt_count,
+      (j.idempotency_key is not null and btrim(j.idempotency_key)<>'') as has_idempotency_key,
+      j.remote_post_id as job_remote_post_id,
+      j.published_at::text as job_published_at,
+      v.updated_at::text as variant_updated_at,
+      v.qa_status,
+      v.qa_fingerprint,
+      v.qa_checked_at::text as qa_checked_at,
+      v.approval_mode,
+      v.approval_status,
+      v.workflow_status,
+      v.approved_by,
+      v.approved_at::text as approved_at,
+      v.external_post_id as variant_external_post_id,
       p.name as profile_name,
       p.industry,
       p.profile_type,
@@ -149,7 +181,7 @@ async function generateConfirmedBriefImage(apiKey:string){
   ].join("\n\n");
   let response:Response|null=null;
   let raw="";
-  for(let attempt=1;attempt<=3;attempt+=1){
+  for(let attempt=1;attempt<=5;attempt+=1){
     response=await fetch("https://api.openai.com/v1/images/generations",{
       method:"POST",
       headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
@@ -157,9 +189,9 @@ async function generateConfirmedBriefImage(apiKey:string){
     });
     raw=await response.text();
     if(response.ok) break;
-    if(response.status!==429 || attempt===3) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
+    if(response.status!==429 || attempt===5) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
     const retryAfter=Number(response.headers.get("retry-after")??"0");
-    const delayMs=Math.min(Math.max(Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:attempt*2000,1000),8000);
+    const delayMs=Math.min(Math.max(Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:Math.pow(2,attempt)*2000,2000),30000);
     await new Promise((resolve)=>setTimeout(resolve,delayMs));
   }
   if(!response?.ok) throw new Error(`OPENAI_IMAGE_HTTP_${response?.status??"UNKNOWN"}`);
@@ -364,6 +396,17 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
       candidate:{
         profileName:prepared.profile_name,
         profileType:prepared.profile_type,
+        variantId,
+        variantUpdatedAt:prepared.variant_updated_at,
+        qaStatus:prepared.qa_status,
+        qaFingerprint:prepared.qa_fingerprint,
+        qaCheckedAt:prepared.qa_checked_at,
+        approvalMode:prepared.approval_mode,
+        approvalStatus:prepared.approval_status,
+        workflowStatus:prepared.workflow_status,
+        approvedBy:prepared.approved_by,
+        approvedAt:prepared.approved_at,
+        variantExternalPostId:prepared.variant_external_post_id,
         platform:prepared.provider,
         format:prepared.format,
         title:prepared.content_title,
@@ -382,8 +425,15 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
           identityStatus:prepared.current_asset_identity_status,
         },
         sourceRefs:prepared.source_refs,
-        approvalStatus:"PENDING",
-        workflowStatus:"REVIEW",
+        publicationJob:{
+          id:prepared.job_id,
+          state:prepared.job_state,
+          executionMode:prepared.execution_mode,
+          attemptCount:prepared.attempt_count,
+          hasIdempotencyKey:prepared.has_idempotency_key,
+          remotePostId:prepared.job_remote_post_id,
+          publishedAt:prepared.job_published_at,
+        },
       },
       visual,
       qa,
