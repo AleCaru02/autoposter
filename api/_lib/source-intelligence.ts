@@ -190,7 +190,7 @@ export function buildSourceIntelligence(input: {
         claim: claim.claim,
         sourceUrls,
         sourceType: mapped[0]?.tier ?? "NONE",
-        verificationStatus: status === "VERIFIED" && sourceUrls.length === 0 ? "NEEDS_SOURCE" : status,
+        verificationStatus: status === "VERIFIED" && claim.sourceRequired && sourceUrls.length === 0 ? "NEEDS_SOURCE" : status,
         checkedAt,
       } satisfies ClaimSourceRecord;
     });
