@@ -1,0 +1,10 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "autoposter",
+  "main": "./onboarding-runtime-qa-controller.ts",
+  "compatibility_date": "2026-08-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
+  "preview_urls": true,
+  "secrets": { "required": ["DATABASE_URL", "ONBOARDING_QA_TOKEN"] }
+}
