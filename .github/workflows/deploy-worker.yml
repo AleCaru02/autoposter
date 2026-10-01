@@ -346,7 +346,7 @@ jobs:
           const body=JSON.parse(fs.readFileSync('controlled-prepublish-qa.json','utf8'));
           const qa=body?.qa??{};
           const summary={
-            httpStatus:process.env.QA_HTTP_STATUS,safeMode:body?.safeMode,publicationJobId:body?.publicationJobId,
+            httpStatus:process.env.QA_HTTP_STATUS,error:body?.error??null,safeMode:body?.safeMode,publicationJobId:body?.publicationJobId,
             candidate:body?.candidate??null,
             visualRegeneration:body?.visual??null,
             overallStatus:qa?.overallStatus,brandStatus:qa?.brandStatus,copyStatus:qa?.copyStatus,
@@ -380,7 +380,10 @@ jobs:
           if(!pullsResponse.ok) throw new Error(`PR_LOOKUP_HTTP_${pullsResponse.status}`);
           const pulls=await pullsResponse.json();
           const pr=Array.isArray(pulls)?pulls[0]:null;
-          if(!pr?.number) throw new Error('PREPUBLISH_PR_NOT_FOUND');
+          if(!pr?.number) {
+            console.log('controlled prepublish report: no pull request for gated SHA, skipping PR comment');
+            process.exit(0);
+          }
           const body=JSON.parse(fs.readFileSync('controlled-prepublish-qa.json','utf8'));
           const qa=body?.qa??{};
           const candidate=body?.candidate??{};
