@@ -89,6 +89,8 @@ jobs:
       - { name: Asset library runtime regression, run: "npm run test:asset-library" }
       - { name: Editorial decision record regression, run: "npm run test:editorial-decision-record" }
       - { name: Master Editorial Brain regression, run: "npm run test:master-editorial-brain" }
+      - { name: Source intelligence regression, run: "npm run test:source-intelligence" }
+      - { name: Social platform strategy regression, run: "npm run test:social-platform-strategy" }
       - { name: OpenAI Research and Fact-check regression, run: "npm run test:openai-research-factcheck" }
       - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
       - { name: OpenAI editorial QA regression, run: "npm run test:openai-editorial-qa" }
