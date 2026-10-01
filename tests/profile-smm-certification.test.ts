@@ -154,11 +154,31 @@ assert.equal(personal.proof.memoryChangedNextDecision,true);
 assert.equal(business.proof.continuityNChangesNPlus1,true);
 assert.equal(personal.proof.continuityNChangesNPlus1,true);
 assert.equal(business.status,"PASS",JSON.stringify({gates:business.gates,failed:business.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype,antiRepetitionReasons:row.antiRepetitionReasons,duplicateScore:row.duplicateScore}))},null,2));
-assert.equal(personal.status,"PASS",JSON.stringify({gates:personal.gates,failed:personal.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype}))},null,2));
+assert.equal(personal.status,"PASS",JSON.stringify({gates:personal.gates,failed:personal.contents.filter((row)=>Object.values(row.gates).includes("FAIL")).map((row)=>({sequence:row.sequence,gates:row.gates,subject:row.subject,visual:row.visualArchetype,antiRepetitionReasons:row.antiRepetitionReasons,duplicateScore:row.duplicateScore,pillar:row.pillar,contentType:row.contentType,intent:row.intent}))},null,2));
 const comparison=compareProfileTypeCertification(business,personal);
 assert.equal(comparison.pass,true,JSON.stringify(comparison));
 assert.equal(comparison.sameIndustry,true);
 assert.equal(comparison.substantiallyDifferent,true);
+assert.equal(comparison.subjectDifference,true);
+assert.equal(comparison.identityDifference,true);
+assert.equal(comparison.storytellingDifference,true);
+assert.equal(comparison.topicDifference,true);
+assert.equal(comparison.ctaDifference,true);
+assert.equal(comparison.visualStrategyDifference,true);
+assert.equal(comparison.providerRoutingDifference,true);
+assert.equal(comparison.continuityProven,true);
+assert.equal(business.proof.higgsfieldRouteCount,0);
+assert.ok(personal.proof.higgsfieldRouteCount>0);
+assert.notDeepEqual(
+  business.contents.map((row)=>row.cta),
+  personal.contents.map((row)=>row.cta),
+  "BUSINESS e PERSONAL_BRAND devono avere CTA strategy differenti nello stesso settore",
+);
+assert.notDeepEqual(
+  business.contents.map((row)=>row.topic),
+  personal.contents.map((row)=>row.topic),
+  "BUSINESS e PERSONAL_BRAND devono avere topic/storytelling differenti nello stesso settore",
+);
 
 const migration=fs.readFileSync("db/migrations/20260930_profile_autonomous_smm_certification.sql","utf8");
 assert.match(migration,/profile_editorial_memory/);

@@ -4,6 +4,7 @@ import { findEditorialRepetition, findNearDuplicate, type ContentDedupeCandidate
 import { evaluateFeedCoherence } from "./feed-coherence.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction, type ContentSubject } from "./subject-strategy.js";
 import type { SocialFormat, SocialProvider } from "./openai-text.js";
+import { decideVisualRuntime } from "./visual-runtime-decision.js";
 
 export const SMM_CERTIFICATION_GATES = [
   "COPY","FACT","BRAND","VISUAL","IDENTITY","CONTINUITY","ANTI_REPETITION",
@@ -36,6 +37,7 @@ export type SimulatedSmmContent = {
   cta: string;
   subject: ContentSubject;
   visualArchetype: string;
+  visualProvider: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD";
   seriesId: string | null;
   seriesSequence: number | null;
   previousContentId: string | null;
@@ -70,6 +72,10 @@ export type ProfileSmmCertificationResult = {
     distinctPillarCount: number;
     canonicalPersonCount: number;
     genericPersonCount: number;
+    higgsfieldRouteCount: number;
+    openAiRouteCount: number;
+    distinctContentTypeCount: number;
+    distinctCtaCount: number;
     publicationJobsCreated: 0;
     realHiggsfieldGenerations: 0;
   };
@@ -82,16 +88,43 @@ const MOTIFS=[
   "scelta consapevole","passaggio chiave","segnale","metodo","caso tipico",
   "preparazione","priorità","confronto","miglioramento","prossimo passo",
 ];
+const CERTIFICATION_UNIQUE_ANGLES=[
+  "diagnosi iniziale","mappa delle priorità","protocollo di verifica","scelta del canale","lettura dei segnali",
+  "preparazione operativa","controllo qualità","gestione dell'eccezione","sequenza decisionale","criterio di esclusione",
+  "documentazione essenziale","coordinamento delle attività","revisione periodica","misurazione del risultato","ottimizzazione progressiva",
+  "passaggio di consegne","prevenzione degli errori","validazione finale","retrospettiva pratica","piano del prossimo ciclo",
+];
 
 function count(values:string[]|undefined,value:string){return values?.filter((item)=>item===value).length??0;}
 function recentCandidate(row:EditorialMemoryRecentContent):ContentDedupeCandidate{
   return {id:row.id,topic:row.topic,angle:row.angle,hook:row.hook,cta:row.cta,pillar:row.pillar,visualArchetype:row.visualArchetype,subjectStrategy:row.subjectStrategy,narrativeStructure:null};
 }
-function platformCta(provider:SocialProvider,providerOccurrence:number){
+function platformCta(profileType:ProfileType,provider:SocialProvider,providerOccurrence:number){
+  if(profileType==="PERSONAL_BRAND"){
+    if(provider==="INSTAGRAM")return providerOccurrence%2?"Salva questo passaggio del mio percorso":"Scrivimi quale parte vuoi che approfondisca nel prossimo contenuto";
+    if(provider==="FACEBOOK")return providerOccurrence%2?"Raccontami nei commenti come vivi questa situazione":"Scrivimi se vuoi confrontarti sul tuo caso";
+    if(provider==="LINKEDIN")return providerOccurrence%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci su questo approccio";
+    return providerOccurrence%2?"Scopri come lavoro e richiedi informazioni":"Visita il profilo attività per il prossimo passo disponibile";
+  }
   if(provider==="INSTAGRAM")return providerOccurrence%2?"Salva il post per riprenderlo quando ti serve":"Condividilo con chi sta affrontando questa scelta";
-  if(provider==="FACEBOOK")return providerOccurrence%2?"Scrivici per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
-  if(provider==="LINKEDIN")return providerOccurrence%2?"Qual è la tua esperienza professionale su questo punto?":"Confrontiamoci sul metodo nei commenti";
+  if(provider==="FACEBOOK")return providerOccurrence%2?"Contattaci per approfondire il caso concreto":"Leggi i dettagli e raccontaci la tua esperienza";
+  if(provider==="LINKEDIN")return providerOccurrence%2?"Confrontiamoci sul metodo nei commenti":"Contatta il team per approfondire il processo";
   return providerOccurrence%2?"Scopri il servizio e richiedi informazioni":"Visita il sito per il prossimo passo disponibile";
+}
+
+function profileContentType(profileType:ProfileType,provider:SocialProvider,index:number){
+  const base=chooseContentType(provider,index);
+  if(profileType==="PERSONAL_BRAND"&&provider!=="GBP"&&index%5===0)return "STORYTELLING" as const;
+  if(profileType==="BUSINESS"&&base==="STORYTELLING"&&index%6===0)return "SINGLE_POST" as const;
+  return base;
+}
+
+function profileTopic(profileType:ProfileType,contentType:string,pillar:string,motif:string,secondaryMotif:string,index:number,provider:SocialProvider){
+  if(profileType==="PERSONAL_BRAND"){
+    if(contentType==="STORYTELLING")return `Il mio percorso in ${pillar}: ${motif} — ${secondaryMotif}; capitolo ${index+1} per ${provider}`;
+    return `Dal mio punto di vista su ${pillar}: ${motif} — ${secondaryMotif}; focus ${index+1} per ${provider}`;
+  }
+  return `${pillar}: ${motif} — ${secondaryMotif} nel processo dell'attività; focus operativo ${index+1} per ${provider}`;
 }
 function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number){
   const templates:Record<EditorialIntent,string> = {
@@ -109,10 +142,13 @@ function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number)
   return `${templates[intent]} · ${index+1}`;
 }
 function visualBriefFor(profileType:ProfileType,contentType:string,intent:EditorialIntent,pillar:string,index:number){
-  if(profileType==="PERSONAL_BRAND"&&(contentType==="STORYTELLING"||intent==="CASE_STUDY")){
+  if(profileType==="PERSONAL_BRAND"&&contentType==="STORYTELLING"){
     return `Ritratto editoriale della persona titolare del Personal Brand, stessa identità canonica, scena naturale collegata a ${pillar}, variazione compositiva ${index+1}.`;
   }
-  if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; nessuna persona canonica richiesta.`;
+  if(profileType==="PERSONAL_BRAND"&&intent==="CASE_STUDY"){
+    return `Caso ed esperienza raccontati con ambiente, dettagli di lavoro e prova visiva collegati a ${pillar}; composizione documentale centrata su contesto, processo e dettagli, mantenendo il feed vario.`;
+  }
+  if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; composizione senza soggetto umano, centrata sul valore del servizio.`;
   if(intent==="CHECKLIST"||intent==="EDUCATION")return `Infografica editoriale chiara su ${pillar}, gerarchia mobile-first, struttura visiva distinta ${index+1}.`;
   if(profileType==="BUSINESS"&&index%4===0)return `Ambiente e team dell'attività come contesto di ${pillar}, fotografia editoriale credibile e non stock.`;
   return `Visual editoriale coerente con ${pillar}; oggetti, ambiente o tipografia scelti per varietà rispetto al feed recente.`;
@@ -145,18 +181,20 @@ export function runProfileSmmCertificationSimulation(
 
   for(let index=0;index<target;index+=1){
     const provider=PROVIDERS[index%PROVIDERS.length];
-    const contentType=chooseContentType(provider,index);
+    const contentType=profileContentType(fixture.profileType,provider,index);
     const format=mapContentTypeToSocialFormat(provider,contentType);
     const intent=chooseEditorialIntent(index);
     const pillar=memory.balance.underusedPillars[0]??pillars[index%pillars.length];
     const followContinuity=Boolean(memory.continuity.suggestedNextTopicIntent)&&index%5===0;
     const motif=MOTIFS[index%MOTIFS.length];
     const secondaryMotif=MOTIFS[(index+7)%MOTIFS.length];
-    const topic=followContinuity
+    let topic=followContinuity
       ? memory.continuity.suggestedNextTopicIntent!
-      : `${pillar}: ${motif} — ${secondaryMotif}`;
-    const hook=`${hookFor(intent,pillar,motif,index)} · ${secondaryMotif}`;
-    const cta=platformCta(provider,Math.floor(index/PROVIDERS.length));
+      : profileTopic(fixture.profileType,contentType,pillar,motif,secondaryMotif,index,provider);
+    let hook=fixture.profileType==="PERSONAL_BRAND"
+      ? `${hookFor(intent,pillar,motif,index)} · cosa ho imparato su ${secondaryMotif}`
+      : `${hookFor(intent,pillar,motif,index)} · ${secondaryMotif} nel metodo operativo`;
+    const cta=platformCta(fixture.profileType,provider,Math.floor(index/PROVIDERS.length));
     const visualBrief=visualBriefFor(fixture.profileType,contentType,intent,pillar,index);
 
     const subjectDecision=chooseSubjectStrategy({
@@ -171,17 +209,39 @@ export function runProfileSmmCertificationSimulation(
       canonicalIdentityReady:fixture.canonicalIdentityReady??fixture.profileType==="PERSONAL_BRAND",
     });
     const continuity=deriveContinuityDecision({memory,profileType:fixture.profileType,contentType,intent,topic});
-    const candidate:ContentDedupeCandidate={
+    let candidate:ContentDedupeCandidate={
       topic,angle:hook,hook,caption:`${hook}. Sviluppo utile e specifico del tema ${topic}, senza claim esterni simulati.`,
       cta,pillar,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:`${contentType}:${intent}`,
     };
     const recent=history.map(recentCandidate);
-    const duplicate=findNearDuplicate(candidate,recent);
+    let duplicate=findNearDuplicate(candidate,recent);
     const linkedSeriesContinuation=continuity.mode==="CONTINUE_SERIES"&&Boolean(continuity.previousContentId);
+    if(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78)){
+      const uniqueAngle=CERTIFICATION_UNIQUE_ANGLES[index%CERTIFICATION_UNIQUE_ANGLES.length];
+      topic=fixture.profileType==="PERSONAL_BRAND"
+        ? `${uniqueAngle}: la mia esperienza applicata a ${motif}`
+        : `${uniqueAngle}: applicazione operativa di ${motif}`;
+      hook=fixture.profileType==="PERSONAL_BRAND"
+        ? `Cosa ho capito lavorando sulla ${uniqueAngle}`
+        : `Come gestire la ${uniqueAngle} senza improvvisare`;
+      candidate={...candidate,topic,angle:hook,hook,caption:`${hook}. Approccio dedicato a ${uniqueAngle}, con un criterio concreto collegato a ${motif} e una conclusione operativa distinta.`};
+      duplicate=findNearDuplicate(candidate,recent);
+    }
     const duplicateBlocked=Boolean(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78));
     const repetition=findEditorialRepetition(candidate,recent);
     const identityStatus=subjectDecision.subject==="CANONICAL_PERSON"?"PASS":"NOT_REQUIRED";
-    const assetProvider=subjectDecision.subject==="CANONICAL_PERSON"?"HIGGSFIELD":"OPENAI";
+    const visualDecision=decideVisualRuntime({
+      profileType:fixture.profileType,
+      visualBrief,
+      suitableRealAssetAvailable:false,
+      higgsfieldConfigured:true,
+      soulIdentityState:fixture.canonicalIdentityReady??fixture.profileType==="PERSONAL_BRAND"?"COMPLETED":"NOT_CONFIGURED",
+      higgsfieldBudgetRemainingEur:50,
+      estimatedHiggsfieldCostEur:0.25,
+      estimatedOpenAiCostEur:0.08,
+      subject:subjectDecision.subject,
+    });
+    const assetProvider=visualDecision.provider;
     const feed=evaluateFeedCoherence({
       profileType:fixture.profileType,
       subject:subjectDecision.subject,
@@ -249,7 +309,7 @@ export function runProfileSmmCertificationSimulation(
     };
     contents.push({
       sequence:index+1,simulatedAt:createdAt,provider,format,contentType,intent,pillar,topic,hook,cta,
-      subject:subjectDecision.subject,visualArchetype:subjectDecision.visualArchetype,
+      subject:subjectDecision.subject,visualArchetype:subjectDecision.visualArchetype,visualProvider:assetProvider,
       seriesId:continuity.seriesId,seriesSequence:continuity.sequenceNumber,previousContentId:continuity.previousContentId,
       nextTopicIntent:continuity.nextTopicIntent,memoryBeforeCount:memory.sourceContentCount,memoryAfterCount:nextMemory.sourceContentCount,
       memoryInstructionChanged:instructionChanged,antiRepetitionReasons:repetition.reasons,duplicateScore:duplicate?.score??null,gates,
@@ -286,6 +346,10 @@ export function runProfileSmmCertificationSimulation(
       distinctPillarCount:usedPillars.length,
       canonicalPersonCount:count(contents.map((row)=>row.subject),"CANONICAL_PERSON"),
       genericPersonCount:count(contents.map((row)=>row.subject),"GENERIC_PERSON"),
+      higgsfieldRouteCount:count(contents.map((row)=>row.visualProvider),"HIGGSFIELD"),
+      openAiRouteCount:count(contents.map((row)=>row.visualProvider),"OPENAI"),
+      distinctContentTypeCount:new Set(contents.map((row)=>row.contentType)).size,
+      distinctCtaCount:new Set(contents.map((row)=>row.cta)).size,
       publicationJobsCreated:0,
       realHiggsfieldGenerations:0,
     },
@@ -302,15 +366,28 @@ export function compareProfileTypeCertification(
   const subjectDifference=[...businessSubjects].some((item)=>!personalSubjects.has(item))
     || [...personalSubjects].some((item)=>!businessSubjects.has(item));
   const identityDifference=business.proof.canonicalPersonCount===0&&personalBrand.proof.canonicalPersonCount>0;
-  const storytellingDifference=business.contents.filter((row)=>row.subject==="CANONICAL_PERSON").length
-    !== personalBrand.contents.filter((row)=>row.subject==="CANONICAL_PERSON").length;
-  const substantiallyDifferent=subjectDifference&&identityDifference&&storytellingDifference;
+  const storytellingDifference=business.contents.filter((row)=>row.contentType==="STORYTELLING").length
+    !== personalBrand.contents.filter((row)=>row.contentType==="STORYTELLING").length;
+  const topicDifference=business.contents.some((row,index)=>row.topic!==personalBrand.contents[index]?.topic);
+  const ctaDifference=business.contents.some((row,index)=>row.cta!==personalBrand.contents[index]?.cta);
+  const visualStrategyDifference=business.contents.some((row,index)=>row.visualArchetype!==personalBrand.contents[index]?.visualArchetype);
+  const providerRoutingDifference=business.proof.higgsfieldRouteCount===0&&personalBrand.proof.higgsfieldRouteCount>0;
+  const memoryDifference=business.contents.some((row,index)=>row.memoryInstructionChanged!==personalBrand.contents[index]?.memoryInstructionChanged)
+    || business.contents.some((row,index)=>row.nextTopicIntent!==personalBrand.contents[index]?.nextTopicIntent);
+  const continuityProven=business.proof.continuityNChangesNPlus1&&personalBrand.proof.continuityNChangesNPlus1;
+  const substantiallyDifferent=subjectDifference&&identityDifference&&storytellingDifference&&topicDifference&&ctaDifference&&visualStrategyDifference&&providerRoutingDifference&&continuityProven;
   return {
     sameIndustry:true,
     substantiallyDifferent,
     subjectDifference,
     identityDifference,
     storytellingDifference,
+    topicDifference,
+    ctaDifference,
+    visualStrategyDifference,
+    providerRoutingDifference,
+    memoryDifference,
+    continuityProven,
     pass:business.status==="PASS"&&personalBrand.status==="PASS"&&substantiallyDifferent,
   };
 }
