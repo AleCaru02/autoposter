@@ -99,7 +99,7 @@ assert.match(String(calls[0].body.instructions), /illuminazione, ombre e atmosfe
 assert.match(String(calls[0].body.instructions), /700-1800 caratteri/i);
 assert.match(String(calls[0].body.instructions), /NON inventare cartografia/i);
 assert.match(String(calls[0].body.instructions), /VISUAL = sintesi/i);
-assert.match(String(calls[0].body.instructions), /5 card vuote/i);
+assert.match(String(calls[0].body.instructions), /(?:5|cinque) card vuote/i);
 assert.match(String(calls[0].body.instructions), /props stock-like/i);
 assert.match(String(calls[0].body.instructions), /STRATEGIA VISUAL Instagram/);
 assert.match(String(calls[0].body.instructions), /fermare lo scroll/i);
