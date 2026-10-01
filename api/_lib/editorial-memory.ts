@@ -20,6 +20,7 @@ export type EditorialMemoryRecentContent = {
   createdAt: string;
   publishedAt: string | null;
   sourceRefs: unknown;
+  decisionRecord?: unknown;
 };
 
 export type EditorialMemoryFeedback = {
@@ -35,6 +36,16 @@ export type EditorialMemoryLearning = {
   confidence: string;
   upliftPct: number;
   sampleSize: number;
+};
+
+export type EditorialMemoryPerformanceSample = {
+  contentId: string | null;
+  provider: SocialProvider;
+  format: SocialFormat | string;
+  topic: string;
+  publishedAt: string;
+  capturedAt: string;
+  metrics: Record<string, unknown>;
 };
 
 export type EditorialMemoryCalendarItem = {
@@ -85,6 +96,12 @@ export type EditorialMemorySnapshot = {
     providers: Array<{ value: string; count: number }>;
     formats: Array<{ value: string; count: number }>;
   };
+  performance: {
+    realSnapshotCount: number;
+    scoredContentCount: number;
+    providers: Array<{ value: string; count: number }>;
+    topContent: Array<{ topic: string; provider: SocialProvider; format: string; score: number; metricBasis: string }>;
+  };
   learning: EditorialMemoryLearning[];
 };
 
@@ -125,6 +142,52 @@ function urlsFrom(value: unknown, out = new Set<string>(), depth = 0) {
   return [...out];
 }
 
+function productServiceValues(value: unknown, out = new Set<string>(), depth = 0, key = "") {
+  if (depth > 5 || out.size >= 30 || value == null) return [...out];
+  const normalizedKey = key.toLowerCase();
+  const relevantKey = /(?:product|service|offer|servizio|prodotto|offerta)/i.test(normalizedKey);
+  if (typeof value === "string") {
+    const candidate = clean(value, 180);
+    if (relevantKey && candidate && !/^none$/i.test(candidate) && !/^https?:\/\//i.test(candidate)) out.add(candidate);
+    return [...out];
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) productServiceValues(item, out, depth + 1, key);
+  } else if (typeof value === "object") {
+    for (const [childKey, item] of Object.entries(value as Record<string, unknown>)) {
+      productServiceValues(item, out, depth + 1, childKey);
+    }
+  }
+  return [...out];
+}
+
+function metricNumber(metrics: Record<string, unknown>, ...names: string[]) {
+  for (const name of names) {
+    const raw = metrics[name];
+    const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : Number.NaN;
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function performanceScore(sample: EditorialMemoryPerformanceSample) {
+  const direct = metricNumber(sample.metrics, "engagement_rate", "engagementRate");
+  if (direct !== null && direct >= 0) {
+    const score = direct <= 1 ? direct : direct <= 100 ? direct / 100 : null;
+    if (score !== null) return { score: Math.min(score, 1), basis: "ENGAGEMENT_RATE" };
+  }
+  const exposure = metricNumber(sample.metrics, "reach", "members_reached", "post_impressions_unique")
+    ?? metricNumber(sample.metrics, "impressions", "impression_count", "post_impressions");
+  if (exposure === null || exposure <= 0) return null;
+  const reactions = metricNumber(sample.metrics, "reactions", "likes", "like_count") ?? 0;
+  const comments = metricNumber(sample.metrics, "comments", "comment_count") ?? 0;
+  const shares = metricNumber(sample.metrics, "shares", "reshares", "share_count") ?? 0;
+  const saves = metricNumber(sample.metrics, "saves", "saved") ?? 0;
+  const clicks = metricNumber(sample.metrics, "clicks", "link_clicks") ?? 0;
+  const weighted = reactions + comments * 2 + shares * 3 + saves * 3 + clicks * 1.5;
+  return { score: Math.min(Math.max(weighted / exposure, 0), 1), basis: "WEIGHTED_ENGAGEMENT_PER_EXPOSURE" };
+}
+
 function decayWeight(createdAt: string, weight: number, now: Date) {
   const timestamp = Date.parse(createdAt);
   const ageDays = Number.isFinite(timestamp) ? Math.max(0, (now.getTime() - timestamp) / 86_400_000) : 365;
@@ -138,6 +201,7 @@ export function buildEditorialMemorySnapshot(input: {
   strategyPillars?: string[];
   calendar?: EditorialMemoryCalendarItem[];
   learning?: EditorialMemoryLearning[];
+  performance?: EditorialMemoryPerformanceSample[];
   now?: Date;
 }): EditorialMemorySnapshot {
   const now = input.now ?? new Date();
@@ -191,6 +255,12 @@ export function buildEditorialMemorySnapshot(input: {
   const calendar = input.calendar ?? [];
   const subjectCounts = counts(input.recent.map((row) => row.subjectStrategy));
   const visualCounts = counts(input.recent.map((row) => row.visualArchetype));
+  const productsOrServices = unique(input.recent.flatMap((row) => productServiceValues(row.decisionRecord)), 30);
+  const performance = input.performance ?? [];
+  const scoredPerformance = performance
+    .map((sample) => ({ sample, scored: performanceScore(sample) }))
+    .filter((row): row is { sample: EditorialMemoryPerformanceSample; scored: { score: number; basis: string } } => Boolean(row.scored))
+    .sort((a, b) => b.scored.score - a.scored.score);
 
   return {
     version: 1,
@@ -205,7 +275,7 @@ export function buildEditorialMemorySnapshot(input: {
       formats: counts(input.recent.map((row) => row.format)),
       visualArchetypes: visualCounts,
       subjects: subjectCounts,
-      productsOrServices: [],
+      productsOrServices,
       sources: unique(input.recent.flatMap((row) => urlsFrom(row.sourceRefs)), 30),
     },
     balance: {
@@ -226,6 +296,18 @@ export function buildEditorialMemorySnapshot(input: {
       providers: counts(calendar.map((item) => item.provider)),
       formats: counts(calendar.map((item) => item.format)),
     },
+    performance: {
+      realSnapshotCount: performance.length,
+      scoredContentCount: scoredPerformance.length,
+      providers: counts(performance.map((item) => item.provider)),
+      topContent: scoredPerformance.slice(0, 8).map(({ sample, scored }) => ({
+        topic: clean(sample.topic, 180),
+        provider: sample.provider,
+        format: String(sample.format),
+        score: Math.round(scored.score * 10000) / 10000,
+        metricBasis: scored.basis,
+      })),
+    },
     learning: (input.learning ?? []).slice(0, 12),
   };
 }
@@ -241,8 +323,10 @@ export function buildEditorialMemoryInstruction(memory: EditorialMemorySnapshot)
     memory.balance.overusedPillars.length ? `Pillar recentemente sovrautilizzati: ${memory.balance.overusedPillars.join(" | ")}. Non insistere senza motivo.` : null,
     memory.recent.subjects.length ? `Subject recenti: ${memory.recent.subjects.slice(0, 8).map((item) => `${item.value}×${item.count}`).join(", ")}. Mantieni varietà.` : null,
     memory.recent.visualArchetypes.length ? `Archetipi visual recenti: ${memory.recent.visualArchetypes.slice(0, 8).map((item) => `${item.value}×${item.count}`).join(", ")}. Non ripetere sempre la stessa composizione.` : null,
+    memory.recent.productsOrServices.length ? `Prodotti/servizi già trattati: ${memory.recent.productsOrServices.slice(0, 10).join(" | ")}. Mantieni continuità senza promuovere sempre gli stessi.` : null,
     memory.continuity.suggestedNextTopicIntent ? `Continuità disponibile: ${memory.continuity.suggestedNextTopicIntent}. Usala solo se è il naturale prossimo passo, non forzare una serie.` : null,
     memory.feedback.weightedSignals.length ? `Feedback ricorrente ponderato per recenza/frequenza: ${memory.feedback.weightedSignals.slice(0, 6).map((item) => `${item.code}(score ${item.score}, n=${item.count})`).join(", ")}. Una singola rejection non è una regola permanente.` : null,
+    memory.performance.topContent.length ? `Performance reali provider: ${memory.performance.topContent.slice(0, 5).map((item) => `${item.provider}/${item.format} “${item.topic}” score ${item.score} [${item.metricBasis}]`).join("; ")}. Usa questi segnali come evidenza, non come regola assoluta.` : null,
     memory.learning.length ? `Learning affidabile disponibile: ${memory.learning.slice(0, 6).map((item) => `${item.dimension}=${item.value} [${item.confidence}, n=${item.sampleSize}]`).join("; ")}.` : null,
     memory.calendar.futureCount ? `Calendario futuro: ${memory.calendar.futureCount} contenuti/job già presenti. Bilancia il feed rispetto a ciò che è già programmato.` : null,
   ].filter(Boolean);
@@ -270,6 +354,7 @@ export async function refreshProfileEditorialMemory(input: {
       ci.visual_archetype,
       ci.subject_strategy,
       ci.source_refs,
+      ci.decision_record,
       ci.created_at::text,
       cv.hook,
       cv.cta,
@@ -290,7 +375,7 @@ export async function refreshProfileEditorialMemory(input: {
   ` as unknown as Array<{
     id:string; topic:string; angle:string|null; pillar:string|null; series_id:string|null; sequence_number:number|null;
     next_topic_intent:string|null; continuity_reason:string|null; visual_archetype:string|null; subject_strategy:string|null;
-    source_refs:unknown; created_at:string; hook:string|null; cta:string|null; provider:SocialProvider|null; format:SocialFormat|null; published_at:string|null;
+    source_refs:unknown; decision_record:unknown; created_at:string; hook:string|null; cta:string|null; provider:SocialProvider|null; format:SocialFormat|null; published_at:string|null;
   }>;
 
   const feedback = await sql`
@@ -324,17 +409,41 @@ export async function refreshProfileEditorialMemory(input: {
     limit 20
   ` as unknown as EditorialMemoryLearning[];
 
+  const performance = await sql`
+    select distinct on (provider,external_post_id)
+      content_id::text as content_id,
+      provider,
+      format,
+      topic,
+      published_at::text,
+      captured_at::text,
+      metrics
+    from public.metric_snapshots
+    where profile_id=${profileId}::uuid
+      and source='PROVIDER_API'
+      and data_origin='PROVIDER_REAL'
+    order by provider,external_post_id,captured_at desc
+    limit 80
+  ` as unknown as Array<{
+    content_id:string|null; provider:SocialProvider; format:SocialFormat|string; topic:string;
+    published_at:string; captured_at:string; metrics:Record<string,unknown>;
+  }>;
+
   const snapshot = buildEditorialMemorySnapshot({
     profileType,
     strategyPillars: input.strategyPillars,
     recent: recent.map((row) => ({
       id:row.id,topic:row.topic,angle:row.angle,pillar:row.pillar,hook:row.hook,cta:row.cta,provider:row.provider,format:row.format,
       visualArchetype:row.visual_archetype,subjectStrategy:row.subject_strategy,seriesId:row.series_id,sequenceNumber:row.sequence_number,
-      nextTopicIntent:row.next_topic_intent,continuityReason:row.continuity_reason,createdAt:row.created_at,publishedAt:row.published_at,sourceRefs:row.source_refs,
+      nextTopicIntent:row.next_topic_intent,continuityReason:row.continuity_reason,createdAt:row.created_at,publishedAt:row.published_at,sourceRefs:row.source_refs,decisionRecord:row.decision_record,
     })),
     feedback: feedback.map((row) => ({code:row.feedback_code,note:row.note,weight:Number(row.weight),createdAt:row.created_at})),
     calendar,
     learning,
+    performance: performance.map((row) => ({
+      contentId:row.content_id,provider:row.provider,format:row.format,topic:row.topic,
+      publishedAt:row.published_at,capturedAt:row.captured_at,metrics:row.metrics,
+    })),
     now: input.now,
   });
 

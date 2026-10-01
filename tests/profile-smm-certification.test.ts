@@ -13,7 +13,7 @@ import { classifyContentFeedback } from "../api/_lib/content-review.js";
 import { compareProfileTypeCertification, runProfileSmmCertificationSimulation } from "../api/_lib/profile-smm-certification.js";
 
 const recent:EditorialMemoryRecentContent[]=[
-  {id:"1",topic:"Tema A",angle:"Angolo A",pillar:"Pillar A",hook:"Hook A",cta:"CTA A",provider:"INSTAGRAM",format:"POST",visualArchetype:"INFOGRAPHIC",subjectStrategy:"INFOGRAPHIC",seriesId:null,sequenceNumber:null,nextTopicIntent:null,continuityReason:null,createdAt:"2026-09-29T10:00:00Z",publishedAt:null,sourceRefs:[{url:"https://example.com/a"}]},
+  {id:"1",topic:"Tema A",angle:"Angolo A",pillar:"Pillar A",hook:"Hook A",cta:"CTA A",provider:"INSTAGRAM",format:"POST",visualArchetype:"INFOGRAPHIC",subjectStrategy:"INFOGRAPHIC",seriesId:null,sequenceNumber:null,nextTopicIntent:null,continuityReason:null,createdAt:"2026-09-29T10:00:00Z",publishedAt:null,sourceRefs:[{url:"https://example.com/a"}],decisionRecord:{offer:"Consulenza Premium",services:["Audit profilo","Piano editoriale"]}},
   {id:"2",topic:"Tema B",angle:"Angolo B",pillar:"Pillar A",hook:"Hook B",cta:"CTA A",provider:"FACEBOOK",format:"POST",visualArchetype:"ENVIRONMENT_EDITORIAL",subjectStrategy:"ENVIRONMENT",seriesId:null,sequenceNumber:null,nextTopicIntent:null,continuityReason:null,createdAt:"2026-09-28T10:00:00Z",publishedAt:null,sourceRefs:[]},
   {id:"3",topic:"Tema C",angle:"Angolo C",pillar:"Pillar B",hook:"Hook C",cta:"CTA B",provider:"LINKEDIN",format:"POST",visualArchetype:"SERVICE_EXPLAINER",subjectStrategy:"SERVICE",seriesId:null,sequenceNumber:null,nextTopicIntent:null,continuityReason:null,createdAt:"2026-09-27T10:00:00Z",publishedAt:null,sourceRefs:[]},
 ];
@@ -27,6 +27,10 @@ const memory=buildEditorialMemorySnapshot({
   strategyPillars:["Pillar A","Pillar B","Pillar C"],
   calendar:[{provider:"INSTAGRAM",format:"POST",scheduledAt:"2026-10-02T09:00:00Z",state:"SCHEDULED",topic:"Futuro"}],
   learning:[{dimension:"TOPIC",value:"Pillar B",confidence:"HIGH",upliftPct:18,sampleSize:12}],
+  performance:[
+    {contentId:"1",provider:"INSTAGRAM",format:"POST",topic:"Tema A",publishedAt:"2026-09-29T09:00:00Z",capturedAt:"2026-09-30T09:00:00Z",metrics:{reach:1000,likes:80,comments:10,shares:5,saves:10}},
+    {contentId:"2",provider:"FACEBOOK",format:"POST",topic:"Tema B",publishedAt:"2026-09-28T09:00:00Z",capturedAt:"2026-09-30T09:00:00Z",metrics:{impressions:1000,reactions:20,comments:2,shares:1}},
+  ],
   now:new Date("2026-09-30T10:00:00Z"),
 });
 assert.equal(memory.profileType,"BUSINESS");
@@ -34,6 +38,14 @@ assert.ok(memory.balance.underusedPillars.includes("Pillar C"),"pillar non usato
 assert.equal(memory.feedback.weightedSignals[0].code,"TOO_GENERIC","feedback recente deve pesare più di uno molto vecchio");
 assert.match(buildEditorialMemoryInstruction(memory),/Pillar relativamente trascurati/i);
 assert.equal(memory.calendar.futureCount,1);
+assert.ok(memory.recent.productsOrServices.includes("Consulenza Premium"));
+assert.ok(memory.recent.productsOrServices.includes("Audit profilo"));
+assert.equal(memory.performance.realSnapshotCount,2);
+assert.equal(memory.performance.scoredContentCount,2);
+assert.equal(memory.performance.topContent[0].topic,"Tema A");
+const memoryInstruction=buildEditorialMemoryInstruction(memory);
+assert.match(memoryInstruction,/Prodotti\/servizi già trattati/i);
+assert.match(memoryInstruction,/Performance reali provider/i);
 
 const startSeries=deriveContinuityDecision({
   memory,
@@ -166,5 +178,11 @@ assert.match(autopilot,/subject_strategy/);
 assert.match(autopilot,/next_topic_intent/);
 assert.match(autopilot,/subject:subjectDecision\.subject/);
 assert.match(autopilot,/profileType:profile\.profile_type/);
+const memorySource=fs.readFileSync("api/_lib/editorial-memory.ts","utf8");
+assert.match(memorySource,/from public\.metric_snapshots/);
+assert.match(memorySource,/data_origin='PROVIDER_REAL'/);
+assert.match(memorySource,/decision_record/);
+assert.match(memorySource,/productsOrServices/);
+assert.match(memorySource,/Performance reali provider/);
 
 console.log("PROFILE AUTONOMOUS SMM certification simulation: PASS");
