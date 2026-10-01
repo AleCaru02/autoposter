@@ -20,9 +20,22 @@ type CandidateRow = {
   profile_type:"BUSINESS"|"PERSONAL_BRAND";
   provider:"FACEBOOK"|"INSTAGRAM"|"LINKEDIN"|"GBP";
   format:"POST"|"CAROUSEL"|"STORY";
+  content_title:string|null;
+  content_topic:string;
+  source_refs:unknown;
+  hook:string|null;
   caption:string|null;
+  cta:string|null;
   current_asset_id:string|null;
+  current_asset_name:string|null;
+  current_asset_provider:string|null;
+  current_asset_model:string|null;
+  current_asset_quality_status:string|null;
+  current_asset_identity_status:string|null;
   current_asset_metadata:unknown;
+  account_name:string|null;
+  connection_status:string|null;
+  provider_account_id:string|null;
   tone_of_voice:unknown;
   visual_identity:unknown;
 };
@@ -73,15 +86,30 @@ async function loadCandidate(sql:ReturnType<typeof neon>,profileId:string,conten
       p.profile_type,
       v.provider,
       v.format,
+      ci.title as content_title,
+      ci.topic as content_topic,
+      ci.source_refs,
+      v.hook,
       v.caption,
+      v.cta,
       v.image_asset_id::text as current_asset_id,
+      a.name as current_asset_name,
+      a.provider as current_asset_provider,
+      a.model as current_asset_model,
+      a.quality_status as current_asset_quality_status,
+      a.identity_status as current_asset_identity_status,
       a.metadata as current_asset_metadata,
+      sc.account_name,
+      sc.status as connection_status,
+      sc.provider_account_id,
       b.tone_of_voice,
       b.visual_identity
     from public.publication_jobs j
     join public.content_variants v on v.id=j.variant_id and v.profile_id=j.profile_id
+    join public.content_items ci on ci.id=v.content_id and ci.profile_id=v.profile_id
     join public.profiles p on p.id=j.profile_id
     left join public.assets a on a.id=v.image_asset_id and a.profile_id=v.profile_id
+    left join public.social_connections sc on sc.profile_id=v.profile_id and sc.provider=v.provider
     left join public.brand_profiles b on b.profile_id=v.profile_id
     where j.profile_id=${profileId}::uuid
       and j.variant_id=${variantId}::uuid
@@ -319,7 +347,37 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
       authUserId:null,
       force:true,
     });
-    return json({safeMode:true,publicationJobId:candidate.job_id,visual,qa});
+    const prepared=await loadCandidate(sql,profileId,contentId,variantId)??candidate;
+    return json({
+      safeMode:true,
+      publicationJobId:prepared.job_id,
+      candidate:{
+        profileName:prepared.profile_name,
+        profileType:prepared.profile_type,
+        platform:prepared.provider,
+        format:prepared.format,
+        title:prepared.content_title,
+        topic:prepared.content_topic,
+        hook:prepared.hook,
+        caption:prepared.caption,
+        cta:prepared.cta,
+        accountName:prepared.account_name,
+        connectionStatus:prepared.connection_status,
+        asset:{
+          id:prepared.current_asset_id,
+          name:prepared.current_asset_name,
+          provider:prepared.current_asset_provider,
+          model:prepared.current_asset_model,
+          qualityStatus:prepared.current_asset_quality_status,
+          identityStatus:prepared.current_asset_identity_status,
+        },
+        sourceRefs:prepared.source_refs,
+        approvalStatus:"PENDING",
+        workflowStatus:"REVIEW",
+      },
+      visual,
+      qa,
+    });
   }catch(reason){
     const code=reason instanceof Error?reason.message.split(":")[0]:"CONTENT_QA_FAILED";
     console.error("controlled-prepublish-qa",{profileId,contentId,variantId,action,code});
