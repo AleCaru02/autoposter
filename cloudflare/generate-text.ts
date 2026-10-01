@@ -88,12 +88,15 @@ export async function handleWorkerGenerateTextStatus(request: Request, env: Env)
   if (!status) return json({ state: "NOT_FOUND", percent: 0, stage: "PREPARING" }, 200);
   const result = status.cached?.response && typeof status.cached.response === "object" ? status.cached.response : null;
   return json({
+    jobId: status.eventId,
+    operationId: operationIdentity,
     state: status.state === "COMMITTED" ? "COMPLETED" : status.state === "RELEASED" ? "FAILED" : "IN_PROGRESS",
     percent: status.percent,
     stage: status.stage,
     error: status.releaseReason ? publicGenerationError(status.releaseReason) : null,
     result,
-    createdAt: status.createdAt,
+    startedAt: status.createdAt,
+    updatedAt: status.updatedAt,
   });
 }
 
