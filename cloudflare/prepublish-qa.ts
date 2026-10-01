@@ -41,7 +41,7 @@ type CandidateRow = {
 };
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V4";
+const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V5";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -146,14 +146,23 @@ async function generateConfirmedBriefImage(apiKey:string){
     "Il testo visibile deve essere esattamente quello richiesto nel brief, in italiano naturale e perfettamente leggibile su smartphone.",
     "Evita totalmente qualsiasi elemento che possa sembrare cartografia reale. La composizione deve essere editoriale, astratta e chiaramente illustrativa, non una rappresentazione geografica.",
   ].join("\n\n");
-  const response=await fetch("https://api.openai.com/v1/images/generations",{
-    method:"POST",
-    headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
-    body:JSON.stringify({model:"gpt-image-2",prompt,size:"1024x1024",quality:"high",n:1,output_format:"png"}),
-  });
+  let response:Response|null=null;
+  let raw="";
+  for(let attempt=1;attempt<=3;attempt+=1){
+    response=await fetch("https://api.openai.com/v1/images/generations",{
+      method:"POST",
+      headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
+      body:JSON.stringify({model:"gpt-image-2",prompt,size:"1024x1024",quality:"high",n:1,output_format:"png"}),
+    });
+    raw=await response.text();
+    if(response.ok) break;
+    if(response.status!==429 || attempt===3) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
+    const retryAfter=Number(response.headers.get("retry-after")??"0");
+    const delayMs=Math.min(Math.max(Number.isFinite(retryAfter)&&retryAfter>0?retryAfter*1000:attempt*2000,1000),8000);
+    await new Promise((resolve)=>setTimeout(resolve,delayMs));
+  }
+  if(!response?.ok) throw new Error(`OPENAI_IMAGE_HTTP_${response?.status??"UNKNOWN"}`);
   const requestId=response.headers.get("x-request-id");
-  const raw=await response.text();
-  if(!response.ok) throw new Error(`OPENAI_IMAGE_HTTP_${response.status}`);
   const body=JSON.parse(raw) as Record<string,unknown>;
   const rows=Array.isArray(body.data)?body.data:[];
   const first=rows[0] && typeof rows[0]==="object" ? rows[0] as Record<string,unknown> : null;
@@ -275,7 +284,7 @@ async function regenerateSafeVisual(input:{
         provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at
       ) values (
         ${profileId}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
-        ${`FACEBOOK-POST-${variantId}-safe-v4.png`},${dataUrl},${result.mimeType},
+        ${`FACEBOOK-POST-${variantId}-safe-v5.png`},${dataUrl},${result.mimeType},
         ${JSON.stringify(["FACEBOOK","POST","AI_GENERATED","PREPUBLISH_SAFE"])}::jsonb,
         ${JSON.stringify(metadata)}::jsonb,
         'OPENAI',${result.model},${actualEur},
