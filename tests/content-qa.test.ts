@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { finalizeVisualQa, runOpenAIVisualQa } from "../api/_lib/openai-visual-qa.js";
 
-const [migration,runtime,endpoint,entry,store,page,worker,vercelImage,factcheck,editorial] = await Promise.all([
+const [migration,runtime,endpoint,prepublish,entry,store,page,worker,vercelImage,factcheck,editorial] = await Promise.all([
   readFile("db/migrations/20260930_content_qa.sql","utf8"),
   readFile("api/_lib/content-qa.ts","utf8"),
   readFile("cloudflare/content-qa.ts","utf8"),
+  readFile("cloudflare/prepublish-qa.ts","utf8"),
   readFile("cloudflare/entry.ts","utf8"),
   readFile("src/features/content/content-store.ts","utf8"),
   readFile("src/pages/approvals-page.tsx","utf8"),
@@ -47,6 +48,15 @@ assert.match(runtime,/brandVisualStyle:brandVisual\.visualStyle/);
 
 assert.match(endpoint,/verifiedCustomerAuthUserId/);
 assert.match(endpoint,/actorType: "MANUAL"/);
+assert.match(prepublish,/PREPUBLISH_QA_TOKEN/);
+assert.match(prepublish,/socialSafeModeState\(env\)!=="ON"/);
+assert.match(prepublish,/j\.state='BLOCKED_APPROVAL'/);
+assert.match(prepublish,/j\.attempt_count=0/);
+assert.match(prepublish,/v\.approval_mode='MANUAL'/);
+assert.match(prepublish,/v\.approval_status='PENDING'/);
+assert.match(prepublish,/actorType:"SYSTEM"/);
+assert.match(prepublish,/force:true/);
+assert.match(entry,/\/api\/internal\/prepublish-qa/);
 assert.ok(entry.indexOf('path === "/api/content-qa"') < entry.indexOf("return worker.fetch(request, env)"),"canonical Worker must route QA before asset fallback");
 assert.match(store,/runVariantQa/);
 assert.match(page,/variant\.qa_status !== "PASS"/);
