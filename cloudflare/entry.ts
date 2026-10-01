@@ -24,7 +24,7 @@ import { handleSocialApi, processDuePublications, type SocialEnv } from "../api/
 import { processDueAnalytics } from "../api/_lib/analytics.js";
 import { runLearningRuntime } from "../api/_lib/learning-runtime.js";
 import { handlePersonalBrandVisualIdentity } from "./personal-brand-visual.js";
-import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdPreflight } from "./personal-brand-reference.js";
+import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdCreate, handleSoulIdPreflight } from "./personal-brand-reference.js";
 import { handlePersonalBrandSources } from "./personal-brand-sources.js";
 import { handleAssetLibrary } from "./asset-library.js";
 import { handleProfileSmmCertification } from "./profile-smm-certification.js";
@@ -174,6 +174,7 @@ export default {
     if (path === "/api/personal-brand/visual-identity") return handlePersonalBrandVisualIdentity(request, env);
     if (path === "/api/personal-brand/reference-images") return handleReferenceImages(request, env);
     if (path === "/api/personal-brand/soul-id/preflight") return handleSoulIdPreflight(request, env);
+    if (path === "/api/personal-brand/soul-id/create") return handleSoulIdCreate(request, env);
     if (path === "/api/personal-brand/sources") return handlePersonalBrandSources(request, env);
     if (path === "/api/assets") return handleAssetLibrary(request, env);
     if (path.startsWith("/api/personal-brand/reference-image/")) {

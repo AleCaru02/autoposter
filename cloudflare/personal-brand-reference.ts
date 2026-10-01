@@ -1,7 +1,12 @@
 import { neon } from "@neondatabase/serverless";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
 import { EntitlementUsageService } from "../api/_lib/entitlement-usage.js";
-import { higgsfieldConfigured } from "../api/_lib/higgsfield.js";
+import {
+  createHiggsfieldSoulId,
+  HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
+  higgsfieldConfigured,
+  parseHiggsfieldCredentials,
+} from "../api/_lib/higgsfield.js";
 import {
   evaluateReferenceImage,
   MAX_REFERENCE_COUNT,
@@ -104,12 +109,17 @@ async function syncIdentityState(sql: ReturnType<typeof neon>, profileId: string
   return { rows, passed, fingerprint, averageQuality: avg, status };
 }
 
-async function signedPreviewUrl(env: Env, referenceId: string) {
+async function signedReferenceUrl(env: Env, referenceId: string, ttlSeconds = 300) {
   if (!env.SOCIAL_TOKEN_KEY) return null;
-  const exp = Math.floor(Date.now() / 1000) + 300;
+  const safeTtl = Math.max(60, Math.min(ttlSeconds, 3600));
+  const exp = Math.floor(Date.now() / 1000) + safeTtl;
   const sig = await signReferencePath(env.SOCIAL_TOKEN_KEY, referenceId, exp);
   const base = (env.APP_BASE_URL || "https://autoposter.02alessandrocaruso.workers.dev").replace(/\/$/,"");
   return `${base}/api/personal-brand/reference-image/${referenceId}?exp=${exp}&sig=${sig}`;
+}
+
+async function signedPreviewUrl(env: Env, referenceId: string) {
+  return signedReferenceUrl(env, referenceId, 300);
 }
 
 export async function handleReferenceImages(request: Request, env: Env): Promise<Response> {
@@ -257,7 +267,7 @@ export async function handleSoulIdPreflight(request: Request, env: Env): Promise
     profileId,
     task: "IMAGE_PREMIUM",
     importance: "PREMIUM",
-    projectedOperationCostUsd: 2.5,
+    projectedOperationCostUsd: HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
     costBucket: "HIGGSFIELD",
   });
   if (!budget.allowed) blockers.push(budget.reason || "HIGGSFIELD_BUDGET_BLOCKED");
@@ -277,7 +287,7 @@ export async function handleSoulIdPreflight(request: Request, env: Env): Promise
       averageTechnicalQuality: state.averageQuality,
     },
     estimatedCost: {
-      usd: 2.5,
+      usd: HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
       eur: budget.projectedOperationCostEur,
     },
     budget: {
@@ -287,4 +297,127 @@ export async function handleSoulIdPreflight(request: Request, env: Env): Promise
       projectedRemainingAfterEur: Math.max(0, budget.higgsfieldRemainingEur - budget.projectedOperationCostEur),
     },
   });
+}
+
+
+export async function handleSoulIdCreate(request: Request, env: Env): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const ctx = await authContext(request, env);
+  if ("error" in ctx) return ctx.error;
+  const body = await request.json().catch(() => ({})) as { profileId?: unknown; confirmed?: unknown };
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  if (!uuid(profileId)) return json({ error: "PROFILE_REQUIRED" }, 400);
+  if (body.confirmed !== true) return json({ error: "EXPLICIT_CONFIRMATION_REQUIRED" }, 409);
+
+  const profile = await ownedPersonalBrand(ctx.sql, profileId, ctx.authUserId);
+  if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+  const credentials = parseHiggsfieldCredentials(env.HF_CREDENTIALS);
+  if (!credentials) return json({ error: "HIGGSFIELD_NOT_CONFIGURED" }, 503);
+
+  const state = await syncIdentityState(ctx.sql, profileId);
+  if (state.passed.length < MIN_REFERENCE_COUNT) {
+    return json({ error: "REFERENCE_IMAGES_INSUFFICIENT", passed: state.passed.length, required: MIN_REFERENCE_COUNT }, 409);
+  }
+
+  const identityRows = await ctx.sql`
+    select soul_id,status,reference_fingerprint
+    from public.personal_brand_visual_identities
+    where profile_id=${profileId}::uuid
+    limit 1
+  ` as unknown as Array<{soul_id:string|null;status:string;reference_fingerprint:string|null}>;
+  const existing = identityRows[0];
+  if (existing?.soul_id && ["CREATING","COMPLETED"].includes(existing.status)) {
+    return json({ profileId, soulId: existing.soul_id, status: existing.status, duplicate: true });
+  }
+
+  const usage = new EntitlementUsageService(ctx.databaseUrl);
+  const operationIdentity = `higgsfield-soul-v2:${profileId}:${state.fingerprint ?? "no-fingerprint"}`;
+  const reservation = await usage.reserveUsage({
+    profileId,
+    capabilityKey: "visual.higgsfield.soul_id",
+    quantity: 1,
+    idempotencyKey: operationIdentity,
+    source: "PERSONAL_BRAND_SOUL_ID",
+    metadata: {
+      cost_bucket: "HIGGSFIELD",
+      provider_cost_reserve_usd: HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
+      model_version: "v2",
+      reference_fingerprint: state.fingerprint,
+      explicit_confirmation: true,
+    },
+  });
+  if (!reservation.allowed) return json({ error: reservation.reason || "SOUL_ID_USAGE_DENIED" }, 409);
+  const eventId = reservation.result?.event_id;
+  if (!eventId) return json({ error: "SOUL_ID_METERING_FAILED" }, 500);
+
+  if (reservation.result?.duplicate) {
+    const usageEvent = await usage.getUsageEvent(eventId);
+    if (usageEvent?.state === "COMMITTED" && existing?.soul_id) {
+      return json({ profileId, soulId: existing.soul_id, status: existing.status, duplicate: true });
+    }
+    if (usageEvent?.state === "RESERVED") return json({ error: "SOUL_ID_CREATION_IN_PROGRESS" }, 409);
+  }
+
+  let committed = false;
+  try {
+    const budget = await new ActivityBudgetEngine(ctx.databaseUrl).preflight({
+      profileId,
+      task: "IMAGE_PREMIUM",
+      importance: "PREMIUM",
+      projectedOperationCostUsd: HIGGSFIELD_SOUL_TRAINING_RESERVE_USD,
+      costBucket: "HIGGSFIELD",
+    });
+    if (!budget.allowed) {
+      await usage.releaseUsage(eventId);
+      return json({ error: budget.reason || "HIGGSFIELD_BUDGET_BLOCKED" }, 409);
+    }
+
+    await usage.markProviderStarted(eventId, HIGGSFIELD_SOUL_TRAINING_RESERVE_USD);
+    const urls = (await Promise.all(state.passed.map((row) => signedReferenceUrl(env, row.id, 1800))))
+      .filter((value): value is string => Boolean(value));
+    if (urls.length < MIN_REFERENCE_COUNT) throw new Error("REFERENCE_SIGNING_NOT_CONFIGURED");
+
+    const soul = await createHiggsfieldSoulId({
+      credentials,
+      name: `${profile.name} Personal Brand`,
+      imageUrls: urls,
+    });
+    if (!soul.id) throw new Error("HIGGSFIELD_SOUL_ID_MISSING");
+
+    await ctx.sql`
+      update public.personal_brand_visual_identities
+      set soul_id=${soul.id},
+          status='CREATING',
+          soul_created_at=coalesce(soul_created_at,now()),
+          last_checked_at=now(),
+          last_error_code=null,
+          metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({model_version:"v2",provider_status:soul.status,usage_event_id:eventId})}::jsonb,
+          updated_at=now()
+      where profile_id=${profileId}::uuid
+    `;
+    await usage.reconcileProviderCostAttempt(eventId);
+    await usage.commitUsage(eventId);
+    committed = true;
+    return json({
+      profileId,
+      soulId: soul.id,
+      provider: "HIGGSFIELD",
+      modelVersion: "v2",
+      status: "CREATING",
+      providerStatus: soul.status,
+      billable: true,
+    }, 202);
+  } catch (reason) {
+    await ctx.sql`
+      update public.personal_brand_visual_identities
+      set status='FAILED',
+          last_checked_at=now(),
+          last_error_code=${reason instanceof Error ? reason.message.slice(0,120) : "HIGGSFIELD_SOUL_CREATE_FAILED"},
+          updated_at=now()
+      where profile_id=${profileId}::uuid
+    `.catch(() => undefined);
+    if (!committed) await usage.releaseUsage(eventId).catch(() => undefined);
+    console.error("personal-brand-soul-create", {profileId,error:reason instanceof Error ? reason.message.slice(0,120) : "unknown"});
+    return json({ error: "HIGGSFIELD_SOUL_CREATE_FAILED" }, 502);
+  }
 }

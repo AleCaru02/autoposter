@@ -23,13 +23,15 @@ const created = await createHiggsfieldSoulId({
   fetcher: (async (input, init) => {
     assert.equal(String(input), "https://api.higgsfield.ai/v1/custom-references");
     const headers = new Headers(init?.headers);
-    assert.equal(headers.get("hf-api-key"), credentials!.keyId);
-    assert.equal(headers.get("hf-secret"), credentials!.keySecret);
+    assert.equal(headers.get("authorization"), `Key ${credentials!.keyId}:${credentials!.keySecret}`);
+    assert.equal(headers.get("hf-api-key"), null);
+    assert.equal(headers.get("hf-secret"), null);
     createAuthorization = String(init?.body || "");
     return Response.json({ id: "11111111-1111-4111-8111-111111111111", name: "Alessandro Personal Brand", status: "queued" });
   }) as typeof fetch,
 });
 assert.equal(created.status, "queued");
+assert.match(createAuthorization, /"model_version":"v2"/);
 assert.match(createAuthorization, /"type":"image_url"/);
 assert.match(createAuthorization, /https:\/\/example\.com\/reference\.jpg/);
 
@@ -38,7 +40,7 @@ const fetched = await getHiggsfieldSoulId({
   referenceId: "11111111-1111-4111-8111-111111111111",
   fetcher: (async (input, init) => {
     assert.equal(String(input), "https://api.higgsfield.ai/v1/custom-references/11111111-1111-4111-8111-111111111111");
-    assert.equal(new Headers(init?.headers).get("hf-secret"), credentials!.keySecret);
+    assert.equal(new Headers(init?.headers).get("authorization"), `Key ${credentials!.keyId}:${credentials!.keySecret}`);
     return Response.json({ id: "11111111-1111-4111-8111-111111111111", name: "Alessandro Personal Brand", status: "completed" });
   }) as typeof fetch,
 });
@@ -51,6 +53,8 @@ const route = fs.readFileSync("cloudflare/personal-brand-visual.ts", "utf8");
 assert.match(route, /verifiedCustomerAuthUserId/, "identity status must require a verified customer session");
 assert.match(route, /owner_auth_user_id/, "identity status must remain owner scoped");
 assert.match(route, /profile_type !== "PERSONAL_BRAND"/, "business profiles must not expose Personal Brand identity runtime");
+assert.match(route, /getHiggsfieldSoulId/, "identity status route must poll Higgsfield training state");
+assert.match(route, /normalizeHiggsfieldSoulState/, "provider status must be normalized fail-closed");
 assert.doesNotMatch(route, /HF_CREDENTIALS.*json|keySecret.*json/i, "credentials must never be returned to the browser");
 
 const wrangler = fs.readFileSync("wrangler.jsonc", "utf8");
