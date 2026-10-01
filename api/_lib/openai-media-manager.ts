@@ -2,6 +2,7 @@ import { estimateTerraCostUsd } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
+import { visualTextLanguageQualityPrompt } from "./language-quality.js";
 
 export type MediaManagerResult = {
   visualIntent: string;
@@ -79,6 +80,7 @@ export async function runOpenAIMediaManager(input: {
       reasoning: { effort: "low" },
       instructions: [
         "Sei il Media Manager e Visual Director senior di Post Automatici.",
+        visualTextLanguageQualityPrompt(),
         "Trasforma il brief editoriale già approvato in una vera art direction pronta per OpenAI Immagini 2: non limitarti a riscrivere o allungare il brief.",
         "Ogni imagePrompt deve descrivere una scena ricca, intenzionale e visivamente memorabile, evitando immagini corporate generiche, piatte, vuote o da stock.",
         "Definisci sempre: soggetto principale e dettagli secondari utili; primo piano, piano intermedio e sfondo; punto focale e gerarchia visiva; prospettiva o inquadratura; profondità; illuminazione, ombre e atmosfera; palette, materiali e texture; livello di realismo; uso intenzionale dello spazio negativo.",
