@@ -40,7 +40,7 @@ type Env = AutopilotEnv & SocialEnv & {
   SOCIAL_TOKEN_KEY?: string;
 };
 type WorkerContext = { waitUntil(promise: Promise<unknown>): void };
-type ScheduledController = { cron?: string };
+type ScheduledController = { cron?: string; scheduledTime?: number };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -212,10 +212,41 @@ export default {
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: WorkerContext) {
     if (controller.cron === "*/5 * * * *") {
+      const cronMeta = {
+        cron: controller.cron,
+        scheduledAt: typeof controller.scheduledTime === "number"
+          ? new Date(controller.scheduledTime).toISOString()
+          : new Date().toISOString(),
+      };
       ctx.waitUntil(processDuePublications(env).then((result) => {
-        console.log("social-publication-run", result);
+        const checked = Number(result.checked ?? 0);
+        const published = Number(result.published ?? 0);
+        const failed = Number(result.failed ?? 0);
+        const skipped = Math.max(checked - published - failed, 0);
+        console.log("social-publication-run", {
+          ...result,
+          ...cronMeta,
+          state: result.blocked ? "BLOCKED" : result.ready ? "COMPLETED" : "NOT_READY",
+          checked,
+          claimed: checked,
+          processed: checked,
+          published,
+          skipped,
+          error: null,
+        });
       }).catch((reason) => {
-        console.error("social-publication-failed", reason instanceof Error ? reason.message : "unknown");
+        const error = reason instanceof Error ? reason.message.split(":")[0] : "unknown";
+        console.error("social-publication-failed", {
+          ...cronMeta,
+          state: "FAILED",
+          checked: null,
+          claimed: null,
+          processed: null,
+          published: null,
+          skipped: null,
+          error,
+        });
+        throw reason;
       }));
       return;
     }
