@@ -28,7 +28,7 @@ type CandidateRow = {
 };
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V2";
+const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V3";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -174,7 +174,7 @@ async function regenerateSafeVisual(input:{
 
     await meter.markProviderStarted(eventId,0.25);
     const brandVisual=normalizeBrandVisualIdentity(candidate.visual_identity);
-    const result=await generateRoutedImage({
+    const generateVisual=()=>generateRoutedImage({
       env:{OPENAI_API_KEY:env.OPENAI_API_KEY},
       budget,
       importance:"STANDARD",
@@ -191,6 +191,15 @@ async function regenerateSafeVisual(input:{
       caption:candidate.caption,
       additionalDirection:"Evita totalmente qualsiasi elemento che possa sembrare cartografia reale. La composizione deve essere editoriale, astratta e chiaramente illustrativa, non una rappresentazione geografica.",
     });
+    let result;
+    try{
+      result=await generateVisual();
+    }catch(reason){
+      const code=reason instanceof Error?reason.message.split(":")[0]:"";
+      if(code!=="OPENAI_MEDIA_MANAGER_HTTP_429") throw reason;
+      await new Promise((resolve)=>setTimeout(resolve,1500));
+      result=await generateVisual();
+    }
     if(result.model!=="gpt-image-2") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
 
     await meter.persistTechnicalEvents(profileId,eventId,technicalEventsFromImageResult(result,{
@@ -222,7 +231,7 @@ async function regenerateSafeVisual(input:{
         provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at
       ) values (
         ${profileId}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
-        ${`FACEBOOK-POST-${variantId}-safe-v2.png`},${dataUrl},${result.mimeType},
+        ${`FACEBOOK-POST-${variantId}-safe-v3.png`},${dataUrl},${result.mimeType},
         ${JSON.stringify(["FACEBOOK","POST","AI_GENERATED","PREPUBLISH_SAFE"])}::jsonb,
         ${JSON.stringify(metadata)}::jsonb,
         'OPENAI',${result.model},${actualEur},
