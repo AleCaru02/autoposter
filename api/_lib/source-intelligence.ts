@@ -142,3 +142,66 @@ export function buildSourceRecords(topic: string, values: string[]) {
   }
   return [...byCanonical.values()].sort((a,b) => b.rank - a.rank || a.host.localeCompare(b.host) || a.canonicalUrl.localeCompare(b.canonicalUrl));
 }
+
+function claimStatus(status: string, sourceRequired: boolean): ClaimVerificationStatus {
+  if (status === "CONTRADICTED") return "CONFLICTING_SOURCES";
+  if (status === "UNSUPPORTED") return sourceRequired ? "NEEDS_SOURCE" : "UNVERIFIED";
+  if (status === "TIME_SENSITIVE") return "PARTIALLY_VERIFIED";
+  if (status === "VERIFIED") return "VERIFIED";
+  return "UNVERIFIED";
+}
+
+function mapClaimSources(claim: string, sources: SourceRecord[]) {
+  const tokens = topicTokens(claim);
+  const strong = sources.filter((source) => !source.weak);
+  const matched = strong.filter((source) => tokens.some((token) => source.host.includes(token)));
+  return (matched.length ? matched : strong).slice(0, 4);
+}
+
+export function buildSourceIntelligence(input: {
+  topic: string;
+  sources: string[];
+  checkedClaims?: Array<{ claim: string; sourceRequired: boolean; status: string }>;
+  checkedAt?: string;
+  uiLimit?: number;
+}): SourceIntelligenceSummary {
+  const auditSources = buildSourceRecords(input.topic, input.sources);
+  const nonWeak = auditSources.filter((source) => !source.weak);
+  const limit = Math.max(1, Math.min(input.uiLimit ?? 8, 8));
+
+  const perHost = new Map<string, number>();
+  const uiSources: SourceRecord[] = [];
+  for (const source of nonWeak) {
+    const used = perHost.get(source.host) ?? 0;
+    if (used >= 3) continue;
+    uiSources.push(source);
+    perHost.set(source.host, used + 1);
+    if (uiSources.length >= limit) break;
+  }
+
+  const checkedAt = input.checkedAt ?? new Date().toISOString();
+  const claims = (input.checkedClaims ?? [])
+    .filter((claim) => claim.sourceRequired || claim.status !== "NOT_FACTUAL")
+    .map((claim) => {
+      const mapped = mapClaimSources(claim.claim, auditSources);
+      const status = claimStatus(claim.status, claim.sourceRequired);
+      const sourceUrls = mapped.map((source) => source.canonicalUrl);
+      return {
+        claim: claim.claim,
+        sourceUrls,
+        sourceType: mapped[0]?.tier ?? "NONE",
+        verificationStatus: status === "VERIFIED" && sourceUrls.length === 0 ? "NEEDS_SOURCE" : status,
+        checkedAt,
+      } satisfies ClaimSourceRecord;
+    });
+
+  return { auditSources, uiSources, claims };
+}
+
+export function hasCriticalUnsupportedClaim(summary: SourceIntelligenceSummary) {
+  return summary.claims.some((claim) =>
+    claim.verificationStatus === "NEEDS_SOURCE"
+    || claim.verificationStatus === "UNVERIFIED"
+    || claim.verificationStatus === "CONFLICTING_SOURCES"
+  );
+}
