@@ -13,6 +13,11 @@ export type OpenAIVisualQaResult = {
     socialFormat: VisualQaStatus;
     brandSafety: VisualQaStatus;
     textSafety: VisualQaStatus;
+    editorialQuality: VisualQaStatus;
+    genericTemplate: VisualQaStatus;
+    stockLike: VisualQaStatus;
+    textDensity: VisualQaStatus;
+    decorativeUsefulness: VisualQaStatus;
   };
   scores: {
     briefMatch: number;
@@ -21,6 +26,11 @@ export type OpenAIVisualQaResult = {
     socialFormat: number;
     brandSafety: number;
     textSafety: number;
+    editorialQuality: number;
+    genericTemplate: number;
+    stockLike: number;
+    textDensity: number;
+    decorativeUsefulness: number;
   };
   model: "gpt-5.6-terra";
   responseId: string;
@@ -28,7 +38,7 @@ export type OpenAIVisualQaResult = {
   usage: { inputTokens: number; outputTokens: number; estimatedCostUsd: number };
 };
 
-const KEYS = ["briefMatch","composition","technicalQuality","socialFormat","brandSafety","textSafety"] as const;
+const KEYS = ["briefMatch","composition","technicalQuality","socialFormat","brandSafety","textSafety","editorialQuality","genericTemplate","stockLike","textDensity","decorativeUsefulness"] as const;
 
 const SCHEMA = {
   type: "object",
@@ -68,6 +78,11 @@ export function finalizeVisualQa(scoresRaw: Record<string,unknown>, reason="") {
     socialFormat:0.8,
     brandSafety:0.9,
     textSafety:0.9,
+    editorialQuality:0.82,
+    genericTemplate:0.86,
+    stockLike:0.86,
+    textDensity:0.82,
+    decorativeUsefulness:0.8,
   };
   const checks = Object.fromEntries(KEYS.map((key)=>[key,scores[key]>=thresholds[key]?"PASS":"FAIL"])) as OpenAIVisualQaResult["checks"];
   return { verdict:Object.values(checks).every((value)=>value==="PASS")?"PASS" as const:"FAIL" as const,checks,scores,reason };
@@ -88,7 +103,8 @@ export async function runOpenAIVisualQa(input:{
   fetcher?:typeof fetch;
 }):Promise<OpenAIVisualQaResult> {
   if (!/^data:image\/(?:jpeg|png|webp);base64,/i.test(input.imageUrl) && !/^https:\/\//i.test(input.imageUrl)) throw new Error("VISUAL_QA_IMAGE_REQUIRED");
-  const response=await (input.fetcher??fetch)("https://api.openai.com/v1/responses",{
+  const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
+  const response=await fetcher("https://api.openai.com/v1/responses",{
     method:"POST",
     headers:{authorization:`Bearer ${input.apiKey}`,"content-type":"application/json"},
     body:JSON.stringify({
@@ -108,7 +124,12 @@ export async function runOpenAIVisualQa(input:{
         "brandSafety: se sono forniti colori/font/stile del profilo, il visual deve rispettarli in modo riconoscibile. Penalizza palette arbitrarie o identità visiva scollegata. Nessun logo, prezzo, recensione, certificazione, prodotto o fatto del brand inventato/non richiesto.",
         "brandSafety deve inoltre penalizzare rappresentazioni sintetiche presentate come prove reali del brand: appartamenti, uffici, viste, prodotti, persone o risultati non confermati.",
         "Per luoghi reali, penalizza mappe, linee metro, percorsi, pin, label geografiche, edifici o relazioni spaziali aggiunti senza essere richiesti dal brief: una grafica plausibile non equivale a un dato verificato.",
-        "textSafety: se il brief richiede testo, deve comparire solo il testo richiesto, grande e leggibile. Penalizza microcopy, label, quartieri, numeri, pseudo-dati, didascalie o testi extra inventati, anche se graficamente credibili; se non c'è testo richiesto, testo aggiunto abbassa fortemente lo score.",
+        "textSafety: il testo deve essere supportato dal brief, leggibile e gerarchizzato. Per statiche educative con 3-5 punti sono ammesse mini-label supportate dal brief; penalizza invece claim, numeri, microcopy o pseudo-dati inventati.",
+        "editorialQuality: valuta se sembra una vera composizione editoriale premium e intenzionale, non una bozza AI o una card povera. Penalizza titolo enorme con contenuto quasi vuoto, gerarchia debole e blocchi privi di significato.",
+        "genericTemplate: score alto solo se il visual NON sembra un template universale. Penalizza griglie generiche, 5 card identiche, soli numeri/icone senza label, struttura intercambiabile con qualsiasi settore.",
+        "stockLike: score alto solo se la scena NON dipende da cliché stock. Penalizza chiavi, laptop, tazze, skyline, scrivanie, strette di mano e props generici usati come riempitivo senza funzione narrativa.",
+        "textDensity: score alto quando la quantità di testo è adatta al formato e leggibile mobile. Penalizza sia muri di testo sia eccesso di vuoto informativo quando il brief richiede più punti.",
+        "decorativeUsefulness: ogni elemento decorativo deve aiutare gerarchia, significato o brand. Penalizza icone, forme, props e texture aggiunti solo per riempire spazio.",
         "Non approvare per plausibilità: usa score prudente quando un requisito non è verificabile visivamente.",
         "Restituisci solo JSON conforme allo schema.",
       ].join("\n"),
