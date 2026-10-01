@@ -148,7 +148,7 @@ function visualBriefFor(profileType:ProfileType,contentType:string,intent:Editor
   if(profileType==="PERSONAL_BRAND"&&intent==="CASE_STUDY"){
     return `Caso ed esperienza raccontati con ambiente, dettagli di lavoro e prova visiva collegati a ${pillar}; composizione documentale senza ritratto, mantenendo il feed vario.`;
   }
-  if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; nessuna persona canonica richiesta.`;
+  if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; composizione senza soggetto umano, centrata sul valore del servizio.`;
   if(intent==="CHECKLIST"||intent==="EDUCATION")return `Infografica editoriale chiara su ${pillar}, gerarchia mobile-first, struttura visiva distinta ${index+1}.`;
   if(profileType==="BUSINESS"&&index%4===0)return `Ambiente e team dell'attività come contesto di ${pillar}, fotografia editoriale credibile e non stock.`;
   return `Visual editoriale coerente con ${pillar}; oggetti, ambiente o tipografia scelti per varietà rispetto al feed recente.`;
