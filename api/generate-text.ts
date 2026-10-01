@@ -173,6 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       editorial_topic: result.content.editorialTopic,
       editorial_angle: result.content.editorialAngle,
       external_sources: result.externalSources,
+      source_intelligence: result.sourceIntelligence,
       verification: result.verification,
       personal_brand_source_profile_id: editorialContext.sourceProfileId,
       personal_brand_pillar: editorialContext.pillar,
@@ -199,12 +200,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       content: result.content,
       model: result.model,
       responseId: result.responseId,
-      research: { mode: result.researchMode, externalSources: result.externalSources, webSearchCalls: result.usage.webSearchCalls },
+      research: { mode: result.researchMode, externalSources: result.externalSources, sourceIntelligence: result.sourceIntelligence, webSearchCalls: result.usage.webSearchCalls },
       usage: result.usage,
       budget: { currency: "EUR", band: activityBudget.band, hardCapEur: activityBudget.hardCapEur, spendEur: activityBudget.spendEur, remainingEur: activityBudget.remainingEur, forecastEndOfMonthEur: activityBudget.forecastEndOfMonthEur },
       editorialContext: {
         ...editorialContext,
         externalSources: result.externalSources,
+        sourceIntelligence: result.sourceIntelligence,
       },
     };
     await meter.storeResult(eventId, { response: responseBody });

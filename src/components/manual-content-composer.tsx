@@ -402,7 +402,20 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
     </div>}
     {content && <div className="manual-result" aria-live="polite">
       <div className="manual-result-summary"><div><small>PROPOSTA EDITORIALE</small><h3>{content.editorialTopic}</h3><p>{content.editorialAngle}</p></div><span>{content.variants.length} {content.variants.length === 1 ? "variante" : "varianti"}</span></div>
-      {(editorialContext?.externalSources?.length ?? 0) > 0 && <details className="manual-source-proof"><summary>Fonti esterne verificate · {editorialContext?.externalSources?.length ?? 0}</summary><div>{(editorialContext?.externalSources ?? []).map((source) => { let label = source; try { label = new URL(source).hostname.replace(/^www\./, ""); } catch { /* keep URL */ } return <a key={source} href={source} target="_blank" rel="noreferrer">{label}</a>; })}</div></details>}
+      {(editorialContext?.sourceIntelligence?.uiSources?.length ?? editorialContext?.externalSources?.length ?? 0) > 0 && <details className="manual-source-proof">
+        <summary>Fonti verificate · {editorialContext?.sourceIntelligence?.auditSources?.length ?? editorialContext?.externalSources?.length ?? 0}</summary>
+        {(editorialContext?.sourceIntelligence?.claims?.length ?? 0) > 0 && <div className="manual-source-claims">
+          {editorialContext?.sourceIntelligence?.claims.slice(0, 8).map((claim) => <section key={claim.claim}>
+            <header><strong>{claim.claim}</strong><span>{claim.verificationStatus === "VERIFIED" ? "Verificato" : claim.verificationStatus === "PARTIALLY_VERIFIED" ? "Parzialmente verificato" : claim.verificationStatus === "CONFLICTING_SOURCES" ? "Fonti in conflitto" : "Da verificare"}</span></header>
+            <div>{claim.sourceUrls.slice(0, 4).map((source) => { let label = source; try { label = new URL(source).hostname.replace(/^www\./, ""); } catch { /* keep URL */ } return <a key={source} href={source} target="_blank" rel="noreferrer">{label}</a>; })}</div>
+          </section>)}
+        </div>}
+        <div className="manual-source-list">{(editorialContext?.sourceIntelligence?.uiSources ?? []).length > 0
+          ? editorialContext?.sourceIntelligence?.uiSources.map((source) => <a key={source.canonicalUrl} href={source.canonicalUrl} target="_blank" rel="noreferrer" title={source.tier}>{source.label}</a>)
+          : (editorialContext?.externalSources ?? []).slice(0, 8).map((source) => { let label = source; try { label = new URL(source).hostname.replace(/^www\./, ""); } catch { /* keep URL */ } return <a key={source} href={source} target="_blank" rel="noreferrer">{label}</a>; })}
+        </div>
+        {(editorialContext?.sourceIntelligence?.auditSources?.length ?? 0) > (editorialContext?.sourceIntelligence?.uiSources?.length ?? 0) && <p className="field-help">La UI mostra le fonti principali; tutte le fonti normalizzate restano conservate per audit.</p>}
+      </details>}
       <div className="manual-variant-list">{content.variants.map((variant, index) => <article key={`${variant.provider}-${variant.format}`} className="manual-variant">
         <header><strong>{PROVIDERS.find((provider) => provider.value === variant.provider)?.label ?? variant.provider}</strong><span>{variant.format === "STORY" ? "Storia" : variant.format === "CAROUSEL" ? "Carosello" : "Post"}</span></header>
         {!variant.eligible && <p className="manual-warning">Questa proposta richiede una revisione particolare per il social scelto.</p>}

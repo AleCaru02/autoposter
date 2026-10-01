@@ -3,6 +3,7 @@ import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
 import { platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
 import { languageQualityPrompt } from "./language-quality.js";
+import { buildSourceIntelligence, hasCriticalUnsupportedClaim, type SourceIntelligenceSummary } from "./source-intelligence.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type SocialFormat = "POST" | "CAROUSEL" | "STORY";
@@ -102,6 +103,7 @@ export type OpenAITextResult = {
   requestId: string | null;
   researchMode: EditorialResearchMode;
   externalSources: string[];
+  sourceIntelligence: SourceIntelligenceSummary;
   verification: {
     researchAgentRan: boolean;
     factCheckAgentRan: boolean;
@@ -775,7 +777,14 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const editorialRepairCostUsd = editorialRepair ? estimateTerraCostUsd(editorialRepair.usage.inputTokens, editorialRepair.usage.outputTokens) : 0;
   const copyRepairCostUsd = copyRepair ? estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens) : 0;
   const estimatedCostUsd = mainCostUsd === null ? null : mainCostUsd + (researchCostUsd ?? 0) + factCheckCostUsd + editorialRepairCostUsd + copyRepairCostUsd;
-  const externalSources = [...new Set([...combinedSources, ...factCheckRuns.flatMap((run) => run.sources)])].slice(0, 20);
+  const rawExternalSources = [...new Set([...combinedSources, ...factCheckRuns.flatMap((run) => run.sources)])].slice(0, 40);
+  const sourceIntelligence = buildSourceIntelligence({
+    topic: options.topic,
+    sources: rawExternalSources,
+    checkedClaims: factCheck?.checkedClaims ?? [],
+    uiLimit: 8,
+  });
+  const externalSources = sourceIntelligence.auditSources.map((source) => source.canonicalUrl);
   const externalClaimPresent = content.variants.some((variant) => variant.factualBasis.some((basis) => /BASE ESTERNA/i.test(basis)));
   const technicalEvents: OpenAITextTechnicalEvent[] = [
     {
@@ -851,6 +860,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   if (factCheck && factCheck.verdict !== "PASS") {
     throw new OpenAITextPipelineError(`OPENAI_FACTCHECK_${factCheck.verdict}`, technicalEvents);
   }
+  if (hasCriticalUnsupportedClaim(sourceIntelligence)) {
+    throw new OpenAITextPipelineError("OPENAI_FACTCHECK_NEEDS_SOURCE", technicalEvents);
+  }
   if ((externalClaimPresent || research.mode === "NEWS") && brain.minimumIndependentSources > 0
       && independentSourceCount(externalSources) < brain.minimumIndependentSources) {
     throw new OpenAITextPipelineError("AI_BRAIN_INSUFFICIENT_SOURCES", technicalEvents);
@@ -863,6 +875,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     requestId,
     researchMode: research.mode,
     externalSources,
+    sourceIntelligence,
     verification: {
       researchAgentRan: Boolean(dedicatedResearch),
       factCheckAgentRan: Boolean(factCheck),
