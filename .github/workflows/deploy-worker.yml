@@ -25,6 +25,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Detect controlled prepublish mode
+        id: prepublish_mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          message=$(git log -1 --pretty=%B)
+          if printf '%s\n' "$message" | grep -Fq '[prepublish-qa]'; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Setup Node
         uses: actions/setup-node@v4
         with: { node-version: 22 }
@@ -101,7 +112,7 @@ jobs:
           echo "::add-mask::$token"
           echo "ADMIN_BOOTSTRAP_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
       - name: Provision ephemeral controlled prepublish QA secret
-        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        if: steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -326,7 +337,7 @@ jobs:
           console.log('production managed auth capability audit: PASS', JSON.stringify({ managedAuth }));
           NODE
       - name: Controlled prepublish QA
-        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        if: steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -362,7 +373,7 @@ jobs:
           console.log('controlled prepublish QA: PASS');
           NODE
       - name: Report controlled prepublish result to pull request
-        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        if: steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -440,7 +451,7 @@ jobs:
           console.log('controlled prepublish report comment: PASS',JSON.stringify({pr:pr.number}));
           NODE
       - name: Remove ephemeral controlled prepublish QA secret
-        if: always() && contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        if: always() && steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -449,7 +460,7 @@ jobs:
           set -euo pipefail
           printf 'y\n' | npx wrangler secret delete PREPUBLISH_QA_TOKEN
       - name: Verify controlled prepublish QA route closed
-        if: always() && contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        if: always() && steps.prepublish_mode.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
