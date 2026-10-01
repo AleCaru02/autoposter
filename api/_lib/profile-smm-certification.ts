@@ -146,7 +146,7 @@ function visualBriefFor(profileType:ProfileType,contentType:string,intent:Editor
     return `Ritratto editoriale della persona titolare del Personal Brand, stessa identità canonica, scena naturale collegata a ${pillar}, variazione compositiva ${index+1}.`;
   }
   if(profileType==="PERSONAL_BRAND"&&intent==="CASE_STUDY"){
-    return `Caso ed esperienza raccontati con ambiente, dettagli di lavoro e prova visiva collegati a ${pillar}; la persona canonica non è obbligatoria e il feed deve restare vario.`;
+    return `Caso ed esperienza raccontati con ambiente, dettagli di lavoro e prova visiva collegati a ${pillar}; composizione documentale senza ritratto, mantenendo il feed vario.`;
   }
   if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; nessuna persona canonica richiesta.`;
   if(intent==="CHECKLIST"||intent==="EDUCATION")return `Infografica editoriale chiara su ${pillar}, gerarchia mobile-first, struttura visiva distinta ${index+1}.`;
