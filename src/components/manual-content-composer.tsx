@@ -93,13 +93,16 @@ function replaceVariant(content: GeneratedSocialContent, index: number, patch: P
 }
 
 function progressLabel(stage: ManualGenerationProgressStage) {
-  if (stage === "ANALYZING") return "Analizzo brand e contesto";
-  if (stage === "RESEARCHING") return "Cerco e verifico le fonti";
-  if (stage === "WRITING") return "Scrivo il contenuto";
+  if (stage === "ANALYZING") return "Analizzo brand e brief";
+  if (stage === "RESEARCHING") return "Cerco le fonti";
+  if (stage === "CHANNEL_STRATEGY") return "Adatto la strategia ai canali";
+  if (stage === "WRITING") return "Scrivo le varianti";
+  if (stage === "VISUAL_BRIEF") return "Preparo i brief visuali";
   if (stage === "COPY_READY") return "Controllo struttura e formato";
+  if (stage === "SOURCE_VALIDATION") return "Normalizzo e valido le fonti";
   if (stage === "VERIFYING") return "Verifico le affermazioni";
   if (stage === "VERIFIED") return "Verifica completata";
-  if (stage === "FINALIZING") return "Finalizzo il risultato";
+  if (stage === "FINALIZING") return "Salvo il risultato";
   if (stage === "COMMITTED") return "Contenuto pronto";
   if (stage === "RELEASED") return "Creazione interrotta";
   return "Preparo la creazione";
