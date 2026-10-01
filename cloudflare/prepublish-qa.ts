@@ -59,7 +59,7 @@ type CandidateRow = {
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_VISUAL_VERSION="CITYLIFE_PREPUBLISH_SAFE_V5";
-const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_4";
+const SAFE_VISUAL_METERING_ATTEMPT="RETRY_20261001_5";
 const SAFE_VISUAL_BRIEF=[
   "Grafica editoriale quadrata premium per Facebook dedicata a CityLife/Fiera e agli affitti brevi.",
   "NON usare mappe, cartografia, planimetrie, percorsi, linee di trasporto, pin, nomi di vie o relazioni geografiche.",
@@ -192,7 +192,7 @@ async function generateConfirmedBriefImage(apiKey:string){
   ].join("\n\n");
   let response:Response|null=null;
   let raw="";
-  for(let attempt=1;attempt<=5;attempt+=1){
+  for(let attempt=1;attempt<=2;attempt+=1){
     response=await fetch("https://api.openai.com/v1/images/generations",{
       method:"POST",
       headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
@@ -201,8 +201,8 @@ async function generateConfirmedBriefImage(apiKey:string){
     raw=await response.text();
     if(response.ok) break;
     const errorKind=openAiImageErrorKind(raw);
-    const nonRetryable429=new Set(["insufficient_quota","billing_hard_limit_reached","billing_not_active","account_deactivated"]);
-    if(response.status!==429 || attempt===5 || nonRetryable429.has(errorKind)){
+    const nonRetryable429=new Set(["credit_balance_exhausted","insufficient_quota","billing_hard_limit_reached","billing_not_active","account_deactivated"]);
+    if(response.status!==429 || attempt===2 || nonRetryable429.has(errorKind)){
       throw new Error(`OPENAI_IMAGE_HTTP_${response.status}_${errorKind.toUpperCase()}`);
     }
     const retryAfter=Number(response.headers.get("retry-after")??"0");
