@@ -329,7 +329,7 @@ jobs:
           status=$(curl --silent --show-error -o controlled-prepublish-qa.json -w "%{http_code}" -X POST \
             -H "x-prepublish-qa-token: $PREPUBLISH_QA_TOKEN_VALUE" \
             -H "content-type: application/json" \
-            --data '{"profileId":"73486d3c-dca0-4aaa-a69e-d4b08cc6430f","contentId":"cefc9287-723d-425f-a2bf-d6c987687b35","variantId":"10dc97cd-55a0-4aca-bc7a-6522d18e51fe"}' \
+            --data '{"action":"REGENERATE_VISUAL_AND_QA","profileId":"73486d3c-dca0-4aaa-a69e-d4b08cc6430f","contentId":"cefc9287-723d-425f-a2bf-d6c987687b35","variantId":"10dc97cd-55a0-4aca-bc7a-6522d18e51fe"}' \
             "$base/api/internal/prepublish-qa" || true)
           QA_HTTP_STATUS="$status" node - <<'NODE'
           const fs=require('node:fs');
@@ -337,6 +337,7 @@ jobs:
           const qa=body?.qa??{};
           const summary={
             httpStatus:process.env.QA_HTTP_STATUS,safeMode:body?.safeMode,publicationJobId:body?.publicationJobId,
+            visualRegeneration:body?.visual??null,
             overallStatus:qa?.overallStatus,brandStatus:qa?.brandStatus,copyStatus:qa?.copyStatus,
             visualStatus:qa?.visualStatus,factStatus:qa?.factStatus,platformStatus:qa?.platformStatus,
             duplicateStatus:qa?.duplicateStatus,budgetStatus:qa?.budgetStatus,
