@@ -152,7 +152,9 @@ export function chooseSubjectStrategy(input: {
     ranked.push("INFOGRAPHIC","TYPOGRAPHIC","ENVIRONMENT","OBJECT","GENERIC_PERSON","TEAM","SERVICE");
   } else {
     ranked.push("INFOGRAPHIC","TYPOGRAPHIC","ENVIRONMENT","OBJECT","SERVICE");
-    if (input.canonicalIdentityReady) ranked.push("CANONICAL_PERSON");
+    // A Personal Brand may use the canonical person often, but only when the
+    // content actually asks for the person. Identity is not a generic filler
+    // used merely to balance the feed.
   }
 
   const subject = [...new Set(ranked)]
