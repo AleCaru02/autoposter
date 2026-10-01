@@ -1,0 +1,1 @@
+export const SOURCE_INTELLIGENCE_VERSION = 1;
