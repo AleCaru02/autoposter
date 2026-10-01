@@ -1,6 +1,11 @@
 import { neon } from "@neondatabase/serverless";
 import { bearerValue, verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
-import { higgsfieldConfigured } from "../api/_lib/higgsfield.js";
+import {
+  getHiggsfieldSoulId,
+  higgsfieldConfigured,
+  normalizeHiggsfieldSoulState,
+  parseHiggsfieldCredentials,
+} from "../api/_lib/higgsfield.js";
 
 type Env = {
   DATABASE_URL?: string;
@@ -63,12 +68,38 @@ export async function handlePersonalBrandVisualIdentity(request: Request, env: E
       where profile_id=${profileId}::uuid
     ` as unknown as Array<{ total: number; passed: number; pending: number; rejected: number; latest_created_at: string | null }>;
 
-    const identities = await sql`
+    let identities = await sql`
       select provider,status,soul_id,reference_quality,soul_created_at,last_checked_at,last_error_code,created_at::text,updated_at::text
       from public.personal_brand_visual_identities
       where profile_id=${profileId}::uuid
       limit 1
     ` as unknown as IdentityRow[];
+
+    const current = identities[0];
+    const credentials = parseHiggsfieldCredentials(env.HF_CREDENTIALS);
+    if (current?.soul_id && current.status === "CREATING" && credentials) {
+      try {
+        const provider = await getHiggsfieldSoulId({ credentials, referenceId: current.soul_id });
+        const nextStatus = normalizeHiggsfieldSoulState(String(provider.status || ""));
+        await sql`
+          update public.personal_brand_visual_identities
+          set status=${nextStatus},
+              last_checked_at=now(),
+              last_error_code=${nextStatus === "FAILED" ? "HIGGSFIELD_SOUL_TRAINING_FAILED" : null},
+              metadata=coalesce(metadata,'{}'::jsonb)||${JSON.stringify({provider_status:provider.status,thumbnail_url:provider.thumbnail_url ?? null})}::jsonb,
+              updated_at=now()
+          where profile_id=${profileId}::uuid
+        `;
+        identities = await sql`
+          select provider,status,soul_id,reference_quality,soul_created_at,last_checked_at,last_error_code,created_at::text,updated_at::text
+          from public.personal_brand_visual_identities
+          where profile_id=${profileId}::uuid
+          limit 1
+        ` as unknown as IdentityRow[];
+      } catch (reason) {
+        console.error("personal-brand-soul-status", {profileId,error:reason instanceof Error ? reason.message.slice(0,120) : "unknown"});
+      }
+    }
 
     return json({
       profileId,
