@@ -2,6 +2,7 @@ import { buildSectorResearchInstruction, type EditorialResearchMode } from "./ed
 import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
 import { platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
+import { languageQualityPrompt } from "./language-quality.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
 export type SocialFormat = "POST" | "CAROUSEL" | "STORY";
@@ -402,6 +403,8 @@ async function repairUnsupportedContent(input: {
       reasoning: { effort: "medium" },
       instructions: [
         "Sei il Copy Repair Agent di Post Automatici.",
+        languageQualityPrompt(),
+        "Nel repair la qualità linguistica è vincolante: correggi anche formulazioni grammaticalmente possibili ma innaturali, senza cambiare il significato o inventare fatti.",
         input.repairReason === "EDITORIAL_QUALITY"
           ? "Il contenuto non ha superato il controllo editoriale deterministico. Riparalo rispettando esattamente qualityIssues e la richiesta originale, senza cambiare tema."
           : "Il contenuto è stato bloccato dal fact-check. Devi ripararlo, non difenderlo.",
@@ -540,7 +543,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   const copyUsesWebSearch = research.useWebSearch && !dedicatedResearch;
   const instructions = [
     "Sei il motore editoriale di Post Automatici.",
+    languageQualityPrompt(),
     "Genera contenuti social distinti per piattaforma e formato, mantenendo il tono del brand e una qualità professionale pronta per revisione umana.",
+    "Esegui sempre un controllo linguistico finale nello stesso passaggio prima di restituire il JSON: non considerare pronto un testo che è corretto solo grammaticalmente ma suona poco naturale nella lingua del profilo.",
     research.instruction,
     dedicatedResearch?.status === "READY"
       ? "Il Research Agent ha già raccolto evidenze esterne affidabili. Usa soltanto quelle evidenze per i fatti esterni e non avviare una seconda ricerca web nel copy."
