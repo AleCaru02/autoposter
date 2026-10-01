@@ -48,7 +48,7 @@
     "test:site-intelligence-ui": "tsx tests/site-intelligence-ui.test.ts",
     "test:editorial-intelligence": "tsx tests/editorial-intelligence.test.ts",
     "test:editorial-research": "tsx tests/editorial-research.test.ts",
-    "test:content-agents": "tsx tests/content-agents.test.ts",
+    "test:content-agents": "tsx tests/content-agents.test.ts && tsx tests/format-selection.test.ts",
     "test:platform-social-manager": "tsx tests/platform-social-manager.test.ts",
     "test:ai-economics": "tsx tests/ai-economics.test.ts",
     "test:openai-research-factcheck": "tsx tests/openai-research-factcheck.test.ts",
