@@ -34,7 +34,7 @@ assert.match(handler,/usage\.markProviderStarted/, "billable call must reserve p
 assert.match(handler,/usage\.reconcileProviderCostAttempt/, "provider cost must reconcile after Soul ID creation");
 assert.match(handler,/usage\.commitUsage/, "successful Soul ID creation must commit logical usage");
 assert.doesNotMatch(preflightSource,/api\.higgsfield\.ai|createHiggsfieldSoulId/, "preflight must remain non-billable and provider-free");
-assert.match(handler,/projectedOperationCostUsd:\s*2\.5/, "Soul ID preflight must account for the expected provider reserve");
+assert.match(handler,/projectedOperationCostUsd:\s*HIGGSFIELD_SOUL_TRAINING_RESERVE_USD/, "Soul ID preflight must account for the expected provider reserve");
 assert.match(handler,/costBucket:\s*"HIGGSFIELD"/, "Soul ID preflight must use the Higgsfield budget bucket");
 
 const ui = fs.readFileSync("src/components/personal-brand-visual-identity-panel.tsx","utf8");
