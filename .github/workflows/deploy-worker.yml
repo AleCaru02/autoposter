@@ -6,6 +6,11 @@ on:
     types: [completed]
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 concurrency:
   group: post-automatici-production-deploy
   cancel-in-progress: false
@@ -342,6 +347,7 @@ jobs:
           const qa=body?.qa??{};
           const summary={
             httpStatus:process.env.QA_HTTP_STATUS,safeMode:body?.safeMode,publicationJobId:body?.publicationJobId,
+            candidate:body?.candidate??null,
             visualRegeneration:body?.visual??null,
             overallStatus:qa?.overallStatus,brandStatus:qa?.brandStatus,copyStatus:qa?.copyStatus,
             visualStatus:qa?.visualStatus,factStatus:qa?.factStatus,platformStatus:qa?.platformStatus,
@@ -354,6 +360,81 @@ jobs:
           console.log('controlled prepublish QA result:',JSON.stringify(summary));
           if(process.env.QA_HTTP_STATUS!=='200'||body?.safeMode!==true||qa?.overallStatus!=='PASS') process.exit(1);
           console.log('controlled prepublish QA: PASS');
+          NODE
+      - name: Report controlled prepublish result to pull request
+        if: contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const token=process.env.GH_TOKEN;
+          const repo=process.env.REPOSITORY;
+          const sha=process.env.HEAD_SHA;
+          const headers={authorization:`Bearer ${token}`,accept:'application/vnd.github+json','content-type':'application/json','x-github-api-version':'2022-11-28'};
+          const pullsResponse=await fetch(`https://api.github.com/repos/${repo}/commits/${sha}/pulls`,{headers});
+          if(!pullsResponse.ok) throw new Error(`PR_LOOKUP_HTTP_${pullsResponse.status}`);
+          const pulls=await pullsResponse.json();
+          const pr=Array.isArray(pulls)?pulls[0]:null;
+          if(!pr?.number) throw new Error('PREPUBLISH_PR_NOT_FOUND');
+          const body=JSON.parse(fs.readFileSync('controlled-prepublish-qa.json','utf8'));
+          const qa=body?.qa??{};
+          const candidate=body?.candidate??{};
+          const asset=candidate?.asset??{};
+          const sources=Array.isArray(qa?.factCheck?.sources)?qa.factCheck.sources:[];
+          const safeText=(value,max=6000)=>typeof value==='string'?value.slice(0,max):'';
+          const report=[
+            '## FIRST REAL PREPUBLISH REPORT',
+            '',
+            `SAFE_MODE: ${body?.safeMode===true?'true':'INVALID'}`,
+            `PUBLICATION_JOB: ${safeText(body?.publicationJobId,120)}`,
+            `PROFILO: ${safeText(candidate?.profileName,300)}`,
+            `PIATTAFORMA: ${safeText(candidate?.platform,100)}`,
+            `FORMATO: ${safeText(candidate?.format,100)}`,
+            `ACCOUNT_DESTINAZIONE: ${safeText(candidate?.accountName,300)}`,
+            `CONNECTION_STATUS: ${safeText(candidate?.connectionStatus,100)}`,
+            `TITOLO: ${safeText(candidate?.title,800)}`,
+            `HOOK: ${safeText(candidate?.hook,1200)}`,
+            '',
+            'COPY:',
+            safeText(candidate?.caption,6000),
+            '',
+            `CTA: ${safeText(candidate?.cta,1200)}`,
+            `ASSET_ID: ${safeText(asset?.id,120)}`,
+            `ASSET_NAME: ${safeText(asset?.name,500)}`,
+            `ASSET_PROVIDER: ${safeText(asset?.provider,100)}`,
+            `ASSET_MODEL: ${safeText(asset?.model,100)}`,
+            `ASSET_QUALITY: ${safeText(asset?.qualityStatus,100)}`,
+            `ASSET_IDENTITY: ${safeText(asset?.identityStatus,100)}`,
+            `APPROVAL_STATUS: ${safeText(candidate?.approvalStatus,100)}`,
+            `WORKFLOW_STATUS: ${safeText(candidate?.workflowStatus,100)}`,
+            '',
+            'QA:',
+            `OVERALL=${safeText(qa?.overallStatus,100)}`,
+            `COPY=${safeText(qa?.copyStatus,100)}`,
+            `FACT=${safeText(qa?.factStatus,100)}`,
+            `BRAND=${safeText(qa?.brandStatus,100)}`,
+            `VISUAL=${safeText(qa?.visualStatus,100)}`,
+            `PLATFORM=${safeText(qa?.platformStatus,100)}`,
+            `DUPLICATE=${safeText(qa?.duplicateStatus,100)}`,
+            `BUDGET=${safeText(qa?.budgetStatus,100)}`,
+            `FEED_COHERENCE=${safeText(qa?.feedCoherenceStatus,100)}`,
+            `PROFILE_TYPE_FIT=${safeText(qa?.profileTypeFitStatus,100)}`,
+            `SUBJECT_STRATEGY=${safeText(qa?.subjectStrategyStatus,100)}`,
+            '',
+            `FONTI: ${sources.length?sources.map((source)=>safeText(source,500)).join(' | '):'nessuna fonte esterna richiesta/registrata'}`,
+            '',
+            'Nessuna approvazione utente simulata. Nessuna external write eseguita.'
+          ].join('\n');
+          const commentResponse=await fetch(`https://api.github.com/repos/${repo}/issues/${pr.number}/comments`,{
+            method:'POST',headers,body:JSON.stringify({body:report})
+          });
+          if(!commentResponse.ok) throw new Error(`PR_COMMENT_HTTP_${commentResponse.status}`);
+          console.log('controlled prepublish report comment: PASS',JSON.stringify({pr:pr.number}));
           NODE
       - name: Remove ephemeral controlled prepublish QA secret
         if: always() && contains(github.event.workflow_run.head_commit.message, '[prepublish-qa]')
