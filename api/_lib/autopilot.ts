@@ -21,6 +21,7 @@ import { decideVisualRuntime } from "./visual-runtime-decision.js";
 import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { selectAutonomousFormat } from "./format-selection.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -157,7 +158,7 @@ export async function currentSpend(sql:Sql,profileId:string){const rows=await sq
 
 async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
-  const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const learning=await activeLearningInsights(sql,profile.id);const planItem=selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,AUTOPILOT_PUBLISH_FORMATS[provider],learning);const format=chooseAutopilotPublishFormat(provider,count,planItem?.format,learnedFormat);const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;const objective=planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
+  const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const learning=await activeLearningInsights(sql,profile.id);const planItem=selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,AUTOPILOT_PUBLISH_FORMATS[provider],learning);const objective=planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
   const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
   if(profile.profile_type==="PERSONAL_BRAND"&&!objective)throw new Error("PERSONAL_BRAND_OBJECTIVE_REQUIRED");
@@ -171,6 +172,20 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     sql`select count(*)::int as count from public.metric_snapshots where profile_id=${profile.id}::uuid and source='PROVIDER_API'` as unknown as CountRow[],
     sql`select count(*)::int as count from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' and (quality_status is null or quality_status='PASS') and storage_url is not null` as unknown as CountRow[],
   ]);
+  const formatDecision=selectAutonomousFormat({
+    provider,
+    topic:planItem?.topicDirection||pillar.instruction||"",
+    objective,
+    goal:context.goals[0]??null,
+    supportedFormats:AUTOPILOT_PUBLISH_FORMATS[provider],
+    requestedFormat:planItem?.format??null,
+    learnedFormat,
+    memory,
+    reusableAssetCount:Number(assetRows[0]?.count??0),
+    budgetBand:editorialBudget.band,
+  });
+  const format=formatDecision.selectedFormat;
+  const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;
   const audienceSignals=stringSignals([context.target,loaded.personalBrand?.audience]);
   const pillarSignals=stringSignals([pillar.pillar?.name,loaded.personalBrand?.pillar]);
   const relevantEvents=planItem&&(planItem.intent==="NEWS"||planItem.intent==="SEASONAL")?[planItem.topicDirection]:[];
@@ -269,7 +284,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     const allowed=Array.isArray(loaded.personalBrand.relation?.allowed_ctas)?loaded.personalBrand.relation?.allowed_ctas.filter((item):item is string=>typeof item==="string"&&Boolean(item.trim())).map((item)=>item.trim().toLowerCase()):[];
     if(allowed.length&&variant.cta&&!allowed.includes(variant.cta.trim().toLowerCase()))throw new Error("AUTOPILOT_PERSONAL_BRAND_CTA_NOT_ALLOWED");
   }
-  await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,timing_source:timingSource,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
+  await meter.persistTechnicalEvents(profile.id,logicalEventId,technicalEventsFromTextResult(generated,{source:"AUTOPILOT",provider,format,research_mode:generated.researchMode,external_sources:generated.externalSources,verification:generated.verification,planner_driven:Boolean(planItem),planner_intent:planItem?.intent??null,planner_funnel_stage:planItem?.funnelStage??null,planner_topic_direction:planItem?.topicDirection??null,learning_applied:Boolean(learningInstruction),learning_format_applied:learnedFormat??null,format_preferred:formatDecision.preferredFormat,format_selected:formatDecision.selectedFormat,format_density:formatDecision.informationDensity,format_capability_constrained:formatDecision.capabilityConstrained,format_reasons:formatDecision.reasons,timing_source:timingSource,editorial_pillar_selected:planItem?null:pillar.pillar?.name??null,editorial_topic:generated.content.editorialTopic,editorial_angle:generated.content.editorialAngle}));
   const recentDedupe=await recentContentForDedupe(sql,profile.id);
   const duplicate=findNearDuplicate({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption},recentDedupe);
   const linkedSeriesContinuation=continuityDecision.mode==="CONTINUE_SERIES"&&Boolean(continuityDecision.previousContentId);
@@ -291,6 +306,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     timing:master.timing??null,
     provider,
     format,
+    formatDecision,
     contentType:master.contentType,
     intent:master.intent,
     objective,
