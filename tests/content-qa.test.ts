@@ -80,10 +80,12 @@ assert.match(editorial,/slideChecks/);
 
 const pass = finalizeVisualQa({
   briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,
+  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,
 },"ok");
 assert.equal(pass.verdict,"PASS");
 const fail = finalizeVisualQa({
   briefMatch:.95,composition:.95,technicalQuality:.5,socialFormat:.95,brandSafety:.98,textSafety:.98,
+  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,
 },"artefatti");
 assert.equal(fail.verdict,"FAIL");
 assert.equal(fail.checks.technicalQuality,"FAIL");
@@ -106,7 +108,7 @@ const visual = await runOpenAIVisualQa({
     return new Response(JSON.stringify({
       id:"resp_visual_qa",
       model:"gpt-5.6-terra",
-      output_text:JSON.stringify({scores:{briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98},reason:"coerente"}),
+      output_text:JSON.stringify({scores:{briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,editorialQuality:.95,genericTemplate:.95,stockLike:.95,textDensity:.95,decorativeUsefulness:.95},reason:"coerente"}),
       usage:{input_tokens:100,output_tokens:40,total_tokens:140},
     }),{status:200,headers:{"x-request-id":"req_visual_qa"}});
   }) as typeof fetch,
@@ -121,6 +123,18 @@ assert.match(String(requestBody?.instructions),/mappe, linee metro, percorsi/i);
 assert.match(String(requestBody?.instructions),/microcopy, label, quartieri/i);
 assert.match(String(requestBody?.instructions),/STRATEGIA VISUAL Instagram/);
 assert.match(String(requestBody?.instructions),/fermare lo scroll/i);
+assert.match(String(requestBody?.instructions),/genericTemplate/);
+assert.match(String(requestBody?.instructions),/stockLike/);
+assert.match(String(requestBody?.instructions),/titolo enorme/i);
+assert.match(String(requestBody?.instructions),/decorativeUsefulness/);
 assert.equal(requestBody?.store,false);
+
+const genericFail=finalizeVisualQa({
+  briefMatch:.95,composition:.9,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,
+  editorialQuality:.62,genericTemplate:.5,stockLike:.95,textDensity:.55,decorativeUsefulness:.5,
+},"template vuoto con numeri e icone");
+assert.equal(genericFail.verdict,"FAIL");
+assert.equal(genericFail.checks.genericTemplate,"FAIL");
+assert.equal(genericFail.checks.editorialQuality,"FAIL");
 
 console.log("Content QA regression: PASS — structured global/slide QA, factual classification, visual inspection, budget and fail-closed approval.");
