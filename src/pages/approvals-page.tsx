@@ -74,15 +74,15 @@ function visualGenerationErrorMessage(value: string | null) {
   const code = (value ?? "").toUpperCase();
   if (!code) return "";
   if (code.includes("CREDIT_BALANCE_EXHAUSTED") || code.includes("INSUFFICIENT_QUOTA") || code.includes("BILLING")) {
-    return "Generazione immagini bloccata: il credito o la fatturazione OpenAI non sono disponibili. Il copy è salvo; ricarica il credito prima di riprovare.";
+    return "Generazione immagini bloccata: il credito o la fatturazione OpenAI non sono disponibili. Il copy è già salvo; ricarica il credito prima di riprovare.";
   }
   if (code.includes("429") || code.includes("RATE_LIMIT")) {
-    return "Generazione immagini temporaneamente limitata dal servizio. Il copy è salvo; riprova più tardi.";
+    return "Generazione immagini temporaneamente limitata dal servizio. Il copy è già salvo; riprova più tardi.";
   }
   if (code.includes("401") || code.includes("403") || code.includes("AUTH") || code.includes("PERMISSION")) {
     return "Generazione immagini non autorizzata. Verifica la configurazione OpenAI prima di riprovare.";
   }
-  return "Generazione immagini non completata. Il copy è salvo; puoi riprovare solo il visuale.";
+  return "Generazione immagini non completata. Il copy è già salvo; puoi riprovare solo il visuale.";
 }
 
 
