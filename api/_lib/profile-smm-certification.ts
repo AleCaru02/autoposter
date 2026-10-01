@@ -142,8 +142,11 @@ function hookFor(intent:EditorialIntent,pillar:string,motif:string,index:number)
   return `${templates[intent]} · ${index+1}`;
 }
 function visualBriefFor(profileType:ProfileType,contentType:string,intent:EditorialIntent,pillar:string,index:number){
-  if(profileType==="PERSONAL_BRAND"&&(contentType==="STORYTELLING"||intent==="CASE_STUDY")){
+  if(profileType==="PERSONAL_BRAND"&&contentType==="STORYTELLING"){
     return `Ritratto editoriale della persona titolare del Personal Brand, stessa identità canonica, scena naturale collegata a ${pillar}, variazione compositiva ${index+1}.`;
+  }
+  if(profileType==="PERSONAL_BRAND"&&intent==="CASE_STUDY"){
+    return `Caso ed esperienza raccontati con ambiente, dettagli di lavoro e prova visiva collegati a ${pillar}; la persona canonica non è obbligatoria e il feed deve restare vario.`;
   }
   if(intent==="SERVICE")return `Visual editoriale del servizio, processo e risultato percepito collegati a ${pillar}; nessuna persona canonica richiesta.`;
   if(intent==="CHECKLIST"||intent==="EDUCATION")return `Infografica editoriale chiara su ${pillar}, gerarchia mobile-first, struttura visiva distinta ${index+1}.`;
