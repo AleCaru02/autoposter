@@ -166,8 +166,9 @@ function cors(origin) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-credentials": "true",
-    "access-control-allow-headers": "authorization,content-type,prefer,range,x-client-info",
+    "access-control-allow-headers": "*",
     "access-control-allow-methods": "GET,HEAD,OPTIONS",
+    "access-control-expose-headers": "content-range,content-location",
     "content-type": "application/json; charset=utf-8",
   };
 }
@@ -179,7 +180,8 @@ function rowsForTable(table, url) {
   if (table === "metric_snapshots") return [metric];
   if (table === "learning_insights") return [];
   if (table === "social_connections") return [{ id: "10000000-0000-4000-8000-000000000006", profile_id: profileId, status: "ACTIVE" }];
-  if (table === "content_carousel_slides" || table === "assets" || table === "content_strategies" || table === "schedules") return [];
+  if (table === "content_strategies") return [{ platform_strategy: {} }];
+  if (table === "content_carousel_slides" || table === "assets" || table === "schedules") return [];
   if (table === "profile_entitlements" || table === "capability_usage_buckets") return [];
   if (table === "brand_profiles" || table === "website_scans" || table === "website_scan_pages") return [];
   return [];
@@ -281,7 +283,12 @@ async function assertNoDocumentOverflow(page, label) {
 async function open(page, path, heading) {
   const response = await page.goto(base + path, { waitUntil: "domcontentloaded", timeout: 30000 });
   assert.ok(response && response.status() < 500, path + " document unavailable");
-  await page.getByRole("heading", { name: heading, exact: true }).waitFor({ state: "visible", timeout: 15000 });
+  try {
+    await page.getByRole("heading", { name: heading, exact: true }).waitFor({ state: "visible", timeout: 15000 });
+  } catch (reason) {
+    const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1200);
+    throw new Error("UI_QA_HEADING_TIMEOUT " + path + " -> " + heading + " | body=" + JSON.stringify(body) + " | cause=" + (reason instanceof Error ? reason.message : String(reason)));
+  }
 }
 
 async function verifyAuthenticatedViewport(browser, viewport, label) {
