@@ -25,6 +25,7 @@ type CandidateRow = {
   qa_status:string;
   qa_fingerprint:string|null;
   qa_checked_at:string|null;
+  qa_result:unknown;
   approval_mode:string;
   approval_status:string;
   workflow_status:string;
@@ -108,6 +109,7 @@ async function loadCandidate(sql:ReturnType<typeof neon>,profileId:string,conten
       v.qa_status,
       v.qa_fingerprint,
       v.qa_checked_at::text as qa_checked_at,
+      v.qa_result,
       v.approval_mode,
       v.approval_status,
       v.workflow_status,
@@ -454,6 +456,53 @@ export async function handleControlledPrepublishQa(request:Request,env:Env){
   }catch(reason){
     const code=reason instanceof Error?reason.message.split(":")[0]:"CONTENT_QA_FAILED";
     console.error("controlled-prepublish-qa",{profileId,contentId,variantId,action,code});
-    return json({error:code},500);
+    return json({
+      error:code,
+      safeMode:true,
+      publicationJobId:candidate.job_id,
+      candidate:{
+        profileName:candidate.profile_name,
+        profileType:candidate.profile_type,
+        variantId,
+        variantUpdatedAt:candidate.variant_updated_at,
+        qaStatus:candidate.qa_status,
+        qaFingerprint:candidate.qa_fingerprint,
+        qaCheckedAt:candidate.qa_checked_at,
+        approvalMode:candidate.approval_mode,
+        approvalStatus:candidate.approval_status,
+        workflowStatus:candidate.workflow_status,
+        approvedBy:candidate.approved_by,
+        approvedAt:candidate.approved_at,
+        variantExternalPostId:candidate.variant_external_post_id,
+        platform:candidate.provider,
+        format:candidate.format,
+        title:candidate.content_title,
+        topic:candidate.content_topic,
+        hook:candidate.hook,
+        caption:candidate.caption,
+        cta:candidate.cta,
+        accountName:candidate.account_name,
+        connectionStatus:candidate.connection_status,
+        asset:{
+          id:candidate.current_asset_id,
+          name:candidate.current_asset_name,
+          provider:candidate.current_asset_provider,
+          model:candidate.current_asset_model,
+          qualityStatus:candidate.current_asset_quality_status,
+          identityStatus:candidate.current_asset_identity_status,
+        },
+        sourceRefs:candidate.source_refs,
+        publicationJob:{
+          id:candidate.job_id,
+          state:candidate.job_state,
+          executionMode:candidate.execution_mode,
+          attemptCount:candidate.attempt_count,
+          hasIdempotencyKey:candidate.has_idempotency_key,
+          remotePostId:candidate.job_remote_post_id,
+          publishedAt:candidate.job_published_at,
+        },
+      },
+      qa:candidate.qa_result,
+    },500);
   }
 }
