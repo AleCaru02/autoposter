@@ -12,6 +12,21 @@ jobs:
     timeout-minutes: 12
     steps:
       - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Inspect prepublish main workflow runs read-only
+        if: github.event_name == 'pull_request' && github.head_ref == 'gpt56/inspect-prepublish-main-runs'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node - <<'NODE'
+          const sha="486e1372be67a9d5053357921a318b6b005de46e";
+          const repo=process.env.GITHUB_REPOSITORY;
+          const headers={authorization:`Bearer ${process.env.GH_TOKEN}`,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28"};
+          const response=await fetch(`https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`,{headers});
+          if(!response.ok) throw new Error(`RUN_LOOKUP_HTTP_${response.status}`);
+          const body=await response.json();
+          const rows=(body.workflow_runs??[]).map(r=>({id:r.id,name:r.name,event:r.event,status:r.status,conclusion:r.conclusion,head_sha:r.head_sha,created_at:r.created_at,updated_at:r.updated_at,html_url:r.html_url}));
+          console.log("PREPUBLISH_MAIN_RUNS="+JSON.stringify(rows));
+          NODE
       - name: Setup Node
         uses: actions/setup-node@v4
         with: { node-version: 22 }
