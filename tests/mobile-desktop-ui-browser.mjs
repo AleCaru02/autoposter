@@ -363,7 +363,7 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
     await assertNoDocumentOverflow(page, label + " analytics");
 
     await open(page, "/app/profili", "Le tue attività");
-    await page.getByText("UI QA", { exact: true }).first().waitFor({ state: "visible" });
+    await page.locator(".profile-card h2", { hasText: "UI QA" }).waitFor({ state: "visible" });
     await assertNoDocumentOverflow(page, label + " profiles");
 
     const rendered = await page.locator("body").innerText();
