@@ -79,7 +79,7 @@ try {
   await page.goto(`${APP_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.getByRole("heading", { name: "Bentornato" }).waitFor({ timeout: 15000 });
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  await page.locator('input[type="password"][autocomplete="current-password"]').fill(password);
   await page.getByRole("button", { name: "Accedi", exact: true }).click();
   await page.waitForURL((url) => url.pathname === "/app/dashboard", { timeout: 30000 });
 
