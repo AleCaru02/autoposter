@@ -10,6 +10,7 @@ async function startLocalServer() {
   localServer = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", "4173"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
   });
   await new Promise((resolve, reject) => {
     let settled = false;
@@ -29,6 +30,23 @@ async function startLocalServer() {
     localServer.once("exit", (code) => finish(reject, new Error("UI_QA_VITE_EXIT_" + code)));
     timeout = setTimeout(() => finish(reject, new Error("UI_QA_VITE_START_TIMEOUT")), 15000);
   });
+}
+
+function stopLocalServer() {
+  if (!localServer) return;
+  const child = localServer;
+  localServer = null;
+  try {
+    if (!child.killed) {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    }
+  } catch {
+    try { child.kill("SIGTERM"); } catch { /* already stopped */ }
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
 }
 
 const dataApiHost = "ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech";
@@ -426,5 +444,5 @@ try {
   console.log("MOBILE_DESKTOP_UI_BROWSER_QA = PASS");
 } finally {
   await browser.close();
-  if (localServer && !localServer.killed) localServer.kill("SIGTERM");
+  stopLocalServer();
 }
