@@ -252,6 +252,11 @@ async function installFixtureRoutes(page, { authenticated = true, socialFailure 
       return;
     }
 
+    if (url.origin === base && process.env.UI_SMOKE_START_LOCAL === "1" && url.pathname.startsWith("/api/_lib/") && ["GET", "HEAD"].includes(method)) {
+      await route.continue();
+      return;
+    }
+
     if (url.origin === base && url.pathname.startsWith("/api/")) {
       if (!["GET", "HEAD"].includes(method)) blockedWrites.push(method + " " + url.pathname);
       await route.fulfill({
