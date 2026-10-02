@@ -94,11 +94,11 @@ try {
   assert.ok(cookies.some((cookie) => cookie.httpOnly && cookie.secure), "same-origin secure HttpOnly auth cookie missing");
 
   await page.goto(`${APP_BASE}/app/profili`, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.getByRole("heading", { name: "Le tue attività" }).waitFor({ timeout: 20000 });
-  assert.equal(new URL(page.url()).pathname, "/app/profili");
+  await page.waitForURL((url) => url.pathname === "/onboarding", { timeout: 20000 });
+  await page.getByRole("heading", { name: "Crea il profilo della tua attività" }).waitFor({ timeout: 20000 });
 
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.getByRole("heading", { name: "Le tue attività" }).waitFor({ timeout: 20000 });
+  await page.getByRole("heading", { name: "Crea il profilo della tua attività" }).waitFor({ timeout: 20000 });
   const refreshSession = await page.evaluate(async () => {
     const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "include" });
     return { status: response.status, body: await response.json().catch(() => null) };
@@ -106,8 +106,17 @@ try {
   assert.equal(refreshSession.status, 200);
   assert.equal(refreshSession.body?.user?.id || refreshSession.body?.data?.user?.id, authUserId);
 
-  await page.getByRole("button", { name: "Esci", exact: true }).click();
-  await page.waitForURL((url) => url.pathname === "/login", { timeout: 20000 });
+  const logout = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/sign-out", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    return { status: response.status, ok: response.ok };
+  });
+  assert.equal(logout.ok, true, `logout failed with HTTP ${logout.status}`);
+  await page.goto(`${APP_BASE}/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
 
   await page.goto(`${APP_BASE}/app/profili`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForURL((url) => url.pathname === "/login", { timeout: 20000 });
