@@ -34,6 +34,7 @@ jobs:
       - { name: FASE 6A design system and app shell regression, run: "npm run test:fase6a-design-system" }
       - { name: FASE 6B customer dashboard regression, run: "npm run test:fase6b-customer-dashboard" }
       - { name: FASE 6C content workflow UX regression, run: "npm run test:fase6c-content-workflow-ux" }
+      - { name: Mobile / desktop UI QA contract, run: "npm run test:mobile-desktop-ui-qa" }
       - { name: FASE 6D Admin UX regression, run: "npm run test:fase6d-admin-ux" }
       - { name: FASE 6E UX polish regression, run: "node tests/fase6e-ux-polish.test.mjs" }
       - { name: Audit Viewer ephemeral runtime static safety, run: "npm run test:audit-runtime-static" }
@@ -127,6 +128,17 @@ jobs:
         env: { OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}" }
         run: npm run test:openai-image-live
       - { name: Vercel build, run: "npm run build" }
+      - name: Install Playwright Chromium for UI QA
+        if: github.event_name == 'pull_request' && github.head_ref == 'gpt56/mobile-desktop-ui-qa'
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: Four viewport UI browser QA
+        if: github.event_name == 'pull_request' && github.head_ref == 'gpt56/mobile-desktop-ui-qa'
+        env:
+          UI_SMOKE_BASE: http://127.0.0.1:4173
+          UI_SMOKE_START_LOCAL: "1"
+        run: node tests/mobile-desktop-ui-browser.mjs
       - { name: Cloudflare bundle dry run, run: "npx wrangler deploy --dry-run" }
 
   fresh-database:

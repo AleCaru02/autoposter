@@ -423,12 +423,12 @@ export function CalendarPage() {
         })}
       </div></div>}
 
-      {viewMode === "WEEK" && <div className="calendar-week-grid">
+      {viewMode === "WEEK" && <div className="calendar-week-scroll" tabIndex={0} aria-label="Calendario settimanale, scorri orizzontalmente"><div className="calendar-week-grid">
         {weekKeys.map((key, index) => <section className={`calendar-week-day ${index >= 5 ? "weekend" : ""}`} key={key}>
           <header><button type="button" onClick={() => { setFocusDateKey(key); setViewMode("DAY"); }}>{shortDayLabel(key)}</button></header>
           <div className="day-events">{(jobsByDate.get(key) ?? []).map(renderJob)}</div>
         </section>)}
-      </div>}
+      </div></div>}
 
       {viewMode === "DAY" && <div className="calendar-day-detail">
         <header><h3>{dayLabel(focusDateKey)}</h3><span>{selectedProfile.timezone}</span></header>

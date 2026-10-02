@@ -70,6 +70,22 @@ function providerLabel(provider: string) {
   return labels[provider.toUpperCase()] ?? provider;
 }
 
+function visualGenerationErrorMessage(value: string | null) {
+  const code = (value ?? "").toUpperCase();
+  if (!code) return "";
+  if (code.includes("CREDIT_BALANCE_EXHAUSTED") || code.includes("INSUFFICIENT_QUOTA") || code.includes("BILLING")) {
+    return "Generazione immagini bloccata: il credito o la fatturazione OpenAI non sono disponibili. Il copy è già salvo; ricarica il credito prima di riprovare.";
+  }
+  if (code.includes("429") || code.includes("RATE_LIMIT")) {
+    return "Generazione immagini temporaneamente limitata dal servizio. Il copy è già salvo; riprova più tardi.";
+  }
+  if (code.includes("401") || code.includes("403") || code.includes("AUTH") || code.includes("PERMISSION")) {
+    return "Generazione immagini non autorizzata. Verifica la configurazione OpenAI prima di riprovare.";
+  }
+  return "Generazione immagini non completata. Il copy è già salvo; puoi riprovare solo il visuale.";
+}
+
+
 export function ApprovalsPage() {
   const { selectedProfile } = useProfiles();
   const [items, setItems] = useState<ContentItemRow[]>([]);
@@ -412,14 +428,14 @@ export function ApprovalsPage() {
                       <p><strong>Gerarchia:</strong> {slide.hierarchy}</p>
                       <p><strong>Visuale:</strong> {slide.visual_brief}</p>
                       {slideAsset ? <figure className="approval-image"><img src={slideAsset.storage_url} alt={slide.alt_text} /><figcaption>Visuale slide {slide.position} · {slideAsset.source}</figcaption></figure> : <div className="no-image-state">Visuale slide {slide.position} non ancora generato.</div>}
-                      {slide.visual_generation_status === "FAIL" && <p className="manual-warning">Visuale fallito. Il testo della slide è salvo e non verrà rigenerato. {slide.visual_generation_error ? `Errore: ${slide.visual_generation_error}` : ""}</p>}
+                      {slide.visual_generation_status === "FAIL" && <p className="manual-warning">{visualGenerationErrorMessage(slide.visual_generation_error)}</p>}
                       <button className="secondary-button" type="button" disabled={busy[`slide-image-${slide.id}`] || slide.visual_generation_status === "GENERATING"} onClick={() => void generateCarouselSlideImage(variant, slide)}><ImageIcon size={16} /> {busy[`slide-image-${slide.id}`] || slide.visual_generation_status === "GENERATING" ? "Generazione visuale…" : slide.visual_generation_status === "FAIL" ? "Riprova visuale slide" : slideAsset ? "Rigenera visuale slide" : "Genera visuale slide"}</button>
                     </article>;
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
                 </div> : <>
                   {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
-                  {variant.visual_generation_status === "FAIL" && <p className="manual-warning">Generazione visuale fallita. Il copy è già salvo: il retry rigenera solo l'immagine. {variant.visual_generation_error ? `Errore: ${variant.visual_generation_error}` : ""}</p>}
+                  {variant.visual_generation_status === "FAIL" && <p className="manual-warning">{visualGenerationErrorMessage(variant.visual_generation_error)}</p>}
                 </>}
                 <details className="decision-record"><summary>Approvazione · {workflowStatusLabel(variant.workflow_status)}</summary>
                   <dl>
