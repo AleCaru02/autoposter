@@ -81,7 +81,7 @@ export function AssetsPage() {
 
   useEffect(()=>{ void load(); },[load]);
 
-  const availableVariants = useMemo(() => variants.filter((item)=>!item.image_asset_id),[variants]);
+  const availableVariants = useMemo(() => variants,[variants]);
 
   async function upload(files: FileList|null) {
     if (!selectedProfile?.id || !files?.length || busy) return;
