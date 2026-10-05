@@ -84,13 +84,14 @@ export function AssetsPage() {
   const availableVariants = useMemo(() => variants,[variants]);
 
   async function upload(files: FileList|null) {
-    if (!selectedProfile?.id || !files?.length || busy) return;
+    const selectedFiles = files ? Array.from(files) : [];
+    if (!selectedProfile?.id || selectedFiles.length === 0 || busy) return;
     setBusy(true); setError(null);
     try {
       const token = await authenticatedApiToken();
       const form = new FormData();
       form.set("profileId",selectedProfile.id);
-      [...files].forEach((file)=>form.append("images",file));
+      selectedFiles.forEach((file)=>form.append("images",file));
       const response = await fetch("/api/assets",{
         method:"POST",
         headers:{authorization:`Bearer ${token}`},
