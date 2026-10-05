@@ -70,5 +70,7 @@ assert.match(app,/path="libreria"/);
 assert.match(shell,/\/app\/libreria/);
 assert.match(assetsPage,/const availableVariants = useMemo\(\(\) => variants,\[variants\]\);/,"manual recovery must allow replacing an existing pending visual");
 assert.doesNotMatch(assetsPage,/variants\.filter\(\(item\)=>!item\.image_asset_id\)/,"pending variants with an existing blocked visual must remain selectable");
+assert.match(assetsPage,/const selectedFiles = files \? Array\.from\(files\) : \[\];/,"upload must snapshot FileList before the first await");
+assert.match(assetsPage,/selectedFiles\.forEach\(\(file\)=>form\.append\("images",file\)\)/,"upload must append the snapshotted files");
 
 console.log("Asset library runtime: PASS");
