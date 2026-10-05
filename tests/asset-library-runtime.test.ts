@@ -65,7 +65,10 @@ assert.doesNotMatch(deleteContent,/from\("assets"\)\.delete/,"content deletion m
 
 const app=fs.readFileSync("src/App.tsx","utf8");
 const shell=fs.readFileSync("src/components/app-shell.tsx","utf8");
+const assetsPage=fs.readFileSync("src/pages/assets-page.tsx","utf8");
 assert.match(app,/path="libreria"/);
 assert.match(shell,/\/app\/libreria/);
+assert.match(assetsPage,/const availableVariants = useMemo\(\(\) => variants,\[variants\]\);/,"manual recovery must allow replacing an existing pending visual");
+assert.doesNotMatch(assetsPage,/variants\.filter\(\(item\)=>!item\.image_asset_id\)/,"pending variants with an existing blocked visual must remain selectable");
 
 console.log("Asset library runtime: PASS");
