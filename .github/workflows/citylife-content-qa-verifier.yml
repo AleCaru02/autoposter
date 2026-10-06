@@ -42,15 +42,57 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error -X POST             -H "x-citylife-qa-token: $CITYLIFE_QA_TOKEN_VALUE"             -H "content-type: application/json"             --data '{}' "$CITYLIFE_QA_URL" > citylife-qa.json
+          http_status="$(
+            curl --silent --show-error \
+              -X POST \
+              -H "x-citylife-qa-token: $CITYLIFE_QA_TOKEN_VALUE" \
+              -H "content-type: application/json" \
+              --data '{}' \
+              --dump-header citylife-qa.headers \
+              --output citylife-qa.json \
+              --write-out '%{http_code}' \
+              "$CITYLIFE_QA_URL"
+          )"
+          export CITYLIFE_QA_HTTP_STATUS="$http_status"
           node - <<'NODE'
           const fs=require('fs');
-          const body=JSON.parse(fs.readFileSync('citylife-qa.json','utf8'));
-          if(body.error) throw new Error(body.error);
+          const status=Number(process.env.CITYLIFE_QA_HTTP_STATUS||0);
+          const rawHeaders=fs.readFileSync('citylife-qa.headers','utf8');
+          const header=(name)=>{
+            const prefix=`${name.toLowerCase()}:`;
+            const lines=rawHeaders.split(/\r?\n/);
+            for(let i=lines.length-1;i>=0;i--){
+              if(lines[i].toLowerCase().startsWith(prefix)) return lines[i].slice(prefix.length).trim();
+            }
+            return null;
+          };
+          const contentType=header('content-type');
+          const requestId=header('x-citylife-qa-request-id');
+          const rawBody=fs.readFileSync('citylife-qa.json','utf8');
+          let body=null;
+          try{ body=JSON.parse(rawBody); }catch{}
+          console.log('CITYLIFE_QA_HTTP_STATUS',status);
+          console.log('CITYLIFE_QA_CONTENT_TYPE',contentType||'UNKNOWN');
+          console.log('CITYLIFE_QA_REQUEST_ID',requestId||'NONE');
+          if(!body){
+            console.log('CITYLIFE_QA_ERROR_BODY',JSON.stringify({error:'NON_JSON_RESPONSE',requestId:requestId||null}));
+            process.exit(1);
+          }
+          if(status>=400||body.error){
+            const safe={
+              error:body.error??null,
+              type:body.type??null,
+              code:body.code??null,
+              message:body.message??null,
+              requestId:body.requestId??requestId??null
+            };
+            console.log('CITYLIFE_QA_ERROR_BODY',JSON.stringify(safe));
+            process.exit(1);
+          }
           console.log('CITYLIFE_CONTENT_QA_RESULT',JSON.stringify(body));
           NODE
       - name: Cleanup verifier files
         if: always()
         run: |
           shred -u .citylife-qa-secrets.env 2>/dev/null || rm -f .citylife-qa-secrets.env
-          rm -f citylife-qa.json
+          rm -f citylife-qa.json citylife-qa.headers
