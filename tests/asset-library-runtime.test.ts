@@ -72,5 +72,10 @@ assert.match(assetsPage,/const availableVariants = useMemo\(\(\) => variants,\[v
 assert.doesNotMatch(assetsPage,/variants\.filter\(\(item\)=>!item\.image_asset_id\)/,"pending variants with an existing blocked visual must remain selectable");
 assert.match(assetsPage,/const selectedFiles = files \? Array\.from\(files\) : \[\];/,"upload must snapshot FileList before the first await");
 assert.match(assetsPage,/selectedFiles\.forEach\(\(file\)=>form\.append\("images",file\)\)/,"upload must append the snapshotted files");
+assert.match(runtime,/previewAssetId/,"asset library must expose authenticated per-asset previews");
+assert.match(runtime,/select storage_url,mime_type/,"preview endpoint must fetch binary source only for one asset");
+assert.doesNotMatch(runtime,/select id::text,profile_id::text,content_id::text,source,kind,name,storage_url,mime_type/,"library metadata list must not inline every base64 image");
+assert.match(assetsPage,/previewAssetId=\$\{encodeURIComponent\(asset\.id\)\}/,"frontend must fetch previews separately");
+assert.match(assetsPage,/URL\.createObjectURL\(blob\)/,"frontend must render authenticated preview blobs");
 
 console.log("Asset library runtime: PASS");

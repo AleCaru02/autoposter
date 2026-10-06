@@ -95,8 +95,32 @@ export async function handleAssetLibrary(request: Request, env: Env): Promise<Re
     if (!uuid(profileId)) return json({ error: "PROFILE_REQUIRED" }, 400);
     if (!await ownsProfile(sql, profileId, authUserId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
 
+    const previewAssetId = url.searchParams.get("previewAssetId") || "";
+    if (previewAssetId) {
+      if (!uuid(previewAssetId)) return json({ error: "ASSET_REQUIRED" }, 400);
+      const previews = await sql`
+        select storage_url,mime_type
+        from public.assets
+        where id=${previewAssetId}::uuid and profile_id=${profileId}::uuid
+        limit 1
+      ` as unknown as Array<{storage_url:string;mime_type:string|null}>;
+      const preview = previews[0];
+      if (!preview) return json({ error: "ASSET_NOT_FOUND" }, 404);
+      const match = /^data:([^;,]+);base64,(.+)$/.exec(preview.storage_url);
+      if (!match) return json({ error: "ASSET_PREVIEW_UNAVAILABLE" }, 409);
+      const binary = atob(match[2]);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return new Response(bytes, {
+        headers: {
+          "content-type": match[1] || preview.mime_type || "application/octet-stream",
+          "cache-control": "private, max-age=300",
+        },
+      });
+    }
+
     const rows = await sql`
-      select id::text,profile_id::text,content_id::text,source,kind,name,storage_url,mime_type,tags,metadata,
+      select id::text,profile_id::text,content_id::text,source,kind,name,mime_type,tags,metadata,
              provider,model,cost_eur::float8,width,height,format,quality_status,identity_status,
              publication_usage,reuse_count,last_used_at::text,content_hash,created_at::text,updated_at::text
       from public.assets
