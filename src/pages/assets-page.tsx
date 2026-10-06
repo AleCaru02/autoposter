@@ -57,6 +57,7 @@ export function AssetsPage() {
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string|null>(null);
   const [selectedVariants,setSelectedVariants] = useState<Record<string,string>>({});
+  const [previewUrls,setPreviewUrls] = useState<Record<string,string>>({});
 
   const load = useCallback(async () => {
     if (!selectedProfile?.id) return;
@@ -72,8 +73,28 @@ export function AssetsPage() {
       });
       const body = await response.json().catch(()=>({})) as AssetResponse;
       if (!response.ok) throw new Error(body.error || "ASSET_LIBRARY_LOAD_FAILED");
-      setAssets(body.assets ?? []);
+      const nextAssets = body.assets ?? [];
+      setAssets(nextAssets);
       setVariants(body.variants ?? []);
+      void Promise.all(nextAssets.map(async (asset) => {
+        try {
+          const previewResponse = await fetch(`/api/assets?profileId=${encodeURIComponent(selectedProfile.id)}&previewAssetId=${encodeURIComponent(asset.id)}`, {
+            headers:{ authorization:`Bearer ${token}` },
+          });
+          if (!previewResponse.ok) return null;
+          const blob = await previewResponse.blob();
+          return [asset.id,URL.createObjectURL(blob)] as const;
+        } catch {
+          return null;
+        }
+      })).then((entries) => {
+        const next: Record<string,string> = {};
+        for (const entry of entries) if (entry) next[entry[0]] = entry[1];
+        setPreviewUrls((current) => {
+          for (const value of Object.values(current)) URL.revokeObjectURL(value);
+          return next;
+        });
+      });
     } catch {
       setError("Non riesco a caricare la libreria immagini.");
     } finally { setBusy(false); }
@@ -176,7 +197,7 @@ export function AssetsPage() {
 
     <section className="asset-grid">
       {assets.map((asset)=><article className="asset-card" key={asset.id}>
-        <div className="asset-preview"><img src={asset.storage_url} alt={asset.name}/></div>
+        <div className="asset-preview">{previewUrls[asset.id] ? <img src={previewUrls[asset.id]} alt={asset.name}/> : <span>Caricamento anteprima…</span>}</div>
         <div className="asset-card-body">
           <div className="asset-card-title"><strong>{asset.name}</strong><span>{PROVIDER_LABELS[asset.provider ?? ""] ?? "Immagine"}</span></div>
           <div className="asset-meta">
