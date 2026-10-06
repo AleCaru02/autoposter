@@ -1,0 +1,56 @@
+name: CityLife Content QA Verifier
+# DO NOT MERGE — exact product Content/Visual QA against the already-authorized CityLife variant.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/citylife-content-qa-verifier.yml"
+      - "tests/citylife-content-qa-controller.mjs"
+      - "tests/wrangler.citylife-content-qa.jsonc"
+
+jobs:
+  qa:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/citylife-content-qa'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - { name: Checkout verifier branch, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Prepare isolated QA preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          alias="citylifeqa-${GITHUB_RUN_ID}"
+          echo "::add-mask::$token"
+          echo "CITYLIFE_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "CITYLIFE_QA_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'CITYLIFE_QA_TOKEN=%s\n' "$token" > .citylife-qa-secrets.env
+          chmod 600 .citylife-qa-secrets.env
+      - name: Upload isolated QA preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.citylife-content-qa.jsonc --keep-vars --preview-alias "citylifeqa-${GITHUB_RUN_ID}" --secrets-file .citylife-qa-secrets.env
+      - name: Run exact product Content and Visual QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error -X POST             -H "x-citylife-qa-token: $CITYLIFE_QA_TOKEN_VALUE"             -H "content-type: application/json"             --data '{}' "$CITYLIFE_QA_URL" > citylife-qa.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const body=JSON.parse(fs.readFileSync('citylife-qa.json','utf8'));
+          if(body.error) throw new Error(body.error);
+          console.log('CITYLIFE_CONTENT_QA_RESULT',JSON.stringify(body));
+          NODE
+      - name: Cleanup verifier files
+        if: always()
+        run: |
+          shred -u .citylife-qa-secrets.env 2>/dev/null || rm -f .citylife-qa-secrets.env
+          rm -f citylife-qa.json
