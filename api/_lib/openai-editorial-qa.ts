@@ -1,6 +1,7 @@
 import { estimateTerraCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { platformCopyStrategyPrompt } from "./social-platform-strategy.js";
 import { languageQualityPrompt } from "./language-quality.js";
+import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
 export type EditorialQAResult = {
   verdict: "PASS" | "BLOCK";
@@ -100,7 +101,7 @@ export async function runOpenAIEditorialQA(input: {
   fetcher?: typeof fetch;
 }): Promise<EditorialQAResult> {
   const fetcher = input.fetcher ?? fetch;
-  const response = await fetcher("https://api.openai.com/v1/responses", {
+  const request: RequestInit = {
     method: "POST",
     headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -133,10 +134,14 @@ export async function runOpenAIEditorialQA(input: {
       text: { verbosity: "low", format: { type: "json_schema", name: "post_automatici_editorial_qa", strict: true, schema: QA_SCHEMA } },
       max_output_tokens: 1000,
     }),
+  };
+  const { response, raw } = await fetchOpenAiQaWithRetry({
+    fetcher,
+    url: "https://api.openai.com/v1/responses",
+    init: request,
   });
   const requestId = response.headers.get("x-request-id");
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`OPENAI_EDITORIAL_QA_HTTP_${response.status}`);
+  if (!response.ok) throw new Error(openAiQaFailureCode("OPENAI_EDITORIAL_QA", response, raw));
   const body = JSON.parse(raw) as Record<string, unknown>;
   const text = outputText(body);
   if (!text) throw new Error("OPENAI_EDITORIAL_QA_EMPTY_OUTPUT");
