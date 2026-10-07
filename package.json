@@ -54,6 +54,7 @@
     "test:openai-research-factcheck": "tsx tests/openai-research-factcheck.test.ts",
     "test:openai-strategy-planner": "tsx tests/openai-strategy-planner.test.ts",
     "test:openai-editorial-qa": "tsx tests/openai-editorial-qa.test.ts",
+    "test:openai-qa-retry": "tsx tests/openai-qa-retry.test.ts",
     "test:autopilot-ai-plan": "tsx tests/autopilot-ai-plan.test.ts",
     "test:learning-engine": "tsx tests/learning-engine.test.ts",
     "test:feedback-loop": "tsx tests/feedback-loop.test.ts",
