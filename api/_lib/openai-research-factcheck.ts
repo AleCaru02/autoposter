@@ -1,5 +1,6 @@
 import type { EditorialResearchMode } from "./editorial-research.js";
 import { buildSourceRecords } from "./source-intelligence.js";
+import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
 export type ResearchEvidence = {
   claim: string;
@@ -167,7 +168,7 @@ async function callStructured(input: {
   fetcher?: typeof fetch;
 }) {
   const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
-  const response = await fetcher("https://api.openai.com/v1/responses", {
+  const request: RequestInit = {
     method: "POST",
     headers: { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -185,10 +186,14 @@ async function callStructured(input: {
       text: { verbosity: "low", format: { type: "json_schema", name: input.schemaName, strict: true, schema: input.schema } },
       max_output_tokens: 2400,
     }),
+  };
+  const { response, raw } = await fetchOpenAiQaWithRetry({
+    fetcher,
+    url: "https://api.openai.com/v1/responses",
+    init: request,
   });
   const requestId = response.headers.get("x-request-id");
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`OPENAI_AGENT_HTTP_${response.status}`);
+  if (!response.ok) throw new Error(openAiQaFailureCode("OPENAI_AGENT", response, raw));
   const body = JSON.parse(raw) as Record<string, unknown>;
   const output = extractOutputText(body);
   if (!output) throw new Error("OPENAI_AGENT_EMPTY_OUTPUT");

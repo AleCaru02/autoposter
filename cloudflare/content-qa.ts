@@ -16,6 +16,7 @@ function statusFor(detail: string) {
   if (detail.includes("CONTENT_QA_DISABLED") || detail.includes("CONTENT_QA_LIMIT_REACHED")) return 429;
   if (detail.includes("CONTENT_QA_IN_PROGRESS") || detail.includes("CONTENT_QA_RETRY_REQUIRED")) return 409;
   if (detail.includes("OPENAI_NOT_CONFIGURED")) return 503;
+  if (/^OPENAI_(?:AGENT|EDITORIAL_QA|VISUAL_QA)_HTTP_429/.test(detail)) return 503;
   return 500;
 }
 
@@ -51,6 +52,7 @@ export async function handleContentQa(request: Request, env: Env) {
     const detail = reason instanceof Error ? reason.message : "CONTENT_QA_FAILED";
     const status = statusFor(detail);
     console.error("content-qa", { profileId, contentId, variantId, status, code: detail.split(":")[0] });
-    return json({ error: status === 500 ? "CONTENT_QA_FAILED" : detail.split(":")[0] }, status);
+    const providerLimited = /^OPENAI_(?:AGENT|EDITORIAL_QA|VISUAL_QA)_HTTP_429/.test(detail);
+    return json({ error: providerLimited ? "CONTENT_QA_PROVIDER_RATE_LIMITED" : status === 500 ? "CONTENT_QA_FAILED" : detail.split(":")[0] }, status);
   }
 }
