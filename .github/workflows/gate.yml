@@ -93,6 +93,7 @@ jobs:
       - { name: OpenAI Research and Fact-check regression, run: "npm run test:openai-research-factcheck" }
       - { name: OpenAI strategist planner regression, run: "npm run test:openai-strategy-planner" }
       - { name: OpenAI editorial QA regression, run: "npm run test:openai-editorial-qa" }
+      - { name: OpenAI QA retry regression, run: "npm run test:openai-qa-retry" }
       - { name: Structured Content QA regression, run: "npm run test:content-qa" }
       - { name: Profile Autonomous SMM certification simulation, run: "npm run test:profile-smm-certification" }
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
