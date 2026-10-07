@@ -1,5 +1,6 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
+import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
 export type VisualQaStatus = "PASS" | "FAIL";
 
@@ -104,7 +105,7 @@ export async function runOpenAIVisualQa(input:{
 }):Promise<OpenAIVisualQaResult> {
   if (!/^data:image\/(?:jpeg|png|webp);base64,/i.test(input.imageUrl) && !/^https:\/\//i.test(input.imageUrl)) throw new Error("VISUAL_QA_IMAGE_REQUIRED");
   const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
-  const response=await fetcher("https://api.openai.com/v1/responses",{
+  const request:RequestInit={
     method:"POST",
     headers:{authorization:`Bearer ${input.apiKey}`,"content-type":"application/json"},
     body:JSON.stringify({
@@ -152,10 +153,14 @@ export async function runOpenAIVisualQa(input:{
       text:{verbosity:"low",format:{type:"json_schema",name:"post_automatici_visual_qa",strict:true,schema:SCHEMA}},
       max_output_tokens:800,
     }),
+  };
+  const {response,raw}=await fetchOpenAiQaWithRetry({
+    fetcher,
+    url:"https://api.openai.com/v1/responses",
+    init:request,
   });
   const requestId=response.headers.get("x-request-id");
-  const raw=await response.text();
-  if(!response.ok) throw new Error(`OPENAI_VISUAL_QA_HTTP_${response.status}`);
+  if(!response.ok) throw new Error(openAiQaFailureCode("OPENAI_VISUAL_QA",response,raw));
   const body=JSON.parse(raw) as Record<string,unknown>;
   const text=outputText(body);
   if(!text) throw new Error("OPENAI_VISUAL_QA_EMPTY_OUTPUT");
