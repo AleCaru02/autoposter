@@ -1,0 +1,96 @@
+name: AUTH Current Production E2E
+# DO NOT MERGE — isolated verifier only.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/auth-current-production-e2e.yml"
+      - "tests/auth-current-email-password-e2e.mjs"
+      - "tests/auth-current-e2e-controller.mjs"
+      - "tests/wrangler.auth-current-e2e.jsonc"
+
+concurrency:
+  group: auth-current-production-e2e
+  cancel-in-progress: false
+
+jobs:
+  email_password_e2e:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/auth-current-production-e2e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - { name: Checkout verifier branch, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install repository dependencies, run: "npm install --no-audit --no-fund" }
+
+      - name: Generate ephemeral verifier material
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="${GITHUB_RUN_ID}"
+          password=$(openssl rand -base64 36 | tr -d '\n')
+          token=$(openssl rand -hex 32)
+          alias="authqa-${GITHUB_RUN_ID}"
+          echo "::add-mask::$password"
+          echo "::add-mask::$token"
+          echo "AUTHQA_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "AUTHQA_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "AUTHQA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "AUTHQA_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'AUTHQA_TOKEN=%s\n' "$token" > .auth-current-e2e-secrets.env
+          chmod 600 .auth-current-e2e-secrets.env
+
+      - name: Upload isolated cleanup controller
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload             --config tests/wrangler.auth-current-e2e.jsonc             --keep-vars             --preview-alias "authqa-${GITHUB_RUN_ID}"             --secrets-file .auth-current-e2e-secrets.env             | tee auth-current-e2e-upload.log
+
+      - name: Verify clean Auth QA preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST             -H 'content-type: application/json'             -H "x-authqa-token: $AUTHQA_TOKEN_VALUE"             --data "{\"action\":\"preflight\",\"marker\":\"$AUTHQA_MARKER\"}"             "$AUTHQA_CONTROLLER_URL" > auth-current-e2e-preflight.json
+          node - <<'NODE'
+          const b=require('./auth-current-e2e-preflight.json');
+          for (const key of ['qaUsers','sessions','accounts','appUsers','profiles','memberships']) {
+            if (b[key] !== 0) throw new Error(`AUTH_QA_PREFLIGHT_RESIDUE:${key}=${b[key]}`);
+          }
+          console.log('AUTH_QA_PREFLIGHT: PASS');
+          NODE
+
+      - name: Install Chromium
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.62.1
+          npx playwright install --with-deps chromium
+
+      - name: Production email password E2E
+        run: node tests/auth-current-email-password-e2e.mjs
+
+      - name: Cleanup ephemeral Auth QA identity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTHQA_CONTROLLER_URL:-}" ] || [ -z "${AUTHQA_TOKEN_VALUE:-}" ]; then exit 1; fi
+          status=$(curl -sS -o auth-current-e2e-cleanup.json -w "%{http_code}" -X POST             -H 'content-type: application/json'             -H "x-authqa-token: $AUTHQA_TOKEN_VALUE"             --data "{\"action\":\"cleanup\",\"marker\":\"$AUTHQA_MARKER\"}"             "$AUTHQA_CONTROLLER_URL" || true)
+          CLEANUP_STATUS="$status" node - <<'NODE'
+          const b=require('./auth-current-e2e-cleanup.json');
+          if (process.env.CLEANUP_STATUS !== '200' || b.cleaned !== true) throw new Error('AUTH_QA_CLEANUP_HTTP_FAILED');
+          for (const key of ['qaUsers','sessions','accounts','appUsers','profiles','memberships']) {
+            if (b[key] !== 0) throw new Error(`AUTH_QA_CLEANUP_RESIDUE:${key}=${b[key]}`);
+          }
+          console.log('AUTH_QA_CLEANUP: PASS');
+          NODE
+
+      - name: Remove ephemeral verifier material
+        if: always()
+        run: |
+          shred -u .auth-current-e2e-secrets.env 2>/dev/null || rm -f .auth-current-e2e-secrets.env
+          rm -f auth-current-e2e-*.json auth-current-e2e-upload.log

@@ -1,0 +1,56 @@
+name: Google Auth Linking Diagnostic
+# DO NOT MERGE — read-only Auth diagnostic only.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/google-auth-linking-diagnostic.yml"
+      - "tests/google-auth-linking-diagnostic-controller.mjs"
+      - "tests/wrangler.google-auth-diagnostic.jsonc"
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/auth-current-production-e2e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - { name: Checkout verifier branch, uses: actions/checkout@v4 }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - { name: Install repository dependencies, run: "npm install --no-audit --no-fund" }
+      - name: Prepare isolated diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 32)
+          alias="authdiag-${GITHUB_RUN_ID}"
+          echo "::add-mask::$token"
+          echo "AUTHDIAG_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "AUTHDIAG_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
+          printf 'AUTHDIAG_TOKEN=%s\n' "$token" > .authdiag-secrets.env
+          chmod 600 .authdiag-secrets.env
+      - name: Upload read-only diagnostic preview
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --config tests/wrangler.google-auth-diagnostic.jsonc --keep-vars --preview-alias "authdiag-${GITHUB_RUN_ID}" --secrets-file .authdiag-secrets.env
+      - name: Diagnose Google account linking
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H 'content-type: application/json' -H "x-authdiag-token: $AUTHDIAG_TOKEN_VALUE" --data '{}' "$AUTHDIAG_URL" > authdiag.json
+          node - <<'NODE'
+          const b=require('./authdiag.json');
+          if (b.error) throw new Error(b.error);
+          console.log('GOOGLE_AUTH_LINKING_DIAGNOSTIC', JSON.stringify(b));
+          NODE
+      - name: Remove diagnostic material
+        if: always()
+        run: |
+          shred -u .authdiag-secrets.env 2>/dev/null || rm -f .authdiag-secrets.env
+          rm -f authdiag.json
