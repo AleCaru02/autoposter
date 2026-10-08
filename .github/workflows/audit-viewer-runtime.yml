@@ -10,178 +10,141 @@ concurrency:
 jobs:
   runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - { name: Checkout, uses: actions/checkout@v4 }
+      - name: Checkout selected verifier ref
+        uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - name: Setup Node
         uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - { name: Install, run: "npm install --no-audit --no-fund" }
+      - name: Install
+        run: npm install --no-audit --no-fund
 
-      - name: Static safety gate
+      - name: Pin production base and verifier-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="3c9697ae83a3422fafc2711658e7986b608349b1"
+          [ "$GITHUB_REF_NAME" = "verify/fase5-onboarding-runtime" ] || { echo "wrong verifier branch" >&2; exit 1; }
+          [ "$(git merge-base HEAD "$expected")" = "$expected" ] || { echo "production base mismatch" >&2; exit 1; }
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            case "$path" in
+              .github/workflows/audit-viewer-runtime.yml|.github/workflows/gate.yml|tests/audit-viewer-runtime-static.test.mjs|tests/onboarding-runtime*|tests/wrangler.onboarding-runtime.jsonc) ;;
+              *) echo "product diff detected: $path" >&2; exit 1 ;;
+            esac
+          done <<< "$(git diff --name-only "$expected"...HEAD)"
+          echo "FASE 5A verifier scope: PASS"
+
+      - name: Static pre-certification gate
         run: |
           npm run typecheck
-          npm run test:platform-rbac
-          npm run test:fase3-core
-          npm run test:admin-audit-viewer
+          npm run test:onboarding-provisioning
+          npm run test:tenant-security
+          npm run test:tenant-cross-security
+          node tests/onboarding-runtime-static.test.mjs
+          npm run build
+          npx wrangler versions upload --dry-run --config tests/wrangler.onboarding-runtime.jsonc
 
-      - name: Generate ephemeral smoke identity material
+      - name: Generate ephemeral onboarding QA material
         shell: bash
         run: |
           set -euo pipefail
-          marker="${GITHUB_RUN_ID}"
+          marker="$GITHUB_RUN_ID"
           password=$(openssl rand -hex 24)
           token=$(openssl rand -hex 32)
-          alias="auditqa-${GITHUB_RUN_ID}"
-          customer_email="audit-smoke-${marker}-customer@example.invalid"
-          admin_email="audit-smoke-${marker}-admin@example.invalid"
+          alias="onboardqa-$GITHUB_RUN_ID"
           echo "::add-mask::$password"
           echo "::add-mask::$token"
-          echo "::add-mask::$customer_email"
-          echo "::add-mask::$admin_email"
-          echo "AUDIT_SMOKE_MARKER=$marker" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_PASSWORD=$password" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
-          echo "AUDIT_PREVIEW_ALIAS=$alias" >> "$GITHUB_ENV"
-          echo "AUDIT_SMOKE_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev/" >> "$GITHUB_ENV"
-          printf 'AUDIT_SMOKE_TOKEN=%s\n' "$token" > .audit-runtime-secrets.env
-          chmod 600 .audit-runtime-secrets.env
+          echo "ONBOARDING_QA_MARKER=$marker" >> "$GITHUB_ENV"
+          echo "ONBOARDING_QA_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "ONBOARDING_QA_TOKEN_VALUE=$token" >> "$GITHUB_ENV"
+          echo "ONBOARDING_QA_CONTROLLER_URL=https://${alias}-autoposter.02alessandrocaruso.workers.dev" >> "$GITHUB_ENV"
+          printf 'ONBOARDING_QA_TOKEN=%s\n' "$token" > .onboarding-runtime-secrets.env
+          chmod 600 .onboarding-runtime-secrets.env
 
-      - name: Upload fixed-scope controller as non-deployed Worker version
+      - name: Upload cleanup controller as isolated Preview version
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler versions upload \
-            --config tests/wrangler.audit-runtime.jsonc \
-            --keep-vars \
-            --preview-alias "$AUDIT_PREVIEW_ALIAS" \
-            --secrets-file .audit-runtime-secrets.env | tee audit-upload.log
-          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' audit-upload.log | tail -n 1)
-          if ! printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'; then
-            echo "preview version id not captured" >&2
-            exit 1
-          fi
-          echo "EPHEMERAL_CONTROLLER_VERSION_ID=$version_id" >> "$GITHUB_ENV"
-          echo "AUDIT_PREVIEW_UPLOADED=true" >> "$GITHUB_ENV"
+          alias="onboardqa-$GITHUB_RUN_ID"
+          npx wrangler versions upload --config tests/wrangler.onboarding-runtime.jsonc --keep-vars --preview-alias "$alias" --secrets-file .onboarding-runtime-secrets.env | tee onboarding-upload.log
+          version_id=$(sed -n 's/^Worker Version ID: \([0-9a-fA-F-]*\)$/\1/p' onboarding-upload.log | tail -n 1)
+          printf '%s' "$version_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}$'
+          echo "ONBOARDING_QA_PREVIEW_VERSION_ID=$version_id" >> "$GITHUB_ENV"
+          shred -u .onboarding-runtime-secrets.env 2>/dev/null || rm -f .onboarding-runtime-secrets.env
 
-      - name: Verify preview version is isolated from production deployments
+      - name: Verify Preview isolation from production
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
-            -o audit-deployments-before.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o onboarding-deployments-before.json
           node - <<'NODE'
-          const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-deployments-before.json', 'utf8'));
-          if (body?.success !== true) throw new Error('Cloudflare deployment read failed');
-          const result = body.result;
-          const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
-          if (deployments.length === 0) throw new Error('no production deployments returned');
-          const deploymentIds = deployments.map((item) => String(item.id || '')).filter(Boolean).sort();
-          const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((version) => String(version.version_id || '')) : []).filter(Boolean))].sort();
-          const ephemeral = process.env.EPHEMERAL_CONTROLLER_VERSION_ID || '';
-          if (!ephemeral) throw new Error('ephemeral controller version missing');
-          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller version is attached to a production deployment');
-          fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_PRODUCTION_DEPLOYMENT_IDS=${deploymentIds.join(',')}\nAUDIT_PRODUCTION_VERSION_IDS=${versionIds.join(',')}\n`);
-          console.log('AUDIT_PREVIEW_ISOLATION: PASS', JSON.stringify({ ephemeralVersionId: ephemeral, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, attachedToProduction: false }));
+          const fs=require('node:fs');const body=JSON.parse(fs.readFileSync('onboarding-deployments-before.json','utf8'));
+          if(body?.success!==true) throw new Error('deployment read failed');
+          const source=Array.isArray(body.result?.deployments)?body.result.deployments:Array.isArray(body.result)?body.result:[];
+          const deployments=source.map(x=>String(x.id||'')).filter(Boolean).sort();
+          const versions=[...new Set(source.flatMap(x=>Array.isArray(x.versions)?x.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
+          if(!source.length||versions.includes(process.env.ONBOARDING_QA_PREVIEW_VERSION_ID||'')) throw new Error('Preview isolation failed');
+          fs.appendFileSync(process.env.GITHUB_ENV,`ONBOARDING_PRODUCTION_DEPLOYMENTS=${deployments.join(',')}\nONBOARDING_PRODUCTION_VERSIONS=${versions.join(',')}\n`);
+          console.log('ONBOARDING_PREVIEW_ISOLATION: PASS',JSON.stringify({previewAttached:false,productionVersions:versions}));
           NODE
 
-      - name: Preview controller preflight and stale QA recovery
+      - name: Preflight and stale QA recovery
         shell: bash
         run: |
           set -euo pipefail
-          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-            -H 'content-type: application/json' -H 'x-audit-smoke-token: wrong' \
-            --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
-          if [ "$wrong" != "403" ]; then
-            echo "preview token gate failed: HTTP $wrong" >&2
-            exit 1
-          fi
-
-          read_preflight() {
-            curl -sS -o audit-preflight.json -w "%{http_code}" -X POST \
-              -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-              --data "{\"action\":\"preflight\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-              "$AUDIT_SMOKE_CONTROLLER_URL"
-          }
-
-          status=$(read_preflight)
-          if [ "$status" != "200" ]; then
-            echo "preview preflight failed HTTP $status" >&2
-            exit 1
-          fi
-          stale=$(node -e "const b=require('./audit-preflight.json'); process.stdout.write(String(Number(b.recognizedQaUsers||0)))")
-          if [ "$stale" -gt 0 ]; then
-            echo "STALE QA RESIDUE: recognized verifier fixtures=$stale; applying exact-namespace cleanup"
-            cleanup_status=$(curl -sS -o audit-stale-cleanup.json -w "%{http_code}" -X POST \
-              -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-              --data "{\"action\":\"cleanup-residue\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-              "$AUDIT_SMOKE_CONTROLLER_URL")
-            CLEANUP_STATUS="$cleanup_status" node -e "const fs=require('node:fs'); const body=JSON.parse(fs.readFileSync('audit-stale-cleanup.json','utf8')); if(process.env.CLEANUP_STATUS!=='200'||body.cleaned!==true) throw new Error('stale QA residue cleanup failed'); if(body.recognizedQaUsers!==0||body.recognizedQaAdmins!==0) throw new Error('stale QA residue remains after scoped cleanup'); console.log('STALE_QA_RESIDUE_CLEANUP: PASS',JSON.stringify({cleanedUsers:body.cleanedUsers,cleanedAdmins:body.cleanedAdmins}));"
-            status=$(read_preflight)
-            if [ "$status" != "200" ]; then
-              echo "post-residue preflight failed HTTP $status" >&2
-              exit 1
-            fi
-          fi
-
+          call_controller() { curl -sS -o "$2" -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-onboarding-qa-token: $ONBOARDING_QA_TOKEN_VALUE" --data "{\"action\":\"$1\",\"marker\":\"$ONBOARDING_QA_MARKER\"}" "$ONBOARDING_QA_CONTROLLER_URL"; }
+          wrong=$(curl -sS -o /dev/null -w "%{http_code}" -X POST -H 'content-type: application/json' -H 'x-onboarding-qa-token: wrong' --data "{\"action\":\"preflight\",\"marker\":\"$ONBOARDING_QA_MARKER\"}" "$ONBOARDING_QA_CONTROLLER_URL" || true)
+          [ "$wrong" = "403" ] || { echo "controller token gate failed" >&2; exit 1; }
+          status=$(call_controller preflight onboarding-preflight.json); [ "$status" = "200" ] || exit 1
+          stale=$(node -e "const b=require('./onboarding-preflight.json');process.stdout.write(String(Number(b.recognizedQaUsers||0)+Number(b.recognizedQaAudit||0)))")
+          if [ "$stale" -gt 0 ]; then cleanup=$(call_controller cleanup-residue onboarding-stale-cleanup.json); [ "$cleanup" = "200" ] || exit 1; status=$(call_controller preflight onboarding-preflight.json); fi
           PREFLIGHT_STATUS="$status" node - <<'NODE'
-          const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-preflight.json', 'utf8'));
-          if (process.env.PREFLIGHT_STATUS !== '200') throw new Error(`preflight HTTP ${process.env.PREFLIGHT_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaSessions','qaAdmins','recognizedQaUsers','recognizedQaAdmins']) {
-            if (body[key] !== 0) throw new Error(`preflight residue ${key}=${body[key]}`);
-          }
-          if (body.superAdmins !== 1) throw new Error(`real SUPER_ADMIN baseline ${body.superAdmins}`);
-          if (body.profilesWithoutOwner !== 0) throw new Error(`profilesWithoutOwner baseline ${body.profilesWithoutOwner}`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_BASELINE_PROFILES=${body.profilesTotal}\nCONTROLLER_READY=true\n`);
-          console.log('AUDIT_PREFLIGHT: PASS', JSON.stringify({ superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner, recognizedQaUsers: body.recognizedQaUsers }));
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('onboarding-preflight.json','utf8'));
+          if(process.env.PREFLIGHT_STATUS!=='200') throw new Error('preflight failed');
+          for(const k of ['qaUsers','recognizedQaUsers','qaProfiles','qaOwners','qaAssignments','qaEntitlements','qaOperations','qaAudit','recognizedQaAudit']) if(b[k]!==0) throw new Error(`residue ${k}=${b[k]}`);
+          if(b.profilesWithoutOwner!==0) throw new Error('owner invariant failed');
+          fs.appendFileSync(process.env.GITHUB_ENV,`ONBOARDING_BASELINE_PROFILES=${b.profilesTotal}\nONBOARDING_CONTROLLER_READY=true\n`);
+          console.log('ONBOARDING_PREFLIGHT: PASS',JSON.stringify({profiles:b.profilesTotal,qaResidue:0}));
           NODE
 
-      - name: Authenticated Audit API runtime
-        run: node tests/audit-viewer-runtime.mjs
-
-      - name: Install Playwright + Chromium
+      - name: FASE 5A authenticated onboarding runtime
+        shell: bash
         run: |
-          npm install --no-save --no-audit --no-fund playwright@1.62.1
-          npx playwright install --with-deps chromium
+          set -euo pipefail
+          node tests/onboarding-runtime.mjs | tee onboarding-runtime-output.log
 
-      - name: Audit Viewer desktop/mobile browser runtime
-        run: node tests/audit-viewer-browser.mjs
-
-      - name: Cleanup ephemeral smoke identities and data
+      - name: Sensitive output scan
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${CONTROLLER_READY:-}" != "true" ]; then
-            echo "CLEANUP_CONTROLLER_NOT_READY: no smoke identities were authorized for creation"
-            exit 0
-          fi
-          status=$(curl -sS -o audit-cleanup.json -w "%{http_code}" -X POST \
-            -H 'content-type: application/json' -H "x-audit-smoke-token: $AUDIT_SMOKE_TOKEN_VALUE" \
-            --data "{\"action\":\"cleanup\",\"marker\":\"$AUDIT_SMOKE_MARKER\"}" \
-            "$AUDIT_SMOKE_CONTROLLER_URL" || true)
+          files=""
+          for f in onboarding-runtime-output.log onboarding-upload.log onboarding-preflight.json onboarding-stale-cleanup.json; do [ -f "$f" ] && files="$files $f"; done
+          if [ -n "$files" ] && grep -Eini '(sk-[A-Za-z0-9_-]{16,}|postgres(ql)?://[^[:space:]]+|Authorization:[[:space:]]*Bearer[[:space:]]+[A-Za-z0-9._-]{20,}|Set-Cookie:|Cookie:|ONBOARDING_QA_(TOKEN_VALUE|PASSWORD)=|DATABASE_URL=)' $files > onboarding-sensitive-findings.txt; then cat onboarding-sensitive-findings.txt >&2; exit 1; fi
+          echo "sensitiveFindings=0"
+
+      - name: Cleanup onboarding QA fixtures
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${ONBOARDING_CONTROLLER_READY:-}" != "true" ]; then echo "ONBOARDING_CLEANUP_NOT_ARMED"; exit 0; fi
+          status=$(curl -sS -o onboarding-cleanup.json -w "%{http_code}" -X POST -H 'content-type: application/json' -H "x-onboarding-qa-token: $ONBOARDING_QA_TOKEN_VALUE" --data "{\"action\":\"cleanup\",\"marker\":\"$ONBOARDING_QA_MARKER\"}" "$ONBOARDING_QA_CONTROLLER_URL" || true)
           CLEANUP_STATUS="$status" node - <<'NODE'
-          const fs = require('node:fs');
-          const body = JSON.parse(fs.readFileSync('audit-cleanup.json', 'utf8'));
-          if (process.env.CLEANUP_STATUS !== '200' || body.cleaned !== true) throw new Error(`cleanup failed HTTP ${process.env.CLEANUP_STATUS}`);
-          for (const key of ['qaUsers','qaProfiles','qaOwners','qaAppUsers','qaSessions','qaAccounts','qaAdmins']) {
-            if (body[key] !== 0) throw new Error(`cleanup residue ${key}=${body[key]}`);
-          }
-          if (body.superAdmins !== 1) throw new Error(`post-cleanup SUPER_ADMIN count ${body.superAdmins}`);
-          if (body.profilesWithoutOwner !== 0) throw new Error(`post-cleanup profilesWithoutOwner ${body.profilesWithoutOwner}`);
-          if (String(body.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`profiles baseline mismatch ${body.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
-          console.log('AUDIT_CLEANUP: PASS', JSON.stringify({ qaUsers: 0, qaProfiles: 0, qaOwners: 0, qaSessions: 0, qaAdmins: 0, superAdmins: body.superAdmins, profilesTotal: body.profilesTotal, profilesWithoutOwner: body.profilesWithoutOwner }));
+          const fs=require('node:fs');const b=JSON.parse(fs.readFileSync('onboarding-cleanup.json','utf8'));
+          if(process.env.CLEANUP_STATUS!=='200'||b.cleaned!==true) throw new Error('cleanup failed');
+          for(const k of ['qaUsers','recognizedQaUsers','qaProfiles','qaOwners','qaAssignments','qaEntitlements','qaOperations','qaAudit','recognizedQaAudit']) if(b[k]!==0) throw new Error(`cleanup residue ${k}=${b[k]}`);
+          if(String(b.profilesTotal)!==String(process.env.ONBOARDING_BASELINE_PROFILES)||b.profilesWithoutOwner!==0) throw new Error('post-cleanup invariant failed');
+          console.log('ONBOARDING_CLEANUP: PASS',JSON.stringify({profiles:b.profilesTotal,qaResidue:0}));
           NODE
 
       - name: Post-cleanup production and deployment invariants
@@ -192,43 +155,23 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/tenant-audit -o tenant-audit.json
-          curl -fsS https://autoposter.02alessandrocaruso.workers.dev/api/security/managed-auth-capabilities -o auth-audit.json
-          curl -fsS \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" \
-            -o audit-deployments-after.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/autoposter/deployments" -o onboarding-deployments-after.json
           node - <<'NODE'
-          const fs = require('node:fs');
-          const tenant = JSON.parse(fs.readFileSync('tenant-audit.json', 'utf8'));
-          const auth = JSON.parse(fs.readFileSync('auth-audit.json', 'utf8'));
-          const cloudflare = JSON.parse(fs.readFileSync('audit-deployments-after.json', 'utf8'));
-          if (tenant?.ready !== true || tenant?.ownerContract?.ready !== true) throw new Error('production tenant/owner invariant not ready');
-          if (tenant.ownerContract.profilesWithoutOwner !== 0) throw new Error(`production profilesWithoutOwner ${tenant.ownerContract.profilesWithoutOwner}`);
-          if (auth?.managedAuth?.ready !== true || auth.managedAuth.nativeAdminUsers !== 1) throw new Error(`production native SUPER_ADMIN count ${auth?.managedAuth?.nativeAdminUsers}`);
-          if (process.env.AUDIT_BASELINE_PROFILES && String(tenant.ownerContract.profilesTotal) !== String(process.env.AUDIT_BASELINE_PROFILES)) throw new Error(`production profile baseline mismatch ${tenant.ownerContract.profilesTotal} != ${process.env.AUDIT_BASELINE_PROFILES}`);
-          if (cloudflare?.success !== true) throw new Error('Cloudflare post-runtime deployment read failed');
-          const result = cloudflare.result;
-          const deployments = Array.isArray(result?.deployments) ? result.deployments : Array.isArray(result) ? result : [];
-          const deploymentIds = deployments.map((item) => String(item.id || '')).filter(Boolean).sort();
-          const versionIds = [...new Set(deployments.flatMap((item) => Array.isArray(item.versions) ? item.versions.map((version) => String(version.version_id || '')) : []).filter(Boolean))].sort();
-          const beforeDeployments = String(process.env.AUDIT_PRODUCTION_DEPLOYMENT_IDS || '').split(',').filter(Boolean).sort();
-          const beforeVersions = String(process.env.AUDIT_PRODUCTION_VERSION_IDS || '').split(',').filter(Boolean).sort();
-          if (JSON.stringify(deploymentIds) !== JSON.stringify(beforeDeployments)) throw new Error('production deployment set changed during Audit runtime');
-          if (JSON.stringify(versionIds) !== JSON.stringify(beforeVersions)) throw new Error('production deployment version set changed during Audit runtime');
-          const ephemeral = process.env.EPHEMERAL_CONTROLLER_VERSION_ID || '';
-          if (versionIds.includes(ephemeral)) throw new Error('ephemeral controller became attached to production after runtime');
-          console.log('AUDIT_POST_CLEANUP_PRODUCTION: PASS', JSON.stringify({ nativeAdminUsers: auth.managedAuth.nativeAdminUsers, profilesTotal: tenant.ownerContract.profilesTotal, profilesWithoutOwner: tenant.ownerContract.profilesWithoutOwner, productionDeploymentIds: deploymentIds, productionVersionIds: versionIds, ephemeralVersionId: ephemeral, attachedToProduction: false }));
+          const fs=require('node:fs');const body=JSON.parse(fs.readFileSync('onboarding-deployments-after.json','utf8'));
+          if(body?.success!==true) throw new Error('deployment read failed');
+          const source=Array.isArray(body.result?.deployments)?body.result.deployments:Array.isArray(body.result)?body.result:[];
+          const deployments=source.map(x=>String(x.id||'')).filter(Boolean).sort();const versions=[...new Set(source.flatMap(x=>Array.isArray(x.versions)?x.versions.map(v=>String(v.version_id||'')):[]).filter(Boolean))].sort();
+          const beforeD=String(process.env.ONBOARDING_PRODUCTION_DEPLOYMENTS||'').split(',').filter(Boolean).sort();const beforeV=String(process.env.ONBOARDING_PRODUCTION_VERSIONS||'').split(',').filter(Boolean).sort();
+          if(JSON.stringify(deployments)!==JSON.stringify(beforeD)||JSON.stringify(versions)!==JSON.stringify(beforeV)) throw new Error('production deployment set changed during onboarding runtime');
+          if(versions.includes(process.env.ONBOARDING_QA_PREVIEW_VERSION_ID||'')) throw new Error('Preview attached to production');
+          console.log('ONBOARDING_POST_CLEANUP_PRODUCTION: PASS',JSON.stringify({previewAttached:false,productionVersions:versions}));
           NODE
 
-      - name: Remove local ephemeral credential material
+      - name: Remove local ephemeral material
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f .audit-runtime-secrets.env ]; then
-            chmod 600 .audit-runtime-secrets.env || true
-            shred -u .audit-runtime-secrets.env 2>/dev/null || rm -f .audit-runtime-secrets.env
-          fi
-          rm -f audit-preflight.json audit-stale-cleanup.json audit-cleanup.json tenant-audit.json auth-audit.json audit-upload.log audit-deployments-before.json audit-deployments-after.json
-          echo "AUDIT_EPHEMERAL_SECRET_CLEANUP: PASS"
+          if [ -f .onboarding-runtime-secrets.env ]; then shred -u .onboarding-runtime-secrets.env 2>/dev/null || rm -f .onboarding-runtime-secrets.env; fi
+          rm -f onboarding-*.json onboarding-*.log onboarding-sensitive-findings.txt
+          echo "ONBOARDING_EPHEMERAL_MATERIAL_CLEANUP: PASS"
