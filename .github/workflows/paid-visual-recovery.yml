@@ -1,0 +1,30 @@
+name: Paid Visual Recovery Probe
+# DO NOT MERGE — one controlled gpt-image-2 generation using the same GitHub secret deployed to production.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/paid-visual-recovery.yml"
+      - "tests/paid-visual-recovery.mjs"
+
+jobs:
+  generate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'verify/paid-visual-recovery'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - { name: Checkout verifier branch, uses: actions/checkout@v4 }
+      - { name: Setup Node, uses: actions/setup-node@v4, with: { node-version: 22 } }
+      - name: Generate one CityLife visual with production OpenAI credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node tests/paid-visual-recovery.mjs
+      - name: Upload generated visual artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: citylife-paid-visual
+          path: paid-visual-output/
+          if-no-files-found: error
+          retention-days: 1
