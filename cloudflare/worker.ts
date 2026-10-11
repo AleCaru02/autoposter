@@ -433,7 +433,7 @@ async function handleGenerateImage(request: Request, env: Env) {
         storage_url: dataUrl,
         mime_type: result.mimeType,
         tags: [provider, format, "AI_GENERATED"],
-        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, format: result.outputFormat, prompt_version: result.promptVersion, generation_timestamp: result.generationTimestamp, cost_usd: result.usage.estimatedCostUsd, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
         provider: "OPENAI",
         model: result.model,
         cost_eur: actualEur,
@@ -481,6 +481,8 @@ async function handleGenerateImage(request: Request, env: Env) {
     }
     console.error("cloudflare-generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return json({ error: detail }, 429);
+    if (/OPENAI_IMAGE_HTTP_429_(CREDIT_BALANCE_EXHAUSTED|INSUFFICIENT_QUOTA|BILLING_HARD_LIMIT_REACHED|BILLING_NOT_ACTIVE|ACCOUNT_DEACTIVATED)/.test(detail)) return json({ error: "BLOCKED_BILLING" }, 429);
+    if (detail.startsWith("OPENAI_IMAGE_HTTP_429_")) return json({ error: "RETRYABLE_PROVIDER_RATE_LIMIT" }, 503);
     if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return json({ error: "BLOCKED_PROVIDER" }, 503);
     const status = detail.startsWith("METERING_FAILED") ? 503 : 500;
     return json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" }, status);

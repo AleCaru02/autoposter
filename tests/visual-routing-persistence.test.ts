@@ -16,7 +16,7 @@ const business=decideVisualRuntime({
   estimatedOpenAiCostEur:0.25,
 });
 assert.equal(business.provider,"OPENAI");
-assert.equal(business.model,"gpt-image-2");
+assert.equal(business.model,"gpt-image-2.5-sunburst");
 assert.equal(business.identityQaStatus,"NOT_REQUIRED");
 
 const fallback=decideVisualRuntime({

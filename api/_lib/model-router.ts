@@ -52,14 +52,14 @@ export const MODEL_REGISTRY = Object.freeze({
     capability: "TEXT",
     note: "Modello OpenAI configurabile per testo, ricerca, strategia e QA.",
   },
-  OPENAI_IMAGE_2: {
-    key: "OPENAI_IMAGE_2",
+  OPENAI_IMAGE_25_SUNBURST: {
+    key: "OPENAI_IMAGE_25_SUNBURST",
     provider: "OPENAI",
-    requestedName: "OpenAI Images 2",
-    apiModelId: "gpt-image-2",
+    requestedName: "GPT-Image-2.5 Sunburst",
+    apiModelId: "gpt-image-2.5-sunburst",
     status: "READY",
     capability: "IMAGE",
-    note: "Unico provider immagini ammesso per Post Automatici.",
+    note: "Modello obbligatorio per tutti i visual finali destinati alla pubblicazione.",
   },
 } satisfies Record<string, ModelDescriptor>);
 
@@ -99,15 +99,15 @@ export function routeAiTask(input: {
   }
 
   if (input.task === "IMAGE_STANDARD") {
-    const model = MODEL_REGISTRY.OPENAI_IMAGE_2;
-    return providerConfigured(model, input.env) ? { status: "READY", model, reason: "Visual standard: OpenAI Images 2." } : blocked(model, "OpenAI Images non configurato o modello non disponibile.");
+    const model = MODEL_REGISTRY.OPENAI_IMAGE_25_SUNBURST;
+    return providerConfigured(model, input.env) ? { status: "READY", model, reason: "Visual finale: GPT-Image-2.5 Sunburst." } : blocked(model, "OpenAI Images non configurato o modello Sunburst non disponibile.");
   }
 
   if (input.task === "IMAGE_PREMIUM") {
-    const model = MODEL_REGISTRY.OPENAI_IMAGE_2;
+    const model = MODEL_REGISTRY.OPENAI_IMAGE_25_SUNBURST;
     return providerConfigured(model, input.env)
-      ? { status: "READY", model, reason: importance === "PREMIUM" || importance === "CRITICAL" || input.difficultPhotoEditing ? "Visual premium giustificato: OpenAI Images 2." : "Visual standardizzato: OpenAI Images 2." }
-      : blocked(model, "OpenAI Images non configurato o modello non disponibile.");
+      ? { status: "READY", model, reason: importance === "PREMIUM" || importance === "CRITICAL" || input.difficultPhotoEditing ? "Visual premium: GPT-Image-2.5 Sunburst." : "Visual finale: GPT-Image-2.5 Sunburst." }
+      : blocked(model, "OpenAI Images non configurato o modello Sunburst non disponibile.");
   }
 
   if (input.task === "RESEARCH" || input.task === "FACT_CHECK") {

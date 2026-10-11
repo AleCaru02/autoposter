@@ -59,7 +59,7 @@ assert.match(prepublish,/force:true/);
 assert.match(prepublish,/REGENERATE_VISUAL_AND_QA/);
 assert.match(prepublish,/SAFE_VISUAL_VERSION/);
 assert.match(prepublish,/https:\/\/api\.openai\.com\/v1\/images\/generations/);
-assert.match(prepublish,/model:"gpt-image-2"/);
+assert.match(prepublish,/model:"gpt-image-2\.5-sunburst"/);
 assert.match(prepublish,/ActivityBudgetEngine/);
 assert.match(prepublish,/ImageGenerationMetering/);
 assert.match(prepublish,/persistTechnicalEvents/);
@@ -67,7 +67,7 @@ assert.match(prepublish,/runContentQa/);
 assert.match(prepublish,/approval_status='PENDING'/);
 assert.match(prepublish,/approved_by is null/);
 assert.match(prepublish,/external_post_id is null/);
-assert.match(prepublish,/result\.model!=="gpt-image-2"/);
+assert.match(prepublish,/result\.model!=="gpt-image-2\.5-sunburst"/);
 assert.match(prepublish,/NON usare mappe, cartografia, planimetrie, percorsi/);
 assert.match(prepublish,/quality_status,identity_status/);
 assert.match(prepublish,/,'PENDING','NOT_REQUIRED',/);
@@ -103,14 +103,15 @@ assert.match(editorial,/grammar/);
 assert.match(editorial,/hashtagFit/);
 assert.match(editorial,/slideChecks/);
 
+const spatialScores = {brandTitleSpacing:.95,headlineSafeArea:.95,textCollision:.98,textOverlap:.98,edgeMargin:.95,typographyLegibility:.95,visualHierarchy:.94,copyLegibility:.95,logoClearspace:.95,compositionBalance:.94};
 const pass = finalizeVisualQa({
   briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,
-  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,
+  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,...spatialScores,
 },"ok");
 assert.equal(pass.verdict,"PASS");
 const fail = finalizeVisualQa({
   briefMatch:.95,composition:.95,technicalQuality:.5,socialFormat:.95,brandSafety:.98,textSafety:.98,
-  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,
+  editorialQuality:.94,genericTemplate:.95,stockLike:.96,textDensity:.94,decorativeUsefulness:.93,...spatialScores,
 },"artefatti");
 assert.equal(fail.verdict,"FAIL");
 assert.equal(fail.checks.technicalQuality,"FAIL");
@@ -133,7 +134,7 @@ const visual = await runOpenAIVisualQa({
     return new Response(JSON.stringify({
       id:"resp_visual_qa",
       model:"gpt-5.6-terra",
-      output_text:JSON.stringify({scores:{briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,editorialQuality:.95,genericTemplate:.95,stockLike:.95,textDensity:.95,decorativeUsefulness:.95},reason:"coerente"}),
+      output_text:JSON.stringify({scores:{briefMatch:.95,composition:.95,technicalQuality:.95,socialFormat:.95,brandSafety:.98,textSafety:.98,editorialQuality:.95,genericTemplate:.95,stockLike:.95,textDensity:.95,decorativeUsefulness:.95,...spatialScores},reason:"coerente"}),
       usage:{input_tokens:100,output_tokens:40,total_tokens:140},
     }),{status:200,headers:{"x-request-id":"req_visual_qa"}});
   }) as typeof fetch,

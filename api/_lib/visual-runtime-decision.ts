@@ -44,7 +44,7 @@ export function decideVisualRuntime(input: {
     estimatedHiggsfieldCostEur: input.estimatedHiggsfieldCostEur,
   });
   const model = decision.provider === "OPENAI"
-    ? "gpt-image-2"
+    ? "gpt-image-2.5-sunburst"
     : decision.provider === "HIGGSFIELD"
       ? "soul_2"
       : null;

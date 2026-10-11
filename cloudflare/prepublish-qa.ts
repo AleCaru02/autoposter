@@ -196,7 +196,7 @@ async function generateConfirmedBriefImage(apiKey:string){
     response=await fetch("https://api.openai.com/v1/images/generations",{
       method:"POST",
       headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},
-      body:JSON.stringify({model:"gpt-image-2",prompt,size:"1024x1024",quality:"high",n:1,output_format:"png"}),
+      body:JSON.stringify({model:"gpt-image-2.5-sunburst",prompt,size:"2048x2048",quality:"high",n:1,output_format:"png"}),
     });
     raw=await response.text();
     if(response.ok) break;
@@ -221,13 +221,13 @@ async function generateConfirmedBriefImage(apiKey:string){
   const outputTokens=numeric(usage.output_tokens);
   const estimatedCostUsd=inputTokens!==null && outputTokens!==null ? estimateImageCostUsd(inputTokens,outputTokens) : null;
   return {
-    model:"gpt-image-2" as const,mimeType:"image/png" as const,base64,
-    size:"1024x1024" as const,aspectRatio:"1:1" as const,quality:"high" as const,
+    model:"gpt-image-2.5-sunburst" as const,mimeType:"image/png" as const,base64,
+    size:"2048x2048" as const,aspectRatio:"1:1" as const,quality:"high" as const,
     generationPrompt:prompt,requestId,usage:{estimatedCostUsd},
     technicalEvents:[{
-      operation:"GENERATE_SOCIAL_IMAGE" as const,model:"gpt-image-2",
+      operation:"GENERATE_SOCIAL_IMAGE" as const,model:"gpt-image-2.5-sunburst",
       inputTokens,outputTokens,costUsd:estimatedCostUsd,
-      metadata:{openai_request_id:requestId,quality:"high",size:"1024x1024",prepublish_direct_confirmed_brief:true},
+      metadata:{openai_request_id:requestId,quality:"high",size:"2048x2048",output_format:"png",prompt_version:"2026-10-11-images-2.5",prepublish_direct_confirmed_brief:true},
     }],
   };
 }
@@ -300,7 +300,7 @@ async function regenerateSafeVisual(input:{
     await meter.markProviderStarted(eventId,0.25);
     const brandVisual=normalizeBrandVisualIdentity(candidate.visual_identity);
     const result=await generateConfirmedBriefImage(env.OPENAI_API_KEY!);
-    if(result.model!=="gpt-image-2") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
+    if(result.model!=="gpt-image-2.5-sunburst") throw new Error("PREPUBLISH_IMAGE_MODEL_MISMATCH");
 
     await meter.persistTechnicalEvents(profileId,eventId,result.technicalEvents.map((event)=>({
       ...event,
@@ -319,7 +319,7 @@ async function regenerateSafeVisual(input:{
     const contentHash=await assetContentHashFromBase64(result.base64);
     const fingerprint=await visualFingerprint({visualBrief:SAFE_VISUAL_BRIEF,aspectRatio:result.aspectRatio});
     const metadata={
-      provider:"OPENAI",model:result.model,profile_type:candidate.profile_type,quality:result.quality,
+      provider:"OPENAI",model:result.model,profile_type:candidate.profile_type,quality:result.quality,format:"png",prompt_version:"2026-10-11-images-2.5",generation_timestamp:new Date().toISOString(),cost_usd:result.usage.estimatedCostUsd,
       size:result.size,aspect_ratio:result.aspectRatio,visual_brief:SAFE_VISUAL_BRIEF,
       visual_fingerprint:fingerprint,brand_palette:brandVisual.colors,brand_fonts:brandVisual.fonts,
       brand_visual_style:brandVisual.visualStyle,generation_prompt:result.generationPrompt.slice(0,8000),

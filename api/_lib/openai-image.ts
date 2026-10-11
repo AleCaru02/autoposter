@@ -2,13 +2,17 @@ import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { visualTextLanguageQualityPrompt } from "./language-quality.js";
+import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
 export type ImageSocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
-export type ImageSize = "1024x1024" | "1024x1536";
+export const FINAL_IMAGE_MODEL = "gpt-image-2.5-sunburst" as const;
+export const DRAFT_IMAGE_MODEL = "gpt-image-2.5-flare" as const;
+export const IMAGE_PROMPT_VERSION = "2026-10-11-images-2.5" as const;
 
-const GPT_IMAGE_2_TEXT_INPUT_PER_MILLION_USD = 5;
-const GPT_IMAGE_2_IMAGE_OUTPUT_PER_MILLION_USD = 30;
+export type FinalImageModel = typeof FINAL_IMAGE_MODEL;
+export type ImageQuality = "high" | "xhigh" | "max";
+export type ImageSize = "2048x2048" | "1536x1920" | "1440x2560";
 
 export type OpenAIImageUsage = {
   inputTokens: number | null;
@@ -38,15 +42,18 @@ export class OpenAIImagePipelineError extends Error {
 
 export type OpenAIImageResult = {
   provider: "OPENAI";
-  model: "gpt-image-2";
+  model: FinalImageModel;
   mimeType: "image/png";
   base64: string;
   revisedPrompt: string | null;
   generationPrompt: string;
   requestId: string | null;
   size: ImageSize;
-  aspectRatio: "1:1" | "2:3";
-  quality: "high";
+  aspectRatio: "1:1" | "4:5" | "9:16";
+  quality: ImageQuality;
+  outputFormat: "png";
+  promptVersion: typeof IMAGE_PROMPT_VERSION;
+  generationTimestamp: string;
   mediaManager: {
     model: "gpt-5.6-terra";
     responseId: string;
@@ -76,8 +83,16 @@ export type GenerateImageOptions = {
   fetcher?: typeof fetch;
 };
 
-export function imageSizeForFormat(format: ImageSocialFormat): ImageSize {
-  return format === "STORY" ? "1024x1536" : "1024x1024";
+export function imageSizeForFormat(format: ImageSocialFormat, provider?: ImageSocialProvider): ImageSize {
+  if (format === "STORY") return "1440x2560";
+  if (provider === "INSTAGRAM" || provider === "FACEBOOK") return "1536x1920";
+  return "2048x2048";
+}
+
+export function imageAspectRatioForFormat(format: ImageSocialFormat, provider?: ImageSocialProvider): OpenAIImageResult["aspectRatio"] {
+  if (format === "STORY") return "9:16";
+  if (provider === "INSTAGRAM" || provider === "FACEBOOK") return "4:5";
+  return "1:1";
 }
 
 function clean(value: string | null | undefined, max: number) {
@@ -148,13 +163,15 @@ function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export function estimateImageCostUsd(inputTokens: number, outputTokens: number) {
-  return (Math.max(inputTokens, 0) * GPT_IMAGE_2_TEXT_INPUT_PER_MILLION_USD + Math.max(outputTokens, 0) * GPT_IMAGE_2_IMAGE_OUTPUT_PER_MILLION_USD) / 1_000_000;
+export function estimateImageCostUsd(_inputTokens: number, _outputTokens: number) {
+  // The Images API response does not provide a reliable Sunburst cost field and
+  // this product must not carry gpt-image-2 pricing into the new final model.
+  return null;
 }
 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
   const fetcher: typeof fetch = options.fetcher ?? ((input, init) => globalThis.fetch(input, init));
-  const size = imageSizeForFormat(options.format);
+  const size = imageSizeForFormat(options.format, options.provider);
   const mediaManager = await runOpenAIMediaManager({
     apiKey: options.apiKey,
     profileName: options.profileName,
@@ -192,30 +209,29 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
         buildFallbackArtDirection(options),
       ].filter(Boolean).join("\n");
   const prompt = [promptBase, buildImageGuardrails(options)].filter(Boolean).join("\n\n");
-  const response = await fetcher("https://api.openai.com/v1/images/generations", {
+  const request: RequestInit = {
     method: "POST",
     headers: {
       authorization: `Bearer ${options.apiKey}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-image-2",
+      model: FINAL_IMAGE_MODEL,
       prompt,
       size,
       quality: "high",
       n: 1,
       output_format: "png",
     }),
+  };
+  const { response, raw, attempts } = await fetchOpenAiQaWithRetry({
+    fetcher,
+    url: "https://api.openai.com/v1/images/generations",
+    init: request,
   });
   const requestId = response.headers.get("x-request-id");
-  const raw = await response.text();
   if (!response.ok) {
-    let message = `OPENAI_IMAGE_HTTP_${response.status}`;
-    try {
-      const body = JSON.parse(raw) as { error?: { code?: string; message?: string } };
-      message = body.error?.code || body.error?.message || message;
-    } catch { /* keep generic status */ }
-    throw new OpenAIImagePipelineError(message, [mediaManagerEvent]);
+    throw new OpenAIImagePipelineError(openAiQaFailureCode("OPENAI_IMAGE", response, raw), [mediaManagerEvent]);
   }
   const body = JSON.parse(raw) as Record<string, unknown>;
   const data = Array.isArray(body.data) ? body.data : [];
@@ -229,23 +245,26 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   const totalCost = imageCost === null ? null : imageCost + mediaManager.usage.estimatedCostUsd;
   const imageEvent: OpenAIImageTechnicalEvent = {
     operation: "GENERATE_SOCIAL_IMAGE",
-    model: "gpt-image-2",
+    model: FINAL_IMAGE_MODEL,
     inputTokens: imageInputTokens,
     outputTokens: imageOutputTokens,
     costUsd: imageCost,
-    metadata: { openai_request_id: requestId, quality: "high", size },
+    metadata: { openai_request_id: requestId, quality: "high", size, output_format: "png", prompt_version: IMAGE_PROMPT_VERSION, retry_attempts: attempts },
   };
   return {
     provider: "OPENAI",
-    model: "gpt-image-2",
+    model: FINAL_IMAGE_MODEL,
     mimeType: "image/png",
     base64,
     revisedPrompt: first && typeof first.revised_prompt === "string" ? first.revised_prompt : null,
     generationPrompt: prompt,
     requestId,
     size,
-    aspectRatio: options.format === "STORY" ? "2:3" : "1:1",
+    aspectRatio: imageAspectRatioForFormat(options.format, options.provider),
     quality: "high",
+    outputFormat: "png",
+    promptVersion: IMAGE_PROMPT_VERSION,
+    generationTimestamp: typeof body.created === "number" ? new Date(body.created * 1_000).toISOString() : new Date().toISOString(),
     mediaManager: {
       model: mediaManager.model,
       responseId: mediaManager.responseId,

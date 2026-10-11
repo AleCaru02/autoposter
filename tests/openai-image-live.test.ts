@@ -18,7 +18,7 @@ const result = await generateOpenAIImage({
   caption: "Test tecnico di generazione immagine.",
 });
 
-assert.equal(result.model, "gpt-image-2");
+assert.equal(result.model, "gpt-image-2.5-sunburst");
 assert.equal(result.quality, "high");
 assert.equal(result.size, "1024x1024");
 assert.ok(result.base64.length > 1_000, "l'API deve restituire dati immagine reali");

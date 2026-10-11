@@ -6,7 +6,7 @@ function assetDetail(asset: Input["asset"]) {
   if (!asset) return { detail: "Nessun asset collegato: l’immagine resta da scegliere o generare.", state: "REVIEW" as const };
   const reused = metadata(asset.metadata).reuse_reason;
   if (typeof reused === "string") return { detail: `Asset riutilizzato perché compatibile (${reused.replaceAll("_", " ").toLowerCase()}). Nessuna nuova generazione a pagamento.`, state: "PASS" as const };
-  if (asset.source === "AI_IMAGE") return { detail: "Visuale generata con OpenAI gpt-image-2 e salvata nel catalogo asset.", state: "INFO" as const };
+  if (asset.source === "AI_IMAGE") return { detail: "Visuale generata con OpenAI Images e salvata nel catalogo asset.", state: "INFO" as const };
   return { detail: "Visuale scelta dal catalogo dell’attività: verifica che rappresenti ancora correttamente il contenuto.", state: "REVIEW" as const };
 }
 export function buildEditorialDecisionRecord(input: Input): EditorialDecisionRecord {
