@@ -124,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const profile = profiles[0];
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
     const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
-    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
+    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity, profile.industry);
 
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -218,7 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       profileType: profile.profile_type,
       industry: profile.industry,
       tone: summary(brands[0]?.tone_of_voice),
-      brandColors: brandVisual.colors,
+      brandColors: [brandVisual.activeSocialPalette.primary, brandVisual.activeSocialPalette.secondary, brandVisual.activeSocialPalette.accent, brandVisual.activeSocialPalette.neutral],
       brandFonts: brandVisual.fonts,
       brandVisualStyle: brandVisual.visualStyle,
       provider: requestedProvider,
@@ -260,7 +260,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             visual_brief: visualBrief,
             visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }),
             generation_prompt: result.generationPrompt.slice(0, 8_000),
-            brand_palette: brandVisual.colors,
+            brand_palette: brandVisual.activeSocialPalette,
+            typography_identity: brandVisual.typography,
             brand_fonts: brandVisual.fonts,
             brand_visual_style: brandVisual.visualStyle,
             provider_request_id: result.requestId,
