@@ -1,7 +1,4 @@
 import { Resvg, initWasm } from "@resvg/resvg-wasm";
-import resvgWasm from "@resvg/resvg-wasm/index_bg.wasm";
-import interRegular from "@fontsource/inter/files/inter-latin-400-normal.woff";
-import interBold from "@fontsource/inter/files/inter-latin-700-normal.woff";
 import { createTypographyLayout, escapeXml, type TypographyLayout } from "./deterministic-text-layout.js";
 
 /** Optional per-profile font data.  A complete pair is used as supplied; an
@@ -12,6 +9,12 @@ export type TypographyStyle = { panelColor?: string; textColor?: string; brandCo
 
 let rendererReady: Promise<void> | null = null;
 let fontsReady: Promise<{ regular: Uint8Array; bold: Uint8Array }> | null = null;
+let workerAssetsReady: Promise<typeof import("./deterministic-text-worker-assets.js")> | null = null;
+
+function workerAssets() {
+  workerAssetsReady ??= import("./deterministic-text-worker-assets.js");
+  return workerAssetsReady;
+}
 
 function bytes(asset: ArrayBuffer) {
   if (!(asset instanceof ArrayBuffer)) throw new Error("TEXT_COMPOSITOR_FONT_UNAVAILABLE");
@@ -19,7 +22,7 @@ function bytes(asset: ArrayBuffer) {
 }
 
 async function fonts() {
-  fontsReady ??= Promise.resolve({ regular: bytes(interRegular), bold: bytes(interBold) });
+  fontsReady ??= workerAssets().then(({ interRegular, interBold }) => ({ regular: bytes(interRegular), bold: bytes(interBold) }));
   return fontsReady;
 }
 
@@ -34,7 +37,7 @@ function effectiveFonts(brandFonts?: BrandFonts) {
 }
 
 async function ready() {
-  rendererReady ??= initWasm(resvgWasm);
+  rendererReady ??= workerAssets().then(({ resvgWasm }) => initWasm(resvgWasm));
   return rendererReady;
 }
 

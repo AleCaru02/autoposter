@@ -63,6 +63,7 @@
     "test:openai-image": "tsx tests/openai-image.test.ts",
     "test:openai-image-live": "tsx tests/openai-image-live.test.ts",
     "test:deterministic-text-compositor": "tsx tests/deterministic-text-compositor.test.ts",
+    "test:deterministic-text-node-import": "tsx tests/deterministic-text-node-import.test.ts",
     "test:content-workflow": "tsx tests/content-workflow.test.ts",
     "test:content-dedupe": "tsx tests/content-dedupe.test.ts",
     "test:calendar-workflow": "tsx tests/calendar-workflow.test.ts",
