@@ -7,6 +7,7 @@ const worker = fs.readFileSync("cloudflare/worker.ts", "utf8");
 const autopilot = fs.readFileSync("api/_lib/autopilot.ts", "utf8");
 const meter = fs.readFileSync("api/_lib/image-generation-metering.ts", "utf8");
 const image = fs.readFileSync("api/_lib/openai-image.ts", "utf8");
+const retry = fs.readFileSync("api/_lib/openai-qa-retry.ts", "utf8");
 const ui = fs.readFileSync("src/pages/approvals-page.tsx", "utf8");
 
 assert.equal(AI_IMAGE_GENERATE_CAPABILITY, "ai.image.generate");
@@ -23,6 +24,8 @@ for (const source of [manual, worker]) {
   assert.match(source, /reservation\.status === "DENIED"/);
   assert.match(source, /IMAGE_GENERATION_IN_PROGRESS/);
   assert.doesNotMatch(source, /body.*limitValue|body.*remaining/);
+  assert.match(source, /BLOCKED_BILLING/);
+  assert.match(source, /RETRYABLE_PROVIDER_RATE_LIMIT/);
 }
 assert.match(autopilot, /source:"AUTOPILOT"/);
 assert.match(autopilot, /autopilot:\$\{profile\.id\}:\$\{provider\}:\$\{scheduledAt\}:\$\{variantId\}/);
@@ -42,6 +45,14 @@ assert.match(meter, /PENDING_RECONCILIATION/);
 assert.match(meter, /logical_usage_event_id/);
 assert.match(meter, /where not exists/);
 assert.match(image, /OpenAIImagePipelineError/);
+assert.match(image, /FINAL_IMAGE_MODEL = "gpt-image-2\.5-sunburst"/);
+assert.doesNotMatch(image, /model:\s*"gpt-image-2"(?!\.5)/);
+assert.match(image, /quality:\s*"high"/);
+assert.match(image, /output_format:\s*"png"/);
+assert.match(image, /fetchOpenAiQaWithRetry/);
+assert.match(retry, /"insufficient_quota"/);
+assert.match(retry, /NON_RETRYABLE_429\.has\(kind\)/);
+assert.match(retry, /\$\{prefix\}_HTTP_\$\{response\.status\}_/);
 assert.match(manual, /generateRoutedImage/);
 assert.match(worker, /generateRoutedImage/);
 assert.match(autopilot, /generateRoutedImage/);

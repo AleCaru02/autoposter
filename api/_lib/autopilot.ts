@@ -406,7 +406,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
           ${imageAssetId}::uuid,${profile.id}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
           ${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},
           ${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,
-          ${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb,
+          ${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,format:image.outputFormat,prompt_version:image.promptVersion,generation_timestamp:image.generationTimestamp,cost_usd:image.usage.estimatedCostUsd,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb,
           'OPENAI',${image.model},${actualEur},${sizeMatch?Number(sizeMatch[1]):null},${sizeMatch?Number(sizeMatch[2]):null},
           ${image.aspectRatio},'PENDING','NOT_REQUIRED',${contentHash},now()
         )`;

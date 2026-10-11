@@ -105,7 +105,7 @@ export async function runOpenAIMediaManager(input: {
         "Non inventare sedi, persone reali, prodotti, risultati, certificazioni, prezzi, loghi o caratteristiche specifiche del brand che non siano presenti nel contesto.",
         "Non usare ricerca web. Non scrivere copy social: occupati soltanto del visual.",
         "Evita watermark, marchi di terzi, claim visivi non verificati, collage casuali, elementi decorativi senza funzione, fondi eccessivamente vuoti e look da template generico.",
-        "imagePrompt deve essere autosufficiente, concreto e production-ready per gpt-image-2; normalmente 700-1800 caratteri, con dettagli sufficienti su composizione, luce, profondità, texture e atmosfera senza riempitivo.",
+        "imagePrompt deve essere autosufficiente, concreto e production-ready per gpt-image-2.5-sunburst; normalmente 700-1800 caratteri, con dettagli sufficienti su composizione, luce, profondità, texture e atmosfera senza riempitivo.",
         "Restituisci esclusivamente JSON conforme allo schema.",
       ].join("\n"),
       input: JSON.stringify({

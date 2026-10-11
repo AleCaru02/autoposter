@@ -244,6 +244,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             profile_type: profile.profile_type,
             quality: result.quality,
             size: result.size,
+            format: result.outputFormat,
+            prompt_version: result.promptVersion,
+            generation_timestamp: result.generationTimestamp,
+            cost_usd: result.usage.estimatedCostUsd,
             aspect_ratio: result.aspectRatio,
             visual_brief: visualBrief,
             visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }),
@@ -310,6 +314,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     console.error("generate-image", { profileId, detail });
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
+    if (/OPENAI_IMAGE_HTTP_429_(CREDIT_BALANCE_EXHAUSTED|INSUFFICIENT_QUOTA|BILLING_HARD_LIMIT_REACHED|BILLING_NOT_ACTIVE|ACCOUNT_DEACTIVATED)/.test(detail)) return res.status(429).json({ error: "BLOCKED_BILLING" });
+    if (detail.startsWith("OPENAI_IMAGE_HTTP_429_")) return res.status(503).json({ error: "RETRYABLE_PROVIDER_RATE_LIMIT" });
     if (detail.startsWith("MODEL_ROUTER_BLOCKED_PROVIDER") || detail.startsWith("OPENAI_")) return res.status(503).json({ error: "BLOCKED_PROVIDER" });
     const status = detail.startsWith("METERING_FAILED") ? 503 : 500;
     return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "IMAGE_GENERATION_FAILED" });

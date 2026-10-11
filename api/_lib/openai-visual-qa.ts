@@ -19,6 +19,16 @@ export type OpenAIVisualQaResult = {
     stockLike: VisualQaStatus;
     textDensity: VisualQaStatus;
     decorativeUsefulness: VisualQaStatus;
+    brandTitleSpacing: VisualQaStatus;
+    headlineSafeArea: VisualQaStatus;
+    textCollision: VisualQaStatus;
+    textOverlap: VisualQaStatus;
+    edgeMargin: VisualQaStatus;
+    typographyLegibility: VisualQaStatus;
+    visualHierarchy: VisualQaStatus;
+    copyLegibility: VisualQaStatus;
+    logoClearspace: VisualQaStatus;
+    compositionBalance: VisualQaStatus;
   };
   scores: {
     briefMatch: number;
@@ -32,6 +42,16 @@ export type OpenAIVisualQaResult = {
     stockLike: number;
     textDensity: number;
     decorativeUsefulness: number;
+    brandTitleSpacing: number;
+    headlineSafeArea: number;
+    textCollision: number;
+    textOverlap: number;
+    edgeMargin: number;
+    typographyLegibility: number;
+    visualHierarchy: number;
+    copyLegibility: number;
+    logoClearspace: number;
+    compositionBalance: number;
   };
   model: "gpt-5.6-terra";
   responseId: string;
@@ -39,7 +59,7 @@ export type OpenAIVisualQaResult = {
   usage: { inputTokens: number; outputTokens: number; estimatedCostUsd: number };
 };
 
-const KEYS = ["briefMatch","composition","technicalQuality","socialFormat","brandSafety","textSafety","editorialQuality","genericTemplate","stockLike","textDensity","decorativeUsefulness"] as const;
+const KEYS = ["briefMatch","composition","technicalQuality","socialFormat","brandSafety","textSafety","editorialQuality","genericTemplate","stockLike","textDensity","decorativeUsefulness","brandTitleSpacing","headlineSafeArea","textCollision","textOverlap","edgeMargin","typographyLegibility","visualHierarchy","copyLegibility","logoClearspace","compositionBalance"] as const;
 
 const SCHEMA = {
   type: "object",
@@ -84,6 +104,16 @@ export function finalizeVisualQa(scoresRaw: Record<string,unknown>, reason="") {
     stockLike:0.86,
     textDensity:0.82,
     decorativeUsefulness:0.8,
+    brandTitleSpacing:0.85,
+    headlineSafeArea:0.85,
+    textCollision:0.9,
+    textOverlap:0.9,
+    edgeMargin:0.85,
+    typographyLegibility:0.88,
+    visualHierarchy:0.84,
+    copyLegibility:0.88,
+    logoClearspace:0.85,
+    compositionBalance:0.82,
   };
   const checks = Object.fromEntries(KEYS.map((key)=>[key,scores[key]>=thresholds[key]?"PASS":"FAIL"])) as OpenAIVisualQaResult["checks"];
   return { verdict:Object.values(checks).every((value)=>value==="PASS")?"PASS" as const:"FAIL" as const,checks,scores,reason };
@@ -131,6 +161,12 @@ export async function runOpenAIVisualQa(input:{
         "stockLike: score alto solo se la scena NON dipende da cliché stock. Penalizza chiavi, laptop, tazze, skyline, scrivanie, strette di mano e props generici usati come riempitivo senza funzione narrativa.",
         "textDensity: score alto quando la quantità di testo è adatta al formato e leggibile mobile. Penalizza sia muri di testo sia eccesso di vuoto informativo quando il brief richiede più punti.",
         "decorativeUsefulness: ogni elemento decorativo deve aiutare gerarchia, significato o brand. Penalizza icone, forme, props e texture aggiunti solo per riempire spazio.",
+        "brandTitleSpacing: valuta la distanza ottica e fisica fra brand/logo e titolo principale. Devono essere chiaramente separati e nessun elemento di branding deve sembrare attaccato all'headline.",
+        "headlineSafeArea ed edgeMargin: titolo, CTA e dettagli essenziali devono stare in una safe area generosa, lontani da bordi, crop potenziali e UI della piattaforma.",
+        "textCollision e textOverlap: score alto solo senza lettere, parole, logo, forme o soggetti che si toccano o si sovrappongono rendendo ambigua la lettura.",
+        "typographyLegibility e copyLegibility: verifica contrasto, dimensione, nitidezza, spaziatura e italiano naturale di ogni testo visibile. Se una parola è dubbia, tagliata o innaturale, penalizza con decisione.",
+        "visualHierarchy e compositionBalance: deve esistere un punto focale chiaro, pesi distribuiti in modo equilibrato e spazio negativo intenzionale; non deve sembrare sbilanciata o congestionata.",
+        "logoClearspace: se compare un logo o nome brand, conserva aria libera attorno e non comprimerlo contro headline, bordi o altri elementi.",
         "Non approvare per plausibilità: usa score prudente quando un requisito non è verificabile visivamente.",
         "Restituisci solo JSON conforme allo schema.",
       ].join("\n"),
