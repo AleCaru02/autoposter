@@ -180,7 +180,7 @@ assert.match(workerRuntime, /select=id,name,industry,profile_type/, "production 
 assert.match(workerRuntime, /select=tone_of_voice,visual_identity/, "production Worker image route must load the selected profile visual identity");
 assert.match(workerRuntime, /text_compositor: result\.textCompositor/, "production Worker must persist deterministic typography metadata");
 assert.match(workerRuntime, /profileType:\s*profile\.profile_type/, "production Worker must propagate Personal Brand vs Business");
-assert.match(workerRuntime, /brandColors:\s*brandVisual\.colors/, "production Worker must pass profile colors to OpenAI Images");
+assert.match(workerRuntime, /brandColors:\s*\[brandVisual\.activeSocialPalette\.primary/, "production Worker must pass the active profile palette to OpenAI Images");
 assert.match(workerRuntime, /brandFonts:\s*brandVisual\.fonts/, "production Worker must pass profile fonts to OpenAI Images");
 assert.match(workerRuntime, /brandVisualStyle:\s*brandVisual\.visualStyle/, "production Worker must pass profile visual style to OpenAI Images");
 

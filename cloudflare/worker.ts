@@ -324,7 +324,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     const profile = profiles[0];
     if (!profile) return json({ error: "PROFILE_NOT_FOUND" }, 404);
     const brands = await rows<Pick<BrandRow, "tone_of_voice" | "visual_identity">>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
-    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
+    const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity, profile.industry);
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
       const variantRows = await rows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id,hook&limit=1`, token);
@@ -411,7 +411,7 @@ async function handleGenerateImage(request: Request, env: Env) {
       profileType: profile.profile_type ?? "BUSINESS",
       industry: profile.industry,
       tone: summaryField(brands[0]?.tone_of_voice),
-      brandColors: brandVisual.colors,
+      brandColors: [brandVisual.activeSocialPalette.primary, brandVisual.activeSocialPalette.secondary, brandVisual.activeSocialPalette.accent, brandVisual.activeSocialPalette.neutral],
       brandFonts: brandVisual.fonts,
       brandVisualStyle: brandVisual.visualStyle,
       provider,
@@ -440,7 +440,7 @@ async function handleGenerateImage(request: Request, env: Env) {
         storage_url: dataUrl,
         mime_type: result.mimeType,
         tags: [provider, format, "AI_GENERATED"],
-        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, format: result.outputFormat, prompt_version: result.promptVersion, generation_timestamp: result.generationTimestamp, cost_usd: result.usage.estimatedCostUsd, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1", text_compositor: result.textCompositor },
+        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, format: result.outputFormat, prompt_version: result.promptVersion, generation_timestamp: result.generationTimestamp, cost_usd: result.usage.estimatedCostUsd, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.activeSocialPalette, brand_fonts: brandVisual.fonts, typography_identity: brandVisual.typography, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1", text_compositor: result.textCompositor },
         provider: "OPENAI",
         model: result.model,
         cost_eur: actualEur,
