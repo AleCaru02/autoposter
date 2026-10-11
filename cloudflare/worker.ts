@@ -1,8 +1,9 @@
 import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
-import type { ImageSocialFormat, ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { generateRoutedImage } from "../api/_lib/routed-image.js";
+import { preflightDeterministicTypography } from "../api/_lib/deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "../api/_lib/text-generation-metering.js";
 import { ActivityBudgetEngine } from "../api/_lib/activity-budget.js";
@@ -28,7 +29,7 @@ type BrandRow = { description: string | null; business_model: string | null; loc
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 type PageRow = { url: string; title: string | null; content_text: string | null };
-type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null };
+type VariantRow = { id: string; content_id: string; provider: ImageSocialProvider; format: ImageSocialFormat; image_asset_id: string | null; hook: string | null };
 type CarouselSlideImageRow = { id: string; content_id: string; variant_id: string; visual_brief: string; headline: string; body: string; alt_text: string; asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
 
@@ -326,7 +327,7 @@ async function handleGenerateImage(request: Request, env: Env) {
     const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity);
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
-      const variantRows = await rows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id&limit=1`, token);
+      const variantRows = await rows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id,hook&limit=1`, token);
       savedVariant = variantRows[0] ?? null;
       if (!savedVariant) return json({ error: "CONTENT_VARIANT_NOT_FOUND" }, 404);
       if (savedVariant.provider !== provider || savedVariant.format !== format) return json({ error: "CONTENT_VARIANT_MISMATCH" }, 409);
@@ -369,6 +370,11 @@ async function handleGenerateImage(request: Request, env: Env) {
         await dataApi(`content_items?id=eq.${encodeURIComponent(savedVariant.content_id)}&profile_id=eq.${encodeURIComponent(profileId)}`, token, { method: "PATCH", headers: { prefer: "return=minimal" }, body: JSON.stringify({ status: "IN_REVIEW", updated_at: now }) });
       }
       return json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
+    }
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null } : null;
+    if (typography) {
+      const [width, height] = imageSizeForFormat(format, provider).split("x").map(Number);
+      await preflightDeterministicTypography({ width, height, ...typography });
     }
     const meter = new ImageGenerationMetering(env.DATABASE_URL);
     activeMeter = meter;
@@ -413,6 +419,7 @@ async function handleGenerateImage(request: Request, env: Env) {
       visualBrief,
       caption,
       additionalDirection,
+      typography,
     });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, { source: "MANUAL", provider, format }));
@@ -433,7 +440,7 @@ async function handleGenerateImage(request: Request, env: Env) {
         storage_url: dataUrl,
         mime_type: result.mimeType,
         tags: [provider, format, "AI_GENERATED"],
-        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, format: result.outputFormat, prompt_version: result.promptVersion, generation_timestamp: result.generationTimestamp, cost_usd: result.usage.estimatedCostUsd, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1" },
+        metadata: { provider: "OPENAI", model: result.model, profile_type: profile.profile_type ?? "BUSINESS", quality: result.quality, size: result.size, format: result.outputFormat, prompt_version: result.promptVersion, generation_timestamp: result.generationTimestamp, cost_usd: result.usage.estimatedCostUsd, aspect_ratio: result.aspectRatio, visual_brief: visualBrief, visual_fingerprint: await visualFingerprint({ visualBrief, aspectRatio: result.aspectRatio }), brand_palette: brandVisual.colors, brand_fonts: brandVisual.fonts, brand_visual_style: brandVisual.visualStyle, generation_prompt: result.generationPrompt.slice(0, 8_000), provider_request_id: result.requestId, storage_mode: "DATABASE_DATA_URL_V1", text_compositor: result.textCompositor },
         provider: "OPENAI",
         model: result.model,
         cost_eur: actualEur,

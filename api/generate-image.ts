@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { ImageSocialFormat, ImageSocialProvider } from "./_lib/openai-image.js";
+import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { generateRoutedImage } from "./_lib/routed-image.js";
+import { preflightDeterministicTypography } from "./_lib/deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
@@ -20,6 +21,7 @@ type VariantRow = {
   provider: ImageSocialProvider;
   format: ImageSocialFormat;
   image_asset_id: string | null;
+  hook: string | null;
 };
 type CarouselSlideImageRow = { id: string; content_id: string; variant_id: string; visual_brief: string; headline: string; body: string; alt_text: string; asset_id: string | null };
 type AssetRow = ReusableAssetCandidate;
@@ -126,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
-      const rows = await readRows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id&limit=1`, token);
+      const rows = await readRows<VariantRow>(`content_variants?id=eq.${encodeURIComponent(contentVariantId)}&profile_id=eq.${encodeURIComponent(profileId)}&select=id,content_id,provider,format,image_asset_id,hook&limit=1`, token);
       savedVariant = rows[0] ?? null;
       if (!savedVariant) return res.status(404).json({ error: "CONTENT_VARIANT_NOT_FOUND" });
       if (savedVariant.provider !== requestedProvider || savedVariant.format !== requestedFormat) return res.status(409).json({ error: "CONTENT_VARIANT_MISMATCH" });
@@ -174,6 +176,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
     }
 
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null } : null;
+    if (typography) {
+      const [width, height] = imageSizeForFormat(requestedFormat, requestedProvider).split("x").map(Number);
+      await preflightDeterministicTypography({ width, height, ...typography });
+    }
     const meter = new ImageGenerationMetering(process.env.DATABASE_URL);
     activeMeter = meter;
     const reservation = await meter.reserve({
@@ -219,6 +226,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       visualBrief,
       caption,
       additionalDirection,
+      typography,
     });
     const dataUrl = `data:${result.mimeType};base64,${result.base64}`;
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromImageResult(result, {
@@ -257,6 +265,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             brand_visual_style: brandVisual.visualStyle,
             provider_request_id: result.requestId,
             storage_mode: "DATABASE_DATA_URL_V1",
+            text_compositor: result.textCompositor,
           },
         }),
       });

@@ -20,6 +20,7 @@ export type RoutedImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null } | null;
   reusableAssetAvailable?: boolean;
   difficultPhotoEditing?: boolean;
   fetcher?: typeof fetch;
@@ -57,6 +58,7 @@ export async function generateRoutedImage(options: RoutedImageOptions): Promise<
     visualBrief: options.visualBrief,
     caption: options.caption,
     additionalDirection: options.additionalDirection,
+    typography: options.typography ?? null,
     fetcher: options.fetcher,
   });
 }
