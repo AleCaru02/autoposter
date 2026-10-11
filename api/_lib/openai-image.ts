@@ -1,7 +1,6 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
-import { visualTextLanguageQualityPrompt } from "./language-quality.js";
 import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
 export type ImageSocialFormat = "POST" | "CAROUSEL" | "STORY";
@@ -54,6 +53,7 @@ export type OpenAIImageResult = {
   outputFormat: "png";
   promptVersion: typeof IMAGE_PROMPT_VERSION;
   generationTimestamp: string;
+  textCompositor: { renderer: "RESVG_WASM"; font: "Inter"; layout: Record<string, unknown> } | null;
   mediaManager: {
     model: "gpt-5.6-terra";
     responseId: string;
@@ -80,6 +80,7 @@ export type GenerateImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null } | null;
   fetcher?: typeof fetch;
 };
 
@@ -112,7 +113,6 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     : "POST/CAROUSEL: mantieni headline, soggetto ed elementi essenziali ad almeno circa l'8% dai bordi e leggibili in anteprima mobile.";
   return [
     "VINCOLI VISIVI OBBLIGATORI:",
-    visualTextLanguageQualityPrompt(),
     colors.length ? `Palette del profilo da rispettare: ${colors.join(", ")}. Usane 2-4 in modo coerente come colori dominanti/accento; non sostituirli con una palette arbitraria. Neutri sono ammessi solo per contrasto e leggibilità.` : "Se non è disponibile una palette confermata, scegli colori coerenti con il settore ma evita combinazioni arbitrarie o eccessivamente decorative.",
     fonts.length ? `Carattere tipografico osservato nel brand: ${fonts.join(", ")}. Mantieni una personalità tipografica coerente; non inventare uno stile editoriale opposto.` : "",
     options.brandVisualStyle ? `Stile visivo del profilo: ${clean(options.brandVisualStyle, 1_200)}.` : "",
@@ -123,10 +123,8 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Per luoghi reali, quartieri, mappe, metro, strade, landmark o percorsi: non inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o label fattuali. Senza dati geografici verificati o asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale.",
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
     "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
-    "Se il brief è educativo/informativo e contiene 3-5 punti esplicitamente supportati, puoi usare headline + sottotitolo breve + 3-5 blocchi compatti con mini-title/label già presenti nel brief. Non creare blocchi vuoti con soli numeri o icone.",
-    "Negli altri casi, se il brief richiede testo nell'immagine, usa esclusivamente il testo richiesto: massimo un headline e un eventuale sottotitolo breve. Non aggiungere microcopy, nomi di quartieri, numeri, pseudo-dati o didascalie inventate.",
-    "Evita titolo enorme con il resto della grafica quasi vuoto: il contenuto visuale deve avere una gerarchia completa, non un header sovradimensionato sopra elementi decorativi deboli.",
-    "Testo ad alto contrasto, grande e immediatamente leggibile su smartphone; non sovrapporlo a zone visivamente rumorose.",
+    "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
+    "Riserva una zona editoriale pulita, ad alto contrasto e senza soggetti nell'area superiore sinistra/centrale per il testo deterministico successivo. Mantieni separata questa safe zone dal soggetto e da elementi decorativi.",
     storySafety,
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
   ].filter(Boolean).join("\n");
@@ -150,7 +148,7 @@ function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" 
     "Costruisci una vera art direction: punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo, profondità, prospettiva, illuminazione, ombre, atmosfera, materiali e texture.",
     "Il risultato deve avere qualità editoriale premium e impatto da social feed, evitando look da stock, template vuoti, composizioni piatte o elementi decorativi casuali.",
     "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente.",
-    "Per una statica educativa con più punti, preferisci una struttura editoriale informativa: headline, subheadline breve, 3-5 blocchi con mini-title/label e icone pertinenti, brand palette e gerarchia forte. Non hardcodare questa struttura quando il contenuto non la richiede.",
+    "La tipografia e qualunque label saranno aggiunte dal renderer AutoPoster: costruisci soltanto immagine, scena, luce, palette e aree sicure.",
     "Evita props generici o stock-like (chiavi, laptop, tazze, fogli, skyline, strette di mano) se non spiegano davvero il messaggio.",
   ].filter(Boolean).join("\n");
 }
@@ -209,6 +207,8 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
         buildFallbackArtDirection(options),
       ].filter(Boolean).join("\n");
   const prompt = [promptBase, buildImageGuardrails(options)].filter(Boolean).join("\n\n");
+  const dimensions = /^(\d+)x(\d+)$/.exec(size);
+  let typographyLayout: Record<string, unknown> | null = null;
   const request: RequestInit = {
     method: "POST",
     headers: {
@@ -236,8 +236,15 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   const body = JSON.parse(raw) as Record<string, unknown>;
   const data = Array.isArray(body.data) ? body.data : [];
   const first = data[0] && typeof data[0] === "object" ? data[0] as Record<string, unknown> : null;
-  const base64 = first && typeof first.b64_json === "string" ? first.b64_json : "";
-  if (!base64) throw new OpenAIImagePipelineError("OPENAI_IMAGE_EMPTY_OUTPUT", [mediaManagerEvent]);
+  const generatedBase64 = first && typeof first.b64_json === "string" ? first.b64_json : "";
+  if (!generatedBase64) throw new OpenAIImagePipelineError("OPENAI_IMAGE_EMPTY_OUTPUT", [mediaManagerEvent]);
+  let base64 = generatedBase64;
+  if (options.typography && dimensions) {
+    const { composeDeterministicTypography } = await import("./deterministic-text-compositor.js");
+    const composed = await composeDeterministicTypography({ backgroundPngBase64: generatedBase64, width: Number(dimensions[1]), height: Number(dimensions[2]), ...options.typography });
+    base64 = composed.base64;
+    typographyLayout = composed.layout as unknown as Record<string, unknown>;
+  }
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const imageInputTokens = numberOrNull(usage.input_tokens);
   const imageOutputTokens = numberOrNull(usage.output_tokens);
@@ -265,6 +272,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     outputFormat: "png",
     promptVersion: IMAGE_PROMPT_VERSION,
     generationTimestamp: typeof body.created === "number" ? new Date(body.created * 1_000).toISOString() : new Date().toISOString(),
+    textCompositor: options.typography ? { renderer: "RESVG_WASM", font: "Inter", layout: typographyLayout ?? {} } : null,
     mediaManager: {
       model: mediaManager.model,
       responseId: mediaManager.responseId,

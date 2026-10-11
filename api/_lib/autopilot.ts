@@ -6,8 +6,9 @@ import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { runContentQa } from "./content-qa.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
-import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
+import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 import { generateRoutedImage } from "./routed-image.js";
+import { preflightDeterministicTypography } from "./deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./image-generation-metering.js";
 import { TextGenerationMetering, technicalEventsFromTextResult, type TechnicalAiEvent } from "./text-generation-metering.js";
 import type { ContentType } from "./content-agents.js";
@@ -391,8 +392,9 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         imageEventId=imageReservation.eventId;
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
+        const typography={brand:profile.name,headline:variant.hook,subheadline:null};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
         await imageMeter.markProviderStarted(imageEventId);
-        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:brandVisual.colors,brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, typography, infographic or other non-identifying elements only.":null});
+        const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:brandVisual.colors,brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
@@ -406,7 +408,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
           ${imageAssetId}::uuid,${profile.id}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
           ${`${provider}-${format}-${variantId}.png`},${dataUrl},${image.mimeType},
           ${JSON.stringify([provider,format,"AI_GENERATED","AUTOPILOT"])}::jsonb,
-          ${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,format:image.outputFormat,prompt_version:image.promptVersion,generation_timestamp:image.generationTimestamp,cost_usd:image.usage.estimatedCostUsd,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode})}::jsonb,
+          ${JSON.stringify({provider:"OPENAI",model:image.model,quality:image.quality,size:image.size,format:image.outputFormat,prompt_version:image.promptVersion,generation_timestamp:image.generationTimestamp,cost_usd:image.usage.estimatedCostUsd,aspect_ratio:image.aspectRatio,visual_brief:variant.visualBrief,visual_fingerprint:await visualFingerprint({visualBrief:variant.visualBrief,aspectRatio:image.aspectRatio}),provider_request_id:image.requestId,storage_mode:"DATABASE_DATA_URL_V1",visual_decision_reason:visualDecision.reasonCode,text_compositor:image.textCompositor})}::jsonb,
           'OPENAI',${image.model},${actualEur},${sizeMatch?Number(sizeMatch[1]):null},${sizeMatch?Number(sizeMatch[2]):null},
           ${image.aspectRatio},'PENDING','NOT_REQUIRED',${contentHash},now()
         )`;

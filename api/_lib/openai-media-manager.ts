@@ -2,7 +2,6 @@ import { estimateTerraCostUsd } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
-import { visualTextLanguageQualityPrompt } from "./language-quality.js";
 
 export type MediaManagerResult = {
   visualIntent: string;
@@ -80,7 +79,6 @@ export async function runOpenAIMediaManager(input: {
       reasoning: { effort: "low" },
       instructions: [
         "Sei il Media Manager e Visual Director senior di Post Automatici.",
-        visualTextLanguageQualityPrompt(),
         "Trasforma il brief editoriale già approvato in una vera art direction pronta per OpenAI Immagini 2: non limitarti a riscrivere o allungare il brief.",
         "Ogni imagePrompt deve descrivere una scena ricca, intenzionale e visivamente memorabile, evitando immagini corporate generiche, piatte, vuote o da stock.",
         "Definisci sempre: soggetto principale e dettagli secondari utili; primo piano, piano intermedio e sfondo; punto focale e gerarchia visiva; prospettiva o inquadratura; profondità; illuminazione, ombre e atmosfera; palette, materiali e texture; livello di realismo; uso intenzionale dello spazio negativo.",
@@ -91,13 +89,12 @@ export async function runOpenAIMediaManager(input: {
         "Se sono forniti font o indicazioni di stile visivo, rispettane il carattere tipografico e l'estetica generale. Non inventare un'identità editoriale diversa solo perché sembra più elegante.",
         "Quando il contenuto è concettuale o informativo, traduci il concetto in una metafora visuale concreta e pertinente al settore invece di produrre una semplice icona, mappa o sfondo decorativo.",
         "VISUAL = sintesi; CAPTION = approfondimento. Il visual deve anticipare il valore e la caption deve svilupparlo, senza duplicare lunghi paragrafi nell'immagine.",
-        "Per statiche educative/informative con 3-5 punti realmente presenti nel brief, costruisci una composizione editoriale completa: headline, eventuale subheadline, 3-5 blocchi con mini-title/label brevi e icone pertinenti. Non usare cinque card vuote con solo numeri o simboli.",
+        "Non generare testo nell'immagine: AutoPoster applica brand, headline, copy e CTA dopo la generazione con compositing PNG deterministico.",
         "Evita il pattern debole 'titolo enorme + molto spazio vuoto + icone decorative'. Ogni elemento secondario deve avere una funzione informativa o narrativa.",
         "Evita props stock-like e stereotipi di settore se non aggiungono significato: chiavi, laptop, tazze, skyline, stretta di mano, fogli o scrivanie generiche non sono un sostituto dell'art direction.",
         "Per luoghi reali, quartieri, mappe, metropolitane, strade, landmark o percorsi: NON inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o etichette fattuali. Se non sono forniti dati geografici verificati o un asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale senza pretendere accuratezza geografica.",
         "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se fosse realmente appartenente al brand, salvo che il brief lo confermi esplicitamente. Una scena sintetica deve restare illustrativa, non una falsa prova dell'attività.",
-        "Se il brief richiede esplicitamente testo nell'immagine, usa SOLO contenuti testuali supportati dal brief. Per statiche educative con punti nominati sono consentite mini-label brevi già presenti nel brief; non inventare claim o microcopy. Negli altri casi limita il testo a headline + eventuale sottotitolo breve.",
-        "Il testo richiesto deve avere forte contrasto, margini generosi e leggibilità immediata su smartphone; niente testo piccolo su sfondi complessi. Per POST/CAROUSEL mantieni gli elementi essenziali lontani almeno circa l'8% dai bordi.",
+        "Riserva una zona editoriale pulita ad alto contrasto nella parte superiore sinistra/centrale per il compositing del testo; nessuna lettera, numero, logo, watermark, label, badge o UI fittizia in qualunque parte dell'immagine.",
         "Per STORY costruisci una gerarchia verticale forte e lascia ampie zone sicure sopra e sotto per l'interfaccia social; concentra testo e soggetto nella parte centrale e mantieni gli elementi essenziali nella zona centrale anche in caso di ritaglio 9:16.",
         "Adatta composizione e densità alla piattaforma e al formato; la strategia visuale della piattaforma è un vincolo, non un suggerimento.",
         platformVisualStrategyPrompt(input.provider),

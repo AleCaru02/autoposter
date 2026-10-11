@@ -6,6 +6,13 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "rules": [
+    {
+      "type": "Data",
+      "globs": ["**/*.woff"],
+      "fallthrough": true
+    }
+  ],
   "keep_vars": true,
   "vars": {
     "SAFE_MODE": "true",
