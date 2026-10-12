@@ -139,6 +139,40 @@ function extractColors(source: string, counts: Map<string, number>) {
     if (!color) continue;
     counts.set(color, (counts.get(color) ?? 0) + 1);
   }
+  extractReferencedHslCustomProperties(source, counts);
+}
+
+function hslChannelColor(value: string) {
+  const match = value.trim().match(/^([+-]?(?:\d*\.\d+|\d+)(?:deg)?)\s+([+-]?(?:\d*\.\d+|\d+)%)\s+([+-]?(?:\d*\.\d+|\d+)%)(?:\s*\/\s*([+-]?(?:\d*\.\d+|\d+)%?))?$/i);
+  if (!match) return null;
+  const hue = Number.parseFloat(match[1]);
+  const saturation = Number.parseFloat(match[2]);
+  const lightness = Number.parseFloat(match[3]);
+  const rawAlpha = match[4];
+  const alpha = rawAlpha ? (rawAlpha.endsWith("%") ? Number.parseFloat(rawAlpha) / 100 : Number.parseFloat(rawAlpha)) : 1;
+  if (![hue, saturation, lightness, alpha].every(Number.isFinite) || saturation < 0 || saturation > 100 || lightness < 0 || lightness > 100 || alpha <= 0 || alpha > 1) return null;
+  const normalizedHue = ((hue % 360) + 360) % 360;
+  const chroma = (1 - Math.abs(2 * (lightness / 100) - 1)) * (saturation / 100);
+  const x = chroma * (1 - Math.abs((normalizedHue / 60) % 2 - 1));
+  const matchHue = normalizedHue < 60 ? [chroma, x, 0]
+    : normalizedHue < 120 ? [x, chroma, 0]
+      : normalizedHue < 180 ? [0, chroma, x]
+        : normalizedHue < 240 ? [0, x, chroma]
+          : normalizedHue < 300 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  const offset = lightness / 100 - chroma / 2;
+  return `#${matchHue.map((channel) => Math.round((channel + offset) * 255).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+}
+
+function extractReferencedHslCustomProperties(source: string, counts: Map<string, number>) {
+  const properties = new Map<string, string>();
+  for (const match of source.matchAll(/(--[a-zA-Z0-9_-]+)\s*:\s*([^;}{]+)\s*(?:;|(?=\}))/g)) properties.set(match[1].toLowerCase(), match[2].trim());
+  for (const match of source.matchAll(/\bhsla?\(\s*var\(\s*(--[a-zA-Z0-9_-]+)\s*\)(?:\s*\/\s*[^)]+)?\s*\)/gi)) {
+    const value = properties.get(match[1].toLowerCase());
+    if (!value) continue;
+    const color = hslChannelColor(value);
+    if (color) counts.set(color, (counts.get(color) ?? 0) + 1);
+  }
 }
 
 function extractFontFamilies(source: string, counts: Map<string, number>) {
