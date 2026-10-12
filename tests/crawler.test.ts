@@ -8,7 +8,7 @@ const html = (title: string, body: string, head = "") => `<!doctype html><html><
 const fixtures = new Map<string, { type: string; body: string; status?: number }>([
   ["https://example.test/robots.txt", { type: "text/plain", body: "User-agent: *\nDisallow: /private" }],
   ["https://example.test/sitemap.xml", { type: "application/xml", body: "<?xml version=\"1.0\"?><urlset><url><loc>https://example.test/faq</loc></url></urlset>" }],
-  ["https://example.test/assets/site.css", { type: "text/css", body: ":root{--brand:#123456} body{font-family:'Inter',sans-serif;color:#123456;background:hsl(var(--background));border-color:#0000}.cta{background:rgb(12, 34, 56);color:hsl(var(--foreground))}" }],
+  ["https://example.test/assets/site.css", { type: "text/css", body: ":root{--brand:#123456;--foreground:210 18% 11%;--accent:152 65% 30%;--muted:210 8% 41%;--background:0 0% 100%;--spacing:16px} body{font-family:'Inter',sans-serif;color:#123456;background:hsl(var(--background));border-color:#0000}.cta{background:rgb(12, 34, 56);color:hsl(var(--foreground));outline-color:hsl(210 50% 40%);box-shadow:0 0 0 1px hsla(var(--accent) / 0.5)}.expected{color:hsl(var(--muted));background:hsl(var(--spacing))}" }],
   ["https://example.test/", { type: "text/html", body: html("Home", '<header><img class="site-logo" src="/assets/logo.svg" alt="Logo Example"></header><h1>Property management Milano</h1><h2>Gestione completa</h2><img src="/images/hero.webp"><a href="/servizi">Servizi</a><a href="/chi-siamo?utm_source=test">Chi siamo</a><a href="/private">Privata</a><a href="https://external.test/page">Fuori</a><a href="/brochure.pdf">PDF</a><a href="https://instagram.com/example">Instagram</a>', '<link rel="stylesheet" href="/assets/site.css"><link rel="canonical" href="https://example.test/"><meta property="og:image" content="/images/og-home.jpg"><script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness"}</script>') }],
   ["https://example.test/servizi", { type: "text/html", body: html("Servizi", '<h1>Servizi per proprietari</h1><img src="/images/service.jpg"><a href="/contatti">Contatti</a><a href="/#top">Home</a>', '<link rel="canonical" href="https://example.test/servizi"><script type="application/ld+json">{"@type":"Service"}</script>') }],
   ["https://example.test/chi-siamo", { type: "text/html", body: html("Chi siamo", "<h1>La nostra azienda</h1>") }],
@@ -79,6 +79,12 @@ assert.ok(inaccessibleResult.pages.some((page) => page.status === "FAILED" && pa
 
 assert.ok(calls.includes("https://example.test/assets/site.css"), "deve leggere il CSS esterno per la brand identity");
 assert.ok(result.visualHints.colors.includes("#123456"), "deve estrarre colori anche dal CSS esterno");
+assert.ok(result.visualHints.colors.includes("#171C21"), "deve risolvere canali HSL da custom property referenziata");
+assert.ok(result.visualHints.colors.includes("#1B7E50"), "deve risolvere custom property HSL con alpha nel riferimento");
+assert.ok(result.visualHints.colors.includes("#606971"), "deve estrarre tutte le custom property HSL realmente usate come colori");
+assert.ok(result.visualHints.colors.includes("#FFFFFF"), "deve estrarre lo sfondo HSL da custom property");
+assert.ok(result.visualHints.colors.includes("hsl(210 50% 40%)"), "deve preservare l'estrazione HSL diretta");
+assert.ok(!result.visualHints.colors.some((color) => color.includes("16px")), "non deve trattare custom property non-colore come colori");
 assert.ok(!result.visualHints.colors.some((color) => color.includes("var(")), "non deve esporre variabili CSS irrisolte come colori");
 assert.ok(!result.visualHints.colors.includes("#0000"), "non deve esporre colori completamente trasparenti");
 assert.ok(result.visualHints.fontFamilies.includes("Inter"), "deve estrarre i font dal CSS esterno");
