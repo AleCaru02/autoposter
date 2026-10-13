@@ -6,12 +6,11 @@ const brand = fs.readFileSync("src/pages/brand-page.tsx", "utf8");
 const site = fs.readFileSync("src/pages/website-scan-page.tsx", "utf8");
 const fullScan = fs.readFileSync("src/lib/full-website-scan.ts", "utf8");
 
-assert.match(token, /authClient\.token\(/);
-assert.match(token, /"X-Force-Fetch": "1"/);
+assert.match(token, /jwtClient\.getJWTToken\?\./);
+assert.match(token, /token\.split\("\."\)\.length !== 3/, "the reanalysis bearer must be a signed JWT usable by Data API RLS");
 
 for (const [name, source] of [["Brand", brand], ["Sito", site]]) {
   assert.match(source, /authenticatedApiToken\(\)/, `${name} must use the reliable same-origin Managed Auth token boundary`);
-  assert.doesNotMatch(source, /getJWTToken/, `${name} must not reintroduce the JWT helper that failed during onboarding`);
   assert.match(source, /runFullWebsiteScan/, `${name} must use the authenticated shared full-site scanner`);
   assert.match(source, /fetch\("\/api\/onboarding-analyze"/);
 }
