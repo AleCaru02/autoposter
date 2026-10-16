@@ -12,7 +12,7 @@ const onboardingFlow = fs.readFileSync("src/lib/onboarding-flow.ts", "utf8");
 const profilesPage = fs.readFileSync("src/pages/profiles-page.tsx", "utf8");
 const verifiedCustomerAuth = fs.readFileSync("api/_lib/verified-customer-auth.ts", "utf8");
 
-assert.match(token, /jwtClient\.getJWTToken\?\./, "authenticated API calls must use the Data API JWT boundary");
+assert.match(token, /authClient\.token\(/, "authenticated API calls must use the public Data API JWT boundary");
 assert.match(token, /token\.split\("\."\)\.length !== 3/, "opaque session tokens must not reach RLS-protected APIs");
 assert.match(profiles, /authClient\.useSession\(\)/, "profile bootstrap must observe the same authenticated session that guards the app route");
 assert.match(profiles, /tokenFromAuthSession\(authSession\.data\)/, "profile bootstrap must reuse the verified session token after reload");
