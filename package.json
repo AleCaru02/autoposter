@@ -12,7 +12,7 @@
     "test:fase7d-content-review": "tsx tests/fase7d-content-review.test.ts",
     "test:fase7c-content-generation": "tsx tests/fase7c-content-generation.test.ts",
     "test:fase7a-editable-brand": "node tests/fase7a-editable-brand.test.mjs",
-    "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs",
+    "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs && node --import tsx tests/auth-token-runtime.test.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
