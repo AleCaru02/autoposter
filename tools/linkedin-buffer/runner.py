@@ -236,6 +236,21 @@ def run(publish=False, now=None):
     validate_linkedin_channel(key, channel_id, expected_name)
     remote = remote_history(key, org_id, channel_id)
     remote_hashes = {digest(p.get("text") or ""): p.get("id") for p in remote if p.get("text")}
+    remote_ids = {p.get("id"): p for p in remote}
+    for record in state["records"]:
+        if record.get("status") == "uncertain":
+            matched_id = remote_hashes.get(record["hash"])
+            if not matched_id:
+                raise RuntimeError(
+                    f"Slot {record['slot']} has uncertain remote outcome: manual reconciliation required"
+                )
+            record["buffer_post_id"] = matched_id
+            record["status"] = "reconciled_on_buffer"
+            save_state(state)
+        if record.get("buffer_post_id") in remote_ids:
+            if str(remote_ids[record["buffer_post_id"]].get("status", "")).lower() == "sent":
+                record["status"] = "sent"
+                save_state(state)
     sent_count = 0
     for entry in active_slots:
         i, content_hash = entry["slot"], entry["hash"]
