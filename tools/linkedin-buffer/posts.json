@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "policy": {
+    "language": "it",
+    "categories_order": [
+      "property",
+      "network",
+      "digital",
+      "personal"
+    ],
+    "posting_interval_days": 3,
+    "timezone": "Europe/Rome",
+    "hour": "09:00",
+    "first_publish_local_date": "2026-10-29",
+    "excluded_topics": [
+      "relazioni sentimentali",
+      "occupazione da operaio"
+    ],
+    "note": "Materiale editoriale evergreen: evitare cifre di fatturato, clienti, risultati o eventi non documentati."
+  },
+  "categories": {
+    "property": [
+      "La gestione degli affitti brevi non è soltanto pubblicare un annuncio e aspettare prenotazioni. Dietro ci sono comunicazione con gli ospiti, organizzazione, prezzi, manutenzione e attenzione ai dettagli. È proprio questo lato operativo che trovo interessante nel property management: costruire un sistema che funzioni anche quando arrivano gli imprevisti.",
+      "Quando valuto il potenziale di un immobile per gli affitti brevi, non parto dal fatturato più alto che si può immaginare. Parto dalle domande scomode: quali sono i costi reali, quanto pesa la stagionalità e che cosa rimane al proprietario? Una stima utile deve aiutare a decidere, non creare aspettative.",
+      "Un alloggio può avere un buon prezzo e fotografie curate, ma se l'esperienza dell'ospite è confusa perde valore. Istruzioni chiare, comunicazioni puntuali e processi semplici contano tanto quanto l'arredamento. Per me il property management si gioca anche su questi dettagli poco appariscenti.",
+      "Il rapporto con un proprietario dovrebbe partire dalla trasparenza. Parlo di obiettivi, rischi, costi e scenari, non di rendimenti garantiti. Se una gestione breve non è la soluzione più adatta a quell'immobile, bisogna poterlo dire. La credibilità vale più di una proposta commerciale forzata.",
+      "Nel settore degli affitti brevi il calendario pieno è solo un pezzo del risultato. Conta anche quanto costa ottenere quelle prenotazioni e quanto tempo richiede la gestione. Guardare soltanto agli incassi può portare a decisioni sbagliate. Mi interessa ragionare sulla sostenibilità del risultato.",
+      "Una delle competenze più utili nel property management è imparare a prevenire i problemi. Procedure per check-in, pulizie, comunicazione e manutenzione non fanno notizia, ma rendono più affidabile l'esperienza. Sto cercando di costruire il mio modo di lavorare intorno a processi replicabili.",
+      "Quando un proprietario confronta affitto tradizionale e affitto breve, non esiste una risposta valida per tutti. La zona, la domanda, la disposizione degli spazi e il tempo disponibile possono cambiare tutto. Preferisco un confronto fatto di ipotesi esplicite piuttosto che uno slogan.",
+      "Gestire un immobile significa lavorare con due aspettative diverse: quelle del proprietario e quelle dell'ospite. Se si trascura una delle due, prima o poi emerge un problema. Per questo considero la comunicazione una competenza centrale, non un'attività accessoria.",
+      "Nel real estate i numeri sono fondamentali, ma vanno letti nel contesto. Due appartamenti vicini possono avere risultati molto diversi per qualità, capienza, comfort e posizionamento. Una buona analisi parte dalla microzona e dalle caratteristiche reali, non dalle sole medie cittadine.",
+      "Sto costruendo il mio percorso nel property management con un principio semplice: prima la qualità del servizio, poi la crescita del numero di immobili. Crescere senza organizzazione può moltiplicare gli errori. Per me ogni processo migliorato oggi è una base più solida per domani."
+    ],
+    "network": [
+      "Il network marketing mi interessa soprattutto per le competenze che obbliga a sviluppare: ascolto, comunicazione, costanza e capacità di costruire relazioni. Non credo alle scorciatoie o ai risultati promessi. Credo molto di più nel lavoro quotidiano e nella qualità del rapporto con le persone.",
+      "Parlare di network marketing senza parlare di fiducia, secondo me, significa saltare il punto principale. Prima di proporre un prodotto o una collaborazione bisogna capire chi abbiamo davanti. Una relazione non è una lista di contatti da consumare.",
+      "Sto studiando come costruire un progetto di network marketing che sia professionale e sostenibile. Il mio punto di partenza non è il numero di persone contattate, ma la qualità delle conversazioni, delle informazioni e del supporto che si riesce a offrire.",
+      "Nel network marketing la formazione conta più dell'entusiasmo del primo giorno. Conoscere i prodotti, imparare a comunicare correttamente e seguire le persone nel tempo richiede metodo. Preferisco concentrarmi su queste basi invece di inseguire messaggi motivazionali.",
+      "Una cosa che voglio evitare nel network marketing è trasformare ogni rapporto personale in un'occasione di vendita. Le persone hanno esigenze, tempi e obiettivi diversi. Rispettarli è parte del lavoro, non un ostacolo ai risultati.",
+      "Mi interessa il lato organizzativo di una rete commerciale: processi chiari, formazione accessibile, informazioni aggiornate e strumenti che riducano il lavoro ripetitivo. La tecnologia può aiutare, ma non sostituisce la fiducia né il confronto umano.",
+      "Nel network marketing una comunicazione efficace dovrebbe raccontare il valore reale di un prodotto senza esagerazioni. Per me questo significa usare informazioni verificabili, evitare affermazioni miracolose e rispettare la libertà di scelta delle persone.",
+      "Costruire una rete è diverso dal cercare una crescita veloce. La prima richiede attenzione alle persone, continuità e capacità di aiutare chi sceglie di iniziare. Sono questi gli aspetti su cui voglio concentrare il mio apprendimento.",
+      "Il network marketing e il property management sembrano mondi lontani, ma condividono una competenza: la gestione delle relazioni. In entrambi i casi promesse chiare, ascolto e affidabilità sono più importanti dell'effetto iniziale.",
+      "Quando penso al mio futuro nel network marketing, penso a un'attività costruita con criteri professionali: formazione, etica commerciale, strumenti utili e misurazione dei risultati reali. Senza rendimenti facili, senza pressioni e senza raccontare successi che non esistono."
+    ],
+    "digital": [
+      "Mi interessa l'intelligenza artificiale soprattutto quando fa risparmiare tempo su attività ripetitive. Un'automazione utile non è quella con più funzioni: è quella che fa bene un compito preciso, si può verificare e non crea problemi nuovi.",
+      "Quando sviluppo un progetto digitale, cerco di partire dal problema concreto. Chi lo userà? Quale lavoro dovrebbe semplificare? Come capisco se funziona? Una dashboard bella senza dati affidabili serve a poco. Prima la sostanza, poi gli effetti speciali.",
+      "Sto esplorando come usare automazioni e strumenti digitali per migliorare attività commerciali e organizzative. La lezione che mi porto dietro è questa: automatizzare un processo confuso non lo rende automaticamente migliore. Prima bisogna chiarirlo.",
+      "Un CRM non dovrebbe essere un archivio pieno di campi che nessuno aggiorna. Dovrebbe aiutare a capire che cosa fare, con quale priorità e con quali informazioni. Mi piacciono gli strumenti che riducono le decisioni inutili e rendono visibile il lavoro importante.",
+      "L'intelligenza artificiale può produrre testi convincenti anche quando le informazioni di partenza sono incomplete. Per questo, nei progetti che seguo, considero fondamentali fonti, verifiche e limiti chiari. Meglio fermarsi che pubblicare un dato inventato.",
+      "La parte più difficile di un'automazione non è sempre scrivere codice. È stabilire quando deve fermarsi. Errori, duplicati, dati mancanti e credenziali scadute vanno previsti prima, non dopo che qualcosa è finito online.",
+      "Nel marketing digitale c'è molta attenzione agli strumenti, ma senza una proposta utile e un pubblico definito la tecnologia da sola non porta lontano. Mi interessa collegare automazione e obiettivi commerciali concreti.",
+      "Quando valuto un software, mi faccio tre domande: mi fa risparmiare tempo? Posso controllare ciò che fa? Il costo è giustificato dal risultato? Se una soluzione gratuita è sufficiente, preferisco partire da quella e investire soltanto quando serve davvero.",
+      "Un progetto digitale serio dovrebbe poter spiegare la propria logica in modo semplice. Da dove arrivano i dati, che cosa viene automatizzato, quali passaggi richiedono una verifica umana? La complessità nascosta non è un vantaggio.",
+      "Sto lavorando per far convivere competenze commerciali e tecnologia. Non mi interessa usare l'AI per riempire internet di contenuti identici. Mi interessa creare sistemi che aiutino a lavorare meglio e che sappiano riconoscere quando non hanno abbastanza informazioni."
+    ],
+    "personal": [
+      "A 24 anni mi interessa costruire un percorso professionale che abbia una direzione, non soltanto accumulare attività. Sto cercando di imparare sul campo, sperimentare e capire quali competenze possono creare valore nel tempo. Non ho bisogno di raccontare un percorso perfetto per raccontarne uno autentico.",
+      "Uno dei miei obiettivi personali è vivere a Tenerife. Non lo considero un semplice cambio di panorama: voglio arrivarci con attività sostenibili, organizzazione e basi economiche solide. Prima costruire le condizioni, poi fare il passo.",
+      "Ci sono obiettivi che sembrano lontani finché non vengono divisi in problemi concreti. Per me significa chiedermi quali competenze sviluppare, quali entrate rendere più stabili e quali processi migliorare. È un modo di ragionare che mi aiuta a non confondere desideri e piani.",
+      "Voglio crescere professionalmente senza fingere di avere già tutte le risposte. Oggi preferisco condividere domande, metodo e ciò che sto imparando. Raccontare solo risultati eccezionali renderebbe il percorso meno utile e meno credibile.",
+      "Mi interessa molto il concetto di indipendenza, ma non lo collego alle frasi motivazionali. Per me è soprattutto la possibilità di scegliere dove vivere, quali progetti seguire e come organizzare il proprio tempo. Richiede pazienza e decisioni concrete.",
+      "Quando penso ai prossimi anni, non immagino un'unica professione immutabile. Mi interessa costruire competenze trasferibili: comunicazione, vendita, gestione, organizzazione e tecnologia. Sono strumenti che possono aiutarmi in progetti diversi.",
+      "Non credo che fare più cose sia automaticamente un vantaggio. Se property management, progetti digitali e crescita personale devono convivere, serve una direzione comune. Sto imparando a distinguere ciò che avvicina ai miei obiettivi da ciò che occupa soltanto tempo.",
+      "Avere ambizioni non significa dover presentare ogni settimana una grande vittoria. Anche rivedere un piano, rinunciare a una scorciatoia o correggere un errore fa parte del percorso. Preferisco risultati reali, anche piccoli, a una narrazione perfetta.",
+      "Tenerife per me rappresenta un obiettivo preciso, ma la parte interessante è il lavoro da fare prima. Organizzare entrate, attività e responsabilità in modo che possano funzionare anche a distanza: è questa la sfida che voglio affrontare.",
+      "Il personal branding che vorrei costruire è semplice: condividere quello che faccio, ciò che sto imparando e dove voglio arrivare. Senza personaggi costruiti, numeri gonfiati o frasi vuote. Se tra qualche anno potrò rileggere questi post e riconoscermi, avranno avuto senso."
+    ]
+  }
+}
