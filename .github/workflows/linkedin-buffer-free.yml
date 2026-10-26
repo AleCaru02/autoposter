@@ -1,0 +1,66 @@
+name: LinkedIn personal brand - Buffer Free
+
+on:
+  pull_request:
+    paths:
+      - "tools/linkedin-buffer/**"
+      - ".github/workflows/linkedin-buffer-free.yml"
+  workflow_dispatch:
+  schedule:
+    # Daily UTC check; Buffer handles 09:00 Europe/Rome slots every 3 days.
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linkedin-buffer-free
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Offline safety and editorial tests
+        run: python -m unittest discover -s tools/linkedin-buffer -p "test_*.py" -v
+      - name: Preview next scheduled slots (no API request)
+        run: python tools/linkedin-buffer/runner.py
+
+  queue:
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BUFFER_PUBLISH_ENABLED: ${{ secrets.BUFFER_PUBLISH_ENABLED }}
+      OTHER_LINKEDIN_AUTOMATION_DISABLED: ${{ secrets.OTHER_LINKEDIN_AUTOMATION_DISABLED }}
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+      BUFFER_ORGANIZATION_ID: ${{ secrets.BUFFER_ORGANIZATION_ID }}
+      BUFFER_EXPECTED_CHANNEL_NAME: ${{ secrets.BUFFER_EXPECTED_CHANNEL_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Publish only after explicit switches and account connection
+        if: env.BUFFER_PUBLISH_ENABLED == 'true'
+        run: python tools/linkedin-buffer/runner.py --publish
+      - name: Save ledger even if Buffer outcome is uncertain
+        if: always() && env.BUFFER_PUBLISH_ENABLED == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/linkedin-buffer/state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(linkedin): persist publication ledger [skip ci]"
+            git push origin HEAD:main
+          fi
