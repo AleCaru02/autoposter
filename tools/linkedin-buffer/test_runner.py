@@ -38,6 +38,12 @@ class EditorialRules(unittest.TestCase):
         for phrase in ("Sono operaio", "La mia ragazza", "Sono in fabbrica", "La fidanzata"):
             self.assertIsNotNone(runner.FORBIDDEN.search(phrase))
 
+    def test_near_duplicate_wording_is_detected(self):
+        original = runner.load_bank()["categories"]["property"][0]
+        paraphrase = original + " Una breve nota aggiuntiva che non cambia il contenuto."
+        self.assertTrue(runner.nearly_same_topic(original, paraphrase))
+        self.assertFalse(runner.nearly_same_topic(original, "Amo le idee chiare e i progetti concreti."))
+
     def test_preview_does_not_require_secret_or_network(self):
         with patch.object(runner, "graphql", side_effect=AssertionError("Network must not be called")):
             with contextlib.redirect_stdout(io.StringIO()) as output:
