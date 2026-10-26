@@ -33,6 +33,19 @@ def digest(text):
     return hashlib.sha256(normalized(text).encode("utf-8")).hexdigest()
 
 
+def word_shingles(text):
+    tokens = re.findall(r"\w+", normalized(text), re.UNICODE)
+    return {tuple(tokens[i:i + 3]) for i in range(max(0, len(tokens) - 2))}
+
+
+def nearly_same_topic(left, right):
+    """Conservative text-level paraphrase guard (not a semantic AI classifier)."""
+    if digest(left) == digest(right):
+        return True
+    a, b = word_shingles(left), word_shingles(right)
+    return len(a) >= 5 and len(b) >= 5 and len(a & b) / min(len(a), len(b)) >= 0.65
+
+
 def load_bank():
     bank = json.loads(BANK.read_text(encoding="utf-8"))
     policy = bank.get("policy", {})
@@ -50,6 +63,7 @@ def load_bank():
     if not sizes[0] or len(set(sizes)) != 1:
         raise ValueError("Each category must have the same nonzero number of posts")
     seen = set()
+    previous_posts = []
     for category in ORDER:
         for post in categories[category]:
             if not isinstance(post, str) or len(post.strip()) < 100:
@@ -57,9 +71,10 @@ def load_bank():
             if FORBIDDEN.search(post):
                 raise ValueError(f"Forbidden personal topic in {category}")
             key = digest(post)
-            if key in seen:
-                raise ValueError("Duplicate text in editorial bank")
+            if key in seen or any(nearly_same_topic(post, old) for old in previous_posts):
+                raise ValueError("Duplicate or near-duplicate text in editorial bank")
             seen.add(key)
+            previous_posts.append(post)
     return bank
 
 
@@ -260,6 +275,10 @@ def run(publish=False, now=None):
             continue
         if content_hash in used_hashes:
             raise RuntimeError("Already used editorial text; no repost")
+        if content_hash not in remote_hashes and any(
+            nearly_same_topic(entry["text"], post.get("text") or "") for post in remote
+        ):
+            raise RuntimeError("Similar LinkedIn post already exists on Buffer; review before publishing")
         record = {
             "slot": i, "category": entry["category"], "hash": content_hash,
             "due_at": entry["due_at"], "buffer_post_id": None,
