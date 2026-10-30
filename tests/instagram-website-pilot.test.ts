@@ -37,6 +37,7 @@ assert.match(autopilot, /const baseTopicRequest=websitePilot\?instagramWebsitePi
 
 const serialized = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
 assert.match(serialized, /allowImageGeneration=strategyObject.instagramWebsitePilot===true/);
+assert.match(serialized, /if\(strategyObject.autopilotEnabled===false\)\{aggregate.profilesChecked\+=1;aggregate.skipped\+=1;continue;\}/);
 
 const store = await readFile(new URL("../src/features/content/autopilot-store.ts", import.meta.url), "utf8");
 assert.match(store, /websitePilotEnabled: row.instagramWebsitePilot === true/);
@@ -44,5 +45,6 @@ assert.match(store, /instagramWebsitePilot: settings.websitePilotEnabled/);
 const page = await readFile(new URL("../src/pages/content-generator-page.tsx", import.meta.url), "utf8");
 assert.match(page, /Pilota Instagram · siti web/);
 assert.match(page, /approvalMode: "MANUAL_REVIEW"/);
+assert.match(page, /enabled: overview.settings.websitePilotEnabled \? overview.settings.enabled : true/);
 
 console.log("PASS Italian Instagram website pilot: opt-in, content brief, format, 2 weekly slots, manual review and profile isolation.");
