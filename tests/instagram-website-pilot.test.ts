@@ -35,6 +35,9 @@ assert.match(autopilot, /settings.websitePilot\?2:21/);
 assert.match(autopilot, /approvalMode:settings.websitePilot\?"MANUAL_REVIEW":settings.approvalMode/);
 assert.match(autopilot, /const baseTopicRequest=websitePilot\?instagramWebsitePilotBrief\(count\)/);
 
+const serialized = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
+assert.match(serialized, /allowImageGeneration=strategyObject.instagramWebsitePilot===true/);
+
 const store = await readFile(new URL("../src/features/content/autopilot-store.ts", import.meta.url), "utf8");
 assert.match(store, /websitePilotEnabled: row.instagramWebsitePilot === true/);
 assert.match(store, /instagramWebsitePilot: settings.websitePilotEnabled/);
