@@ -37,7 +37,7 @@ export async function runContentAutopilotSerialized(env: AutopilotEnv, options: 
   try{
     await client.query("select pg_advisory_lock(hashtextextended($1::text, 0))",[LOCK_NAME]);locked=true;const ids=await profileIds(client,options.profileId);if(!ids.length)return emptyResult();const aggregate=emptyResult();let remainingRun=Math.min(Math.max(options.maxGenerations??DEFAULT_GENERATIONS_PER_RUN,1),50);
     for(const profileId of ids){
-      if(remainingRun<=0)break;let strategy=await platformStrategy(client,profileId);let strategyObject=strategy&&typeof strategy==="object"&&!Array.isArray(strategy)?strategy as Record<string,unknown>:{};const policy=profileAiEconomicsPolicy(strategy);let usage=await usageSnapshot(client,profileId);
+      if(remainingRun<=0)break;let strategy=await platformStrategy(client,profileId);let strategyObject=strategy&&typeof strategy==="object"&&!Array.isArray(strategy)?strategy as Record<string,unknown>:{};if(strategyObject.autopilotEnabled===false){aggregate.profilesChecked+=1;aggregate.skipped+=1;continue;}const policy=profileAiEconomicsPolicy(strategy);let usage=await usageSnapshot(client,profileId);
       const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL);const currentBudget=await budgetEngine.snapshot(profileId);
       if(currentBudget.band==="HARD_STOP"){aggregate.profilesChecked+=1;aggregate.skipped+=1;aggregate.errors.push(`${profileId}:AUTOPILOT_AI_LIMIT_REACHED:ACTIVITY_HARD_STOP`);continue;}
       const refresh=strategyPlannerRefreshDecision(strategy,{strategyRefreshDays:policy.strategyRefreshDays,planRefreshDays:policy.planRefreshDays});const reserve=refresh.refreshStrategy?0.20:refresh.refreshPlan?0.12:0;
