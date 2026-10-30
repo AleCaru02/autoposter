@@ -173,6 +173,20 @@ export function ContentGeneratorPage() {
     </section>
 
     <section className="panel approval-mode-panel">
+      <div className="panel-heading"><div><h2>Pilota Instagram · siti web</h2><p>Solo per questo profilo: post in italiano per imprenditori, offerta 99 €/mese e bozza iniziale gratuita.</p></div><WandSparkles size={20} /></div>
+      <button type="button" className={`approval-mode-card ${overview.settings.websitePilotEnabled ? "selected" : ""}`} onClick={() => void changeSettings({
+        websitePilotEnabled: !overview.settings.websitePilotEnabled,
+        approvalMode: "MANUAL_REVIEW",
+        enabled: true,
+      })}>
+        <strong>{overview.settings.websitePilotEnabled ? "Pilota attivo · disattiva" : "Attiva il pilota da 2 post Instagram a settimana"}</strong>
+        <p>Se attivo, l'Autopilot crea solo post Instagram (fino a 2/settimana), da approvare manualmente. I contenuti sono orientati alle richieste di bozza gratuita; non pubblica nulla senza approvazione e una connessione social reale.</p>
+        <span className="mode-check">{overview.settings.websitePilotEnabled ? "Attivo" : "Attiva"}</span>
+      </button>
+      <p className="field-help">La generazione usa le API AI configurate e i loro limiti di budget. Il pilota non cancella vecchie pubblicazioni già programmate su altri social: controlla il Calendario prima di consentire pubblicazioni reali.</p>
+    </section>
+
+    <section className="panel approval-mode-panel">
       <div className="panel-heading"><div><h2>Prima della pubblicazione</h2><p>Scegli una volta come deve comportarsi il sistema. Puoi cambiarlo quando vuoi.</p></div><ShieldCheck size={20} /></div>
       <div className="approval-mode-grid">
         <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
