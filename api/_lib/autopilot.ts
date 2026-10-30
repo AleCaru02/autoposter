@@ -113,7 +113,7 @@ export function candidateSlots(schedule:AutopilotSchedule,now=new Date(),learned
   if(!candidates.length){for(const date of dates.slice(0,target)){add(date,"12:00","DEFAULT");}}
   return candidates.sort((a,b)=>a.scheduledAt.localeCompare(b.scheduledAt)).slice(0,target);
 }
-function settingsFromStrategy(value:unknown){const strategy=asObject(value);return{enabled:strategy.autopilotEnabled!==false,approvalMode:strategy.approvalMode==="AUTOMATIC"?"AUTOMATIC" as ApprovalMode:"MANUAL_REVIEW" as ApprovalMode,websitePilot:instagramWebsitePilotEnabled(value)};
+function settingsFromStrategy(value:unknown){const strategy=asObject(value);return{enabled:strategy.autopilotEnabled!==false,approvalMode:strategy.approvalMode==="AUTOMATIC"?"AUTOMATIC" as ApprovalMode:"MANUAL_REVIEW" as ApprovalMode,websitePilot:instagramWebsitePilotEnabled(value)};}
 async function ensureStrategy(sql:Sql,profileId:string){const defaults=JSON.stringify({autopilotEnabled:true,approvalMode:"MANUAL_REVIEW",researchMode:"BALANCED"});await sql`insert into public.content_strategies (profile_id,platform_strategy,updated_at) values (${profileId}::uuid,${defaults}::jsonb,now()) on conflict (profile_id) do nothing`;}
 async function ensureSchedules(sql:Sql,profile:ProfileRow){for(const item of DEFAULT_SCHEDULES){await sql`insert into public.schedules (profile_id,provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled,updated_at) select ${profile.id}::uuid,${item.provider},${profile.timezone||"Europe/Rome"},${item.posts},'[]'::jsonb,true,true,now() where not exists (select 1 from public.schedules where profile_id=${profile.id}::uuid and provider=${item.provider})`;}}
 type PersonalBrandEditorialContext = {
