@@ -6,7 +6,8 @@ const brand = fs.readFileSync("src/pages/brand-page.tsx", "utf8");
 const site = fs.readFileSync("src/pages/website-scan-page.tsx", "utf8");
 const fullScan = fs.readFileSync("src/lib/full-website-scan.ts", "utf8");
 
-assert.match(token, /jwtClient\.getJWTToken\?\./);
+assert.match(token, /authClient\.token\(/);
+assert.doesNotMatch(token, /jwtClient|getJWTToken\?\./, "the public adapter must not be cast to an internal Neon client");
 assert.match(token, /token\.split\("\."\)\.length !== 3/, "the reanalysis bearer must be a signed JWT usable by Data API RLS");
 
 for (const [name, source] of [["Brand", brand], ["Sito", site]]) {

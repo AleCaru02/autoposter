@@ -15,10 +15,12 @@ export function tokenFromAuthSession(value: unknown) {
 export async function authenticatedApiToken(preferredToken?: string | null) {
   // The Neon Data API evaluates RLS from a signed JWT.  A Better Auth session
   // token can authenticate a same-origin request, but is not a Data API bearer.
-  // Always use the same JWT boundary already used by neonClient itself.
+  // neonClient.auth exposes the public Better Auth adapter, not Neon's internal
+  // getJWTToken helper. Unknown adapter methods become HTTP paths, so calling
+  // getJWTToken here requests /get-jwt-token instead of obtaining a JWT.
   void preferredToken;
-  const jwtClient = authClient as typeof authClient & { getJWTToken?: () => Promise<string | null | undefined> };
-  const token = await jwtClient.getJWTToken?.();
-  if (!token || token.split(".").length !== 3) throw new Error("Sessione non valida. Accedi di nuovo.");
+  const result = await authClient.token({ fetchOptions: { cache: "no-store" } });
+  const token = result.data?.token;
+  if (result.error || typeof token !== "string" || token.split(".").length !== 3) throw new Error("Sessione non valida. Accedi di nuovo.");
   return token;
 }
