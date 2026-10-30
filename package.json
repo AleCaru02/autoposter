@@ -72,6 +72,7 @@
     "test:safe-mode": "tsx tests/safe-mode.test.ts",
     "test:social-metrics": "tsx tests/social-metrics.test.ts",
     "test:autopilot-route": "tsx tests/autopilot-route-contract.test.ts",
+    "test:instagram-website-pilot": "tsx tests/instagram-website-pilot.test.ts",
     "test:entitlements": "tsx tests/entitlement-usage.test.ts",
     "test:entitlement-migration": "tsx tests/entitlement-migration.test.ts",
     "test:plan-packages": "tsx tests/plan-packages.test.ts",
