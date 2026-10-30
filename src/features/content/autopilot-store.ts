@@ -6,6 +6,7 @@ export type AutopilotSettings = {
   enabled: boolean;
   approvalMode: ApprovalMode;
   researchMode: EditorialResearchMode;
+  websitePilotEnabled: boolean;
 };
 
 export type AutopilotSchedule = {
@@ -31,6 +32,7 @@ function parseSettings(value: unknown): AutopilotSettings {
     enabled: row.autopilotEnabled !== false,
     approvalMode: row.approvalMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL_REVIEW",
     researchMode: normalizeEditorialResearchMode(row.researchMode),
+    websitePilotEnabled: row.instagramWebsitePilot === true,
   };
 }
 
@@ -62,6 +64,7 @@ export async function saveAutopilotSettings(profileId: string, settings: Autopil
     autopilotEnabled: settings.enabled,
     approvalMode: settings.approvalMode,
     researchMode: normalizeEditorialResearchMode(settings.researchMode),
+    instagramWebsitePilot: settings.websitePilotEnabled,
   };
   const payload = { platform_strategy: platformStrategy, updated_at: new Date().toISOString() };
   const write = currentData?.profile_id
