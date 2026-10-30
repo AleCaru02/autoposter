@@ -177,7 +177,7 @@ export function ContentGeneratorPage() {
       <button type="button" className={`approval-mode-card ${overview.settings.websitePilotEnabled ? "selected" : ""}`} onClick={() => void changeSettings({
         websitePilotEnabled: !overview.settings.websitePilotEnabled,
         approvalMode: "MANUAL_REVIEW",
-        enabled: true,
+        enabled: overview.settings.websitePilotEnabled ? overview.settings.enabled : true,
       })}>
         <strong>{overview.settings.websitePilotEnabled ? "Pilota attivo · disattiva" : "Attiva il pilota da 2 post Instagram a settimana"}</strong>
         <p>Se attivo, l'Autopilot crea solo post Instagram (fino a 2/settimana), da approvare manualmente. I contenuti sono orientati alle richieste di bozza gratuita; non pubblica nulla senza approvazione e una connessione social reale.</p>
