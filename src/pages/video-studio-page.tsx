@@ -21,6 +21,22 @@ export function VideoStudioPage() {
   const [renderInstructions,setRenderInstructions] = useState(false);
   const [jobId,setJobId] = useState("");
   const [submitting,setSubmitting] = useState(false);
+  const [uploadStatus,setUploadStatus] = useState("");
+  const [uploading,setUploading] = useState(false);
+  async function uploadScene(sceneId:string,file:File|null){
+    if(!file||!jobId||!selectedProfileId)return;
+    setUploading(true);
+    try{
+      if(file.type!=="image/png"||file.size>8*1024*1024)throw new Error("Serve un PNG fino a 8 MB");
+      const token=await authenticatedApiToken();
+      const url=`/api/video-studio/media/${selectedProfileId}/${jobId}/${sceneId}.png`;
+      const response=await fetch(url,{method:"PUT",headers:{authorization:"Bearer "+token,"content-type":"image/png"},body:file});
+      const result=await response.json() as {error?:string};
+      if(!response.ok)throw new Error(result.error||"Caricamento fallito");
+      setUploadStatus(sceneId+" caricata");
+    }catch(e){setUploadStatus(e instanceof Error?e.message:String(e));}
+    finally{setUploading(false);}
+  }
   const [jobStatus,setJobStatus] = useState("");
   const [previewUrl,setPreviewUrl] = useState("");
   useEffect(()=>()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);},[previewUrl]);
@@ -99,6 +115,7 @@ export function VideoStudioPage() {
     </section>
     {renderInstructions&&<section><h2>Rendering locale (senza API a pagamento)</h2><p>Scarica lo storyboard, prepara un file PNG per ogni scena e un manifest JSON che associ gli ID delle scene ai percorsi dei PNG. Sul computer con FFmpeg esegui:</p><pre style={{whiteSpace:"pre-wrap"}}>python scripts/render-video-assets.py storyboard.json scene-images.json reel.mp4</pre><p>Questo comando crea il MP4 sul tuo computer. Il rendering automatico dal browser non è ancora disponibile.</p></section>}
     <section style={{display:"grid",gap:8}}><h2>Stato e anteprima dei lavori cloud</h2><p>Inserisci l’identificativo di un lavoro esistente. La coda registra la richiesta ma non genera il video finché il servizio cloud non viene attivato.</p><label>ID lavoro<input value={jobId} onChange={e=>setJobId(e.target.value)} placeholder="UUID del lavoro"/></label><div><button type="button" onClick={()=>void loadJobStatus()} disabled={!jobId.trim()}>Verifica stato</button></div>{jobStatus&&<p role="status">{jobStatus}</p>}{previewUrl&&<video src={previewUrl} controls playsInline style={{width:"100%",maxWidth:320}}/>}</section>
+    {jobId&&planJson&&<section style={{display:"grid",gap:8}}><h2>Immagini delle scene</h2><p>Carica un PNG per ogni scena del lavoro. Questo passaggio è manuale finché il generatore AI non sarà collegato.</p>{(JSON.parse(planJson) as {scenes:Array<{id:string}>}).scenes.map(scene=><label key={scene.id}>{scene.id} <input type="file" accept="image/png" disabled={uploading} onChange={e=>void uploadScene(scene.id,e.target.files?.[0]||null)}/></label>)}{uploadStatus&&<p role="status">{uploadStatus}</p>}</section>}
     <section><h2>Bozze salvate</h2>{drafts.map(d=><article key={d.id}><button type="button" onClick={()=>setPlanJson(JSON.stringify(d.plan,null,2))}>{d.title}</button> · {new Date(d.updated_at).toLocaleDateString("it-IT")}</article>)}</section>
     <section><h2>Piano editoriale — 30 giorni</h2><p>Idee iniziali da validare con ricerca e fonti prima della produzione.</p>
       <div style={{display:"grid",gap:10}}>{calendar?.slots.map(slot=><article key={slot.day} style={{padding:12,border:"1px solid #8885",borderRadius:10}}><strong>Giorno {slot.day} · {slot.pillar}</strong><p>{slot.headline}</p><small>{slot.hook}</small></article>)}</div>
