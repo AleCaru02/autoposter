@@ -26,18 +26,36 @@ def storage():
                         aws_secret_access_key=os.environ["VIDEO_R2_SECRET_ACCESS_KEY"],
                         region_name="auto")
 
-def claim(conn):
+def claim(conn, client):
     with conn.transaction():
-        row = conn.execute("""
+        rows = conn.execute("""
             select id::text,profile_id::text,plan,reserved_eur
             from public.video_studio_jobs
             where state='QUEUED' order by created_at
-            for update skip locked limit 1
-        """).fetchone()
-        if not row:
-            return None
-        conn.execute("update public.video_studio_jobs set state='RENDERING',updated_at=now() where id=%s::uuid",(row[0],))
-        return row
+            for update skip locked limit 20
+        """).fetchall()
+        for row in rows:
+            job_id,profile_id,plan,_=row
+            scenes=plan.get("scenes",[])
+            if not scenes or len(scenes)>20:
+                continue
+            ready=True
+            for scene in scenes:
+                scene_id=scene.get("id","")
+                if not isinstance(scene_id,str) or not scene_id.startswith("scene-") or not scene_id[6:].isdigit():
+                    ready=False
+                    break
+                try:
+                    client.head_object(Bucket=BUCKET,Key=f"{PROFILE_PREFIX}{profile_id}/{job_id}/{scene_id}.png")
+                except ClientError as exc:
+                    if exc.response.get("Error",{}).get("Code") in ("404","NoSuchKey","NotFound"):
+                        ready=False
+                        break
+                    raise
+            if ready:
+                conn.execute("update public.video_studio_jobs set state='RENDERING',updated_at=now() where id=%s::uuid",(job_id,))
+                return row
+        return None
 
 def finish(conn, job, state, error=None, output=None):
     job_id, profile_id, _, reserved = job
@@ -100,7 +118,7 @@ def main():
     while True:
         try:
             with psycopg.connect(DATABASE_URL,autocommit=True) as conn:
-                job=claim(conn)
+                job=claim(conn,client)
                 if job:
                     try:
                         render_job(conn,client,job)
