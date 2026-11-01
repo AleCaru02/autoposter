@@ -36,3 +36,5 @@ jobs:
         run: npx tsx tests/content-budget-forecast.test.ts
       - name: Requested monthly production plan tests
         run: npx tsx tests/requested-monthly-content-plan.test.ts
+      - name: Reel provider selection tests
+        run: npx tsx tests/reel-provider-selection.test.ts
