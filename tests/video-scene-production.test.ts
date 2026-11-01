@@ -15,5 +15,5 @@ const complete=await produceVideoSceneAssets(plan,settings,[
 ]);
 assert.equal(complete.readyForLocalRender,true);
 await assert.rejects(produceVideoSceneAssets(plan,{...settings,enabled:false}),/DISABLED/);
-assert.equal(calls,4);
+assert.equal(calls,8);
 console.log("Scene production completeness checks passed");
