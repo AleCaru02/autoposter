@@ -24,6 +24,7 @@ jobs:
           npx tsx tests/abekyo-local-adapter.test.ts
           npx tsx tests/video-studio-integration.test.ts
           npx tsx tests/video-publication-gate.test.ts
+          npx tsx tests/video-image-generator.test.ts
       - name: FFmpeg renderer smoke test
         run: |
           sudo apt-get update -qq
@@ -35,6 +36,17 @@ jobs:
           PY
           python3 scripts/render-video-studio.py /tmp/storyboard.json /tmp/autoposter-test.mp4
           ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /tmp/autoposter-test.mp4 | grep -qx '1080,1920'
+      - name: Scene asset MP4 smoke test
+        run: |
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=blue:s=720x1280 -frames:v 1 /tmp/scene1.png
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=green:s=720x1280 -frames:v 1 /tmp/scene2.png
+          python3 - <<'PY'
+          import json
+          json.dump({"format":"REEL_9_16","width":1080,"height":1920,"fps":30,"scenes":[{"id":"scene-1","startMs":0,"endMs":1000},{"id":"scene-2","startMs":1000,"endMs":2000}]},open("/tmp/asset-plan.json","w"))
+          json.dump({"scene-1":"/tmp/scene1.png","scene-2":"/tmp/scene2.png"},open("/tmp/asset-manifest.json","w"))
+          PY
+          python3 scripts/render-video-assets.py /tmp/asset-plan.json /tmp/asset-manifest.json /tmp/asset-reel.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /tmp/asset-reel.mp4 | grep -qx '1080,1920'
       - name: Typecheck
         run: npm run typecheck
       - name: Build
