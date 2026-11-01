@@ -97,6 +97,19 @@ def render_job(conn, client, job):
             if file.stat().st_size>8*1024*1024:
                 raise ValueError("IMAGE_TOO_LARGE")
             manifest[scene_id]=str(file)
+        # Audio is a licensed, pre-generated asset. This worker never calls paid TTS APIs.
+        if plan.get("requiresNarration") is True:
+            audio_key=prefix+"narration.mp3"
+            audio_file=tmp/"narration.mp3"
+            try:
+                client.download_file(BUCKET,audio_key,str(audio_file))
+            except ClientError as exc:
+                if exc.response.get("Error",{}).get("Code") in ("404","NoSuchKey","NotFound"):
+                    raise ValueError("NARRATION_REQUIRED") from exc
+                raise
+            if not 0<audio_file.stat().st_size<=20*1024*1024:
+                raise ValueError("INVALID_NARRATION_SIZE")
+            manifest["__audio__"]=str(audio_file)
         plan_file=tmp/"plan.json"
         plan_file.write_text(json.dumps(plan),encoding="utf-8")
         manifest_file=tmp/"manifest.json"
@@ -104,12 +117,20 @@ def render_job(conn, client, job):
         output=tmp/"output.mp4"
         subprocess.run(["python3",str(RENDERER),str(plan_file),str(manifest_file),str(output)],
                        check=True,timeout=900,capture_output=True)
-        probe=subprocess.run(["ffprobe","-v","error","-show_entries","stream=width,height",
+        probe=subprocess.run(["ffprobe","-v","error","-show_entries","stream=codec_type,width,height:format=duration",
                               "-select_streams","v:0","-of","json",str(output)],
                              check=True,timeout=30,capture_output=True,text=True)
-        streams=json.loads(probe.stdout).get("streams",[])
-        if not streams or streams[0].get("width")!=1080 or streams[0].get("height")!=1920:
+        inspection=json.loads(probe.stdout)
+        streams=inspection.get("streams",[])
+        video=next((stream for stream in streams if stream.get("codec_type")=="video"),None)
+        if not video or video.get("width")!=1080 or video.get("height")!=1920:
             raise ValueError("INVALID_OUTPUT")
+        if plan.get("requiresNarration") is True and not any(stream.get("codec_type")=="audio" for stream in streams):
+            raise ValueError("MISSING_OUTPUT_AUDIO")
+        duration=float(inspection.get("format",{}).get("duration",0))
+        expected=scenes[-1].get("endMs",0)/1000
+        if not expected or abs(duration-expected)>1.0:
+            raise ValueError("INVALID_OUTPUT_DURATION")
         key=prefix+"output.mp4"
         client.upload_file(str(output),BUCKET,key,ExtraArgs={"ContentType":"video/mp4"})
         finish(conn,job,"READY",output=key)
