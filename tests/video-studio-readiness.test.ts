@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import {assessVideoStudioReadiness,unverifiedVideoStudioCapabilities} from "../api/_lib/video-studio-readiness.js";
+const unknown=assessVideoStudioReadiness(unverifiedVideoStudioCapabilities);
+assert.equal(unknown.canPublish,false);
+assert.equal(unknown.canRender,false);
+assert.ok(unknown.blockers.includes("rendererReachable"));
+const all={...unverifiedVideoStudioCapabilities};
+for(const key of Object.keys(all) as Array<keyof typeof all>) all[key]=true;
+const ready=assessVideoStudioReadiness(all);
+assert.equal(ready.canLearn,true);
+assert.equal(ready.blockers.length,0);
+assert.equal(assessVideoStudioReadiness({...all,approvalWorkflow:false}).canPublish,false);
+assert.equal(assessVideoStudioReadiness({...all,licensedMedia:false}).canRender,false);
+assert.equal(assessVideoStudioReadiness({...all,analyticsConnected:false}).canPublish,true);
+assert.equal(assessVideoStudioReadiness({...all,analyticsConnected:false}).canLearn,false);
+console.log("Video Studio readiness tests passed");
