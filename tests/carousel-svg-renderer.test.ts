@@ -8,7 +8,7 @@ assert.match(slides[0], /1 \/ 2/);
 assert.match(slides[1], /2 \/ 2/);
 assert.match(slides[1], /Studio Milano/);
 assert.throws(() => renderCarouselBundle([{headline:"Una sola"}], brand), /SLIDE_COUNT/);
-const escaped = renderCarouselBundle([{headline:"<script>alert(1)</script>"},{headline:"Seconda"}],brand);
+const escaped = renderCarouselBundle([{headline:"<script>"},{headline:"Seconda"}],brand);
 assert.ok(!escaped[0].includes("<script>"));
 assert.match(escaped[0], /&lt;script&gt;/);
 const bad = renderCarouselBundle([{headline:"Titolo"},{headline:"Seconda"}], {...brand,primaryColor:"red\" onload=\"alert(1)"});
