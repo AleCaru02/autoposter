@@ -40,8 +40,13 @@ def render(plan_file, manifest_file, output_file):
             segments.append(segment)
         concat = Path(temp) / "segments.txt"
         concat.write_text("".join("file '"+str(p)+"'\n" for p in segments),encoding="utf-8")
-        subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y","-f","concat","-safe","0",
-            "-i",str(concat),"-c","copy","-movflags","+faststart",str(output_file)],check=True,timeout=180)
+        command = ["ffmpeg","-hide_banner","-loglevel","error","-y","-f","concat","-safe","0","-i",str(concat)]
+        if audio is not None:
+            command += ["-i",str(audio),"-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","160k","-af","apad","-t",str(previous/1000)]
+        else:
+            command += ["-c","copy"]
+        command += ["-movflags","+faststart",str(output_file)]
+        subprocess.run(command,check=True,timeout=180)
     return str(output_file)
 
 if __name__ == "__main__":
