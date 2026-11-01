@@ -18,12 +18,12 @@ render = _module.render
 
 def run(plan_path: Path, output_path: Path) -> dict:
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    scenes = plan.get("scenes", [])
+    if plan.get("format") != "REEL_9_16" or plan.get("width") != 1080 or plan.get("height") != 1920:\n        raise ValueError("INVALID_FORMAT")\n    scenes = plan.get("scenes", [])
     if not scenes or len(scenes) > 20:
         raise ValueError("INVALID_SCENES")
     if not all(isinstance(s.get("id"), str) and s["id"].replace("-","").isalnum() for s in scenes):
         raise ValueError("INVALID_SCENE_ID")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    previous = 0\n    for scene in scenes:\n        start, end = scene.get("startMs"), scene.get("endMs")\n        if not isinstance(start, int) or not isinstance(end, int) or start != previous or end <= start or end > 120000:\n            raise ValueError("INVALID_TIMELINE")\n        previous = end\n    output_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="autoposter-") as work:
         work = Path(work)
         manifest = {}
