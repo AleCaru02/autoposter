@@ -20,9 +20,22 @@ export function VideoStudioPage() {
   const [productionStatus,setProductionStatus] = useState("");
   const [renderInstructions,setRenderInstructions] = useState(false);
   const [jobId,setJobId] = useState("");
+  const [submitting,setSubmitting] = useState(false);
   const [jobStatus,setJobStatus] = useState("");
   const [previewUrl,setPreviewUrl] = useState("");
   useEffect(()=>()=>{if(previewUrl)URL.revokeObjectURL(previewUrl);},[previewUrl]);
+  async function submitCloudJob(){
+    if(!planJson)return;
+    setSubmitting(true);
+    try{
+      const token=await authenticatedApiToken();
+      const response=await fetch("/api/video-studio/jobs/create",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify({plan:JSON.parse(planJson),idempotencyKey:crypto.randomUUID()})});
+      const result=await response.json() as {jobId?:string;error?:string;state?:string};
+      if(!response.ok||!result.jobId)throw new Error(result.error||"Impossibile creare il lavoro");
+      setJobId(result.jobId);setJobStatus(result.state||"QUEUED");
+    }catch(e){setJobStatus(e instanceof Error?e.message:String(e));}
+    finally{setSubmitting(false);}
+  }
   async function loadJobStatus(){
     if(!selectedProfileId||!jobId.trim())return;
     try{
@@ -45,7 +58,7 @@ export function VideoStudioPage() {
   function generate() {
     try {
       if(!selectedProfileId) throw new Error("Seleziona prima un'attività.");
-      const plan=buildVideoPlan({profileId:selectedProfileId,topic,problem,solution,callToAction:cta});
+      const plan=buildVideoPlan({profileId:selectedProfileId,topic,problem,solution,callToAction:cta,cloudEstimateEur:1.5});
       const issues=validateVideoForReview(plan,{},0);
       if(issues.length) throw new Error(issues.join(", "));
       setPlanJson(JSON.stringify(plan,null,2));setError("");
@@ -82,10 +95,10 @@ export function VideoStudioPage() {
       <div><button type="button" className="primary-button" onClick={generate}>Crea storyboard 30 secondi</button></div>
       {error&&<p role="alert">{error}</p>}
       {productionStatus&&<p role="status">{productionStatus}</p>}
-      {planJson&&<><p>Storyboard pronto per la revisione. Non è un video MP4.</p><pre style={{overflowX:"auto",whiteSpace:"pre-wrap",padding:16,border:"1px solid #777",borderRadius:12}}>{planJson}</pre><div><button type="button" onClick={download}>Esporta JSON</button> <button type="button" onClick={prepareLocalRender}>Prepara rendering locale</button> <button type="button" disabled={checking} onClick={()=>void checkGenerationReadiness()}>{checking?"Verifica…":"Verifica generazione Reel"}</button> <button type="button" disabled={saving} onClick={()=>void persistDraft()}>{saving?"Salvataggio…":"Salva bozza nel database"}</button></div></>}
+      {planJson&&<><p>Storyboard pronto per la revisione. Non è un video MP4.</p><pre style={{overflowX:"auto",whiteSpace:"pre-wrap",padding:16,border:"1px solid #777",borderRadius:12}}>{planJson}</pre><div><button type="button" onClick={download}>Esporta JSON</button> <button type="button" onClick={prepareLocalRender}>Prepara rendering locale</button> <button type="button" disabled={submitting} onClick={()=>void submitCloudJob()}>{submitting?"Invio…":"Accoda Reel nel cloud (riserva 1,50 €)"}</button> <button type="button" disabled={checking} onClick={()=>void checkGenerationReadiness()}>{checking?"Verifica…":"Verifica generazione Reel"}</button> <button type="button" disabled={saving} onClick={()=>void persistDraft()}>{saving?"Salvataggio…":"Salva bozza nel database"}</button></div></>}
     </section>
     {renderInstructions&&<section><h2>Rendering locale (senza API a pagamento)</h2><p>Scarica lo storyboard, prepara un file PNG per ogni scena e un manifest JSON che associ gli ID delle scene ai percorsi dei PNG. Sul computer con FFmpeg esegui:</p><pre style={{whiteSpace:"pre-wrap"}}>python scripts/render-video-assets.py storyboard.json scene-images.json reel.mp4</pre><p>Questo comando crea il MP4 sul tuo computer. Il rendering automatico dal browser non è ancora disponibile.</p></section>}
-    <section style={{display:"grid",gap:8}}><h2>Stato e anteprima dei lavori cloud</h2><p>Inserisci l’identificativo di un lavoro esistente. La creazione automatica dei lavori sarà disponibile solo dopo l’attivazione del servizio cloud.</p><label>ID lavoro<input value={jobId} onChange={e=>setJobId(e.target.value)} placeholder="UUID del lavoro"/></label><div><button type="button" onClick={()=>void loadJobStatus()} disabled={!jobId.trim()}>Verifica stato</button></div>{jobStatus&&<p role="status">{jobStatus}</p>}{previewUrl&&<video src={previewUrl} controls playsInline style={{width:"100%",maxWidth:320}}/>}</section>
+    <section style={{display:"grid",gap:8}}><h2>Stato e anteprima dei lavori cloud</h2><p>Inserisci l’identificativo di un lavoro esistente. La coda registra la richiesta ma non genera il video finché il servizio cloud non viene attivato.</p><label>ID lavoro<input value={jobId} onChange={e=>setJobId(e.target.value)} placeholder="UUID del lavoro"/></label><div><button type="button" onClick={()=>void loadJobStatus()} disabled={!jobId.trim()}>Verifica stato</button></div>{jobStatus&&<p role="status">{jobStatus}</p>}{previewUrl&&<video src={previewUrl} controls playsInline style={{width:"100%",maxWidth:320}}/>}</section>
     <section><h2>Bozze salvate</h2>{drafts.map(d=><article key={d.id}><button type="button" onClick={()=>setPlanJson(JSON.stringify(d.plan,null,2))}>{d.title}</button> · {new Date(d.updated_at).toLocaleDateString("it-IT")}</article>)}</section>
     <section><h2>Piano editoriale — 30 giorni</h2><p>Idee iniziali da validare con ricerca e fonti prima della produzione.</p>
       <div style={{display:"grid",gap:10}}>{calendar?.slots.map(slot=><article key={slot.day} style={{padding:12,border:"1px solid #8885",borderRadius:10}}><strong>Giorno {slot.day} · {slot.pillar}</strong><p>{slot.headline}</p><small>{slot.hook}</small></article>)}</div>
