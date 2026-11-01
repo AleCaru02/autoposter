@@ -169,6 +169,8 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   const recent = await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
   const learning = await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and source_type='PROVIDER_API' and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];
 
+  const competitorObservations = (Array.isArray(object(current[0]?.platform_strategy).competitorObservations) ? object(current[0]?.platform_strategy).competitorObservations : []) as CompetitorObservation[];
+  const verifiedCompetitorObservations = competitorObservations.filter((item) => item && typeof item === "object").slice(0, 25);
   const meter = new StrategyPlannerMetering(env.DATABASE_URL);
   const reservation = await meter.reserve({ profileId, cycle: "STRATEGY_PLAN" });
   if (reservation.status === "DENIED") throw new Error(reservation.code);
@@ -179,7 +181,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
   let logicalCommitted = false;
   try {
     await meter.markProviderStarted(eventId);
-    const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, learningInsights: learning, fetcher });
+    const strategyResult = await generateOpenAIStrategy({ apiKey: env.OPENAI_API_KEY, profile, brand: brands[0], existingObjectives: current[0]?.objectives, learningInsights: learning, competitorObservations: verifiedCompetitorObservations, fetcher });
     await meter.persistTechnicalUsage(profileId, eventId, {
       operation: "AGENT_STRATEGIST", model: MODEL,
       inputTokens: strategyResult.usage.inputTokens, outputTokens: strategyResult.usage.outputTokens,
@@ -188,7 +190,7 @@ export async function runOpenAIStrategyPlanner(env: StrategyPlannerEnv, profileI
     });
     const mixTotal = Object.values(strategyResult.output.contentMix).reduce((sum, value) => sum + value, 0);
     if (mixTotal !== 100) throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
-    const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), learningInsights: learning, fetcher });
+    const plannerResult = await generateOpenAIPlan({ apiKey: env.OPENAI_API_KEY, profile, strategy: strategyResult.output, schedules, recentTopics: recent.map((row) => row.topic).filter(Boolean), learningInsights: learning, competitorObservations: verifiedCompetitorObservations, fetcher });
     await meter.persistTechnicalUsage(profileId, eventId, {
       operation: "AGENT_PLANNER", model: MODEL,
       inputTokens: plannerResult.usage.inputTokens, outputTokens: plannerResult.usage.outputTokens,
