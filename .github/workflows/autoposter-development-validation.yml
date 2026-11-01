@@ -40,3 +40,5 @@ jobs:
         run: npx tsx tests/reel-provider-selection.test.ts
       - name: Reel production approval and QA gates
         run: npx tsx tests/reel-production-gates.test.ts
+      - name: Premium cloud Reel quality policy
+        run: npx tsx tests/premium-cloud-reel-policy.test.ts
