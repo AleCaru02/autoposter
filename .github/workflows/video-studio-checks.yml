@@ -22,6 +22,7 @@ jobs:
           npx tsx tests/video-editorial-calendar.test.ts
           npx tsx tests/video-studio-readiness.test.ts
           npx tsx tests/abekyo-local-adapter.test.ts
+          npx tsx tests/video-studio-integration.test.ts
       - name: FFmpeg renderer smoke test
         run: |
           sudo apt-get update -qq
