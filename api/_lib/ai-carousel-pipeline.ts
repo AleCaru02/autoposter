@@ -15,6 +15,7 @@ export async function generateAiCarousel(input: {
   authorizeSlide: (reservationId: string, index: number) => Promise<boolean>;
   /** Persist each result immediately so partial work is not lost. */
   saveSlide: (index: number, result: OpenAIImageResult) => Promise<void>;
+  generateImage?: typeof generateOpenAIImage;
 }): Promise<AiCarouselResult> {
   if (input.scenes.length < 2 || input.scenes.length > 10) throw new Error("CAROUSEL_INVALID_SLIDE_COUNT");
   if (!input.verifiedPricing) throw new Error("IMAGE_API_PRICING_UNVERIFIED");
@@ -23,7 +24,7 @@ export async function generateAiCarousel(input: {
   const slides: OpenAIImageResult[] = [];
   for (const [index, scene] of input.scenes.entries()) {
     if (!(await input.authorizeSlide(input.budgetReservationId, index))) throw new Error("CAROUSEL_BUDGET_DENIED");
-    const result = await generateOpenAIImage({
+    const result = await (input.generateImage ?? generateOpenAIImage)({
       ...input.imageOptions,
       format: "CAROUSEL",
       visualBrief: `Slide ${index + 1}/${input.scenes.length}. ${scene.visualBrief}`,
