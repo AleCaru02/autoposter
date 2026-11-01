@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import {buildPersonalEditorialCalendar} from "../api/_lib/video-editorial-calendar.js";
+const calendar=buildPersonalEditorialCalendar("personal",12);
+assert.equal(calendar.slots.length,12);
+assert.equal(calendar.slots[0].day,1);
+assert.equal(calendar.slots.at(-1)?.day,30);
+assert.ok(calendar.slots.every(s=>s.requiresEvidence && s.status==="IDEA"));
+assert.ok(new Set(calendar.slots.map(s=>s.pillar)).size>=4);
+assert.throws(()=>buildPersonalEditorialCalendar("",12),/INVALID_EDITORIAL_REQUEST/);
+assert.throws(()=>buildPersonalEditorialCalendar("p",30),/INVALID_EDITORIAL_REQUEST/);
+console.log("Video editorial calendar contract: PASS");
