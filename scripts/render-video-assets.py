@@ -16,6 +16,10 @@ def render(plan_file, manifest_file, output_file):
         raise ValueError("INVALID_SCENES")
     if not isinstance(manifest, dict):
         raise ValueError("INVALID_MANIFEST")
+    audio_value = manifest.get("__audio__")
+    audio = Path(audio_value) if isinstance(audio_value, str) and audio_value else None
+    if audio is not None and (not audio.is_file() or audio.suffix.lower() not in (".wav", ".mp3", ".m4a")):
+        raise ValueError("INVALID_AUDIO_ASSET")
     with tempfile.TemporaryDirectory() as temp:
         segments = []
         previous = 0
