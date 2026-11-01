@@ -48,6 +48,8 @@ jobs:
           PY
           python3 scripts/render-video-assets.py /tmp/asset-plan.json /tmp/asset-manifest.json /tmp/asset-reel.mp4
           ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 /tmp/asset-reel.mp4 | grep -qx '1080,1920'
+      - name: One-command offline pipeline E2E
+        run: python3 tests/video-studio-offline-e2e.py
       - name: Typecheck
         run: npm run typecheck
       - name: Build
