@@ -195,6 +195,7 @@ export default {
       const response = await handleAdminApi(request, env);
       if (response) return response;
     }
+    if (path === "/api/video-studio/jobs/create") return handleVideoJobStatus(request, env);
     if (path === "/api/video-studio/jobs/status") return handleVideoJobStatus(request, env);
     if (path.startsWith("/api/video-studio/media/")) return handleVideoMedia(request, env);
     if (path === "/api/video-studio/preflight") return handleVideoStudioPreflight(request);
