@@ -24,3 +24,31 @@ export async function checkAbekyoLocal(config: AbekyoConfig, fetcher: typeof fet
     return response.json();
   } finally {clearTimeout(timeout);}
 }
+
+/** Validate a schema-compliant Abekyo project before any render. */
+export async function validateAbekyoProject(
+  config: AbekyoConfig,
+  project: unknown,
+  fetcher: typeof fetch = fetch
+): Promise<unknown> {
+  if (!config.enabled) throw new Error("ABE KYO_DISABLED".replace(" ", ""));
+  const origin = assertLocalAbekyoUrl(config.baseUrl);
+  if (!project || typeof project !== "object" || Array.isArray(project)) {
+    throw new Error("ABE KYO_INVALID_PROJECT".replace(" ", ""));
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.min(Math.max(config.timeoutMs ?? 5000, 100), 15000));
+  try {
+    const response = await fetcher(origin + "/api/project/validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(project),
+      redirect: "error",
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error("ABE KYO_VALIDATION_FAILED".replace(" ", ""));
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
