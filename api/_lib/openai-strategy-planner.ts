@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { competitorResearchContext, type CompetitorObservation } from "./competitor-evidence.js";
 import type { SocialProvider } from "./openai-text.js";
 import type { ContentType, EditorialIntent, FunnelStage } from "./content-agents.js";
 import { StrategyPlannerMetering } from "./strategy-planner-metering.js";
@@ -115,7 +116,7 @@ async function callAgent<T>(input: { apiKey: string; agent: "STRATEGIST" | "PLAN
   return { output: JSON.parse(text) as T, responseId: typeof body.id === "string" ? body.id : "", requestId, usage: usage(body) };
 }
 
-export function generateOpenAIStrategy(input: { apiKey: string; profile: ProfileRow; brand: BrandRow | undefined; existingObjectives: unknown; learningInsights?: PersistedLearningInsight[]; fetcher?: typeof fetch }) {
+export function generateOpenAIStrategy(input: { apiKey: string; profile: ProfileRow; brand: BrandRow | undefined; existingObjectives: unknown; learningInsights?: PersistedLearningInsight[]; competitorObservations?: CompetitorObservation[]; fetcher?: typeof fetch }) {
   return callAgent<OpenAIStrategy>({
     apiKey: input.apiKey, agent: "STRATEGIST", fetcher: input.fetcher, schema: STRATEGY_SCHEMA, schemaName: "post_automatici_strategy",
     instructions: [
@@ -126,9 +127,11 @@ export function generateOpenAIStrategy(input: { apiKey: string; profile: Profile
       "Bilancia educazione, consigli, news, storytelling e promozione. Le percentuali del contentMix devono sommare esattamente a 100.",
       "Usa evidenceBasedLearning solo quando presente: contiene confronti da metriche provider reali con soglia di confidenza già verificata. Non inventare insight mancanti.",
       "Considera Instagram, Facebook, LinkedIn e Google Business Profile solo quando pertinenti.",
+      "Non confondere le metriche pubbliche dei concorrenti con conversioni o fatturato; individua opportunità originali e non copiare contenuti.",
+      "Se competitorResearch.evidenceCount è zero, non fingere di aver analizzato concorrenti.",
       "Restituisci esclusivamente JSON conforme allo schema.",
     ].join("\n"),
-    context: { profile: input.profile, brand: { description: input.brand?.description ?? null, businessModel: input.brand?.business_model ?? null, location: input.brand?.location ?? null, serviceArea: input.brand?.service_area ?? null, target: summary(input.brand?.target_audience), tone: summary(input.brand?.tone_of_voice), goals: strings(input.brand?.goals), userProvidedContext: input.brand?.user_context?.trim() || null, visualIdentity: input.brand?.visual_identity ?? null }, existingObjectives: strings(input.existingObjectives), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []) },
+    context: { profile: input.profile, brand: { description: input.brand?.description ?? null, businessModel: input.brand?.business_model ?? null, location: input.brand?.location ?? null, serviceArea: input.brand?.service_area ?? null, target: summary(input.brand?.target_audience), tone: summary(input.brand?.tone_of_voice), goals: strings(input.brand?.goals), userProvidedContext: input.brand?.user_context?.trim() || null, visualIdentity: input.brand?.visual_identity ?? null }, existingObjectives: strings(input.existingObjectives), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []), competitorResearch: competitorResearchContext(input.competitorObservations ?? [], []) },
   });
 }
 
@@ -141,13 +144,15 @@ export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow;
       "Usa soltanto formati che il publisher reale può consegnare con il singolo asset generato dal piano.",
       "Per Facebook, LinkedIn e GBP usa SINGLE_POST. Per Instagram usa SINGLE_POST o SINGLE_STORY. Non pianificare caroselli finché non esiste un bundle reale di più asset.",
       "Evita i temi recenti e distribuisci intenti e funnel senza sequenze ripetitive.",
+      "Ogni tema deve contribuire all’obiettivo commerciale: definisci topicDirection concreto, beneficio per il pubblico e CTA coerente con ctaPolicy.",
+      "I segnali dei concorrenti sono osservazioni pubbliche, non prove di vendite; differenziati invece di copiare.",
       "Quando evidenceBasedLearning contiene segnali, modifica coerentemente almeno una decisione futura tra provider, formato, tema, giorno o orario, senza violare schedule e formati pubblicabili.",
       "Ignora insight LOW, dati di altri profili e qualsiasi preferenza non presente in evidenceBasedLearning.",
       "Rispetta la frequenza dei schedule abilitati; se un provider ha posts_per_week=0 o disabled non pianificarlo.",
       "Non inventare eventi, news o fatti: NEWS indica soltanto una direzione da affidare successivamente al Research Agent.",
       "Restituisci esclusivamente JSON conforme allo schema.",
     ].join("\n"),
-    context: { profile: { name: input.profile.name, industry: input.profile.industry, timezone: input.profile.timezone }, strategy: input.strategy, schedules: input.schedules, recentTopics: input.recentTopics.slice(0, 40), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []) },
+    context: { profile: { name: input.profile.name, industry: input.profile.industry, timezone: input.profile.timezone }, strategy: input.strategy, schedules: input.schedules, recentTopics: input.recentTopics.slice(0, 40), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []), competitorResearch: competitorResearchContext(input.competitorObservations ?? [], input.recentTopics) },
   });
 }
 
