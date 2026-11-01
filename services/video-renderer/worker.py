@@ -2,6 +2,7 @@
 """Private polling renderer. Requires Neon + R2; no public HTTP endpoint or paid AI calls.
 Start only after staging migration, R2 bucket and credentials are configured.
 """
+import argparse
 import json
 import os
 import subprocess
@@ -114,6 +115,9 @@ def render_job(conn, client, job):
         finish(conn,job,"READY",output=key)
 
 def main():
+    parser = argparse.ArgumentParser(description="Autoposter video renderer")
+    parser.add_argument("--once", action="store_true", help="Process at most one ready job, then exit")
+    args = parser.parse_args()
     client=storage()
     while True:
         try:
@@ -128,6 +132,8 @@ def main():
                         finish(conn,job,"FAILED",error=type(exc).__name__[:80])
         except Exception as exc:
             print(json.dumps({"state":"WORKER_ERROR","type":type(exc).__name__}),flush=True)
+        if args.once:
+            return
         time.sleep(INTERVAL)
 
 if __name__=="__main__":
