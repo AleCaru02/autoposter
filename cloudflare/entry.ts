@@ -1,4 +1,5 @@
 import worker from "./worker.js";
+import { validateVideoForReview, type VideoPlan } from "../api/_lib/video-studio.js";
 import { handleWorkerGenerateText, handleWorkerGenerateTextStatus } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
 import { handleWorkerOnboardingProvision } from "./onboarding-provision.js";
@@ -118,6 +119,24 @@ async function canAccessProfile(request: Request, profileId: string) {
   return rows.some((row) => row.id === profileId);
 }
 
+async function handleVideoStudioPreflight(request: Request) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  let plan: VideoPlan;
+  try {
+    const payload = await request.json() as { plan?: VideoPlan };
+    if (!payload.plan || typeof payload.plan.profileId !== "string") return json({ error: "INVALID_VIDEO_PLAN" }, 400);
+    plan = payload.plan;
+  } catch { return json({ error: "INVALID_JSON" }, 400); }
+  if (!await canAccessProfile(request, plan.profileId)) return json({ error: "PROFILE_NOT_FOUND" }, 404);
+  const blockers = validateVideoForReview(plan, {}, 0);
+  if (blockers.length) return json({ ready: false, blockers }, 422);
+  return json({
+    ready: false,
+    blockers: ["RENDER_WORKER_NOT_CONFIGURED", "PERSISTENT_COST_LEDGER_NOT_CONFIGURED", "VIDEO_ASSET_STORAGE_NOT_CONFIGURED"],
+    message: "Video generation is disabled until authenticated rendering, persistent budget accounting and media storage are configured. No charges incurred."
+  }, 503);
+}
+
 async function handleAutopilotRun(request: Request, env: Env) {
   if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   let profileId = "";
@@ -174,6 +193,7 @@ export default {
       const response = await handleAdminApi(request, env);
       if (response) return response;
     }
+    if (path === "/api/video-studio/preflight") return handleVideoStudioPreflight(request);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
     if (path === "/api/autopilot/certify") return handleProfileSmmCertification(request, env);
     if (path === "/api/learning/run") return handleLearningRun(request, env);
