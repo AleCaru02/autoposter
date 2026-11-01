@@ -1,5 +1,6 @@
 import worker from "./worker.js";
 import { handleVideoMedia } from "./video-studio-media.js";
+import { handleVideoJobStatus } from "./video-studio-jobs.js";
 import { validateVideoForReview, type VideoPlan } from "../api/_lib/video-studio.js";
 import { handleWorkerGenerateText, handleWorkerGenerateTextStatus } from "./generate-text.js";
 import { handleWorkerOnboardingAnalyze } from "./onboarding-analyze.js";
@@ -194,6 +195,7 @@ export default {
       const response = await handleAdminApi(request, env);
       if (response) return response;
     }
+    if (path === "/api/video-studio/jobs/status") return handleVideoJobStatus(request, env);
     if (path.startsWith("/api/video-studio/media/")) return handleVideoMedia(request, env);
     if (path === "/api/video-studio/preflight") return handleVideoStudioPreflight(request);
     if (path === "/api/autopilot/run") return handleAutopilotRun(request, env);
