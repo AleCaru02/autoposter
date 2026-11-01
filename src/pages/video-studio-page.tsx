@@ -15,6 +15,7 @@ export function VideoStudioPage() {
   const [error,setError] = useState("");
   const [drafts,setDrafts] = useState<SavedVideoDraft[]>([]);
   const [saving,setSaving] = useState(false);
+  const [renderInstructions,setRenderInstructions] = useState(false);
   useEffect(()=>{let active=true;setDrafts([]);if(selectedProfileId) void loadVideoDrafts(selectedProfileId).then(rows=>{if(active)setDrafts(rows);}).catch(()=>{if(active)setError("Impossibile caricare le bozze.");});return ()=>{active=false;};},[selectedProfileId]);
   async function persistDraft(){if(!planJson||!selectedProfileId)return;setSaving(true);try{const plan=JSON.parse(planJson);if(plan.profileId!==selectedProfileId)throw new Error("Profilo non valido");await saveVideoDraft(plan);setDrafts(await loadVideoDrafts(selectedProfileId));setError("");}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setSaving(false);}}
   const calendar=useMemo(()=>selectedProfileId?buildPersonalEditorialCalendar(selectedProfileId):null,[selectedProfileId]);
@@ -27,6 +28,7 @@ export function VideoStudioPage() {
       setPlanJson(JSON.stringify(plan,null,2));setError("");
     } catch(e) {setError(e instanceof Error?e.message:String(e));}
   }
+  function prepareLocalRender() { setRenderInstructions(true); download(); }
   function download() {
     const blob=new Blob([planJson],{type:"application/json"});
     const url=URL.createObjectURL(blob);
@@ -42,8 +44,9 @@ export function VideoStudioPage() {
       <label>Invito all'azione<input style={{width:"100%"}} value={cta} onChange={e=>setCta(e.target.value)}/></label>
       <div><button type="button" className="primary-button" onClick={generate}>Crea storyboard 30 secondi</button></div>
       {error&&<p role="alert">{error}</p>}
-      {planJson&&<><p>Storyboard pronto per la revisione. Non è un video MP4.</p><pre style={{overflowX:"auto",whiteSpace:"pre-wrap",padding:16,border:"1px solid #777",borderRadius:12}}>{planJson}</pre><div><button type="button" onClick={download}>Esporta JSON</button> <button type="button" disabled={saving} onClick={()=>void persistDraft()}>{saving?"Salvataggio…":"Salva bozza nel database"}</button></div></>}
+      {planJson&&<><p>Storyboard pronto per la revisione. Non è un video MP4.</p><pre style={{overflowX:"auto",whiteSpace:"pre-wrap",padding:16,border:"1px solid #777",borderRadius:12}}>{planJson}</pre><div><button type="button" onClick={download}>Esporta JSON</button> <button type="button" onClick={prepareLocalRender}>Prepara rendering locale</button> <button type="button" disabled={saving} onClick={()=>void persistDraft()}>{saving?"Salvataggio…":"Salva bozza nel database"}</button></div></>}
     </section>
+    {renderInstructions&&<section><h2>Rendering locale (senza API a pagamento)</h2><p>Scarica lo storyboard, prepara un file PNG per ogni scena e un manifest JSON che associ gli ID delle scene ai percorsi dei PNG. Sul computer con FFmpeg esegui:</p><pre style={{whiteSpace:"pre-wrap"}}>python scripts/render-video-assets.py storyboard.json scene-images.json reel.mp4</pre><p>Questo comando crea il MP4 sul tuo computer. Il rendering automatico dal browser non è ancora disponibile.</p></section>}
     <section><h2>Bozze salvate</h2>{drafts.map(d=><article key={d.id}><button type="button" onClick={()=>setPlanJson(JSON.stringify(d.plan,null,2))}>{d.title}</button> · {new Date(d.updated_at).toLocaleDateString("it-IT")}</article>)}</section>
     <section><h2>Piano editoriale — 30 giorni</h2><p>Idee iniziali da validare con ricerca e fonti prima della produzione.</p>
       <div style={{display:"grid",gap:10}}>{calendar?.slots.map(slot=><article key={slot.day} style={{padding:12,border:"1px solid #8885",borderRadius:10}}><strong>Giorno {slot.day} · {slot.pillar}</strong><p>{slot.headline}</p><small>{slot.hook}</small></article>)}</div>
