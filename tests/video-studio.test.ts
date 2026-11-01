@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import {buildVideoPlan,validateVideoForReview} from "../api/_lib/video-studio.js";
+const plan=buildVideoPlan({profileId:"personal",topic:"Il tuo sito perde clienti?",problem:"Un sito lento allontana visitatori",solution:"Una pagina chiara rende semplice contattarti",callToAction:"Richiedi una bozza gratuita",cloudEstimateEur:4});
+assert.equal(plan.scenes.length,4);
+assert.equal(plan.scenes.at(-1)?.endMs,30000);
+assert.equal(plan.width,1080);
+assert.deepEqual(validateVideoForReview(plan,{},20),[]);
+assert.ok(validateVideoForReview(plan,{},27).includes("MONTHLY_BUDGET_EXCEEDED"));
+assert.throws(()=>buildVideoPlan({profileId:"p",topic:"t",problem:"p",solution:"s",callToAction:"c",cloudEstimateEur:31}),/BUDGET/);
+const bad={...plan,sources:[{url:"https://example.com",title:"x",license:"unknown",commercialUseVerified:false}]};
+assert.ok(validateVideoForReview(bad,{},0).includes("SOURCE_LICENSE_UNVERIFIED"));
+console.log("Video Studio contract: PASS");
