@@ -20,6 +20,7 @@ const result = await generateAiCarousel({
   verifiedPricing: true,
   authorizeSlide: async (_id, index) => index < 2,
   saveSlide: async (index) => { saved.push(index); },
+  settleSlideCost: async () => true,
   generateImage: fakeImage,
 });
 assert.equal(result.count, 2);
@@ -30,7 +31,7 @@ let blocked = false;
 try {
   await generateAiCarousel({
     scenes, imageOptions, budgetReservationId: "reserved", verifiedPricing: false,
-    authorizeSlide: async () => true, saveSlide: async () => {},
+    authorizeSlide: async () => true, saveSlide: async () => {}, settleSlideCost: async () => true,
     generateImage: fakeImage,
   });
 } catch (error) { blocked = String(error).includes("PRICING_UNVERIFIED"); }
@@ -42,8 +43,26 @@ await assert.rejects(() => generateAiCarousel({
   scenes, imageOptions, budgetReservationId: "reserved", verifiedPricing: true,
   authorizeSlide: async (_id, index) => index === 0,
   saveSlide: async (index) => { partial.push(index); },
+  settleSlideCost: async () => true,
   generateImage: fakeImage,
 }), /BUDGET_DENIED/);
 assert.deepEqual(partial, [0]);
 assert.equal(calls.length, 3, "No second paid call when budget denied");
 console.log("AI carousel pipeline tests passed");
+
+const beforeSettlementFailure = calls.length;
+await assert.rejects(() => generateAiCarousel({
+  scenes, imageOptions, budgetReservationId: "reserved", verifiedPricing: true,
+  authorizeSlide: async () => true,
+  saveSlide: async () => {},
+  settleSlideCost: async () => false,
+  generateImage: fakeImage,
+}), /COST_SETTLEMENT_FAILED/);
+assert.equal(calls.length, beforeSettlementFailure + 1, "Stop after failed settlement; never bill second slide");
+await assert.rejects(() => generateAiCarousel({
+  scenes, imageOptions, budgetReservationId: "reserved", verifiedPricing: true,
+  authorizeSlide: async () => true,
+  saveSlide: async () => {},
+  generateImage: fakeImage,
+}), /COST_SETTLEMENT_REQUIRED/);
+assert.equal(calls.length, beforeSettlementFailure + 1, "Missing settlement must not call provider");
