@@ -135,7 +135,7 @@ export function generateOpenAIStrategy(input: { apiKey: string; profile: Profile
   });
 }
 
-export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow; strategy: OpenAIStrategy; schedules: ScheduleRow[]; recentTopics: string[]; learningInsights?: PersistedLearningInsight[]; fetcher?: typeof fetch }) {
+export function generateOpenAIPlan(input: { apiKey: string; profile: ProfileRow; strategy: OpenAIStrategy; schedules: ScheduleRow[]; recentTopics: string[]; learningInsights?: PersistedLearningInsight[]; competitorObservations?: CompetitorObservation[]; fetcher?: typeof fetch }) {
   return callAgent<OpenAIEditorialPlan>({
     apiKey: input.apiKey, agent: "PLANNER", fetcher: input.fetcher, schema: PLAN_SCHEMA, schemaName: "post_automatici_editorial_plan",
     instructions: [
