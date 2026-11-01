@@ -1,0 +1,30 @@
+name: Autoposter development validation
+on:
+  push:
+    branches: [feature/ai-video-editor-plan]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Editorial planning tests
+        run: npm run test:openai-strategy-planner
+      - name: Content generation tests
+        run: npm run test:fase7c-content-generation
+      - name: Publication engine tests
+        run: npm run test:fase7f-publication-engine
+      - name: Competitor evidence tests
+        run: npx tsx tests/competitor-evidence.test.ts
