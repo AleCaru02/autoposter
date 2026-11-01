@@ -16,11 +16,14 @@ export async function generateAiCarousel(input: {
   /** Persist each result immediately so partial work is not lost. */
   saveSlide: (index: number, result: OpenAIImageResult) => Promise<void>;
   generateImage?: typeof generateOpenAIImage;
+  /** Durable cost settlement must complete before another image is requested. */
+  settleSlideCost?: (reservationId: string, index: number, result: OpenAIImageResult) => Promise<boolean>;
 }): Promise<AiCarouselResult> {
   if (input.scenes.length < 2 || input.scenes.length > 10) throw new Error("CAROUSEL_INVALID_SLIDE_COUNT");
   if (!input.verifiedPricing) throw new Error("IMAGE_API_PRICING_UNVERIFIED");
   if (!input.budgetReservationId.trim()) throw new Error("CAROUSEL_BUDGET_RESERVATION_REQUIRED");
   if (input.scenes.some((s) => !s.headline.trim() || !s.visualBrief.trim())) throw new Error("CAROUSEL_INVALID_SCENE");
+  if (!input.settleSlideCost) throw new Error("CAROUSEL_COST_SETTLEMENT_REQUIRED");
   const slides: OpenAIImageResult[] = [];
   for (const [index, scene] of input.scenes.entries()) {
     if (!(await input.authorizeSlide(input.budgetReservationId, index))) throw new Error("CAROUSEL_BUDGET_DENIED");
@@ -31,6 +34,7 @@ export async function generateAiCarousel(input: {
       typography: { brand: input.imageOptions.profileName, headline: scene.headline, subheadline: scene.subheadline },
     });
     await input.saveSlide(index, result);
+    if (!(await input.settleSlideCost(input.budgetReservationId, index, result))) throw new Error("CAROUSEL_COST_SETTLEMENT_FAILED");
     slides.push(result);
   }
   return { slides, count: slides.length };
