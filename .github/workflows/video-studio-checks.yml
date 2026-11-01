@@ -25,6 +25,7 @@ jobs:
           npx tsx tests/video-studio-integration.test.ts
           npx tsx tests/video-publication-gate.test.ts
           npx tsx tests/video-image-generator.test.ts
+          npx tsx tests/video-scene-production.test.ts
       - name: FFmpeg renderer smoke test
         run: |
           sudo apt-get update -qq
