@@ -23,7 +23,8 @@ export async function generateSceneImages(plan: VideoPlan, settings: ImageGenera
       method: "POST",
       headers: { Authorization: "Bearer " + settings.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-image-1",
+        model: "gpt-image-2.5-flare",
+        quality: "low",
         size: "1024x1536",
         n: 1,
         prompt: "Vertical photorealistic professional B-roll, no text, no logos, no recognizable people. Subject: " + plan.title + ". Scene: " + scene.narration
