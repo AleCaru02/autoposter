@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import {estimateMonthlyContentPlan} from "../api/_lib/content-budget-forecast.js";
+const base={posts:12,carousels:4,slidesPerCarousel:5,reels:4,imageOutputTokensPerImage:8000,imageInputTokensPerImage:0,textInputTokensPerImage:1000,reelCostUsd:1,otherAiCostUsd:4,usdToEur:0.92,monthlyBudgetEur:30,contingencyPercent:20};
+const result=estimateMonthlyContentPlan(base);
+assert.equal(result.publications,20);
+assert.equal(result.imageCount,32);
+assert.ok(result.estimatedEur>0);
+assert.equal(result.withinBudget,result.estimatedEur<=30);
+assert.ok(estimateMonthlyContentPlan({...base,imageOutputTokensPerImage:20000}).estimatedEur>result.estimatedEur);
+assert.ok(estimateMonthlyContentPlan({...base,carousels:0}).imageCount===12);
+assert.throws(()=>estimateMonthlyContentPlan({...base,usdToEur:0}),/INVALID_CONTENT_BUDGET_INPUT/);
+assert.throws(()=>estimateMonthlyContentPlan({...base,slidesPerCarousel:11}),/INVALID_CONTENT_BUDGET_INPUT/);
+console.log("Content budget forecast tests passed");
