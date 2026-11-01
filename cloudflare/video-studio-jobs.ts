@@ -2,7 +2,7 @@
 import { neon } from "@neondatabase/serverless";
 import { validateVideoForReview, type VideoPlan } from "../api/_lib/video-studio.js";
 import { bearerValue, verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
-export async function handleVideoJobStatus(request:Request,env:{DATABASE_URL?:string}):Promise<Response>{
+export async function handleVideoJobStatus(request:Request,env:{DATABASE_URL?:string;VIDEO_RENDER_ENABLED?:string;VIDEO_MEDIA?:unknown}):Promise<Response>{
   const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
   if(request.method!=="GET"&&request.method!=="POST")return json({error:"METHOD_NOT_ALLOWED"},405);
   if(!env.DATABASE_URL)return json({error:"DATABASE_NOT_CONFIGURED"},503);
@@ -16,7 +16,10 @@ export async function handleVideoJobStatus(request:Request,env:{DATABASE_URL?:st
   const jobId=request.method==="POST"?null:url.searchParams.get("jobId");
   const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if(!profileId||!uuid.test(profileId)||(request.method==="GET"&&(!jobId||!uuid.test(jobId))))return json({error:"INVALID_JOB_QUERY"},400);
-  if(request.method==="POST"&&(!plan||!key||key.length<8||key.length>128||!Number.isFinite(plan.estimatedCloudCostEur)||plan.estimatedCloudCostEur<=0||validateVideoForReview(plan,{},0).length))return json({error:"INVALID_JOB_PLAN"},422);
+  if(request.method==="POST"){
+    if(env.VIDEO_RENDER_ENABLED!=="true"||!env.VIDEO_MEDIA)return json({error:"RENDER_SERVICE_NOT_ENABLED"},503);
+    if(!plan||!Array.isArray(plan.scenes)||!Array.isArray(plan.sources)||!key||key.length<8||key.length>128||!Number.isFinite(plan.estimatedCloudCostEur)||plan.estimatedCloudCostEur<=0||validateVideoForReview(plan,{},0).length)return json({error:"INVALID_JOB_PLAN"},422);
+  }
   const token=bearerValue(request.headers.get("authorization"));
   const user=token?await verifiedCustomerAuthUserId(token,env.DATABASE_URL):null;
   if(!user)return json({error:"UNAUTHORIZED"},401);
