@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import {REQUESTED_MONTHLY_CONTENT_PLAN as plan,requestedPlanForecast} from "../api/_lib/requested-monthly-content-plan.js";
+assert.equal(plan.posts,12);
+assert.equal(plan.carousels,4);
+assert.equal(plan.slidesPerCarousel,5);
+assert.equal(plan.reels,15);
+assert.equal(plan.totalPublications,31);
+assert.equal(plan.aiImages,32);
+assert.equal(plan.assumedTotalEur,27);
+assert.equal(plan.enabled,false);
+const forecast=requestedPlanForecast({measuredImageEur:.25,measuredReelEur:1,measuredOtherEur:4});
+assert.equal(forecast.totalEur,27);
+assert.equal(forecast.remainingEur,3);
+assert.equal(forecast.feasible,true);
+assert.equal(forecast.activationAllowed,false);
+assert.equal(requestedPlanForecast({measuredImageEur:.25,measuredReelEur:1.5,measuredOtherEur:4}).feasible,false);
+assert.throws(()=>requestedPlanForecast({measuredImageEur:-1,measuredReelEur:1,measuredOtherEur:4}),/INVALID_MEASURED_COST/);
+console.log("Requested monthly content plan tests passed");
