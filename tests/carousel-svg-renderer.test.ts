@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { renderCarouselBundle } from "../api/_lib/carousel-svg-renderer.js";
+const brand = { name: "Studio Milano", primaryColor: "#208060", backgroundColor: "#111111", textColor: "#FFFFFF", cta: "Richiedi una consulenza" };
+const slides = renderCarouselBundle([{ headline: "Tre errori da evitare", body: "Una guida pratica" }, { headline: "La soluzione", body: "Scegli un metodo chiaro" }], brand);
+assert.equal(slides.length, 2);
+assert.match(slides[0], /1080" height="1350"/);
+assert.match(slides[0], /1 \/ 2/);
+assert.match(slides[1], /2 \/ 2/);
+assert.match(slides[1], /Studio Milano/);
+assert.throws(() => renderCarouselBundle([{headline:"Una sola"}], brand), /SLIDE_COUNT/);
+const escaped = renderCarouselBundle([{headline:"<script>alert(1)</script>"},{headline:"Seconda"}],brand);
+assert.ok(!escaped[0].includes("<script>"));
+assert.match(escaped[0], /&lt;script&gt;/);
+const bad = renderCarouselBundle([{headline:"Titolo"},{headline:"Seconda"}], {...brand,primaryColor:"red\" onload=\"alert(1)"});
+assert.ok(!bad[0].includes("onload="));
+console.log("Carousel SVG renderer tests passed");
