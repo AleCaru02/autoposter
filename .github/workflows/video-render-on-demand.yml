@@ -1,0 +1,38 @@
+name: Video render (on demand)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-renderer-single
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.VIDEO_RENDER_DATABASE_URL }}
+      VIDEO_R2_BUCKET: ${{ secrets.VIDEO_RENDER_R2_BUCKET }}
+      VIDEO_R2_ENDPOINT: ${{ secrets.VIDEO_RENDER_R2_ENDPOINT }}
+      VIDEO_R2_ACCESS_KEY_ID: ${{ secrets.VIDEO_RENDER_R2_ACCESS_KEY_ID }}
+      VIDEO_R2_SECRET_ACCESS_KEY: ${{ secrets.VIDEO_RENDER_R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configuration
+        run: |
+          for name in DATABASE_URL VIDEO_R2_BUCKET VIDEO_R2_ENDPOINT VIDEO_R2_ACCESS_KEY_ID VIDEO_R2_SECRET_ACCESS_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+      - name: Install FFmpeg and Python
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          python -m pip install -r services/video-renderer/requirements.txt
+      - name: Render at most one ready job
+        run: python services/video-renderer/worker.py --once
