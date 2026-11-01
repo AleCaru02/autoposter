@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const page=readFileSync("src/pages/video-studio-page.tsx","utf8");
+const store=readFileSync("src/features/video-studio/video-drafts.ts","utf8");
+const renderer=readFileSync("scripts/render-video-studio.py","utf8");
+assert.match(page,/saveVideoDraft/);
+assert.match(page,/loadVideoDrafts/);
+assert.match(store,/\.eq\("profile_id",profileId\)/);
+assert.match(store,/publicationReady: false/);
+assert.match(store,/source: "VIDEO_STUDIO"/);
+assert.match(renderer,/INVALID_TIMELINE/);
+assert.doesNotMatch(page,/publishVideo\(/);
+console.log("Video Studio integration static checks passed");
