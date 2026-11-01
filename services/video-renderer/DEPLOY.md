@@ -2,6 +2,14 @@
 
 The repository contains an independently deployable Docker polling worker. It is not yet wired to a Cloudflare Container binding or deployed to an always-on host. Cloudflare Containers have their own lifecycle; this infinite polling process needs a compatible long-running runtime or an HTTP-triggered Container adapter.
 
+## Zero-idle staging option (GitHub Actions, not production)
+
+The development branch includes `.github/workflows/video-render-on-demand.yml`, a manually triggered GitHub Actions workflow that runs `worker.py --once` with a 20-minute timeout and single-job concurrency. It avoids an always-on Render server. GitHub Actions runner minutes and artifact/network usage are subject to GitHub account quotas; do not assume unlimited free rendering.
+
+Before any run, configure the five repository Actions secrets: `VIDEO_RENDER_DATABASE_URL`, `VIDEO_RENDER_R2_BUCKET`, `VIDEO_RENDER_R2_ENDPOINT`, `VIDEO_RENDER_R2_ACCESS_KEY_ID`, `VIDEO_RENDER_R2_SECRET_ACCESS_KEY`. Use only staging credentials and least-privilege roles. The workflow is intentionally manual and cannot auto-render from the web UI yet. GitHub may require the workflow file to exist on the default branch before manual dispatch is available.
+
+Do not enable production video jobs until the staging migration, R2 integration, durable job recovery, security checks and end-to-end tests are complete. Render has not been provisioned.
+
 ## Required configuration
 
 1. Apply `migrations/20261101_video_studio_jobs.sql` to a staging Neon branch; test reservations, retries, isolation, refunds and concurrent jobs before production.
