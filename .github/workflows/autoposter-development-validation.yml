@@ -28,3 +28,5 @@ jobs:
         run: npm run test:fase7f-publication-engine
       - name: Competitor evidence tests
         run: npx tsx tests/competitor-evidence.test.ts
+      - name: Carousel artwork tests
+        run: npx tsx tests/carousel-svg-renderer.test.ts
