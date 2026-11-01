@@ -27,7 +27,7 @@ export function renderCarouselSvg(slide: CarouselSlide, brand: CarouselBrand, in
   const bg = color(brand.backgroundColor, "#101A17");
   const ink = color(brand.textColor, "#FFFFFF");
   const title = lines(slide.headline, 23, 5);
-  const body = lines(slide.body ?? "", 43, 6);
+  const body = lines(slide.body ?? "", 43, 4);
   const kicker = lines(slide.kicker ?? (index === 0 ? "DA SAPERE" : "IN PRATICA"), 35, 1);
   const cta = lines(brand.cta ?? "Scopri di più", 35, 1);
   const name = lines(brand.name, 32, 1);
