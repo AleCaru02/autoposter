@@ -32,7 +32,7 @@ def render(source, target):
         overlay=escape_drawtext(str(scene.get("overlay",""))[:110])
         start=scene["startMs"]/1000
         end=scene["endMs"]/1000
-        filters.append(f"drawtext=text='{overlay}':fontcolor=white:fontsize=55:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,{start:.3f},{end:.3f})'")
+        filters.append(f"drawtext=text='{overlay}':fontcolor=white:fontsize=55:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t\\,{start:.3f}\\,{end:.3f})'")
     cmd=["ffmpeg","-hide_banner","-loglevel","error","-y","-f","lavfi","-i",f"color=c=0x131c2b:s=1080x1920:r=30:d={previous/1000:.3f}","-vf",",".join(filters),"-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-movflags","+faststart",str(target)]
     subprocess.run(cmd,check=True,timeout=180)
     return target
