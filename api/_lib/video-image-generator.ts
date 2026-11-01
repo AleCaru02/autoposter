@@ -11,7 +11,7 @@ export type ImageGenerationSettings = {
 };
 
 export async function generateSceneImages(plan: VideoPlan, settings: ImageGenerationSettings): Promise<SceneImage[]> {
-  const scenes = plan.scenes.filter(scene => scene.kind === "BROLL" || scene.kind === "CTA");
+  const scenes = plan.scenes;
   if (!settings.enabled) throw new Error("IMAGE_GENERATION_DISABLED");
   if (!settings.apiKey) throw new Error("IMAGE_API_KEY_MISSING");
   if (![settings.monthlyLimitEur, settings.spentEur, settings.estimatedEurPerImage].every(value => Number.isFinite(value) && value >= 0)) throw new Error("INVALID_BUDGET");
