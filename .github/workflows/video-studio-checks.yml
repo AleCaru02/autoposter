@@ -1,0 +1,28 @@
+name: Video Studio branch checks
+on:
+  push:
+    branches: [feature/ai-video-editor-plan]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  video-studio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Video Studio unit tests
+        run: |
+          npx tsx tests/video-studio.test.ts
+          npx tsx tests/video-editorial-calendar.test.ts
+          npx tsx tests/video-studio-readiness.test.ts
+          npx tsx tests/abekyo-local-adapter.test.ts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
