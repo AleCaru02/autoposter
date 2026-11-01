@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Globe2, Images, LayoutDashboard, LogOut, Menu, Palette, Settings2, Share2, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, FileCheck2, FileText, Film, Globe2, Images, LayoutDashboard, LogOut, Menu, Palette, Settings2, Share2, X } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -11,7 +11,7 @@ const links = [
   ["Attività", "/app/profili", Building2],
   ["Brand", "/app/brand", Palette],
   ["Sito", "/app/sito", Globe2],
-  ["Contenuti", "/app/contenuti", FileText],
+  ["Contenuti", "/app/contenuti", FileText],\n  ["Video Studio", "/app/video-studio", Film],
   ["Revisioni", "/app/approvazioni", FileCheck2],
   ["Calendario", "/app/calendario", CalendarDays],
   ["Libreria", "/app/libreria", Images],
@@ -21,14 +21,14 @@ const links = [
   ["Impostazioni", "/app/impostazioni", Settings2],
 ] as const;
 
-const mobilePrimaryLinks = [links[0], links[4], links[6], links[8]] as const;
-const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[7], links[9], links[10], links[11]] as const;
+const mobilePrimaryLinks = [links[0], links[4], links[7], links[9]] as const;
+const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[6], links[8], links[10], links[11], links[12]] as const;
 
 const navigationGroups = [
   { label: "Oggi", items: [links[0]] },
-  { label: "Crea e pubblica", items: [links[4], links[5], links[6], links[7]] },
-  { label: "Canali e risultati", items: [links[8], links[9], links[10]] },
-  { label: "La tua attività", items: [links[1], links[2], links[3], links[11]] },
+  { label: "Crea e pubblica", items: [links[4], links[5], links[6], links[7], links[8]] },
+  { label: "Canali e risultati", items: [links[9], links[10], links[11]] },
+  { label: "La tua attività", items: [links[1], links[2], links[3], links[12]] },
 ] as const;
 
 export function AppShell() {
