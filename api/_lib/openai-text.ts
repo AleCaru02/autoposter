@@ -396,7 +396,7 @@ export function estimateTextRequestUpperBoundUsd(options: Pick<GenerateOptions, 
   const approximateInputChars = selected.length + options.topic.length + (options.objective?.length ?? 0) + JSON.stringify(options.brand).length + 7_000;
   const approximateInputTokens = Math.ceil(approximateInputChars / 3.5);
   const research = buildSectorResearchInstruction({ industry: options.brand.industry, description: options.brand.description, businessModel: options.brand.businessModel, target: options.brand.target, mode: options.researchMode ?? "BALANCED" });
-  const agentReserve = research.mode === "NEWS" ? estimateTerraCostUsd(6_000, 2_400) * 2 : 0;
+  const agentReserve = (research.mode === "NEWS" || research.mode === "COMPETITORS") ? estimateTerraCostUsd(6_000, 2_400) * 2 : 0;
   return estimateTerraCostUsd(approximateInputTokens, MAX_TEXT_OUTPUT_TOKENS) + (research.useWebSearch ? WEB_SEARCH_PER_RUN_USD : 0) + agentReserve;
 }
 
@@ -539,7 +539,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   await reportProgress(options, 25, "ANALYZING");
 
   let dedicatedResearch: ResearchAgentResult | null = null;
-  const researchTopic = [options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
+  const researchTopic = [research.mode === "COMPETITORS" ? "Benchmark competitor del settore" : null, options.brand.industry, options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
   const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(researchTopic);
   if (shouldRunResearchAgent(research.mode, researchTopic)) {
     await reportProgress(options, 35, "RESEARCHING");
@@ -552,7 +552,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       freshnessDays: research.freshnessDays,
       fetcher,
     });
-    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && research.mode === "NEWS") {
+    if ((dedicatedResearch.status !== "READY" || !dedicatedResearch.sources.length) && (research.mode === "NEWS" || research.mode === "COMPETITORS")) {
       const researchCostUsd = agentCost(dedicatedResearch);
       throw new OpenAITextPipelineError("OPENAI_RESEARCH_BLOCKED", [{
         operation: "AGENT_RESEARCH",
