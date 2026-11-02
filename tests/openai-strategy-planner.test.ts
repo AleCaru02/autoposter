@@ -72,3 +72,4 @@ assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayU
 assert.equal(CONTENT_AGENTS.find((agent) => agent.role === "FACT_CHECKER")?.mayUseWeb, true, "Fact-checker may use web only when existing evidence is insufficient");
 
 console.log("OpenAI strategist/planner regression: PASS");
+await import("./primary-commercial-goal.test.js");
