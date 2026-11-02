@@ -539,7 +539,9 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   await reportProgress(options, 25, "ANALYZING");
 
   let dedicatedResearch: ResearchAgentResult | null = null;
-  const researchTopic = [research.mode === "COMPETITORS" ? "Confronto tra competitor del settore" : null, options.brand.industry, options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
+  const researchTopic = research.mode === "COMPETITORS"
+    ? ["Confronto tra competitor del settore", options.brand.industry, options.topic, options.objective?.trim()].filter(Boolean).join(" — ")
+    : [options.topic, options.objective?.trim()].filter(Boolean).join(" — ");
   const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(researchTopic);
   if (shouldRunResearchAgent(research.mode, researchTopic)) {
     await reportProgress(options, 35, "RESEARCHING");
