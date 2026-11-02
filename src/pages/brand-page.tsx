@@ -41,6 +41,7 @@ type BrandDraft = {
   differentiators: string[];
   valuePropositions: string[];
   colors: string[];
+  manualColorsSet: boolean;
   visualSummary: string;
   userContext: string;
 };
@@ -123,7 +124,8 @@ export function BrandPage() {
       visual_identity: {
         ...existingVisualIdentity,
         detectedGoals: draft.detectedGoals,
-        observedColors: concreteColors(draft.colors),
+        // Never overwrite scanned colors when the owner edits the social palette.
+        ...(draft.manualColorsSet ? { manualColors: concreteColors(draft.colors) } : {}),
         summary: draft.visualSummary,
       },
       updated_at: new Date().toISOString(),
@@ -145,6 +147,10 @@ export function BrandPage() {
     if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
     const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
+    const manualColors = Array.isArray(visual.manualColors)
+      ? concreteColors(visual.manualColors.filter((item): item is string => typeof item === "string")) : [];
+    const scannedColors = Array.isArray(visual.observedColors)
+      ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [];
     const activeGoals = stringList(row?.goals);
     let detectedGoals = stringList(visual.detectedGoals);
     if (!detectedGoals.length) {
@@ -176,7 +182,8 @@ export function BrandPage() {
       services: stringList(row?.services),
       differentiators: stringList(row?.differentiators),
       valuePropositions: stringList(row?.value_propositions),
-      colors: Array.isArray(visual.observedColors) ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [],
+      colors: manualColors.length ? manualColors : scannedColors,
+      manualColorsSet: manualColors.length > 0,
       visualSummary: typeof visual.summary === "string" ? visual.summary : "",
       userContext: row?.user_context ?? "",
     });
@@ -257,7 +264,7 @@ export function BrandPage() {
       </div></section>
       <section className="brand-edit-group"><div className="brand-edit-heading"><h3>Identità visiva</h3><p>Usa solo elementi realmente confermati per questa attività.</p></div><div className="brand-edit-grid">
         <label className="full">Stile visivo<textarea rows={3} value={draft.visualSummary} onChange={(event) => patch("visualSummary", event.target.value)} /></label>
-        <label className="full">Colori del brand <span className="field-help">Codici colore separati da virgola o uno per riga</span><textarea rows={3} value={draft.colors.join("\n")} onChange={(event) => patch("colors", listFromText(event.target.value))} /></label>
+        <label className="full">Colori del brand <span className="field-help">Codici colore separati da virgola o uno per riga</span><textarea rows={3} value={draft.colors.join("\n")} onChange={(event) => autosave.setDraft((current) => ({ ...current, colors: listFromText(event.target.value), manualColorsSet: true }))} /></label>
       </div></section>
       <div className="form-actions"><span className="save-state" role="status" aria-live="polite">{autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Modifiche da salvare" : autosave.status === "SAVED" ? "Modifiche salvate" : ""}</span><button className="compact-action save-action" type="button" disabled={autosave.status === "SAVING"} onClick={() => void autosave.flush().catch(() => undefined)}><Check size={15} /> Salva modifiche</button></div>
     </div></details>
