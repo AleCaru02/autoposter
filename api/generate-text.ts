@@ -3,6 +3,7 @@ import { neon } from "@neondatabase/serverless";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./_lib/content-dedupe.js";
 import { enrichRequestedTopicWithPillars } from "./_lib/editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./_lib/editorial-research.js";
+import { publicTextGenerationError } from "./_lib/public-text-generation-error.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./_lib/openai-text.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
@@ -221,7 +222,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (detail === "PROVIDER_COST_BUDGET_REACHED") return res.status(429).json({ error: detail });
     if (detail === "PERSONAL_BRAND_SOURCE_NOT_AUTHORIZED") return res.status(403).json({ error: detail });
     if (detail === "PROFILE_NOT_FOUND") return res.status(404).json({ error: detail });
-    const status = detail.startsWith("OPENAI_") ? 502 : detail.startsWith("METERING_FAILED") ? 503 : 500;
-    return res.status(status).json({ error: detail.startsWith("METERING_FAILED") ? "METERING_FAILED" : "GENERATION_FAILED" });
+    const publicError = publicTextGenerationError(detail);
+    const status = publicError === "RESEARCH_INSUFFICIENT" || publicError === "FACTCHECK_NEEDS_SOURCE" || publicError === "FACTCHECK_BLOCKED" ? 422
+      : detail.startsWith("OPENAI_") ? 502
+      : detail.startsWith("METERING_FAILED") ? 503 : 500;
+    return res.status(status).json({ error: publicError });
   }
 }

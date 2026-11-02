@@ -13,6 +13,14 @@ assert.equal(tips.useWebSearch, true);
 assert.equal(tips.freshnessDays, null);
 assert.match(tips.instruction, /consigli pratici/i);
 assert.equal(buildEditorialResearchPolicy("WEBSITE_ONLY").useWebSearch, false);
+const competitorMode = buildEditorialResearchPolicy("COMPETITORS");
+assert.equal(competitorMode.useWebSearch, true);
+assert.equal(competitorMode.freshnessDays, 60);
+assert.match(competitorMode.instruction, /non inventare metriche/i);
+assert.match(competitorMode.instruction, /non copiare/i);
+const competitorSector = buildSectorResearchInstruction({ industry: "Siti web per piccole imprese", description: "Siti professionali", businessModel: "Servizi B2B", target: "Imprenditori italiani", mode: "COMPETITORS" });
+assert.match(competitorSector.instruction, /2-3 concorrenti/);
+assert.match(competitorSector.instruction, /Siti web per piccole imprese/);
 
 const plumber = buildSectorResearchInstruction({ industry: "Idraulica", description: "Pronto intervento, manutenzione e installazioni idrauliche", businessModel: "Servizi locali", target: "Proprietari di casa e amministratori", mode: "BALANCED" });
 assert.equal(plumber.mode, "BALANCED");
@@ -40,4 +48,13 @@ const page = readFileSync(new URL("../src/pages/content-generator-page.tsx", imp
 for (const label of ["Bilanciato", "Consigli", "News", "Evergreen", "Solo sito"]) assert.match(page, new RegExp(label));
 assert.match(page, /changeSettings\(\{ researchMode: mode\.value \}\)/);
 
+const agent = readFileSync(new URL("../api/_lib/openai-research-factcheck.ts", import.meta.url), "utf8");
+assert.match(agent, /mode === "NEWS" \|\| mode === "COMPETITORS"/);
+assert.match(agent, /non attribuire numeri non documentati/);
+assert.match(openaiText, /research.mode === "COMPETITORS"/);
+assert.match(openaiText, /Confronto tra competitor del settore/);
+assert.match(openaiText, /research.mode === "NEWS" \|\| research.mode === "COMPETITORS"/);
+assert.match(page, /value: "COMPETITORS", title: "Competitor"/);
 console.log("PASS editorial research: website defines brand context; sector web research, Planner NEWS routing, profile filter and telemetry are guarded.");
+
+await import("./competitors-controlled-e2e.test.js");

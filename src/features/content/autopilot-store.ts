@@ -36,12 +36,12 @@ function parseSettings(value: unknown): AutopilotSettings {
   };
 }
 
-export async function loadAutopilotOverview(profileId: string): Promise<AutopilotOverview> {
+export async function loadAutopilotOverview(profileId: string, db = neonClient): Promise<AutopilotOverview> {
   const [strategy, schedules, review, upcoming] = await Promise.all([
-    neonClient.from("content_strategies").select("platform_strategy").eq("profile_id", profileId).maybeSingle(),
-    neonClient.from("schedules").select("provider,posts_per_week,enabled").eq("profile_id", profileId).order("provider", { ascending: true }),
-    neonClient.from("content_items").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "IN_REVIEW"),
-    neonClient.from("publication_jobs").select("id", { count: "exact", head: true }).eq("profile_id", profileId).gt("scheduled_at", new Date().toISOString()).in("state", ["SCHEDULED", "BLOCKED_APPROVAL", "QUEUED"]),
+    db.from("content_strategies").select("platform_strategy").eq("profile_id", profileId).maybeSingle(),
+    db.from("schedules").select("provider,posts_per_week,enabled").eq("profile_id", profileId).order("provider", { ascending: true }),
+    db.from("content_items").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "IN_REVIEW"),
+    db.from("publication_jobs").select("id", { count: "exact", head: true }).eq("profile_id", profileId).gt("scheduled_at", new Date().toISOString()).in("state", ["SCHEDULED", "BLOCKED_APPROVAL", "QUEUED"]),
   ]);
   if (strategy.error || schedules.error || review.error || upcoming.error) {
     throw new Error("Impossibile caricare l’automazione contenuti. Riprova.");
@@ -55,8 +55,8 @@ export async function loadAutopilotOverview(profileId: string): Promise<Autopilo
   };
 }
 
-export async function saveAutopilotSettings(profileId: string, settings: AutopilotSettings) {
-  const current = await neonClient.from("content_strategies").select("profile_id,platform_strategy").eq("profile_id", profileId).maybeSingle();
+export async function saveAutopilotSettings(profileId: string, settings: AutopilotSettings, db = neonClient) {
+  const current = await db.from("content_strategies").select("profile_id,platform_strategy").eq("profile_id", profileId).maybeSingle();
   if (current.error) throw new Error("Impostazione non salvata. Riprova.");
   const currentData = current.data as { profile_id?: string; platform_strategy?: unknown } | null;
   const platformStrategy = {
@@ -68,7 +68,7 @@ export async function saveAutopilotSettings(profileId: string, settings: Autopil
   };
   const payload = { platform_strategy: platformStrategy, updated_at: new Date().toISOString() };
   const write = currentData?.profile_id
-    ? await neonClient.from("content_strategies").update(payload).eq("profile_id", profileId).select("profile_id")
-    : await neonClient.from("content_strategies").insert({ profile_id: profileId, ...payload }).select("profile_id");
+    ? await db.from("content_strategies").update(payload).eq("profile_id", profileId).select("profile_id")
+    : await db.from("content_strategies").insert({ profile_id: profileId, ...payload }).select("profile_id");
   if (write.error) throw new Error("Impostazione non salvata. Riprova.");
 }
