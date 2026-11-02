@@ -143,7 +143,9 @@ export function ContentGeneratorPage() {
     setError(null);
     try {
       await saveAutopilotSettings(selectedProfile.id, next);
-      if (next.enabled) {
+      // Selecting competitor research must not itself launch a billable generation.
+      // An explicit create action or the existing scheduled Autopilot run remains required.
+      if (next.enabled && patch.researchMode !== "COMPETITORS") {
         triggeredProfile.current = null;
         void triggerAutopilot();
       }
