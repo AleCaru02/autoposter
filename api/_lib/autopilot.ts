@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { findEditorialRepetition, findNearDuplicate, semanticContentSimilarity, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { buildAutopilotPillarInstruction } from "./editorial-intelligence.js";
 import { normalizeEditorialResearchMode } from "./editorial-research.js";
+import { primaryCommercialGoal } from "./primary-commercial-goal.js";
 import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan.js";
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { runContentQa } from "./content-qa.js";
@@ -160,7 +161,7 @@ export async function currentSpend(sql:Sql,profileId:string){const rows=await sq
 
 async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
-  const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const websitePilot=provider==="INSTAGRAM"&&instagramWebsitePilotEnabled(strategy?.platform_strategy);const availableFormats:SocialFormat[]=websitePilot?["POST"]:AUTOPILOT_PUBLISH_FORMATS[provider];const learning=await activeLearningInsights(sql,profile.id);const planItem=websitePilot?null:selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,availableFormats,learning);const objective=websitePilot?"Ricevere richieste qualificate di bozza gratuita per siti web a 99 euro al mese":planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
+  const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const websitePilot=provider==="INSTAGRAM"&&instagramWebsitePilotEnabled(strategy?.platform_strategy);const availableFormats:SocialFormat[]=websitePilot?["POST"]:AUTOPILOT_PUBLISH_FORMATS[provider];const learning=await activeLearningInsights(sql,profile.id);const planItem=websitePilot?null:selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,availableFormats,learning);const ownerCommercialGoal=primaryCommercialGoal(loaded.visualIdentity);const objective=websitePilot?"Ricevere richieste qualificate di bozza gratuita per siti web a 99 euro al mese":ownerCommercialGoal||planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
   const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
   if(profile.profile_type==="PERSONAL_BRAND"&&!objective)throw new Error("PERSONAL_BRAND_OBJECTIVE_REQUIRED");
@@ -178,7 +179,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     provider,
     topic:websitePilot?instagramWebsitePilotTopic(count):planItem?.topicDirection||pillar.instruction||"",
     objective,
-    goal:context.goals[0]??null,
+    goal:ownerCommercialGoal??context.goals[0]??null,
     supportedFormats:availableFormats,
     requestedFormat:planItem?.format??null,
     learnedFormat,
