@@ -201,11 +201,11 @@ async function callStructured(input: {
 }
 
 export function shouldRunResearchAgent(mode: EditorialResearchMode, _topic = "") {
-  return mode === "NEWS";
+  return mode === "NEWS" || mode === "COMPETITORS";
 }
 
 export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchMode) {
-  if (mode === "NEWS") return true;
+  if (mode === "NEWS" || mode === "COMPETITORS") return true;
   const serialized = JSON.stringify(content ?? "");
   if (/BASE ESTERNA/i.test(serialized)) return true;
   const text = serialized.replace(/\b\d+\s+(?:consigli|passi|idee|errori|modi|motivi|strategie|azioni|domande|suggerimenti|slide)\b/gi, "");
@@ -235,6 +235,7 @@ export async function runOpenAIResearchAgent(input: {
       "Gerarchia fonti: 1) fonte primaria del soggetto citato; 2) ente pubblico, istituzione o documentazione ufficiale; 3) testata/editoria affidabile solo come supporto secondario.",
       "Per confronti fra piattaforme, aziende o prodotti cerca separatamente fonti autorevoli per ciascun soggetto citato.",
       "Non usare social post, forum, Reddit, Quora, aggregatori anonimi, siti copia-incolla o pagine SEO come prova fattuale.",
+      "Se cerchi competitor, puoi descrivere esempi pubblici osservabili come ispirazione editoriale, ma non usare questi esempi per dimostrare risultati, engagement, conversioni o trend di settore. Non copiare creatività e non attribuire numeri non documentati.",
       "Una fonte secondaria da sola non basta per claim materiali se esiste una fonte primaria/ufficiale reperibile. Per claim delicati o potenzialmente controversi cerca conferma indipendente.",
       "Se fonti affidabili si contraddicono, privilegia la fonte primaria/ufficiale più recente e segnala l'incertezza; non scegliere la versione più sensazionale.",
       "Per news e dati correnti verifica data e freschezza.",
