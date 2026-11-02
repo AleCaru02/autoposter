@@ -69,7 +69,7 @@ assert.deepEqual(legacyBrand.preferredPhotoAssetIds, []);
 assert.equal(legacyBrand.visualReferenceNotes, null);
 
 const sampleAsset = (id: string, props: Partial<ReusableAssetCandidate> = {}): ReusableAssetCandidate => ({
-  id, name: "Foto reale di facciata con finiture moderne in zona urbana",
+  id, name: "Foto reale di facciata moderna in zona urbana",
   kind: "IMAGE", source: "UPLOAD", provider: "REAL_ASSET",
   storage_url: "data:image/png;base64,AA==", mime_type: "image/png",
   tags: ["facciata", "moderna", "zona", "urbana"],
