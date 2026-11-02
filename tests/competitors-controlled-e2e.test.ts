@@ -2,10 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { assertSocialPublishingAllowed } from "../api/_lib/social.js";
 import { generateSocialText, estimateTextRequestUpperBoundUsd } from "../api/_lib/openai-text.js";
+import { publicTextGenerationError } from "../api/_lib/public-text-generation-error.js";
 import { brainDecision, activityBudgetBand } from "../api/_lib/ai-brain-policy.js";
 import { shouldRunResearchAgent, contentNeedsFactCheck } from "../api/_lib/openai-research-factcheck.js";
-import { requestManualContent, manualGenerationFingerprint } from "../src/features/content/manual-content-generation.js";
+import { requestManualContent, manualGenerationFingerprint, friendlyGenerationError } from "../src/features/content/manual-content-generation.js";
 import { loadAutopilotOverview, saveAutopilotSettings } from "../src/features/content/autopilot-store.js";
+
+// Regression: Vercel and Worker must not hide expected competitor source failures
+// behind a generic provider error, or expose private diagnostics to the client.
+const vercelText = readFileSync(new URL("../api/generate-text.ts", import.meta.url), "utf8");
+assert.match(vercelText, /publicTextGenerationError\(detail\)/);
+assert.match(vercelText, /publicError === "RESEARCH_INSUFFICIENT"/);
+assert.equal(publicTextGenerationError("OPENAI_RESEARCH_BLOCKED"), "RESEARCH_INSUFFICIENT");
+assert.equal(publicTextGenerationError("AI_BRAIN_INSUFFICIENT_SOURCES"), "RESEARCH_INSUFFICIENT");
+assert.equal(publicTextGenerationError("OPENAI_FACTCHECK_NEEDS_SOURCE"), "FACTCHECK_NEEDS_SOURCE");
+assert.equal(publicTextGenerationError("OPENAI_FACTCHECK_BLOCK"), "FACTCHECK_BLOCKED");
+assert.equal(publicTextGenerationError("OPENAI_AGENT_HTTP_503_provider_private"), "AI_PROVIDER_ERROR");
+assert.equal(publicTextGenerationError("METERING_FAILED_private"), "METERING_FAILED");
+assert.equal(publicTextGenerationError("DATABASE_PRIVATE_DETAILS"), "GENERATION_FAILED");
+assert.match(friendlyGenerationError(publicTextGenerationError("OPENAI_RESEARCH_BLOCKED")), /fonti sufficienti/i);
 
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
@@ -190,4 +205,12 @@ assert.equal(manualCalls, 1);
 assert.equal(prepared.content.variants[0]?.caption, draft.variants[0].caption);
 assert.equal(prepared.editorialContext.externalSources.length, 2);
 assert.throws(() => assertSocialPublishingAllowed({ SAFE_MODE: true }), /SAFE_MODE_ACTIVE/, "safe mode blocks social writes");
+await assert.rejects(
+  requestManualContent(request, "fake-jwt", "test-operation-id-0000000002", (async () => new Response(
+    JSON.stringify({ error: publicTextGenerationError("OPENAI_RESEARCH_BLOCKED") }),
+    { status: 422 },
+  )) as typeof fetch),
+  (error: unknown) => error instanceof Error && /fonti sufficienti/i.test(error.message),
+  "UI must explain insufficient public sources without leaking provider diagnostics",
+);
 console.log("PASS competitors controlled E2E: per-profile mode persistence, research 0/1/2 sources, errors, fact-check, budget and draft only.");
