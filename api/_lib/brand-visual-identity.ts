@@ -2,8 +2,10 @@ export type BrandVisualIdentity = {
   colors: string[];
   fonts: string[];
   visualStyle: string | null;
-  activeSocialPalette: { primary: string; secondary: string; accent: string; neutral: string; source: "OBSERVED" | "FALLBACK" };
-  typography: { observedFonts: string[]; renderableFont: string; source: "OBSERVED_RENDERABLE" | "CONTROLLED_FALLBACK" };
+  visualReferenceNotes: string | null;
+  preferredPhotoAssetIds: string[];
+  activeSocialPalette: { primary: string; secondary: string; accent: string; neutral: string; source: "MANUAL" | "OBSERVED" | "FALLBACK" };
+  typography: { observedFonts: string[]; requestedFont: string | null; renderableFont: string; source: "MANUAL_STYLE_REFERENCE" | "OBSERVED_RENDERABLE" | "CONTROLLED_FALLBACK" };
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -41,14 +43,36 @@ function fallbackPalette(industry: unknown) {
 export function normalizeBrandVisualIdentity(value: unknown, industry?: unknown): BrandVisualIdentity {
   const source = record(value);
   const observedColors=strings(source.observedColors, 10).filter(concreteColor).slice(0, 8);
-  const selected=observedColors.length>=2 ? [...observedColors.slice(0,3), observedColors.find((color)=>/^(#fff|#f[ef]|white|#000|black)/i.test(color))??"#f8fafc"].slice(0,4) : fallbackPalette(industry);
+  const manualColors=strings(source.manualColors, 10).filter(concreteColor).slice(0, 4);
+  const fallback=fallbackPalette(industry);
+  const observedPalette=observedColors.length>=2
+    ? [observedColors[0], observedColors[1], observedColors[2]??fallback[2], observedColors.find((color)=>/^(#fff|#f[ef]|white|#000|black)/i.test(color))??fallback[3]]
+    : fallback;
+  // Owner-confirmed colors win over fresh crawls; remaining slots retain coherent defaults.
+  const selected=manualColors.length
+    ? [manualColors[0],manualColors[1]??observedPalette[1],manualColors[2]??observedPalette[2],manualColors[3]??observedPalette[3]]
+    : observedPalette;
+  const paletteSource=manualColors.length?"MANUAL":observedColors.length>=2?"OBSERVED":"FALLBACK";
   const observedFonts=strings(source.observedFonts, 8).slice(0, 6);
+  // Owner fonts are stylistic references: the renderer only claims Inter unless
+  // real font bytes have explicitly been installed and verified.
+  const manualFonts=strings(source.manualFonts, 4).filter((font)=>font.length<=90 && !/[<>\x00-\x1f]/.test(font));
+  const chosenFont=manualFonts[0]??observedFonts[0]??null;
   const interObserved=observedFonts.some((font)=>/^inter$/i.test(font));
+  const preferredPhotoAssetIds=strings(source.preferredPhotoAssetIds, 12)
+    .filter((id)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+    .slice(0, 8);
+  const visualReferenceNotes=clean(source.visualReferenceNotes, 600) || null;
   return {
-    colors: observedColors,
-    fonts: observedFonts,
+    colors: manualColors.length?manualColors:observedColors,
+    fonts: manualFonts.length?manualFonts:observedFonts,
     visualStyle: clean(source.summary, 1_200) || null,
-    activeSocialPalette: { primary:selected[0], secondary:selected[1], accent:selected[2], neutral:selected[3], source:observedColors.length>=2?"OBSERVED":"FALLBACK" },
-    typography: { observedFonts, renderableFont:"Inter", source:interObserved?"OBSERVED_RENDERABLE":"CONTROLLED_FALLBACK" },
+    visualReferenceNotes,
+    preferredPhotoAssetIds,
+    activeSocialPalette: { primary:selected[0], secondary:selected[1], accent:selected[2], neutral:selected[3], source:paletteSource },
+    typography: {
+      observedFonts, requestedFont:chosenFont, renderableFont:"Inter",
+      source:manualFonts.length?"MANUAL_STYLE_REFERENCE":interObserved?"OBSERVED_RENDERABLE":"CONTROLLED_FALLBACK",
+    },
   };
 }

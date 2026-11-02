@@ -5,15 +5,20 @@ const page = fs.readFileSync("src/pages/brand-page.tsx", "utf8");
 const migration = fs.readFileSync("db/migrations/20260923_brand_user_context.sql", "utf8");
 const brandCss = fs.readFileSync("src/brand.css", "utf8");
 
-for (const field of ["targetSegments", "toneTraits", "services", "differentiators", "valuePropositions", "visualSummary", "colors", "userContext"]) {
+for (const field of ["targetSegments", "toneTraits", "services", "differentiators", "valuePropositions", "visualSummary", "userContext"]) {
   assert.match(page, new RegExp(`patch\\(\\"${field}\\"`), `${field} must be customer-editable`);
   assert.match(page, new RegExp(`draft\\.${field}`), `${field} must be loaded from persisted profile data`);
 }
+assert.match(page, /colors: listFromText\(event.target.value\)/, "colors remain customer editable");
 assert.match(page, /brand_profiles"\)\.update\(payload\)/, "existing brand intelligence must persist profile-scoped");
 assert.match(page, /brand_profiles"\)\.insert\(payload\)/, "a missing brand row must be creatable for the selected profile");
 assert.match(page, /select\("profile_id,visual_identity"\)/, "manual brand save must read the current visual intelligence before writing");
 assert.match(page, /const existingVisualIdentity = current\.data\?\.visual_identity/, "manual brand save must preserve previously analyzed site intelligence");
-assert.match(page, /visual_identity:\s*\{\s*\.\.\.existingVisualIdentity,[\s\S]*observedColors:[\s\S]*summary:/, "editing colors or summary must merge into, not replace, pageInsights/logo/contentPillars/pageSignals");
+assert.match(page, /visual_identity:\s*\{\s*\.\.\.existingVisualIdentity,[\s\S]*manualColors:[\s\S]*summary:/, "manual palette and summary must preserve previously analyzed pages, logo and site observations");
+assert.match(page, /manualColorsSet: true/, "editing colors must explicitly mark the user override");
+assert.match(page, /manualColors: concreteColors\(draft.colors\)/, "manual changes must persist independently of observed CSS colors");
+assert.doesNotMatch(page, /observedColors: concreteColors\(draft.colors\)/, "manual color changes must never overwrite website scan evidence");
+assert.match(page, /colors: manualColors.length \? manualColors : scannedColors/, "owner-confirmed colors must take priority in the editor");
 assert.match(page, /autosave\.flush\(\)/, "the customer must have an explicit save action");
 assert.match(page, /aria-live="polite"/, "save status must be announced accessibly");
 assert.match(page, /Informazioni aggiuntive/, "the confirmed user context must have a clear heading");

@@ -41,10 +41,17 @@ type BrandDraft = {
   differentiators: string[];
   valuePropositions: string[];
   colors: string[];
+  manualColorsSet: boolean;
+  fontFamily: string;
+  manualFontsEdited: boolean;
+  preferredPhotoAssetIds: string[];
+  visualReferenceNotes: string;
   visualSummary: string;
   userContext: string;
 };
 
+type BrandPhotoChoice = { id: string; name: string; source: string; provider: string | null; quality_status: string | null; storage_url: string | null };
+const REAL_PHOTO_LIMIT = 8;
 const STANDARD_GOALS = ["Più richieste", "Più prenotazioni", "Notorietà locale", "Educare il pubblico", "Fiducia nel brand", "Traffico al sito"];
 
 function summary(value: unknown) {
@@ -93,6 +100,8 @@ export function BrandPage() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [brandPhotos, setBrandPhotos] = useState<BrandPhotoChoice[]>([]);
+  const [photoLibraryError, setPhotoLibraryError] = useState<string | null>(null);
 
   const save = useCallback(async (draft: BrandDraft) => {
     const profileId = selectedProfile?.id;
@@ -123,7 +132,11 @@ export function BrandPage() {
       visual_identity: {
         ...existingVisualIdentity,
         detectedGoals: draft.detectedGoals,
-        observedColors: concreteColors(draft.colors),
+        // Never overwrite scanned colors when the owner edits the social palette.
+        ...(draft.manualColorsSet ? { manualColors: concreteColors(draft.colors) } : {}),
+        ...(draft.manualFontsEdited ? { manualFonts: draft.fontFamily.trim() ? [draft.fontFamily.trim().slice(0, 90)] : [] } : {}),
+        preferredPhotoAssetIds: draft.preferredPhotoAssetIds.slice(0, REAL_PHOTO_LIMIT),
+        visualReferenceNotes: draft.visualReferenceNotes.trim().slice(0, 600),
         summary: draft.visualSummary,
       },
       updated_at: new Date().toISOString(),
@@ -145,6 +158,10 @@ export function BrandPage() {
     if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
     const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
+    const manualColors = Array.isArray(visual.manualColors)
+      ? concreteColors(visual.manualColors.filter((item): item is string => typeof item === "string")) : [];
+    const scannedColors = Array.isArray(visual.observedColors)
+      ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [];
     const activeGoals = stringList(row?.goals);
     let detectedGoals = stringList(visual.detectedGoals);
     if (!detectedGoals.length) {
@@ -176,13 +193,42 @@ export function BrandPage() {
       services: stringList(row?.services),
       differentiators: stringList(row?.differentiators),
       valuePropositions: stringList(row?.value_propositions),
-      colors: Array.isArray(visual.observedColors) ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [],
+      colors: manualColors.length ? manualColors : scannedColors,
+      manualColorsSet: manualColors.length > 0,
+      fontFamily: stringList(visual.manualFonts)[0] ?? stringList(visual.observedFonts)[0] ?? "",
+      manualFontsEdited: false,
+      preferredPhotoAssetIds: stringList(visual.preferredPhotoAssetIds).slice(0, REAL_PHOTO_LIMIT),
+      visualReferenceNotes: typeof visual.visualReferenceNotes === "string" ? visual.visualReferenceNotes.slice(0, 600) : "",
       visualSummary: typeof visual.summary === "string" ? visual.summary : "",
       userContext: row?.user_context ?? "",
     });
   }, [selectedProfile?.id]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const profileId = selectedProfile?.id;
+    if (!profileId) { setBrandPhotos([]); return; }
+    let cancelled = false;
+    setBrandPhotos([]);
+    setPhotoLibraryError(null);
+    void (async () => {
+      try {
+        const token = await authenticatedApiToken();
+        const response = await fetch(`/api/assets?profileId=${encodeURIComponent(profileId)}&provider=REAL_ASSET`, {
+          headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+        });
+        if (!response.ok) throw new Error("BRAND_ASSET_LIST_FAILED");
+        const body = await response.json() as { assets?: BrandPhotoChoice[] };
+        const photos = (body.assets ?? []).filter((asset) =>
+          asset.provider === "REAL_ASSET" && asset.quality_status === "PASS" &&
+          asset.source !== "AI_IMAGE" && Boolean(asset.id));
+        if (!cancelled) setBrandPhotos(photos.slice(0, 80));
+      } catch {
+        if (!cancelled) setPhotoLibraryError("Libreria foto temporaneamente non disponibile. Le foto già selezionate restano salvate.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedProfile?.id]);
 
   async function jwt() {
     return authenticatedApiToken();
@@ -229,6 +275,13 @@ export function BrandPage() {
 
   const patch = <K extends keyof BrandDraft>(field: K, value: BrandDraft[K]) => autosave.setDraft((current) => ({ ...current, [field]: value }));
   const toggleGoal = (goal: string) => patch("goals", draft.goals.includes(goal) ? draft.goals.filter((item) => item !== goal) : [...draft.goals, goal]);
+  const toggleBrandPhoto = (assetId: string) => autosave.setDraft((current) => ({
+    ...current,
+    preferredPhotoAssetIds: current.preferredPhotoAssetIds.includes(assetId)
+      ? current.preferredPhotoAssetIds.filter((id) => id !== assetId)
+      : current.preferredPhotoAssetIds.length < REAL_PHOTO_LIMIT
+        ? [...current.preferredPhotoAssetIds, assetId] : current.preferredPhotoAssetIds,
+  }));
   const contextSaveLabel = autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Da salvare" : autosave.status === "ERROR" ? "Errore di salvataggio" : "Salvato";
   const contextSaveClass = autosave.status === "ERROR" ? "error" : autosave.status === "SAVING" ? "saving" : autosave.status === "WAITING" ? "waiting" : "saved";
 
@@ -257,7 +310,19 @@ export function BrandPage() {
       </div></section>
       <section className="brand-edit-group"><div className="brand-edit-heading"><h3>Identità visiva</h3><p>Usa solo elementi realmente confermati per questa attività.</p></div><div className="brand-edit-grid">
         <label className="full">Stile visivo<textarea rows={3} value={draft.visualSummary} onChange={(event) => patch("visualSummary", event.target.value)} /></label>
-        <label className="full">Colori del brand <span className="field-help">Codici colore separati da virgola o uno per riga</span><textarea rows={3} value={draft.colors.join("\n")} onChange={(event) => patch("colors", listFromText(event.target.value))} /></label>
+        <label className="full">Colori del brand <span className="field-help">Codici colore separati da virgola o uno per riga</span><textarea rows={3} value={draft.colors.join("\n")} onChange={(event) => autosave.setDraft((current) => ({ ...current, colors: listFromText(event.target.value), manualColorsSet: true }))} /></label>
+        <label className="full">Font del brand <span className="field-help">Riferimento stilistico; il renderer userà Inter finché il font scelto non è installato e verificato.</span><input maxLength={90} value={draft.fontFamily} placeholder="Es. Manrope" onChange={(event) => autosave.setDraft((current) => ({ ...current, fontFamily: event.target.value, manualFontsEdited: true }))} /></label>
+        <label className="full">Riferimenti visivi <span className="field-help">Descrivi inquadrature, illuminazione, materiali e stile fotografico. Non inserire URL o istruzioni di pubblicazione.</span><textarea rows={3} maxLength={600} value={draft.visualReferenceNotes} onChange={(event) => patch("visualReferenceNotes", event.target.value)} /></label>
+        <div className="full"><strong>Fotografie reali di riferimento</strong><p className="field-help">Seleziona fino a {REAL_PHOTO_LIMIT} foto approvate dalla Libreria asset di questo profilo. La scelta dà loro priorità solo quando sono pertinenti al contenuto; non forza la pubblicazione di foto inadatte.</p>
+          {photoLibraryError && <p className="form-error" role="alert">{photoLibraryError}</p>}
+          {brandPhotos.length === 0 && !photoLibraryError && <p className="field-help">Nessuna foto reale approvata disponibile. Caricale prima nella Libreria asset.</p>}
+          {brandPhotos.length > 0 && <div className="specific-goals-list">{brandPhotos.map((asset) => <label className="specific-goal-row" key={asset.id}>
+            <input type="checkbox" checked={draft.preferredPhotoAssetIds.includes(asset.id)} disabled={!draft.preferredPhotoAssetIds.includes(asset.id) && draft.preferredPhotoAssetIds.length >= REAL_PHOTO_LIMIT} onChange={() => toggleBrandPhoto(asset.id)} />
+            {asset.storage_url?.startsWith("data:image/") && <img src={asset.storage_url} alt="" width={54} height={54} style={{ objectFit: "cover", borderRadius: 8 }} />}
+            <span>{asset.name}</span>
+          </label>)}</div>}
+          <p className="field-help">Selezionate: {draft.preferredPhotoAssetIds.length}/{REAL_PHOTO_LIMIT}</p>
+        </div>
       </div></section>
       <div className="form-actions"><span className="save-state" role="status" aria-live="polite">{autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Modifiche da salvare" : autosave.status === "SAVED" ? "Modifiche salvate" : ""}</span><button className="compact-action save-action" type="button" disabled={autosave.status === "SAVING"} onClick={() => void autosave.flush().catch(() => undefined)}><Check size={15} /> Salva modifiche</button></div>
     </div></details>
