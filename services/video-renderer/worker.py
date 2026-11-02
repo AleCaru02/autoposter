@@ -46,13 +46,18 @@ def claim(conn, client):
                 if not isinstance(scene_id,str) or not scene_id.startswith("scene-") or not scene_id[6:].isdigit():
                     ready=False
                     break
-                try:
-                    client.head_object(Bucket=BUCKET,Key=f"{PROFILE_PREFIX}{profile_id}/{job_id}/{scene_id}.png")
-                except ClientError as exc:
-                    if exc.response.get("Error",{}).get("Code") in ("404","NoSuchKey","NotFound"):
-                        ready=False
+                found=False
+                for ext in ("mp4","png"):
+                    try:
+                        client.head_object(Bucket=BUCKET,Key=f"{PROFILE_PREFIX}{profile_id}/{job_id}/{scene_id}.{ext}")
+                        found=True
                         break
-                    raise
+                    except ClientError as exc:
+                        if exc.response.get("Error",{}).get("Code") not in ("404","NoSuchKey","NotFound"):
+                            raise
+                if not found:
+                    ready=False
+                    break
             if ready:
                 conn.execute("update public.video_studio_jobs set state='RENDERING',updated_at=now() where id=%s::uuid",(job_id,))
                 return row
@@ -86,16 +91,21 @@ def render_job(conn, client, job):
             scene_id=scene.get("id","")
             if not isinstance(scene_id,str) or not scene_id.startswith("scene-") or not scene_id[6:].isdigit():
                 raise ValueError("INVALID_SCENE_ID")
-            key=prefix+scene_id+".png"
-            file=tmp/(scene_id+".png")
-            try:
-                client.download_file(BUCKET,key,str(file))
-            except ClientError as exc:
-                if exc.response.get("Error",{}).get("Code") in ("404","NoSuchKey"):
-                    raise ValueError("MISSING_SCENE_IMAGE") from exc
-                raise
-            if file.stat().st_size>8*1024*1024:
-                raise ValueError("IMAGE_TOO_LARGE")
+            file=None
+            for ext in ("mp4","png"):
+                candidate=tmp/(scene_id+"."+ext)
+                try:
+                    client.download_file(BUCKET,prefix+scene_id+"."+ext,str(candidate))
+                    file=candidate
+                    break
+                except ClientError as exc:
+                    if exc.response.get("Error",{}).get("Code") not in ("404","NoSuchKey","NotFound"):
+                        raise
+            if file is None:
+                raise ValueError("MISSING_SCENE_ASSET")
+            limit=120*1024*1024 if file.suffix==".mp4" else 8*1024*1024
+            if file.stat().st_size>limit:
+                raise ValueError("SCENE_ASSET_TOO_LARGE")
             manifest[scene_id]=str(file)
         # Audio is a licensed, pre-generated asset. This worker never calls paid TTS APIs.
         if plan.get("requiresNarration") is True:
