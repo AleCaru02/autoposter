@@ -140,6 +140,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const activeGoals = [...new Set([...preservedOtherGoals, ...activeDetectedGoals])];
     const now = new Date().toISOString();
     const visualIdentity = {
+      // Keep owner-confirmed overrides (e.g. manualColors) across repeat scans.
+      ...existingVisualIdentity,
       source: "website_scan",
       observedColors: visualHints.colors,
       observedFonts: visualHints.fontFamilies,
