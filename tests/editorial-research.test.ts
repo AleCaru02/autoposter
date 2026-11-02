@@ -56,3 +56,5 @@ assert.match(openaiText, /Confronto tra competitor del settore/);
 assert.match(openaiText, /research.mode === "NEWS" \|\| research.mode === "COMPETITORS"/);
 assert.match(page, /value: "COMPETITORS", title: "Competitor"/);
 console.log("PASS editorial research: website defines brand context; sector web research, Planner NEWS routing, profile filter and telemetry are guarded.");
+
+await import("./competitors-controlled-e2e.test.js");
