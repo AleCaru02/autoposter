@@ -104,7 +104,7 @@ export function VideoStudioPage() {
     const a=document.createElement("a");a.href=url;a.download="autoposter-video-storyboard.json";a.click();URL.revokeObjectURL(url);
   }
   return <div style={{maxWidth:1100,margin:"0 auto",display:"grid",gap:24,paddingBottom:48}}>
-    <header><h1>Video Studio</h1><p>Prepara storyboard verticali per i Reel. Il rendering e la pubblicazione non sono ancora collegati.</p></header>
+    <header><h1>Video Studio</h1><p>Prepara storyboard verticali e invia lavori al renderer cloud quando configurato. La generazione autonoma di riprese realistiche, il montaggio professionale completo e la pubblicazione dei Reel non sono ancora collegati.</p></header>
     <section style={{display:"grid",gap:12,padding:18,border:"1px solid #8885",borderRadius:12}} aria-label="Simulazione piano editoriale adattivo">
       <h2>Strategia editoriale adattiva — simulazione</h2>
       <p>Anteprima della distribuzione automatica dei formati in base al budget. Non crea contenuti, non spende e non modifica il calendario. I costi sono ipotesi, non tariffe dei provider.</p>
