@@ -22,6 +22,7 @@ const RESEARCH_MODES: Array<{ value: EditorialResearchMode; title: string; descr
   { value: "BALANCED", title: "Bilanciato", description: "Mescola informazioni di settore, consigli, contenuti evergreen e aggiornamenti pertinenti." },
   { value: "TIPS", title: "Consigli", description: "Privilegia guide pratiche, checklist, spiegazioni ed errori da evitare." },
   { value: "NEWS", title: "News", description: "Privilegia notizie e aggiornamenti recenti realmente collegati al settore." },
+  { value: "COMPETITORS", title: "Competitor", description: "Cerca esempi pubblici pertinenti, valuta hook e temi, differenzia i contenuti senza copiarli né inventare performance. Usa ricerca AI a consumo." },
   { value: "EVERGREEN", title: "Evergreen", description: "Privilegia temi utili e durevoli, senza forzare news o trend." },
   { value: "WEBSITE_ONLY", title: "Solo sito", description: "Usa esclusivamente i fatti e i temi confermati dal sito e dal brand." },
 ];
