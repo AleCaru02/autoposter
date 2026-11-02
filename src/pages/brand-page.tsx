@@ -7,6 +7,7 @@ import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
 import { PersonalBrandSourcesPanel } from "../components/personal-brand-sources-panel";
 import { PersonalBrandVisualIdentityPanel } from "../components/personal-brand-visual-identity-panel";
+import { commercialGoalOptions, primaryCommercialGoal } from "../../api/_lib/primary-commercial-goal";
 
 type BrandRow = {
   profile_id: string;
@@ -36,6 +37,7 @@ type BrandDraft = {
   tone: string;
   toneTraits: string[];
   goals: string[];
+  primaryCommercialGoal: string;
   detectedGoals: string[];
   services: string[];
   differentiators: string[];
@@ -123,6 +125,7 @@ export function BrandPage() {
       visual_identity: {
         ...existingVisualIdentity,
         detectedGoals: draft.detectedGoals,
+        primaryCommercialGoal: draft.primaryCommercialGoal.trim() || null,
         observedColors: concreteColors(draft.colors),
         summary: draft.visualSummary,
       },
@@ -172,6 +175,7 @@ export function BrandPage() {
       tone: summary(row?.tone_of_voice),
       toneTraits: nestedList(row?.tone_of_voice, "traits"),
       goals: activeGoals,
+      primaryCommercialGoal: primaryCommercialGoal(visual) ?? "",
       detectedGoals,
       services: stringList(row?.services),
       differentiators: stringList(row?.differentiators),
@@ -223,12 +227,20 @@ export function BrandPage() {
   const draft = autosave.draft;
   const primaryGoals = useMemo(() => STANDARD_GOALS, []);
   const specificGoals = useMemo(() => draft?.detectedGoals ?? [], [draft?.detectedGoals]);
+  const commercialChoices = useMemo(() => commercialGoalOptions(draft?.goals ?? [], draft?.detectedGoals ?? []), [draft?.goals, draft?.detectedGoals]);
   const visibleBrandSummary = professionalBrandSummary(draft?.visualSummary ?? "");
   if (!selectedProfile) return null;
   if (loading || !draft) return <div className="page-content"><section className="panel">Caricamento…</section></div>;
 
   const patch = <K extends keyof BrandDraft>(field: K, value: BrandDraft[K]) => autosave.setDraft((current) => ({ ...current, [field]: value }));
-  const toggleGoal = (goal: string) => patch("goals", draft.goals.includes(goal) ? draft.goals.filter((item) => item !== goal) : [...draft.goals, goal]);
+  const toggleGoal = (goal: string) => autosave.setDraft((current) => {
+    const removing = current.goals.includes(goal);
+    return {
+      ...current,
+      goals: removing ? current.goals.filter((item) => item !== goal) : [...current.goals, goal],
+      primaryCommercialGoal: removing && current.primaryCommercialGoal === goal ? "" : current.primaryCommercialGoal,
+    };
+  });
   const contextSaveLabel = autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Da salvare" : autosave.status === "ERROR" ? "Errore di salvataggio" : "Salvato";
   const contextSaveClass = autosave.status === "ERROR" ? "error" : autosave.status === "SAVING" ? "saving" : autosave.status === "WAITING" ? "waiting" : "saved";
 
@@ -240,6 +252,18 @@ export function BrandPage() {
     </section>
     {selectedProfile.profile_type === "PERSONAL_BRAND" && <><PersonalBrandVisualIdentityPanel profileId={selectedProfile.id} /><PersonalBrandSourcesPanel personalBrandProfileId={selectedProfile.id} profiles={profiles} /></>}
     <section className="panel brand-goals-panel"><h2>Obiettivi</h2><p className="section-hint">Seleziona gli obiettivi principali e, se serve, disattiva quelli specifici rilevati dal sito.</p>
+      <div className="brand-goal-section">
+        <label className="brand-context-field"><span>Obiettivo commerciale prioritario</span>
+          <select aria-label="Obiettivo commerciale prioritario" value={draft.primaryCommercialGoal} onChange={(event) => autosave.setDraft((current) => {
+            const value = event.target.value;
+            return { ...current, primaryCommercialGoal: value, goals: value && !current.goals.includes(value) ? [...current.goals, value] : current.goals };
+          })}>
+            <option value="">Nessuna priorità impostata</option>
+            {commercialChoices.map((goal) => <option key={goal} value={goal}>{goal}</option>)}
+          </select>
+        </label>
+        <p className="field-help">La priorità viene utilizzata da strategia e Autopilot per questo profilo, senza modificare gli altri account.</p>
+      </div>
       <div className="brand-goal-section"><small>Obiettivi principali</small><div className="goal-options">{primaryGoals.map((goal) => <button className={`goal-chip ${draft.goals.includes(goal) ? "selected" : ""}`} type="button" key={goal} aria-pressed={draft.goals.includes(goal)} onClick={() => toggleGoal(goal)}>{goal}</button>)}</div></div>
       {specificGoals.length > 0 && <div className="brand-goal-section"><small>Obiettivi specifici rilevati</small><div className="specific-goals-list">{specificGoals.map((goal) => <button className="specific-goal-row" type="button" key={goal} aria-pressed={draft.goals.includes(goal)} onClick={() => toggleGoal(goal)}><span>{goal}</span><strong>{draft.goals.includes(goal) ? "Attivo" : "Disattivato"}</strong></button>)}</div></div>}
     </section>
