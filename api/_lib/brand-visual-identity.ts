@@ -56,7 +56,7 @@ export function normalizeBrandVisualIdentity(value: unknown, industry?: unknown)
   const observedFonts=strings(source.observedFonts, 8).slice(0, 6);
   // Owner fonts are stylistic references: the renderer only claims Inter unless
   // real font bytes have explicitly been installed and verified.
-  const manualFonts=strings(source.manualFonts, 4).filter((font)=>font.length<=90 && !/[<>\\x00-\\x1f]/.test(font));
+  const manualFonts=strings(source.manualFonts, 4).filter((font)=>font.length<=90 && !/[<>\x00-\x1f]/.test(font));
   const chosenFont=manualFonts[0]??observedFonts[0]??null;
   const interObserved=observedFonts.some((font)=>/^inter$/i.test(font));
   const preferredPhotoAssetIds=strings(source.preferredPhotoAssetIds, 12)
