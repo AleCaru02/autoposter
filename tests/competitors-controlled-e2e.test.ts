@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { assertSocialPublishingAllowed } from "../api/_lib/social.js";
 import { generateSocialText, estimateTextRequestUpperBoundUsd } from "../api/_lib/openai-text.js";
 import { brainDecision, activityBudgetBand } from "../api/_lib/ai-brain-policy.js";
 import { shouldRunResearchAgent, contentNeedsFactCheck } from "../api/_lib/openai-research-factcheck.js";
@@ -188,6 +189,5 @@ const prepared = await requestManualContent(request, "fake-jwt", "test-operation
 assert.equal(manualCalls, 1);
 assert.equal(prepared.content.variants[0]?.caption, draft.variants[0].caption);
 assert.equal(prepared.editorialContext.externalSources.length, 2);
-const publication = readFileSync(new URL("../api/_lib/publication-engine.ts", import.meta.url), "utf8");
-assert.match(publication, /SAFE_MODE|safeMode|safe_mode/i, "publication must preserve a safe-mode gate");
+assert.throws(() => assertSocialPublishingAllowed({ SAFE_MODE: true }), /SAFE_MODE_ACTIVE/, "safe mode blocks social writes");
 console.log("PASS competitors controlled E2E: per-profile mode persistence, research 0/1/2 sources, errors, fact-check, budget and draft only.");
