@@ -35,7 +35,7 @@ export function buildSectorResearchInstruction(input: { industry: string | null;
     instruction: [
       `Perimetro editoriale: ${sector}.${target}`,
       policy.instruction,
-      "Nel benchmarking competitor le evidenze esterne restano contesto editoriale: non diventano testimonianze, dati di performance o affermazioni sul brand.",
+      ...(policy.mode === "COMPETITORS" ? ["Nel benchmarking competitor le evidenze esterne restano contesto editoriale: non diventano testimonianze, dati di performance o affermazioni sul brand."] : []),
       "Il sito serve soprattutto a capire identità del brand, servizi realmente offerti, tono, posizionamento e segnali visivi; non è l'unico universo di argomenti.",
       "Qualunque informazione esterna deve essere direttamente pertinente al perimetro editoriale. Non trasformare una notizia generica in contenuto solo perché è popolare.",
       "Distingui sempre fatti del brand da fatti esterni: non attribuire al brand dati, risultati, prezzi o dichiarazioni trovati altrove.",
