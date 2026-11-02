@@ -52,7 +52,7 @@ const agent = readFileSync(new URL("../api/_lib/openai-research-factcheck.ts", i
 assert.match(agent, /mode === "NEWS" \|\| mode === "COMPETITORS"/);
 assert.match(agent, /non attribuire numeri non documentati/);
 assert.match(openaiText, /research.mode === "COMPETITORS"/);
-assert.match(openaiText, /Benchmark competitor del settore/);
+assert.match(openaiText, /Confronto tra competitor del settore/);
 assert.match(openaiText, /research.mode === "NEWS" \|\| research.mode === "COMPETITORS"/);
 assert.match(page, /value: "COMPETITORS", title: "Competitor"/);
 console.log("PASS editorial research: website defines brand context; sector web research, Planner NEWS routing, profile filter and telemetry are guarded.");
