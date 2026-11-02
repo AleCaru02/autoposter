@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "./_lib/brand-analysis.js";
+import { primaryCommercialGoal } from "./_lib/primary-commercial-goal.js";
 import { BrandAnalysisMetering } from "./_lib/brand-analysis-metering.js";
 import { completeOnboardingProfile } from "./_lib/onboarding-completion.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
@@ -141,6 +142,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const now = new Date().toISOString();
     const visualIdentity = {
       source: "website_scan",
+      // A fresh AI scan may update observations but must preserve the owner-selected priority.
+      primaryCommercialGoal: primaryCommercialGoal(existingVisualIdentity),
       observedColors: visualHints.colors,
       observedFonts: visualHints.fontFamilies,
       logoUrl: visualHints.logoUrl,
