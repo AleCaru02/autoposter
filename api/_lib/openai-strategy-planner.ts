@@ -131,6 +131,9 @@ export function generateOpenAIStrategy(input: { apiKey: string; profile: Profile
       "Restituisci esclusivamente JSON conforme allo schema.",
     ].join("\n"),
     context: { profile: input.profile, brand: { description: input.brand?.description ?? null, businessModel: input.brand?.business_model ?? null, location: input.brand?.location ?? null, serviceArea: input.brand?.service_area ?? null, target: summary(input.brand?.target_audience), tone: summary(input.brand?.tone_of_voice), goals: strings(input.brand?.goals), primaryCommercialGoal: primaryCommercialGoal(input.brand?.visual_identity), userProvidedContext: input.brand?.user_context?.trim() || null, visualIdentity: input.brand?.visual_identity ?? null }, existingObjectives: strings(input.existingObjectives), evidenceBasedLearning: learningContext(input.profile.id, input.learningInsights ?? []) },
+  }).then((result) => {
+    const ownerGoal = primaryCommercialGoal(input.brand?.visual_identity);
+    return ownerGoal ? { ...result, output: { ...result.output, primaryObjective: ownerGoal } } : result;
   });
 }
 
