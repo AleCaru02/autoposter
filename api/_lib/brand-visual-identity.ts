@@ -2,8 +2,10 @@ export type BrandVisualIdentity = {
   colors: string[];
   fonts: string[];
   visualStyle: string | null;
+  visualReferenceNotes: string | null;
+  preferredPhotoAssetIds: string[];
   activeSocialPalette: { primary: string; secondary: string; accent: string; neutral: string; source: "MANUAL" | "OBSERVED" | "FALLBACK" };
-  typography: { observedFonts: string[]; renderableFont: string; source: "OBSERVED_RENDERABLE" | "CONTROLLED_FALLBACK" };
+  typography: { observedFonts: string[]; requestedFont: string | null; renderableFont: string; source: "MANUAL_STYLE_REFERENCE" | "OBSERVED_RENDERABLE" | "CONTROLLED_FALLBACK" };
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -52,12 +54,25 @@ export function normalizeBrandVisualIdentity(value: unknown, industry?: unknown)
     : observedPalette;
   const paletteSource=manualColors.length?"MANUAL":observedColors.length>=2?"OBSERVED":"FALLBACK";
   const observedFonts=strings(source.observedFonts, 8).slice(0, 6);
+  // Owner fonts are stylistic references: the renderer only claims Inter unless
+  // real font bytes have explicitly been installed and verified.
+  const manualFonts=strings(source.manualFonts, 4).filter((font)=>font.length<=90 && !/[<>\\x00-\\x1f]/.test(font));
+  const chosenFont=manualFonts[0]??observedFonts[0]??null;
   const interObserved=observedFonts.some((font)=>/^inter$/i.test(font));
+  const preferredPhotoAssetIds=strings(source.preferredPhotoAssetIds, 12)
+    .filter((id)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+    .slice(0, 8);
+  const visualReferenceNotes=clean(source.visualReferenceNotes, 600) || null;
   return {
     colors: manualColors.length?manualColors:observedColors,
-    fonts: observedFonts,
+    fonts: manualFonts.length?manualFonts:observedFonts,
     visualStyle: clean(source.summary, 1_200) || null,
+    visualReferenceNotes,
+    preferredPhotoAssetIds,
     activeSocialPalette: { primary:selected[0], secondary:selected[1], accent:selected[2], neutral:selected[3], source:paletteSource },
-    typography: { observedFonts, renderableFont:"Inter", source:interObserved?"OBSERVED_RENDERABLE":"CONTROLLED_FALLBACK" },
+    typography: {
+      observedFonts, requestedFont:chosenFont, renderableFont:"Inter",
+      source:manualFonts.length?"MANUAL_STYLE_REFERENCE":interObserved?"OBSERVED_RENDERABLE":"CONTROLLED_FALLBACK",
+    },
   };
 }
