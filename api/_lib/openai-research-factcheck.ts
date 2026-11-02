@@ -142,7 +142,7 @@ function independentHostCount(values: string[]) {
 }
 
 function comparisonNeedsCrossCheck(topic: string) {
-  return /\b(?:vs\.?|versus|confront|compar|differenz|meglio\s+tra)\b/i.test(topic);
+  return /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(topic);
 }
 
 function usage(body: Record<string, unknown>) {
