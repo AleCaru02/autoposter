@@ -15,7 +15,8 @@ const ProfilesPage = lazy(() => import("./pages/profiles-page").then((module) =>
 const BrandPage = lazy(() => import("./pages/brand-page").then((module) => ({ default: module.BrandPage })));
 const WebsiteScanPage = lazy(() => import("./pages/website-scan-page").then((module) => ({ default: module.WebsiteScanPage })));
 const ContentGeneratorPage = lazy(() => import("./pages/content-generator-page").then((module) => ({ default: module.ContentGeneratorPage })));
-const VideoStudioPage = lazy(() => import("./pages/video-studio-page").then((module) => ({ default: module.VideoStudioPage })));\nconst ApprovalsPage = lazy(() => import("./pages/approvals-page").then((module) => ({ default: module.ApprovalsPage })));
+const VideoStudioPage = lazy(() => import("./pages/video-studio-page").then((module) => ({ default: module.VideoStudioPage }))); 
+const ApprovalsPage = lazy(() => import("./pages/approvals-page").then((module) => ({ default: module.ApprovalsPage })));
 const CalendarPage = lazy(() => import("./pages/calendar-page").then((module) => ({ default: module.CalendarPage })));
 const SocialPage = lazy(() => import("./pages/social-page").then((module) => ({ default: module.SocialPage })));
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
@@ -65,7 +66,8 @@ export default function App() {
       <Route path="brand" element={<BrandPage />} />
       <Route path="sito" element={<WebsiteScanPage />} />
       <Route path="contenuti" element={<ContentGeneratorPage />} />
-      <Route path="approvazioni" element={<ApprovalsPage />} />\n      <Route path="video-studio" element={<VideoStudioPage />} />
+      <Route path="approvazioni" element={<ApprovalsPage />} /> 
+      <Route path="video-studio" element={<VideoStudioPage />} />
       <Route path="calendario" element={<CalendarPage />} />
       <Route path="social" element={<SocialPage />} />
       <Route path="analytics" element={<AnalyticsPage />} />
