@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline MP4 assembly from approved, local PNG scene assets. No network or spending."""
+"""Offline MP4 assembly from approved local PNG or real MP4 motion clips. No network or spending."""
 import json
 import subprocess
 import sys
@@ -28,14 +28,18 @@ def render(plan_file, manifest_file, output_file):
             if not isinstance(start, int) or not isinstance(end, int) or start != previous or end <= start or end > 120000:
                 raise ValueError("INVALID_TIMELINE")
             previous = end
-            image = Path(manifest.get(scene["id"], ""))
-            if not image.is_file() or image.suffix.lower() != ".png":
-                raise ValueError("SCENE_IMAGE_REQUIRED:" + scene["id"])
+            asset_value = manifest.get(scene["id"])
+            if not isinstance(asset_value, str) or not asset_value:
+                raise ValueError("SCENE_ASSET_REQUIRED:" + scene["id"])
+            image = Path(asset_value)
+            if not image.is_file() or image.suffix.lower() not in (".png", ".mp4"):
+                raise ValueError("SCENE_ASSET_REQUIRED:" + scene["id"])
             segment = Path(temp) / f"segment-{index:02d}.mp4"
-            subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y",
-                "-loop","1","-framerate","30","-i",str(image),"-t",str((end-start)/1000),
-                "-vf","scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
-                "-r","30","-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p",str(segment)],
+            source_args = ["-loop","1","-framerate","30","-i",str(image)] if image.suffix.lower() == ".png" else ["-i",str(image)]
+            subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y",*source_args,
+                "-t",str((end-start)/1000),
+                "-vf","fps=30,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,format=yuv420p",
+                "-an","-r","30","-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p",str(segment)],
                 check=True,timeout=180)
             segments.append(segment)
         concat = Path(temp) / "segments.txt"
