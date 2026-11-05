@@ -31,6 +31,16 @@ function request(overrides: Record<string, unknown> = {}) {
 try {
   const authPage = readFileSync(new URL("../src/pages/auth-pages.tsx", import.meta.url), "utf8");
   assert.match(authPage, /callbackURL:\s*\x60\$\{window\.location\.origin\}\/api\/oauth\/complete\x60/);
+  const linkPage = readFileSync(new URL("../src/pages/google-account-link-page.tsx", import.meta.url), "utf8");
+  assert.match(linkPage, /authClient\.linkSocial/);
+  assert.match(linkPage, /authClient\.listAccounts/);
+  assert.match(linkPage, /providerId === "google"/);
+  assert.match(linkPage, /\/api\/oauth\/complete\?after=link/);
+  assert.doesNotMatch(linkPage, /trustedProviders|allowDifferentEmails|disableImplicitLinking/);
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /path="\/collega-google" element=\{<RequireAuth>/);
+  const login = readFileSync(new URL("../src/pages/auth-pages.tsx", import.meta.url), "utf8");
+  assert.match(login, /oauthError === "provider_account_not_linked" \? "\/collega-google"/);
   const legacy = readFileSync(new URL("../src/components/oauth-return-gate.tsx", import.meta.url), "utf8");
   assert.match(legacy, /new URL\("\/api\/oauth\/complete"/);
 
@@ -64,6 +74,33 @@ try {
     assert.doesNotMatch(state.headers.location as string, /verifier/);
   }
 
+  // A verified existing credential session is required for explicit Google linking.
+  {
+    const { res, state } = harness();
+    await handler(request({ query: { neon_auth_session_verifier: "test-verifier-only", after: "link" } }) as never, res as never);
+    assert.equal(state.status, 302);
+    assert.equal(state.headers.location, APP_ORIGIN + "/collega-google?linked=1");
+    assert.ok(Array.isArray(state.headers["set-cookie"]));
+  }
+  {
+    const { res, state } = harness();
+    await handler(request({ query: { after: "link" }, headers: { host: new URL(APP_ORIGIN).host, cookie: "__Secure-neon-auth.session_token=existing-session" } }) as never, res as never);
+    assert.equal(state.status, 302);
+    assert.equal(state.headers.location, APP_ORIGIN + "/collega-google?linked=1");
+    assert.equal(seenUpstream, UPSTREAM + "?disableCookieCache=true");
+  }
+  {
+    const before = calls;
+    const { res, state } = harness();
+    await handler(request({ query: { after: "link" }, headers: { host: new URL(APP_ORIGIN).host } }) as never, res as never);
+    assert.equal(state.headers.location, APP_ORIGIN + "/collega-google?oauth=session_cookie_missing");
+    assert.equal(calls, before);
+  }
+  {
+    const { res, state } = harness();
+    await handler(request({ query: { error: "access_denied", after: "link" } }) as never, res as never);
+    assert.equal(state.headers.location, APP_ORIGIN + "/collega-google?oauth=provider_access_denied");
+  }
   const noUpstream = async (bad: Record<string, unknown>, expected: string, status = 302) => {
     const count = calls;
     const { res, state } = harness();

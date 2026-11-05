@@ -7,6 +7,7 @@ import { AdminImpersonationRouteAction } from "./components/admin-impersonation-
 import { ProfileProvider, useProfiles } from "./features/profiles/profile-context";
 
 const LoginPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.LoginPage })));
+const GoogleAccountLinkPage = lazy(() => import("./pages/google-account-link-page").then((module) => ({ default: module.GoogleAccountLinkPage })));
 const RegisterPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.RegisterPage })));
 const ForgotPasswordPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("./pages/auth-pages").then((module) => ({ default: module.ResetPasswordPage })));
@@ -55,6 +56,7 @@ export default function App() {
     <Route path="/" element={<RootRedirect />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/registrazione" element={<RegisterPage />} />
+    <Route path="/collega-google" element={<RequireAuth><GoogleAccountLinkPage /></RequireAuth>} />
     <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
     <Route path="/reimposta-password" element={<ResetPasswordPage />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
