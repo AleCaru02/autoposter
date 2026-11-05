@@ -53,7 +53,7 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
   try {
     const result = await withAuthTimeout(authClient.signIn.social({
       provider: "google",
-      callbackURL: `${window.location.origin}/app/dashboard`,
+      callbackURL: `${window.location.origin}/api/oauth/complete`,
     }));
     if (result?.error) {
       setError("Accesso con Google non riuscito. Riprova.");
@@ -67,6 +67,8 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [loginSearch] = useSearchParams();
+  const oauthError = loginSearch.get("oauth");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function LoginPage() {
     }
   }
 
-  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button><div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
+  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button>{oauthError && <p role="alert" className="form-error">Non è stato possibile completare l’accesso Google. Il sistema ha rilevato un problema nella verifica della sessione (codice: {oauthError.replace(/[^a-z_]/g, "").slice(0, 30)}). Riprova; se persiste, comunica questo codice all’assistenza.</p>}<div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
 }
 
 export function ForgotPasswordPage() {
