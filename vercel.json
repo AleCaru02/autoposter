@@ -11,11 +11,7 @@
       "destination": "/api/autopilot?path=:path*"
     },
     {
-      "source": "/studio",
-      "destination": "/studio/index.html"
-    },
-    {
-      "source": "/((?!api/|studio/).*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
