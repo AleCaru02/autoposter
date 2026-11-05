@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import handler, { APP_ORIGIN } from "../api/auth.js";
+import handler, { APP_ORIGIN, normalizeNeonAuthCookie } from "../api/auth.js";
 
 const UPSTREAM = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
 const originalFetch = globalThis.fetch;
@@ -62,6 +62,35 @@ async function run() {
     assert.equal(data.status, 302);
     assert.equal(data.headers.location, APP_ORIGIN + "/api/auth/callback/google?state=opaque");
     assert.equal((data.headers["set-cookie"] as string[]).length, 2);
+  }
+  {
+    const raw = "__Secure-neon-auth.session_challenge=opaque; Path=/neondb/auth; Domain=ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech; HttpOnly; SameSite=None; Secure; Partitioned";
+    const normalized = normalizeNeonAuthCookie(raw);
+    assert.match(normalized, /Path=\//);
+    assert.match(normalized, /SameSite=Lax/);
+    assert.match(normalized, /Secure/);
+    assert.match(normalized, /HttpOnly/);
+    assert.doesNotMatch(normalized, /Domain=/i);
+    assert.doesNotMatch(normalized, /Partitioned/i);
+    assert.doesNotMatch(normalized, /SameSite=None/i);
+  }
+  {
+    let forwardedCookie = "";
+    globalThis.fetch = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      forwardedCookie = new Headers(init?.headers).get("cookie") || "";
+      const headers = new Headers({"content-type":"application/json"});
+      headers.append("set-cookie", "__Secure-neon-auth.session_token=opaque-session; Domain=neonauth.example; Path=/neondb/auth; HttpOnly; Secure; SameSite=None; Partitioned");
+      return new Response(JSON.stringify({session:{id:"session-id"},user:{id:"user-id"}}), {status:200,headers});
+    }) as typeof fetch;
+    const { data, res } = capture();
+    await handler(req("get-session?neon_auth_session_verifier=short-test", "GET", { cookie: "__Secure-neon-auth.session_challenge=challenge" }) as never, res as never);
+    assert.equal(data.status, 200);
+    assert.equal(forwardedCookie, "__Secure-neon-auth.session_challenge=challenge");
+    const cookie = (data.headers["set-cookie"] as string[])[0];
+    assert.match(cookie, /session_token/);
+    assert.match(cookie, /SameSite=Lax/);
+    assert.match(cookie, /Path=\//);
+    assert.doesNotMatch(cookie, /Domain=|Partitioned/);
   }
   {
     let called = false;
