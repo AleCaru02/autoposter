@@ -37,8 +37,21 @@ export function OAuthReturnGate({ children }: { children: ReactNode }) {
           headers: { accept: "application/json" },
           signal: controller.signal,
         });
-        const body = await response.json().catch(() => null) as { session?: unknown; user?: unknown } | null;
-        if (!response.ok || !body?.session || !body.user) {
+        if (!response.ok) {
+          setState("FAILED");
+          return;
+        }
+        // The verifier exchange can succeed even without returning the final
+        // session JSON. Check the actual first-party cookie in a fresh read.
+        const check = await fetch("/api/auth/get-session?disableCookieCache=true", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        const confirmed = await check.json().catch(() => null) as { session?: unknown; user?: unknown } | null;
+        if (!check.ok || !confirmed?.session || !confirmed.user) {
           setState("FAILED");
           return;
         }
