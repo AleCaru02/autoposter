@@ -72,7 +72,11 @@ function profileIdFromUrl() {
   }
 }
 
-const PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = [0, 250, 700] as const;
+// On some Neon Data API connections the first authenticated RLS read can
+// produce an empty 200 response while the JWT context is being initialized.
+// Repeat idempotent reads before deciding the account has no saved profiles.
+// Never bypass RLS or infer ownership from local browser storage.
+const PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = [0, 250, 700, 1200, 1600] as const;
 
 async function fetchBootstrappedProfiles(preferredToken?: string | null): Promise<Profile[]> {
   let lastError: unknown = new Error("PROFILE_BOOTSTRAP_FAILED");
@@ -92,6 +96,9 @@ async function fetchBootstrappedProfiles(preferredToken?: string | null): Promis
       });
       const body = await response.json().catch(() => ({})) as { profiles?: Profile[]; error?: string };
       if (!response.ok || !Array.isArray(body.profiles)) throw new Error(body.error || `PROFILE_BOOTSTRAP_${response.status}`);
+      // An empty response is not proof that an existing account has lost its
+      // activities. Give the authenticated RLS context time to settle.
+      if (body.profiles.length === 0 && attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS.length - 1) continue;
       return body.profiles;
     } catch (reason) {
       lastError = reason;
