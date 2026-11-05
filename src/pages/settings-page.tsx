@@ -1,5 +1,6 @@
 import { CreditCard, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Share2, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { NavLink } from "react-router-dom";
 import { authClient, neonClient, NEON_DATA_API_URL } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
@@ -281,6 +282,8 @@ export function SettingsPage() {
       {accountDone && <p className="field-help full" role="status">{accountDone}</p>}
       <div className="full"><button className="compact-action" type="submit" disabled={accountBusy}>{accountBusy ? "Salvataggio…" : "Salva dati account"}</button></div>
     </form></section>
+
+    <section className="panel"><div className="panel-heading"><div><h2>Accesso Google</h2><p>Collega Google al tuo account già esistente, dopo esserti autenticato.</p></div><ShieldCheck size={19} /></div><p>Il collegamento viene autorizzato da te e non crea un nuovo account.</p><NavLink className="compact-action" to="/collega-google">Verifica e collega Google</NavLink></section>
 
     <section className="panel"><div className="panel-heading"><div><h2>Sicurezza</h2><p>Per cambiare password devi confermare prima quella attuale.</p></div><ShieldCheck size={19} /></div><form className="form-grid" onSubmit={changePassword}>
       <label className="full">Password attuale<span className="password-input-wrap"><input type={showCurrentPassword ? "text" : "password"} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /><button type="button" className="password-toggle" aria-label={showCurrentPassword ? "Nascondi password" : "Mostra password"} onClick={() => setShowCurrentPassword((value) => !value)}>{showCurrentPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
