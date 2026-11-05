@@ -21,7 +21,7 @@
     "deploy:cloudflare": "npm run build && wrangler deploy",
     "dev:cloudflare": "npm run build && wrangler dev",
     "test:auth-security": "tsx tests/auth-security.test.ts",
-    "test:auth-proxy": "tsx tests/same-origin-auth-proxy.test.ts && tsx tests/vercel-auth-route.test.ts",
+    "test:auth-proxy": "tsx tests/same-origin-auth-proxy.test.ts && tsx tests/vercel-auth-route.test.ts && tsx tests/neon-oauth-finalize.test.ts",
     "test:auth-boundary-static": "node tests/same-origin-auth-boundary-static.test.mjs",
     "test:platform-rbac": "tsx tests/platform-rbac.test.ts",
     "test:fase3-core": "tsx tests/fase3-core-harness-absent.test.ts",
