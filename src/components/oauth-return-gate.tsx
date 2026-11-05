@@ -24,49 +24,12 @@ export function OAuthReturnGate({ children }: { children: ReactNode }) {
       return;
     }
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 15000);
-    void (async () => {
-      try {
-        const request = new URL("/api/auth/get-session", url.origin);
-        request.searchParams.set("neon_auth_session_verifier", verifier);
-        const response = await fetch(request.pathname + request.search, {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers: { accept: "application/json" },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          setState("FAILED");
-          return;
-        }
-        // The verifier exchange can succeed even without returning the final
-        // session JSON. Check the actual first-party cookie in a fresh read.
-        const check = await fetch("/api/auth/get-session?disableCookieCache=true", {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-          headers: { accept: "application/json" },
-          signal: controller.signal,
-        });
-        const confirmed = await check.json().catch(() => null) as { session?: unknown; user?: unknown } | null;
-        if (!check.ok || !confirmed?.session || !confirmed.user) {
-          setState("FAILED");
-          return;
-        }
-        // Remove the one-time verifier before the app, analytics or any
-        // protected routes render; a full navigation refreshes useSession().
-        url.searchParams.delete("neon_auth_session_verifier");
-        window.location.replace(url.toString());
-      } catch {
-        setState("FAILED");
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    })();
-
-    return () => window.clearTimeout(timeout);
+    // Legacy Google callbacks might still land on /app/dashboard from a
+    // browser tab opened before deployment. Complete them on the same server
+    // endpoint, rather than issuing a get-session fetch inside React.
+    const destination = new URL("/api/oauth/complete", url.origin);
+    destination.searchParams.set("neon_auth_session_verifier", verifier);
+    window.location.replace(destination.toString());
   }, [state]);
 
   if (state === "EXCHANGING") {
