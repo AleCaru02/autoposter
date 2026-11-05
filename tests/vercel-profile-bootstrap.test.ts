@@ -29,6 +29,13 @@ async function run() {
     assert.match(src, /profile_tenant_modes\?select=/);
     const route = readFileSync(new URL("../src/features/profiles/profile-context.tsx", import.meta.url), "utf8");
     assert.match(route, /fetch\("\/api\/profile-bootstrap"/);
+    assert.match(route, /body\.profiles\.length === 0 && attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS\.length - 1/,
+      "a 200 empty response must be retried before onboarding");
+    assert.match(route, /authorization: `Bearer \$\{token\}`/,
+      "retries must preserve authenticated RLS reads");
+    const onboarding = readFileSync(new URL("../src/pages/onboarding-page.tsx", import.meta.url), "utf8");
+    assert.match(onboarding, /Ricarica le mie attività esistenti/,
+      "existing accounts must have a safe recovery path instead of duplicating profiles");
 
     let requests: Array<{ url: string; auth: string | null }> = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

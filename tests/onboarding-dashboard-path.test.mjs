@@ -41,7 +41,7 @@ assert.match(onboarding, /setBrandProgressExact\(30\)/, "brand progress must ent
 assert.match(onboarding, /current < 88 \? current \+ 1 : current/, "brand progress must advance one percentage point at a time while AI analysis is running");
 assert.match(onboarding, /advanceBrandProgressTo\(100, 16\)/, "brand completion must finish smoothly to 100 before showing DONE");
 assert.doesNotMatch(onboarding, /setBrandProgress\((?:15|35|85|95|100)\)/, "brand progress must not jump between hard-coded percentages");
-assert.match(profiles, /PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = \[0, 250, 700\]/, "hard refresh must absorb the short auth/session warmup race automatically");
+assert.match(profiles, /PROFILE_BOOTSTRAP_RETRY_DELAYS_MS = \[0, 250, 700, 1200, 1600\]/, "hard refresh must absorb session warmup and occasional empty RLS reads");
 assert.match(profiles, /for \(let attempt = 0; attempt < PROFILE_BOOTSTRAP_RETRY_DELAYS_MS\.length; attempt \+= 1\)/, "profile bootstrap must retry a bounded number of times");
 assert.match(profiles, /authenticatedApiToken\(attempt === 0 \? preferredToken : null\)/, "profile bootstrap must obtain its bearer through the canonical auth boundary");
 assert.match(profiles, /authenticatedApiToken\(attempt === 0 \? preferredToken : null\)[\s\S]*fetch\("\/api\/profile-bootstrap"/, "profile bootstrap must authenticate before every same-origin server request");
