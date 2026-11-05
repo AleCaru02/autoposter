@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
+import { OAuthReturnGate } from "./components/oauth-return-gate";
 import { AdminImpersonationRouteAction } from "./components/admin-impersonation-route-action";
 import { ProfileProvider, useProfiles } from "./features/profiles/profile-context";
 
@@ -50,7 +51,7 @@ function RootRedirect() {
 }
 
 export default function App() {
-  return <Suspense fallback={<PageFallback />}><AdminImpersonationRouteAction /><Routes>
+  return <Suspense fallback={<PageFallback />}><AdminImpersonationRouteAction /><OAuthReturnGate><Routes>
     <Route path="/" element={<RootRedirect />} />
     <Route path="/login" element={<LoginPage />} />
     <Route path="/registrazione" element={<RegisterPage />} />
@@ -74,5 +75,5 @@ export default function App() {
       <Route path="impostazioni" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></Suspense>;
+  </Routes></OAuthReturnGate></Suspense>;
 }
