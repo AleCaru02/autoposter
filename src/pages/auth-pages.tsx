@@ -68,7 +68,7 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
 function googleOAuthFailureMessage(code: string) {
   switch (code) {
     case "provider_account_not_linked":
-      return "Questo indirizzo potrebbe avere già un account creato con email e password. Accedi con il metodo originale; non creare un secondo account. Il collegamento Google va verificato separatamente.";
+      return "Hai già un account creato con email e password. Accedi con quelle credenziali: potrai collegare Google in sicurezza all’account esistente, senza registrarti nuovamente.";
     case "provider_access_denied":
       return "L'autorizzazione Google è stata annullata o rifiutata. Ripeti l'accesso e conferma il consenso.";
     case "provider_invalid_client":
@@ -113,7 +113,7 @@ export function LoginPage() {
         setError("Email o password non corretti.");
         return;
       }
-      navigate("/app/dashboard", { replace: true });
+      navigate(oauthError === "provider_account_not_linked" ? "/collega-google" : "/app/dashboard", { replace: true });
     } catch (reason) {
       setError(readableAuthError(reason, "Accesso non riuscito. Riprova."));
     } finally {
