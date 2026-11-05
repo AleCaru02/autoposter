@@ -49,7 +49,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   if (first(req.headers.host) !== new URL(APP_ORIGIN).host) return res.status(403).json({ error: "CALLBACK_HOST_NOT_ALLOWED" });
-  if (typeof first(req.query.error) === "string") return fail(res, "provider_failed");
+  // Better Auth sends a reason through the provider's error callback.
+  // Earlier versions collapsed every reason to provider_failed, making
+  // account linking, Google denial and malformed OAuth state indistinguishable.
+  const rawProviderError = first(req.query.error);
+  if (typeof rawProviderError === "string") {
+    const knownProviderErrors = new Set([
+      "account_not_linked", "email_not_verified", "access_denied",
+      "state_mismatch", "invalid_state", "invalid_state_format",
+      "state_integrity_check_failed", "invalid_code", "invalid_grant",
+      "invalid_callback_url", "redirect_uri_mismatch", "unauthorized_client",
+      "invalid_client", "invalid_request", "user_not_found",
+      "please_restart_the_process", "provider_not_found", "signup_disabled",
+      "unable_to_create_user", "unable_to_link_account", "unknown",
+    ]);
+    const parsed = rawProviderError.trim().toLowerCase();
+    const code = knownProviderErrors.has(parsed) ? parsed : "other";
+    // Never log provider descriptions, identities, state, auth codes or tokens.
+    console.warn("google-oauth-return-error", { reason: code });
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("location", `${APP_ORIGIN}/login?oauth=provider_${code}`);
+    return res.status(302).send("");
+  }
 
   const verifier = first(req.query.neon_auth_session_verifier);
   if (!verifier || verifier.length > MAX_VERIFIER_LENGTH || /\s/.test(verifier)) return fail(res, "missing_verifier");
