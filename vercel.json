@@ -3,6 +3,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?path=:path*"
+    },
+    {
       "source": "/api/social/:path*",
       "destination": "/api/social?path=:path*"
     },
