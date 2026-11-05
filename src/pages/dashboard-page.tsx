@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, FileText, Lightbulb, Radio, Share2, Sparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { CreativeHub } from "../components/creative-hub";
 import { neonClient } from "../lib/neon-client";
 import { useProfiles } from "../features/profiles/profile-context";
 
@@ -90,6 +91,7 @@ export function DashboardPage() {
   const advice = data.insights[0]?.insight;
 
   return <div className="page-content dashboard-page">
+    {!loading && !error && <CreativeHub profileName={selectedProfile.name} publishedCount={view.published.length} reviewCount={data.approvals} scheduledCount={view.upcoming.length} connectedCount={data.connected} />}
     <header className="dashboard-hero"><div><p className="eyebrow">La giornata di {selectedProfile.name}</p><h1>Cosa richiede attenzione oggi</h1><p>Contenuti, pubblicazioni e risultati in una sola panoramica.</p></div><NavLink className="primary-button dashboard-create" to="/app/contenuti"><Sparkles size={17} /> Crea contenuto</NavLink></header>
     {error && <p className="form-error" role="alert">{error}</p>}
     {loading ? <section className="dashboard-loading" aria-label="Caricamento panoramica"><span /><span /><span /></section> : <>
