@@ -26,6 +26,18 @@ function requestedAuthSuffix(value: string | string[] | undefined) {
   return raw;
 }
 
+/**
+ * Neon Auth may set SameSite=None; Partitioned cookies with an upstream Domain.
+ * Proxied auth is first-party: bind cookies to this canonical Vercel hostname,
+ * keep Google top-level callbacks working, and preserve expiry/HttpOnly.
+ */
+export function normalizeNeonAuthCookie(raw: string): string {
+  const [nameValue, ...attrs] = raw.split(";").map((part) => part.trim()).filter(Boolean);
+  if (!nameValue || !nameValue.includes("=")) return "";
+  const remaining = attrs.filter((attribute) => !/^(?:domain=|path=|samesite=|partitioned$|secure$)/i.test(attribute));
+  return [nameValue, ...remaining, "Path=/", "SameSite=Lax", "Secure"].join("; ");
+}
+
 function requestHeaders(req: VercelRequest) {
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
@@ -78,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.setHeader(name, value);
     }
     // Preserve distinct session/callback cookies; never comma-join Set-Cookie.
-    const cookies = upstream.headers.getSetCookie();
+    const cookies = upstream.headers.getSetCookie().map(normalizeNeonAuthCookie).filter(Boolean);
     if (cookies.length) res.setHeader("set-cookie", cookies);
     return res.status(upstream.status).send(Buffer.from(await upstream.arrayBuffer()));
   } catch {
