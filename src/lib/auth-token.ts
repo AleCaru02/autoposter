@@ -1,5 +1,3 @@
-import { authClient } from "./neon-client";
-
 type SessionTokenShape = {
   session?: { token?: string | null } | null;
   token?: string | null;
@@ -12,15 +10,41 @@ export function tokenFromAuthSession(value: unknown) {
   return data.session?.token || data.token || data.access_token || null;
 }
 
+/**
+ * Obtain the RLS JWT from the documented Neon Auth /token endpoint.
+ *
+ * Better Auth's useSession().session.token is an opaque session identifier,
+ * not a Data API JWT. On the pinned Neon beta adapter authClient.token() can
+ * also return a cached session-shaped response rather than { token: JWT }.
+ * Call the endpoint directly with the current first-party HttpOnly cookie.
+ * Never store, log, or forward the opaque session identifier as a Data API JWT.
+ */
 export async function authenticatedApiToken(preferredToken?: string | null) {
-  // The Neon Data API evaluates RLS from a signed JWT.  A Better Auth session
-  // token can authenticate a same-origin request, but is not a Data API bearer.
-  // neonClient.auth exposes the public Better Auth adapter, not Neon's internal
-  // getJWTToken helper. Unknown adapter methods become HTTP paths, so calling
-  // getJWTToken here requests /get-jwt-token instead of obtaining a JWT.
-  void preferredToken;
-  const result = await authClient.token({ fetchOptions: { cache: "no-store" } });
-  const token = result.data?.token;
-  if (result.error || typeof token !== "string" || token.split(".").length !== 3) throw new Error("Sessione non valida. Accedi di nuovo.");
+  void preferredToken; // Never trust an old token when the session changes.
+  let response: Response;
+  try {
+    response = await fetch("/api/auth/token", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    throw new Error("AUTH_JWT_NETWORK_FAILED");
+  }
+
+  if (response.status === 401 || response.status === 403) throw new Error("SESSION_INVALID");
+  if (response.status === 404) throw new Error("AUTH_JWT_ENDPOINT_MISSING");
+  if (!response.ok) throw new Error("AUTH_JWT_ENDPOINT_FAILED");
+
+  const data: unknown = await response.json().catch(() => null);
+  const token = data && typeof data === "object" && "token" in data
+    ? (data as { token?: unknown }).token
+    : null;
+  if (typeof token !== "string" || token.length > 8192 ||
+      token.split(".").length !== 3 || token.split(".").some((part) => !part) ||
+      /\s/.test(token)) {
+    throw new Error("AUTH_JWT_INVALID_RESPONSE");
+  }
   return token;
 }
