@@ -161,7 +161,6 @@ export function ContentGeneratorPage() {
 
   return <div className="page-content content-autopilot-page">
     <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa il sito per capire brand, servizi e tono, poi può ampliare i temi con ricerca online pertinente al settore.</p></div></header>
-    <section className="panel" aria-label="Studio rapido per Instagram"><h2>Studio rapido · disponibile ora</h2><p>Crea post, caroselli PNG e video verticali dal browser, senza API a consumo. Esporta i file e caricali su Instagram; la pubblicazione automatica richiede ancora il collegamento Meta.</p><a className="primary-button" href="https://autoposter-studio-creator.vercel.app/" target="_blank" rel="noopener noreferrer">Apri Studio rapido (gratis)</a></section>
     <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
 
