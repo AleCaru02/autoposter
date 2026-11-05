@@ -122,8 +122,14 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         else localStorage.removeItem(ACTIVE_PROFILE_KEY);
         return resolved;
       });
-    } catch {
-      setError("Impossibile caricare le attività. Riprova.");
+    } catch (reason) {
+      const rawCode = reason instanceof Error ? reason.message : "";
+      const code = /^[-A-Z0-9_]{3,70}$/.test(rawCode)
+        ? rawCode
+        : rawCode.includes("Sessione non valida")
+          ? "AUTH_TOKEN_REQUIRED"
+          : "PROFILE_BOOTSTRAP_UNAVAILABLE";
+      setError(`Impossibile caricare le attività. Codice: ${code}. Riprova.`);
     } finally {
       setLoading(false);
     }
