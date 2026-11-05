@@ -14,11 +14,10 @@ type Failure =
   | "session_cookie_missing"
   | "callback_failed";
 
-function fail(res: VercelResponse, code: Failure) {
-  // Never place the verifier, OAuth code, Google details or cookies in URLs or logs.
+function fail(res: VercelResponse, code: Failure, linking = false) {
   res.setHeader("cache-control", "no-store");
   res.setHeader("referrer-policy", "no-referrer");
-  res.setHeader("location", `${APP_ORIGIN}/login?oauth=${code}`);
+  res.setHeader("location", APP_ORIGIN + (linking ? "/collega-google" : "/login") + "?oauth=" + code);
   return res.status(302).send("");
 }
 
@@ -49,6 +48,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   if (first(req.headers.host) !== new URL(APP_ORIGIN).host) return res.status(403).json({ error: "CALLBACK_HOST_NOT_ALLOWED" });
+  const linking = first(req.query.after) === "link";
+  const successDestination = APP_ORIGIN + (linking ? "/collega-google?linked=1" : "/app/dashboard");
   // Better Auth sends a reason through the provider's error callback.
   // Earlier versions collapsed every reason to provider_failed, making
   // account linking, Google denial and malformed OAuth state indistinguishable.
@@ -69,15 +70,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.warn("google-oauth-return-error", { reason: code });
     res.setHeader("cache-control", "no-store");
     res.setHeader("referrer-policy", "no-referrer");
-    res.setHeader("location", `${APP_ORIGIN}/login?oauth=provider_${code}`);
+    res.setHeader("location", APP_ORIGIN + (linking ? "/collega-google" : "/login") + "?oauth=provider_" + code);
     return res.status(302).send("");
   }
 
   const verifier = first(req.query.neon_auth_session_verifier);
-  if (!verifier || verifier.length > MAX_VERIFIER_LENGTH || /\s/.test(verifier)) return fail(res, "missing_verifier");
-
   const incomingCookies = first(req.headers.cookie) || "";
-  if (!CHALLENGE_COOKIE.test(incomingCookies)) return fail(res, "missing_challenge");
+
+  // Explicit linking begins with an authenticated identity. If Neon returns
+  // without a verifier, verify the existing session; the next page checks
+  // listAccounts() before reporting that Google is actually connected.
+  if (linking && !verifier) {
+    if (!/(?:^|;\s*)__Secure-neon-auth\.session_token=/.test(incomingCookies)) {
+      return fail(res, "session_cookie_missing", true);
+    }
+    try {
+      const request = new Request(APP_ORIGIN + "/api/auth/get-session?disableCookieCache=true", {
+        method: "GET", headers: { cookie: incomingCookies, accept: "application/json" },
+        redirect: "manual",
+      });
+      const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: APP_ORIGIN });
+      const body = response?.ok ? await response.json().catch(() => null) as { session?: unknown; user?: unknown } | null : null;
+      if (!body?.session || !body.user) return fail(res, "exchange_failed", true);
+      const cookies = response?.headers.getSetCookie().map(normalizeNeonAuthCookie).filter(Boolean) ?? [];
+      if (cookies.length) res.setHeader("set-cookie", cookies);
+      res.setHeader("location", successDestination);
+      return res.status(302).send("");
+    } catch {
+      return fail(res, "callback_failed", true);
+    }
+  }
+
+  if (!verifier || verifier.length > MAX_VERIFIER_LENGTH || /\s/.test(verifier)) return fail(res, "missing_verifier", linking);
+  if (!CHALLENGE_COOKIE.test(incomingCookies)) return fail(res, "missing_challenge", linking);
 
   const target = new URL(`${APP_ORIGIN}/api/auth/get-session`);
   target.searchParams.set("neon_auth_session_verifier", verifier);
@@ -89,14 +114,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: APP_ORIGIN });
-    if (!response?.ok) return fail(res, "exchange_failed");
+    if (!response?.ok) return fail(res, "exchange_failed", linking);
     const cookies = response.headers.getSetCookie().map(normalizeNeonAuthCookie).filter(Boolean);
-    if (!cookies.some(activeSessionCookie)) return fail(res, "session_cookie_missing");
+    if (!cookies.some(activeSessionCookie)) return fail(res, "session_cookie_missing", linking);
 
     res.setHeader("set-cookie", cookies);
-    res.setHeader("location", `${APP_ORIGIN}/app/dashboard`);
+    res.setHeader("location", successDestination);
     return res.status(302).send("");
   } catch {
-    return fail(res, "callback_failed");
+    return fail(res, "callback_failed", linking);
   }
 }
