@@ -65,6 +65,34 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
   }
 }
 
+function googleOAuthFailureMessage(code: string) {
+  switch (code) {
+    case "provider_account_not_linked":
+      return "Questo indirizzo potrebbe avere già un account creato con email e password. Accedi con il metodo originale; non creare un secondo account. Il collegamento Google va verificato separatamente.";
+    case "provider_access_denied":
+      return "L'autorizzazione Google è stata annullata o rifiutata. Ripeti l'accesso e conferma il consenso.";
+    case "provider_invalid_client":
+    case "provider_redirect_uri_mismatch":
+    case "provider_unauthorized_client":
+      return "Configurazione OAuth Google non valida: occorre verificare Client ID e URI di reindirizzamento nella console Google Cloud.";
+    case "provider_state_mismatch":
+    case "provider_invalid_state":
+    case "provider_invalid_state_format":
+    case "provider_state_integrity_check_failed":
+    case "provider_invalid_code":
+    case "provider_invalid_grant":
+    case "provider_please_restart_the_process":
+      return "Il flusso OAuth è scaduto o la verifica dello stato non è riuscita. Apri una finestra privata nuova e riprova una sola volta.";
+    case "missing_challenge":
+      return "Il browser non ha conservato il cookie temporaneo Google. Riprova senza blocchi ai cookie del sito.";
+    case "session_cookie_missing":
+    case "exchange_failed":
+      return "La sessione Google non è stata emessa correttamente dal servizio di autenticazione.";
+    default:
+      return "Il servizio di autenticazione ha rifiutato l'accesso Google. Il codice indicato consente di distinguere il problema senza raccogliere dati personali.";
+  }
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const [loginSearch] = useSearchParams();
@@ -93,7 +121,7 @@ export function LoginPage() {
     }
   }
 
-  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button>{oauthError && <p role="alert" className="form-error">Non è stato possibile completare l’accesso Google. Il sistema ha rilevato un problema nella verifica della sessione (codice: {oauthError.replace(/[^a-z_]/g, "").slice(0, 30)}). Riprova; se persiste, comunica questo codice all’assistenza.</p>}<div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
+  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button>{oauthError && <p role="alert" className="form-error">{googleOAuthFailureMessage(oauthError)} <strong>Codice: {oauthError.replace(/[^a-z_]/g, "").slice(0, 60)}</strong>.</p>}<div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
 }
 
 export function ForgotPasswordPage() {
