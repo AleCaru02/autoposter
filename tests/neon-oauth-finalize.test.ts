@@ -73,7 +73,10 @@ try {
     assert.equal(calls, count, "invalid callback must not call Neon upstream");
   };
 
-  await noUpstream({ query: { error: "access_denied" } }, "provider_failed");
+  await noUpstream({ query: { error: "access_denied" } }, "provider_access_denied");
+  await noUpstream({ query: { error: "account_not_linked" } }, "provider_account_not_linked");
+  await noUpstream({ query: { error: "invalid_code" } }, "provider_invalid_code");
+  await noUpstream({ query: { error: "sensitive@example.invalid" } }, "provider_other");
   await noUpstream({ query: {} }, "missing_verifier");
   await noUpstream({ headers: { host: new URL(APP_ORIGIN).host } }, "missing_challenge");
   await noUpstream({ headers: { host: "attacker.invalid", cookie: CHALLENGE } }, "", 403);
