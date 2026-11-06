@@ -60,6 +60,39 @@ async function run() {
     const vercelConfig = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8")) as { rewrites?: Array<{ source?: string; destination?: string }> };
     assert.equal(vercelConfig.rewrites?.some((rewrite) => rewrite.source === "/api/autopilot/:path*" && rewrite.destination === "/api/autopilot?path=:path*"), true, "Vercel must route /api/autopilot/run to the server handler");
 
+    const existingWorkerOrigin = "https://autoposter.02alessandrocaruso.workers.dev";
+    const requiredWorkerOnlyPaths = [
+      "/api/assets", "/api/content-qa", "/api/learning/run",
+      "/api/generate-text/status", "/api/editorial-agents/strategy-plan",
+    ];
+    for (const source of requiredWorkerOnlyPaths) {
+      const matches = (vercelConfig.rewrites ?? []).filter((rewrite) => rewrite.source === source);
+      assert.equal(matches.length, 1, `${source} requires exactly one Vercel route`);
+      assert.equal(matches[0]?.destination, existingWorkerOrigin + source,
+        `${source} must use the existing Worker backend rather than returning Vercel 404`);
+    }
+    assert.equal(vercelConfig.rewrites?.[0]?.source, "/api/assets",
+      "explicit authenticated Worker routes must precede SPA fallback");
+    assert.equal(vercelConfig.rewrites?.some((rewrite) => rewrite.source === "/api/auth/:path*" &&
+      rewrite.destination === "/api/auth?path=:path*"), true,
+      "session cookies must continue to use first-party Vercel auth");
+    assert.equal(vercelConfig.rewrites?.some((rewrite) => rewrite.source === "/api/autopilot/:path*" &&
+      rewrite.destination === "/api/autopilot?path=:path*"), true,
+      "already working Vercel autopilot stays native");
+    const assetWorkerSource = await readFile(new URL("../cloudflare/asset-library.ts", import.meta.url), "utf8");
+    const qaWorkerSource = await readFile(new URL("../cloudflare/content-qa.ts", import.meta.url), "utf8");
+    const learningWorkerSource = await readFile(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
+    for (const workerSource of [assetWorkerSource, qaWorkerSource, learningWorkerSource]) {
+      assert.match(workerSource, /verifiedCustomerAuthUserId|canAccessProfile/,
+        "proxied operations must keep authenticated owner enforcement");
+    }
+    assert.match(assetWorkerSource, /owner_auth_user_id=\$\{authUserId\}/,
+      "asset library must remain profile-owner scoped");
+    assert.match(assetWorkerSource, /request\.method === "GET"/,
+      "asset library must serve images already present in Neon");
+    assert.match(assetWorkerSource, /request\.method === "POST"/,
+      "asset library must support uploads through the proxied path");
+
     const serializedSource = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
     assert.match(serializedSource, /pg_advisory_lock/, "autopilot runs must acquire a PostgreSQL advisory lock");
     assert.match(serializedSource, /pg_advisory_unlock/, "autopilot runs must release a PostgreSQL advisory lock");
