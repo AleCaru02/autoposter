@@ -126,7 +126,8 @@
     "test:provider-analytics-certification": "tsx tests/provider-analytics-certification.test.ts",
     "test:mobile-desktop-ui-qa": "tsx tests/mobile-desktop-ui-qa.test.ts",
     "test:vercel-profile-bootstrap": "tsx tests/vercel-profile-bootstrap.test.ts",
-    "test:vercel-learning-route": "tsx tests/vercel-learning-route.test.ts"
+    "test:vercel-learning-route": "tsx tests/vercel-learning-route.test.ts",
+    "test:vercel-assets-route": "tsx tests/vercel-assets-route.test.ts"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
