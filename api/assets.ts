@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const request = new Request(url, {
       method: req.method,
       headers,
-      ...(body ? { body } : {}),
+      ...(body ? { body: body as BodyInit } : {}),
     });
     const response = await handleAssetLibrary(request, { DATABASE_URL: process.env.DATABASE_URL });
     response.headers.forEach((value, name) => res.setHeader(name, value));
