@@ -104,10 +104,15 @@ async function run() {
     const liveDataApi = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
     const vercelImageSource = await readFile(new URL("../api/generate-image.ts", import.meta.url), "utf8");
     const vercelProfileSource = await readFile(new URL("../api/profile-bootstrap.ts", import.meta.url), "utf8");
-    for (const [name, source] of [["autopilot", vercelAutopilotSource], ["images", vercelImageSource], ["profiles", vercelProfileSource]] as const) {
+    const vercelEditorialSource = await readFile(new URL("../api/editorial-agents.ts", import.meta.url), "utf8");
+    const vercelBrandSource = await readFile(new URL("../api/onboarding-analyze.ts", import.meta.url), "utf8");
+    for (const [name, source] of [["autopilot", vercelAutopilotSource], ["images", vercelImageSource], ["profiles", vercelProfileSource], ["editorial", vercelEditorialSource], ["brand", vercelBrandSource]] as const) {
       assert.ok(source.includes(liveDataApi), name + " must use the live Neon Data API for auth/RLS");
       assert.doesNotMatch(source, /ep-nameless-truth|aws\\.neondb/, name + " cannot use the retired Neon endpoint");
     }
+
+    assert.match(vercelEditorialSource, /PROFILE_DATA_API_UNAVAILABLE/, "editorial planner must fail visibly on broken Neon connectivity");
+    assert.match(vercelEditorialSource, /SESSION_INVALID/, "editorial planner must not turn an invalid token into a false missing profile");
 
     const workerEntrySource = await readFile(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
     assert.match(workerEntrySource, /const result = await runContentAutopilotSerialized\(env,\s*\{\s*profileId,\s*maxGenerations:\s*6\s*\}\)/, "Worker manual autopilot must remain attached to the authenticated request until generation completes");
