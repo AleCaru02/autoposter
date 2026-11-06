@@ -315,11 +315,19 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
   const comparisonRequested = /\b(?:vs\.?|versus|confront\w*|compar\w*|differenz\w*|meglio\s+tra)\b/i.test(requestText);
   const differencesRequested = /\bdifferenz\w*\b/i.test(requestText);
   if (comparisonRequested) {
-    const framing = `${content.editorialTopic} ${content.editorialAngle}`.toLowerCase();
+    // The comparison can be expressed in the copy rather than repeating the exact
+    // word used in the brief (for example: "cosa cambia" or "rispetto a").
+    // Inspect the whole deliverable so a valid Italian comparison is not rejected.
+    const framing = [
+      content.editorialTopic,
+      content.editorialAngle,
+      ...content.variants.flatMap((variant) => [variant.hook, variant.caption]),
+    ].join(" ").toLowerCase();
     if (/\b(?:non esiste (?:un )?vincitore|nessun vincitore|più che cercare un vincitore|aspetti da confrontare|criteri da valutare)\b/i.test(framing)) {
       issues.push("COMPARISON_FRAMING_EVASIVE");
     }
-    if (differencesRequested && !/\bdifferenz\w*\b/i.test(framing)) {
+    const directComparison = /\b(?:differenz\w*|cosa\s+cambia|cambia\w*|rispetto\s+a|a\s+differenza\s+di|mentre|invece)\b/i.test(framing);
+    if (differencesRequested && !directComparison) {
       issues.push("DIFFERENCE_REQUEST_DILUTED");
     }
   }

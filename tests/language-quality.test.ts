@@ -24,6 +24,14 @@ const native: GeneratedSocialContent = {
 assert.deepEqual(languageQualityIssues(native), []);
 assert.deepEqual(editorialQualityIssues(native,"booking vs airbnb","le 5 differenze fra i due"), []);
 
+const directComparisonWithoutExactWord: GeneratedSocialContent = {
+  ...native,
+  editorialTopic:"Airbnb o Booking? Cosa cambia nella gestione di un immobile",
+  editorialAngle:"Un confronto operativo per scegliere il canale più adatto alla tua gestione.",
+  variants:[{...native.variants[0],caption:"Con Airbnb hai una struttura di commissioni diversa, mentre Booking offre regole di cancellazione e strumenti di tariffazione da valutare con attenzione."}],
+};
+assert.ok(!editorialQualityIssues(directComparisonWithoutExactWord,"booking vs airbnb","le differenze fra i due").includes("DIFFERENCE_REQUEST_DILUTED"));
+
 const fakeCount: GeneratedSocialContent = {
   ...native,
   variants:[{...native.variants[0],caption:"Airbnb e Booking: 5 differenze da conoscere prima di scegliere."}],
@@ -34,6 +42,7 @@ const evasive: GeneratedSocialContent = {
   ...native,
   editorialTopic:"Airbnb e Booking: aspetti da confrontare",
   editorialAngle:"Più che cercare un vincitore, ci sono alcuni criteri da valutare.",
+  variants:[{...native.variants[0],hook:"Quali aspetti valutare prima di scegliere.",caption:"Commissioni, tariffazione, cancellazioni e operatività sono alcuni criteri da considerare.",cta:"Salva questi criteri.",}],
 };
 const evasiveIssues=editorialQualityIssues(evasive,"booking vs airbnb","le 5 differenze fra i due");
 assert.ok(evasiveIssues.includes("COMPARISON_FRAMING_EVASIVE"));
