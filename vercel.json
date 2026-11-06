@@ -3,6 +3,26 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/assets",
+      "destination": "https://autoposter.02alessandrocaruso.workers.dev/api/assets"
+    },
+    {
+      "source": "/api/content-qa",
+      "destination": "https://autoposter.02alessandrocaruso.workers.dev/api/content-qa"
+    },
+    {
+      "source": "/api/learning/run",
+      "destination": "https://autoposter.02alessandrocaruso.workers.dev/api/learning/run"
+    },
+    {
+      "source": "/api/generate-text/status",
+      "destination": "https://autoposter.02alessandrocaruso.workers.dev/api/generate-text/status"
+    },
+    {
+      "source": "/api/editorial-agents/strategy-plan",
+      "destination": "https://autoposter.02alessandrocaruso.workers.dev/api/editorial-agents/strategy-plan"
+    },
+    {
       "source": "/api/auth/:path*",
       "destination": "/api/auth?path=:path*"
     },
