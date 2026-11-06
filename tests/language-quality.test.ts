@@ -42,6 +42,7 @@ const evasive: GeneratedSocialContent = {
   ...native,
   editorialTopic:"Airbnb e Booking: aspetti da confrontare",
   editorialAngle:"Più che cercare un vincitore, ci sono alcuni criteri da valutare.",
+  variants:[{...native.variants[0],hook:"Quali aspetti valutare prima di scegliere.",caption:"Commissioni, tariffazione, cancellazioni e operatività sono alcuni criteri da considerare.",cta:"Salva questi criteri.",}],
 };
 const evasiveIssues=editorialQualityIssues(evasive,"booking vs airbnb","le 5 differenze fra i due");
 assert.ok(evasiveIssues.includes("COMPARISON_FRAMING_EVASIVE"));
