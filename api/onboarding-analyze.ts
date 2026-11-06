@@ -6,7 +6,7 @@ import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-nameless-truth-a698bwer.apirest.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type ScanRow = { id: string };
