@@ -100,6 +100,7 @@ jobs:
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
       - { name: Autopilot AI plan runtime regression, run: "npm run test:autopilot-ai-plan" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
+      - { name: Vercel authenticated learning route regression, run: "npm run test:vercel-learning-route" }
       - { name: Feedback loop regression, run: "npm run test:feedback-loop" }
       - { name: Content workflow regression, run: "npm run test:content-workflow" }
       - { name: Content semantic dedupe regression, run: "npm run test:content-dedupe" }
