@@ -33,6 +33,23 @@ async function run() {
       assert.deepEqual(captured.body, { error: "PROFILE_NOT_FOUND" });
     }
 
+    // A disconnected Neon Data API must produce a retriable service error,
+    // not a false PROFILE_NOT_FOUND or an unhandled Vercel exception.
+    globalThis.fetch = async () => { throw new Error("getaddrinfo ENOTFOUND"); };
+    {
+      const { response, captured } = responseCapture();
+      await handler({ method: "POST", headers: { authorization: "Bearer test-token" }, query: { path: "run" }, body: { profileId: "00000000-0000-4000-8000-000000000001" } } as never, response as never);
+      assert.equal(captured.status, 502);
+      assert.deepEqual(captured.body, { error: "PROFILE_DATA_API_UNAVAILABLE" });
+    }
+    globalThis.fetch = async () => Response.json({ error: "invalid_token" }, { status: 401 });
+    {
+      const { response, captured } = responseCapture();
+      await handler({ method: "POST", headers: { authorization: "Bearer test-token" }, query: { path: "run" }, body: { profileId: "00000000-0000-4000-8000-000000000001" } } as never, response as never);
+      assert.equal(captured.status, 401);
+      assert.deepEqual(captured.body, { error: "SESSION_INVALID" });
+    }
+
     {
       const { response, captured } = responseCapture();
       await handler({ method: "POST", headers: {}, query: { path: "unknown" }, body: {} } as never, response as never);
@@ -84,6 +101,13 @@ async function run() {
 
     const vercelAutopilotSource = await readFile(new URL("../api/autopilot.ts", import.meta.url), "utf8");
     assert.match(vercelAutopilotSource, /runContentAutopilotSerialized/, "Vercel manual autopilot must use the serialized runner");
+    const liveDataApi = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+    const vercelImageSource = await readFile(new URL("../api/generate-image.ts", import.meta.url), "utf8");
+    const vercelProfileSource = await readFile(new URL("../api/profile-bootstrap.ts", import.meta.url), "utf8");
+    for (const [name, source] of [["autopilot", vercelAutopilotSource], ["images", vercelImageSource], ["profiles", vercelProfileSource]] as const) {
+      assert.ok(source.includes(liveDataApi), name + " must use the live Neon Data API for auth/RLS");
+      assert.doesNotMatch(source, /ep-nameless-truth|aws\\.neondb/, name + " cannot use the retired Neon endpoint");
+    }
 
     const workerEntrySource = await readFile(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
     assert.match(workerEntrySource, /const result = await runContentAutopilotSerialized\(env,\s*\{\s*profileId,\s*maxGenerations:\s*6\s*\}\)/, "Worker manual autopilot must remain attached to the authenticated request until generation completes");
