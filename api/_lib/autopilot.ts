@@ -57,7 +57,7 @@ const DEFAULT_SCHEDULES: Array<{ provider: SocialProvider; posts: number }> = [
 ];
 const PROVIDER_BASE_TIME: Record<SocialProvider, string> = { INSTAGRAM: "18:00", FACEBOOK: "12:30", LINKEDIN: "09:00", GBP: "10:00" };
 const PROVIDER_OFFSET: Record<SocialProvider, number> = { INSTAGRAM: 0, FACEBOOK: 1, LINKEDIN: 2, GBP: 3 };
-export const AUTOPILOT_PUBLISH_FORMATS: Record<SocialProvider, SocialFormat[]> = { INSTAGRAM: ["POST","STORY"], FACEBOOK: ["POST"], LINKEDIN: ["POST"], GBP: ["POST"] };
+export const AUTOPILOT_PUBLISH_FORMATS: Record<SocialProvider, SocialFormat[]> = { INSTAGRAM: ["POST","STORY","CAROUSEL"], FACEBOOK: ["POST"], LINKEDIN: ["POST"], GBP: ["POST"] };
 
 function asObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function summary(value: unknown) { const text = asObject(value).summary; return typeof text === "string" && text.trim() ? text.trim() : null; }
