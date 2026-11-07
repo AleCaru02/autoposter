@@ -10,6 +10,46 @@ import { CustomerWorkflowJourney } from "../components/customer-workflow-journey
 import { ManualContentComposer } from "../components/manual-content-composer";
 
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
+type AutopilotRunResponse = {
+  generated?: number;
+  blockedForReview?: number;
+  skipped?: number;
+  errors?: string[];
+  error?: string;
+};
+
+function autopilotFailureMessage(code: string): string {
+  switch (code) {
+    case "DATABASE_NOT_CONFIGURED":
+      return "Il server di questa versione non ha ancora il collegamento al database. L'Autopilot non può avviarsi.";
+    case "OPENAI_NOT_CONFIGURED":
+      return "Il server di questa versione non ha ancora le credenziali AI. L'Autopilot non può generare contenuti.";
+    case "AUTOPILOT_CANONICAL_UNAVAILABLE":
+      return "Il motore AI principale non è raggiungibile. Non sono stati confermati nuovi contenuti.";
+    case "AUTOPILOT_CANONICAL_INVALID_RESPONSE":
+      return "Il motore AI principale ha restituito una risposta non valida.";
+    case "SESSION_INVALID":
+    case "AUTH_REQUIRED":
+      return "Sessione scaduta: accedi di nuovo per avviare l'Autopilot.";
+    case "PROFILE_NOT_FOUND":
+      return "Non hai accesso all'attività selezionata. Controlla il profilo.";
+    case "AUTOPILOT_AI_LIMIT_REACHED":
+      return "Il limite AI dell'attività è stato raggiunto. Nessuna nuova generazione viene avviata.";
+    case "PROFILE_DATA_API_UNAVAILABLE":
+      return "Non riesco a verificare il profilo nel database. Riprova più tardi.";
+    default:
+      return "Generazione automatica non completata. Il server ha segnalato un errore: " + code.replace(/[^A-Z0-9_]/g, "").slice(0, 80);
+  }
+}
+
+function autopilotResultMessage(value: AutopilotRunResponse): string | null {
+  if (typeof value.generated === "number" && value.generated > 0) return null;
+  const firstError = value.errors?.find(e => typeof e === "string" && e.trim());
+  if (!firstError) return null;
+  const code = firstError.split(":").find(part => part.startsWith("AUTOPILOT_AI_LIMIT_REACHED") || part.startsWith("OPENAI_")) ??
+    firstError.split(":").at(-1) ?? "AUTOPILOT_RUN_FAILED";
+  return autopilotFailureMessage(code);
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   INSTAGRAM: "Instagram",
@@ -34,6 +74,8 @@ export function ContentGeneratorPage() {
   const [bootstrapPages, setBootstrapPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showManualComposer, setShowManualComposer] = useState(false);
+  const [autopilotRunning, setAutopilotRunning] = useState(false);
+  const [autopilotNotice, setAutopilotNotice] = useState<string | null>(null);
   const triggeredProfile = useRef<string | null>(null);
   const bootstrappedProfile = useRef<string | null>(null);
 
@@ -113,6 +155,8 @@ export function ContentGeneratorPage() {
     const profileId = selectedProfile?.id;
     if (!profileId || !selectedProfile.onboarding_completed || triggeredProfile.current === profileId) return;
     triggeredProfile.current = profileId;
+    setAutopilotRunning(true);
+    setAutopilotNotice(null);
     try {
       const token = await jwt();
       const response = await fetch("/api/autopilot/run", {
@@ -120,14 +164,16 @@ export function ContentGeneratorPage() {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ profileId }),
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { detail?: string; error?: string };
-        throw new Error("Autopilot non avviato. Riprova tra poco.");
-      }
-      window.setTimeout(() => { void load(); }, 2500);
+      const body = await response.json().catch(() => null) as AutopilotRunResponse | null;
+      if (!response.ok) throw new Error(autopilotFailureMessage(body?.error ?? `HTTP_${response.status}`));
+      if (!body) throw new Error(autopilotFailureMessage("AUTOPILOT_CANONICAL_INVALID_RESPONSE"));
+      setAutopilotNotice(autopilotResultMessage(body));
+      await load();
     } catch (reason) {
       triggeredProfile.current = null;
       setError(reason instanceof Error ? reason.message : "Autopilot non avviato.");
+    } finally {
+      setAutopilotRunning(false);
     }
   }, [selectedProfile?.id, selectedProfile?.onboarding_completed, jwt, load]);
 
@@ -164,11 +210,12 @@ export function ContentGeneratorPage() {
     <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Non devi scegliere argomenti né scrivere post: l’Autopilot usa brand, pagine del sito, settore e ricerca online per creare autonomamente il piano editoriale, i contenuti e il calendario. I concorrenti saranno integrati quando la ricerca competitiva verificata sarà disponibile.</p></div></header>
     <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
+    {autopilotNotice && <p className="form-error" role="status">{autopilotNotice}</p>}
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
       <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
-      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{overview.settings.enabled ? "Il sistema mantiene il piano editoriale, ricerca temi pertinenti, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
-      <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
+      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{autopilotRunning ? "Generazione in corso" : overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{autopilotRunning ? "Il motore AI sta verificando il piano e preparando gli eventuali nuovi contenuti. L'operazione è reale e può richiedere tempo." : overview.settings.enabled ? "Il sistema mantiene il piano editoriale, ricerca temi pertinenti, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
+      <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" disabled={autopilotRunning} onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
     </section>
 
     {(overview.settings.websitePilotEnabled || /web design|creazione siti|sviluppo siti|agenzia web/i.test(selectedProfile.industry ?? "")) && <section className="panel approval-mode-panel">
