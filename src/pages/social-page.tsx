@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Link2, LoaderCircle, RefreshCw, Share2, Unplug } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authClient, neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
@@ -141,6 +141,7 @@ export function SocialPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
+  const loadRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [busyProvider, setBusyProvider] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +150,9 @@ export function SocialPage() {
   const load = useCallback(async () => {
     const profileId = selectedProfile?.id;
     if (!profileId || sessionPending) return;
+    const revision = ++loadRevision.current;
+    setStatus(null);
+    setSavedConnections([]);
     setLoading(true);
     setError(null);
     // Read only safe, owner-scoped historical metadata. Neon RLS enforces
@@ -158,6 +162,7 @@ export function SocialPage() {
       .select("provider,status,account_name,last_validated_at,expires_at")
       .eq("profile_id", profileId)
       .limit(8);
+    if (revision !== loadRevision.current) return;
     if (!saved.error) setSavedConnections((saved.data ?? []) as SavedConnection[]);
     else setSavedConnections([]);
     let lastError: unknown = new Error("SOCIAL_STATUS_FAILED");
@@ -167,6 +172,7 @@ export function SocialPage() {
       try {
         const token = await jwt(sessionToken);
         const body = await apiJson<StatusResponse>(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, token);
+        if (revision !== loadRevision.current) return;
         setStatus(body);
         setLoading(false);
         return;
@@ -174,6 +180,7 @@ export function SocialPage() {
         lastError = reason;
       }
     }
+    if (revision !== loadRevision.current) return;
     setError(readableError(lastError instanceof Error ? lastError.message : "SOCIAL_STATUS_FAILED"));
     setLoading(false);
   }, [selectedProfile?.id, sessionPending, sessionToken]);
