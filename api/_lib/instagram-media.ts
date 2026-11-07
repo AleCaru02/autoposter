@@ -15,7 +15,7 @@ export type InstagramPublishImage = {
   alt_text?: string | null;
 };
 
-export function validateInstagramPublishImage(asset: InstagramPublishImage): string | null {
+export function validateInstagramPublishImage(asset: InstagramPublishImage, format: "POST" | "CAROUSEL" | "STORY" = "POST"): string | null {
   if (!asset.asset_id) return "INSTAGRAM_ASSET_MISSING";
   if (asset.qa_status !== "PASS") return "INSTAGRAM_ASSET_QA_NOT_APPROVED";
   if (asset.asset_quality_status !== "PASS") return "INSTAGRAM_ASSET_QUALITY_NOT_APPROVED";
@@ -26,7 +26,7 @@ export function validateInstagramPublishImage(asset: InstagramPublishImage): str
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return "INSTAGRAM_ASSET_DIMENSIONS_REQUIRED";
   if (w * h > 100_000_000) return "INSTAGRAM_ASSET_DIMENSIONS_EXCESSIVE";
   const ratio = w / h;
-  if (ratio < 0.8 - 0.0001 || ratio > 1.91 + 0.0001) return "INSTAGRAM_ASSET_ASPECT_RATIO_UNSUPPORTED";
+  if (format === "STORY" ? Math.abs(ratio - 9 / 16) > 0.035 : ratio < 0.8 - 0.0001 || ratio > 1.91 + 0.0001) return "INSTAGRAM_ASSET_ASPECT_RATIO_UNSUPPORTED";
   return null;
 }
 
