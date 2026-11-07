@@ -353,7 +353,20 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,approval_mode,workflow_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${approvalMode==="AUTOMATIC"?"AUTO":"MANUAL"},'DRAFT',${now}::timestamptz)`;
-  if(variant.eligible&&allowImageGeneration){
+
+  const carouselSlideIds:string[]=[];
+  if(format==="CAROUSEL"){
+    const slides=variant.carouselSlides??[];
+    if(slides.length<4||slides.length>10)throw new Error("AUTOPILOT_CAROUSEL_SLIDES_INVALID");
+    for(const slide of slides){
+      const slideId=crypto.randomUUID();
+      carouselSlideIds.push(slideId);
+      await sql`insert into public.content_carousel_slides
+        (id,profile_id,content_id,variant_id,position,purpose,headline,body,hierarchy,visual_brief,alt_text,width,height,qa_status,updated_at)
+        values (${slideId}::uuid,${profile.id}::uuid,${contentId}::uuid,${variantId}::uuid,${slide.position},${slide.purpose},${slide.headline},${slide.body},${slide.hierarchy},${slide.visualBrief},${slide.altText},1080,1080,'PENDING',now())`;
+    }
+  }
+  if(variant.eligible&&allowImageGeneration&&format!=="CAROUSEL"){
     const aspectRatio=format==="STORY"?"2:3":"1:1";
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
