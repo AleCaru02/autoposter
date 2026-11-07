@@ -42,7 +42,10 @@ assert.match(social,/variantReadyForPublishing/);
 assert.match(social,/workflow_status, v\.qa_status, v\.qa_fingerprint, v\.approved_fingerprint/);
 assert.match(social,/if \(!variantReadyForPublishing\(variant\)\) throw new Error\("CONTENT_NOT_APPROVED"\)/);
 assert.match(social,/if \(!current \|\| !variantReadyForPublishing\(current\)\)/);
-assert.match(social,/pubblicazione multi-media Instagram resta disabilitata/);
+assert.match(social,/publishInstagramCarousel/);
+assert.match(social,/validateInstagramCarousel\(slides\)/);
+assert.match(social,/CAROUSEL_PUBLISH/);
+assert.match(social,/beforeVisibleWrite/);
 assert.match(calendarMigration,/approved_fingerprint/);
 
 console.log("Publication QA guard: PASS — remote writes require immutable approved QA fingerprint and real carousel readiness.");
