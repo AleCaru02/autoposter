@@ -33,6 +33,7 @@ export function ContentGeneratorPage() {
   const [bootstrapping, setBootstrapping] = useState(false);
   const [bootstrapPages, setBootstrapPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showManualComposer, setShowManualComposer] = useState(false);
   const triggeredProfile = useRef<string | null>(null);
   const bootstrappedProfile = useRef<string | null>(null);
 
@@ -160,11 +161,9 @@ export function ContentGeneratorPage() {
   const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
   return <div className="page-content content-autopilot-page">
-    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Post Automatici usa il sito per capire brand, servizi e tono, poi può ampliare i temi con ricerca online pertinente al settore.</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Non devi scegliere argomenti né scrivere post: l’Autopilot usa brand, pagine del sito, settore e ricerca online per creare autonomamente il piano editoriale, i contenuti e il calendario. I concorrenti saranno integrati quando la ricerca competitiva verificata sarà disponibile.</p></div></header>
     <CustomerWorkflowJourney current="CREATE" />
     {error && <p className="form-error" role="alert">{error}</p>}
-
-    <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} profileType={selectedProfile.profile_type} profiles={profiles} researchMode={overview.settings.researchMode} />
 
     <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
       <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
@@ -172,7 +171,7 @@ export function ContentGeneratorPage() {
       <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
     </section>
 
-    <section className="panel approval-mode-panel">
+    {(overview.settings.websitePilotEnabled || /web design|creazione siti|sviluppo siti|agenzia web/i.test(selectedProfile.industry ?? "")) && <section className="panel approval-mode-panel">
       <div className="panel-heading"><div><h2>Pilota Instagram · siti web</h2><p>Solo per questo profilo: post in italiano per imprenditori, offerta 99 €/mese e bozza iniziale gratuita.</p></div><WandSparkles size={20} /></div>
       <button type="button" className={`approval-mode-card ${overview.settings.websitePilotEnabled ? "selected" : ""}`} onClick={() => void changeSettings({
         websitePilotEnabled: !overview.settings.websitePilotEnabled,
@@ -184,7 +183,7 @@ export function ContentGeneratorPage() {
         <span className="mode-check">{overview.settings.websitePilotEnabled ? "Attivo" : "Attiva"}</span>
       </button>
       <p className="field-help">La generazione usa le API AI configurate e i loro limiti di budget. Il pilota non cancella vecchie pubblicazioni già programmate su altri social: controlla il Calendario prima di consentire pubblicazioni reali.</p>
-    </section>
+    </section>}
 
     <section className="panel approval-mode-panel">
       <div className="panel-heading"><div><h2>Prima della pubblicazione</h2><p>Scegli una volta come deve comportarsi il sistema. Puoi cambiarlo quando vuoi.</p></div><ShieldCheck size={20} /></div>
@@ -222,6 +221,11 @@ export function ContentGeneratorPage() {
       {overview.schedules.length ? <div className="autopilot-schedule-list">{overview.schedules.filter((schedule) => schedule.enabled).map((schedule) => <div key={schedule.provider}><span>{PROVIDER_LABELS[schedule.provider] ?? schedule.provider}</span><strong>{schedule.posts_per_week} {schedule.posts_per_week === 1 ? "contenuto" : "contenuti"} / settimana</strong></div>)}</div> : <p className="autopilot-preparing">Il piano iniziale viene preparato automaticamente.</p>}
       <div className="autopilot-counters"><div><span>In revisione</span><strong>{overview.inReview}</strong></div><div><span>Nel calendario</span><strong>{overview.upcoming}</strong></div></div>
       <div className="autopilot-links"><NavLink to="/app/calendario">Apri calendario</NavLink>{!automaticApproval && <NavLink to="/app/approvazioni">Apri Revisioni</NavLink>}</div>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Creazione manuale (facoltativa)</h2><p>Non necessaria per usare Post Automatici. Puoi intervenire soltanto se vuoi un contenuto straordinario fuori dal piano automatico.</p></div></div>
+      <button type="button" className="secondary-button" aria-expanded={showManualComposer} onClick={() => setShowManualComposer(value => !value)}>{showManualComposer ? "Chiudi creazione manuale" : "Apri creazione manuale"}</button>
+      {showManualComposer && <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} profileType={selectedProfile.profile_type} profiles={profiles} researchMode={overview.settings.researchMode} />}
     </section>
   </div>;
 }
