@@ -212,10 +212,10 @@ export function ContentGeneratorPage() {
     }
   }, [selectedProfile?.id, selectedProfile?.onboarding_completed, jwt, load]);
 
-  useEffect(() => {
-    if (overview?.settings.enabled && selectedProfile?.onboarding_completed) void triggerAutopilot();
-  }, [overview?.settings.enabled, selectedProfile?.onboarding_completed, triggerAutopilot]);
-
+  // Autopilot runs from the authorized hourly server cron. Visiting this page
+  // must only READ the saved plan: it must not start billable generation or
+  // repeat QA-rejected attempts. Enabling from paused state may still request
+  // a first run via the explicit settings action below.
   async function changeSettings(patch: Partial<AutopilotSettings>) {
     if (!selectedProfile?.id || !overview || settingsSavingRef.current) return;
     settingsSavingRef.current = true;
