@@ -371,13 +371,20 @@ export function providerCapabilities(provider: SocialProvider) {
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
 
-export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
   if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
   if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
-    if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    if (input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) && Date.parse(input.expiresAt) <= now) {
+      return { state: "USER_ACTION_REQUIRED", detail: input.provider === "GBP"
+        ? "Il token Google è scaduto. Ricollega l’account o verifica il rinnovo OAuth prima di pubblicare."
+        : "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    }
+    if (input.lastValidatedAt && (!Number.isFinite(Date.parse(input.lastValidatedAt)) || Date.parse(input.lastValidatedAt) < now - 7 * 24 * 60 * 60 * 1000)) {
+      return { state: "USER_ACTION_REQUIRED", detail: "La connessione non viene verificata con il provider da oltre 7 giorni. Riconvalida l’account prima di pubblicare." };
+    }
     const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : null;
     if (analyticsPermission && !permissions.includes(analyticsPermission)) return { state: "USER_ACTION_REQUIRED", detail: `Manca il consenso ${analyticsPermission} richiesto per Analytics.` };
     return { state: "PASS_REAL", detail: "Account attivo con credenziali cifrate e validazione reale del provider." };
@@ -944,7 +951,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
         lastError,
-        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
+        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, lastValidatedAt: row?.last_validated_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),
