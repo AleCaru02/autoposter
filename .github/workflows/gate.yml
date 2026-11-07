@@ -141,12 +141,12 @@ jobs:
         run: npm run test:openai-image-live
       - { name: Vercel build, run: "npm run build" }
       - name: Install Playwright Chromium for UI QA
-        if: github.event_name == 'pull_request' && github.head_ref == 'gpt56/mobile-desktop-ui-qa'
+        if: github.event_name == 'pull_request' && (github.head_ref == 'gpt56/mobile-desktop-ui-qa' || github.head_ref == 'feature/instagram-creator-toolkit-20261107')
         run: |
           npm install --no-save --no-audit --no-fund playwright@1.62.1
           npx playwright install --with-deps chromium
       - name: Four viewport UI browser QA
-        if: github.event_name == 'pull_request' && github.head_ref == 'gpt56/mobile-desktop-ui-qa'
+        if: github.event_name == 'pull_request' && (github.head_ref == 'gpt56/mobile-desktop-ui-qa' || github.head_ref == 'feature/instagram-creator-toolkit-20261107')
         env:
           UI_SMOKE_BASE: http://127.0.0.1:4173
           UI_SMOKE_START_LOCAL: "1"
