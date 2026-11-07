@@ -36,13 +36,13 @@ export function CreativeHub({ profileName, publishedCount, reviewCount, schedule
       <div><span>Pubblicazioni recenti</span><strong>{publishedCount}</strong></div>
       <div><span>Da approvare</span><strong>{reviewCount}</strong></div>
       <div><span>Prossime uscite</span><strong>{scheduledCount}</strong></div>
-      <div><span>Canali collegati</span><strong>{connectedCount}</strong></div>
+      <div><span>Canali pronti</span><strong>{connectedCount}</strong></div>
     </section>
     <div className="creator-section-title"><div><p>CREA E DISTRIBUISCI</p><h2>Cosa vuoi fare oggi?</h2></div><span>4 azioni essenziali, senza menu complicati</span></div>
     <section className="creator-tool-grid">
       <NavLink to="/app/contenuti" className="creator-tool-tile"><span className="creator-tool-icon purple"><ImageIcon size={22} /></span><strong>Post con immagini AI</strong><p>Brief, copy, visual e revisione con i modelli cloud già integrati.</p><span className="creator-tool-cta">Apri generatore <ArrowRight size={15} /></span></NavLink>
       <NavLink to="/app/contenuti" className="creator-tool-tile"><span className="creator-tool-icon orange"><LayoutGrid size={22} /></span><strong>Caroselli Instagram</strong><p>Crea le slide e prepara i visual originali, senza collage casuali.</p><span className="creator-tool-cta">Crea carosello <ArrowRight size={15} /></span></NavLink>
-      <NavLink to="/app/social" className="creator-tool-tile"><span className="creator-tool-icon pink"><Instagram size={22} /></span><strong>Collegamento Instagram</strong><p>Autorizza Meta e verifica che la pubblicazione sia davvero disponibile.</p><span className="creator-tool-cta">{connectedCount ? "Verifica connessione" : "Collega Instagram"} <ArrowRight size={15} /></span></NavLink>
+      <NavLink to="/app/social" className="creator-tool-tile"><span className="creator-tool-icon pink"><Instagram size={22} /></span><strong>Collegamento Instagram</strong><p>Autorizza Meta e verifica che la pubblicazione sia davvero disponibile.</p><span className="creator-tool-cta">Verifica Instagram <ArrowRight size={15} /></span></NavLink>
       <NavLink to="/app/analytics" className="creator-tool-tile"><span className="creator-tool-icon mint"><Zap size={22} /></span><strong>Visualizzazioni e risultati</strong><p>Analizza soltanto dati reali, per capire quali contenuti attirano clienti.</p><span className="creator-tool-cta">Apri risultati <ArrowRight size={15} /></span></NavLink>
     </section>
     <section className="creator-planning">
