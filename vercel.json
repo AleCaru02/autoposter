@@ -2,13 +2,35 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "crons": [
-    { "path": "/api/cron", "schedule": "0 * * * *" }
+    {
+      "path": "/api/cron",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-social",
+      "schedule": "0 * * * *"
+    }
   ],
   "rewrites": [
-    { "source": "/api/auth/:path*", "destination": "/api/auth?path=:path*" },
-    { "source": "/api/social/:path*", "destination": "/api/social?path=:path*" },
-    { "source": "/api/autopilot/:path*", "destination": "/api/autopilot?path=:path*" },
-    { "source": "/api/learning/:path*", "destination": "/api/learning?path=:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?path=:path*"
+    },
+    {
+      "source": "/api/social/:path*",
+      "destination": "/api/social?path=:path*"
+    },
+    {
+      "source": "/api/autopilot/:path*",
+      "destination": "/api/autopilot?path=:path*"
+    },
+    {
+      "source": "/api/learning/:path*",
+      "destination": "/api/learning?path=:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }
