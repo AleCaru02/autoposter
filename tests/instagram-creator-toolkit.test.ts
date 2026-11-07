@@ -4,6 +4,7 @@ import {
   INSTAGRAM_RECIPES,
   applyInstagramRecipe,
   instagramDraftPreflight,
+  instagramImagePreflight,
 } from "../src/features/content/instagram-creator-toolkit.js";
 import type { GeneratedVariant } from "../api/_lib/openai-text.js";
 
@@ -44,6 +45,16 @@ assert.match(duplicate.warnings.join(" "), /ripetuti/);
 const carousel = instagramDraftPreflight({ ...sample, format: "CAROUSEL", carouselSlides: [] });
 assert.match(carousel.blockingIssues.join(" "), /4 a 10 slide/);
 assert.deepEqual(instagramDraftPreflight({ ...sample, provider: "FACEBOOK" }).blockingIssues, []);
+
+assert.equal(instagramImagePreflight({ mimeType: "image/jpeg", width: 1080, height: 1350, format: "CAROUSEL" }).ready, true);
+assert.match(instagramImagePreflight({ mimeType: "image/png", width: 1080, height: 1350, format: "POST" }).blockingIssues.join(" "), /JPEG/);
+assert.match(instagramImagePreflight({ mimeType: "image/jpeg", width: 600, height: 1400, format: "POST" }).blockingIssues.join(" "), /4:5/);
+assert.match(instagramImagePreflight({ mimeType: "image/jpeg", width: null, height: null, format: "POST" }).warnings.join(" "), /Dimensioni/);
+assert.equal(instagramImagePreflight({ mimeType: "image/jpeg", width: 1080, height: 1920, format: "STORY" }).ready, true);
+
+const approvalUi = readFileSync(new URL("../src/pages/approvals-page.tsx", import.meta.url), "utf8");
+assert.match(approvalUi, /instagramImagePreflight/);
+assert.match(approvalUi, /Verifica file Instagram/);
 
 const composer = readFileSync(new URL("../src/components/manual-content-composer.tsx", import.meta.url), "utf8");
 assert.match(composer, /INSTAGRAM_RECIPES\.map/);
