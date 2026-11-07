@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { CapabilityKey } from "./capabilities.js";
 import { assertInstagramCaption, instagramCarouselChildForm, instagramCarouselParentForm, validateInstagramCarousel, validateInstagramPublishImage, type InstagramPublishImage } from "./instagram-media.js";
+import { toInstagramJpeg } from "./instagram-jpeg.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
@@ -1042,16 +1043,16 @@ function bytesBody(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string) {
-  return hmac(`media:${profileId}:${assetId}:${exp}`, secret);
+async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string, format = "") {
+  return hmac(`media:${profileId}:${assetId}:${exp}${format ? `:${format}` : ""}`, secret);
 }
 
-async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv) {
+async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv, jpeg = false) {
   const root = baseUrl(env);
   if (!root) throw new Error("APP_BASE_URL_NOT_CONFIGURED");
   const exp = Date.now() + 20 * 60_000;
-  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!);
-  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
+  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!, jpeg ? "jpeg" : "");
+  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}${jpeg ? "&fmt=jpeg" : ""}`;
 }
 
 async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
@@ -1060,17 +1061,18 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   const profileId = url.searchParams.get("profile") || "";
   const exp = Number(url.searchParams.get("exp"));
   const sig = url.searchParams.get("sig") || "";
-  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
+  const requestedFormat = url.searchParams.get("fmt") || "";
+  if (requestedFormat && requestedFormat !== "jpeg") return socialJson({ error: "MEDIA_FORMAT_INVALID" }, 403);
+  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY, requestedFormat)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`select storage_url, mime_type from public.assets where id=${assetId}::uuid and profile_id=${profileId}::uuid limit 1` as unknown as Array<{ storage_url: string; mime_type: string | null }>;
   const asset = rows[0];
   if (!asset?.storage_url) return socialJson({ error: "ASSET_NOT_FOUND" }, 404);
   try {
     const data = await assetBytes(asset.storage_url, asset.mime_type || "image/png");
-    if (data.mimeType.split(";")[0].trim().toLowerCase() === "image/jpeg") {
-      if (data.bytes.length > 8 * 1024 * 1024 || data.bytes.length < 4 || data.bytes[0] !== 0xff || data.bytes[1] !== 0xd8 || data.bytes[2] !== 0xff) throw new Error("JPEG_MEDIA_INVALID");
-    }
-    return new Response(bytesBody(data.bytes), { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
+    const output = requestedFormat === "jpeg" ? await toInstagramJpeg(data.bytes, data.mimeType) : data.bytes;
+    const outputMime = requestedFormat === "jpeg" ? "image/jpeg" : data.mimeType;
+    return new Response(bytesBody(output), { status: 200, headers: { "content-type": outputMime, "cache-control": "public, max-age=600" } });
   } catch (reason) {
     console.error("social-asset-read-failed", { code: reason instanceof Error ? reason.message : "unknown" });
     return socialJson({ error: "ASSET_READ_FAILED" }, 502);
@@ -1122,7 +1124,7 @@ async function publishInstagramCarousel(sql: Sql, variant: VariantRecord, connec
   const base = `https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}`;
   const children: string[] = [];
   for (const [index, assetId] of assetIds.entries()) {
-    const url = await publicMediaUrl(variant.profile_id, assetId, env);
+    const url = await publicMediaUrl(variant.profile_id, assetId, env, true);
     const response = await providerRequest(`${base}/media`, {
       method: "POST", body: instagramCarouselChildForm(url, bundle.accessToken, slides[index]?.alt_text),
     }, { provider: "INSTAGRAM", stage: "CAROUSEL_CHILD_CREATE" });
@@ -1160,7 +1162,7 @@ async function publishInstagram(sql: Sql, variant: VariantRecord, connection: St
   if (issue) throw new Error(issue);
   const caption = composeCaption(variant);
   if (variant.format === "POST") assertInstagramCaption(caption);
-  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env);
+  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env, true);
   const form = new URLSearchParams({ image_url: mediaUrl, access_token: bundle.accessToken });
   if (variant.format === "POST") {
     form.set("caption", caption);
