@@ -5,7 +5,7 @@ import { ensureOpenAIStrategyPlannerFresh, strategyPlannerRefreshDecision } from
 import { ActivityBudgetEngine } from "./activity-budget.js";
 
 type RunOptions = { profileId?: string; maxGenerations?: number };
-type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; errors: string[] };
+type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
 type UsageSnapshot = { globalTextUsd: number; profileTotalUsd: number; globalImages: number; profileImages: number; generated24h: number; generated7d: number };
 
 const LOCK_NAME = "post-automatici:content-autopilot:v1";
@@ -13,7 +13,7 @@ const DEFAULT_GENERATIONS_PER_RUN = 12;
 
 function numberOr(value: unknown, fallback = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 function emptyResult(): RunResult { return { profilesChecked: 0, generated: 0, scheduled: 0, blockedForReview: 0, skipped: 0, errors: [] }; }
-function addResult(target: RunResult, source: RunResult) { target.profilesChecked += source.profilesChecked; target.generated += source.generated; target.scheduled += source.scheduled; target.blockedForReview += source.blockedForReview; target.skipped += source.skipped; target.errors.push(...source.errors); }
+function addResult(target: RunResult, source: RunResult) { target.profilesChecked += source.profilesChecked; target.generated += source.generated; target.scheduled += source.scheduled; target.blockedForReview += source.blockedForReview; target.skipped += source.skipped; if(source.deferred)target.deferred=(target.deferred??0)+source.deferred; target.errors.push(...source.errors); }
 
 async function profileIds(client: Client, requestedProfileId?: string) {
   if (requestedProfileId) { const rows = await client.query<{ id: string }>("select id::text as id from public.profiles where id=$1::uuid and archived_at is null and onboarding_completed=true limit 1", [requestedProfileId]); return rows.rows.map((row) => row.id); }
