@@ -323,7 +323,7 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
   page.on("console", (message) => { if (message.type() === "error") critical.push("console:" + message.text()); });
 
   try {
-    await open(page, "/app/dashboard", "Cosa richiede attenzione oggi");
+    await open(page, "/app/dashboard", "Il tuo prossimo contenuto inizia qui.");
     await assertNoDocumentOverflow(page, label + " dashboard");
 
     const desktop = viewport.width > 760;
