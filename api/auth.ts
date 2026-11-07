@@ -17,7 +17,7 @@ export const APP_ORIGIN = "https://post-automatici-canonical.vercel.app";
  * wildcard *.vercel.app hosts, or user-controlled redirect parameters.
  * Previews must also be allowlisted independently in Neon Auth.
  */
-export function resolveAuthOrigin(host: string | undefined, environment: Pick<NodeJS.ProcessEnv, "VERCEL_ENV" | "AUTH_PREVIEW_ORIGIN"> = process.env): string | null {
+export function resolveAuthOrigin(host: string | undefined, environment: { VERCEL_ENV?: string; AUTH_PREVIEW_ORIGIN?: string } = process.env): string | null {
   if (host === new URL(APP_ORIGIN).host) return APP_ORIGIN;
   if (environment.VERCEL_ENV !== "preview" || !environment.AUTH_PREVIEW_ORIGIN) return null;
   try {
