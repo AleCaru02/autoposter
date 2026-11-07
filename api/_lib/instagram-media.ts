@@ -62,7 +62,7 @@ export function instagramCarouselChildForm(url: string, token: string, alt?: str
 }
 
 export function instagramCarouselParentForm(children: readonly string[], caption: string, token: string) {
-  if (children.length < 4 || children.length > 10 || children.some(child => !/^\\d+$/.test(child))) throw new Error("INSTAGRAM_CAROUSEL_CONTAINER_IDS_INVALID");
+  if (children.length < 4 || children.length > 10 || children.some(child => !/^[0-9]+$/.test(child))) throw new Error("INSTAGRAM_CAROUSEL_CONTAINER_IDS_INVALID");
   assertInstagramCaption(caption);
   return new URLSearchParams({ media_type: "CAROUSEL", children: children.join(","), caption, access_token: token });
 }
