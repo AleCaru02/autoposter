@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarDays, Eye, Globe2, LoaderCircle, Pause, Play, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowRight, CalendarDays, ChevronDown, Eye, Globe2, LoaderCircle, Pause, Play, Settings2, ShieldCheck, Sparkles, WandSparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { EditorialResearchMode } from "../../api/_lib/editorial-research";
 import { authenticatedApiToken } from "../lib/auth-token";
@@ -74,6 +74,7 @@ export function ContentGeneratorPage() {
   const [bootstrapPages, setBootstrapPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showManualComposer, setShowManualComposer] = useState(false);
+  const [showAllTopics, setShowAllTopics] = useState(false);
   const [autopilotRunning, setAutopilotRunning] = useState(false);
   const [autopilotNotice, setAutopilotNotice] = useState<string | null>(null);
   const triggeredProfile = useRef<string | null>(null);
@@ -206,103 +207,119 @@ export function ContentGeneratorPage() {
 
   const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
-  return <div className="page-content content-autopilot-page">
-    <header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1><p>Non devi scegliere argomenti né scrivere post: l’Autopilot usa brand, pagine del sito, settore e ricerca online per creare autonomamente il piano editoriale, i contenuti e il calendario. I concorrenti saranno integrati quando la ricerca competitiva verificata sarà disponibile.</p></div></header>
-    <CustomerWorkflowJourney current="CREATE" />
-    {error && <p className="form-error" role="alert">{error}</p>}
-    {autopilotNotice && <p className="form-error" role="status">{autopilotNotice}</p>}
+  const plan = overview.editorialPlan;
+  const visibleTopics = plan?.items.slice(0, showAllTopics ? 60 : 5) ?? [];
+  const generatedAt = plan?.generatedAt && Number.isFinite(Date.parse(plan.generatedAt)) ? new Date(plan.generatedAt) : null;
+  const planStale = generatedAt !== null && Date.now() - generatedAt.getTime() > 14 * 86400000;
+  const activeSchedules = overview.schedules.filter(schedule => schedule.enabled);
+  const currentResearch = RESEARCH_MODES.find(mode => mode.value === overview.settings.researchMode)?.title ?? "Bilanciato";
 
-    <section className={`autopilot-master ${overview.settings.enabled ? "active" : "paused"}`}>
-      <div className="autopilot-master-icon">{overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23} />}</div>
-      <div className="autopilot-master-copy"><small>AUTOPILOT</small><h2>{autopilotRunning ? "Generazione in corso" : overview.settings.enabled ? "Attivo" : "In pausa"}</h2><p>{autopilotRunning ? "Il motore AI sta verificando il piano e preparando gli eventuali nuovi contenuti. L'operazione è reale e può richiedere tempo." : overview.settings.enabled ? "Il sistema mantiene il piano editoriale, ricerca temi pertinenti, crea testi e immagini e prepara le date nel calendario." : "Nessun nuovo contenuto automatico viene creato finché non riattivi l'autopilot."}</p></div>
-      <button className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} type="button" disabled={autopilotRunning} onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>{overview.settings.enabled ? <><Pause size={15} /> Metti in pausa</> : <><Play size={15} /> Riattiva</>}</button>
-    </section>
+  return <div className="page-content content-autopilot-page studio-editorial-page">
+    <header className="page-header editorial-page-heading">
+      <div>
+        <p className="eyebrow">STUDIO EDITORIALE · {selectedProfile.name}</p>
+        <h1>Il tuo piano editoriale</h1>
+        <p>I temi vengono scelti per la tua attività. Qui controlli il piano, non devi scrivere ogni singolo post.</p>
+      </div>
+      <NavLink className="editorial-heading-link" to="/app/calendario"><CalendarDays size={16}/> Calendario <ArrowRight size={15}/></NavLink>
+    </header>
 
-    {(overview.settings.websitePilotEnabled || /web design|creazione siti|sviluppo siti|agenzia web/i.test(selectedProfile.industry ?? "")) && <section className="panel approval-mode-panel">
-      <div className="panel-heading"><div><h2>Pilota Instagram · siti web</h2><p>Solo per questo profilo: post in italiano per imprenditori, offerta 99 €/mese e bozza iniziale gratuita.</p></div><WandSparkles size={20} /></div>
-      <button type="button" className={`approval-mode-card ${overview.settings.websitePilotEnabled ? "selected" : ""}`} onClick={() => void changeSettings({
-        websitePilotEnabled: !overview.settings.websitePilotEnabled,
-        approvalMode: "MANUAL_REVIEW",
-        enabled: overview.settings.websitePilotEnabled ? overview.settings.enabled : true,
-      })}>
-        <strong>{overview.settings.websitePilotEnabled ? "Pilota attivo · disattiva" : "Attiva il pilota da 2 post Instagram a settimana"}</strong>
-        <p>Se attivo, l'Autopilot crea solo post Instagram (fino a 2/settimana), da approvare manualmente. I contenuti sono orientati alle richieste di bozza gratuita; non pubblica nulla senza approvazione e una connessione social reale.</p>
-        <span className="mode-check">{overview.settings.websitePilotEnabled ? "Attivo" : "Attiva"}</span>
+    {error && <div className="editorial-alert" role="alert"><ShieldCheck size={18}/><p>{error}</p></div>}
+    {autopilotNotice && <div className="editorial-alert subtle" role="status"><Globe2 size={18}/><p>{autopilotNotice}</p></div>}
+
+    <section className={`autopilot-master editorial-control ${overview.settings.enabled ? "active" : "paused"}`} aria-label="Stato automazione">
+      <div className="autopilot-master-icon">{autopilotRunning ? <LoaderCircle className="spin" size={23} /> : overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23}/>}</div>
+      <div className="autopilot-master-copy">
+        <small>AUTOPILOT · {selectedProfile.name}</small>
+        <h2>{autopilotRunning ? "Preparazione in corso" : overview.settings.enabled ? "Automazione attiva" : "Automazione in pausa"}</h2>
+        <p>{autopilotRunning ? "Il motore sta controllando il piano e preparando eventuali nuovi contenuti." : overview.settings.enabled ? "Il sistema è abilitato a preparare contenuti secondo le frequenze impostate. Le pubblicazioni richiedono comunque autorizzazioni social valide." : "I nuovi contenuti automatici non vengono creati finché non riattivi l'automazione."}</p>
+      </div>
+      <button type="button" className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} disabled={autopilotRunning} aria-pressed={overview.settings.enabled} onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>
+        {overview.settings.enabled ? <><Pause size={16} /> Metti in pausa</> : <><Play size={16} /> Riattiva</>}
       </button>
-      <p className="field-help">La generazione usa le API AI configurate e i loro limiti di budget. Il pilota non cancella vecchie pubblicazioni già programmate su altri social: controlla il Calendario prima di consentire pubblicazioni reali.</p>
-    </section>}
+    </section>
 
-    <section className="panel approval-mode-panel">
-      <div className="panel-heading"><div><h2>Prima della pubblicazione</h2><p>Scegli una volta come deve comportarsi il sistema. Puoi cambiarlo quando vuoi.</p></div><ShieldCheck size={20} /></div>
-      <div className="approval-mode-grid">
-        <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
-          <span className="approval-mode-icon"><Eye size={19} /></span><strong>Voglio approvare io</strong><p>Il sistema crea tutto e lo mette nel calendario, ma il post resta in attesa finché non lo approvi nelle Revisioni.</p><span className="mode-check">{!automaticApproval ? "Attivo" : "Seleziona"}</span>
-        </button>
-        <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
-          <span className="approval-mode-icon"><Sparkles size={19} /></span><strong>Gestisci tutto automaticamente</strong><p>Il sistema crea, approva e programma da solo. La pubblicazione esterna partirà solo quando il relativo social sarà realmente collegato.</p><span className="mode-check">{automaticApproval ? "Attivo" : "Seleziona"}</span>
-        </button>
+    <div className="editorial-summary" aria-label="Stato del piano">
+      <div><strong>{plan?.items.length ?? 0}</strong><span>Idee nel piano AI</span></div>
+      <div><strong>{overview.inReview}</strong><span>In revisione</span></div>
+      <div><strong>{overview.upcoming}</strong><span>Nel calendario</span></div>
+      <div><strong>{activeSchedules.length}</strong><span>Canali pianificati</span></div>
+    </div>
+
+    <section className="panel editorial-plan-surface" aria-labelledby="editorial-plan-title">
+      <div className="editorial-plan-head">
+        <div><p className="eyebrow">DECISIONI EDITORIALI</p><h2 id="editorial-plan-title">I prossimi argomenti</h2><p>Questi sono temi effettivamente salvati nel piano della tua attività; non sono pubblicazioni confermate.</p></div>
+        {generatedAt && <div className="editorial-plan-updated"><span>Piano generato</span><strong>{new Intl.DateTimeFormat("it-IT",{day:"2-digit",month:"short",year:"numeric"}).format(generatedAt)}</strong>{planStale && <small>Da aggiornare</small>}</div>}
       </div>
-    </section>
-
-    <section className="panel approval-mode-panel editorial-research-panel">
-      <div className="panel-heading"><div><h2>Tipo di contenuti</h2><p>Il filtro vale solo per {selectedProfile.name}. Il sito resta la fonte dei fatti specifici del brand; la ricerca online viene usata solo quando prevista dalla modalità.</p></div><Globe2 size={20} /></div>
-      <div className="approval-mode-grid editorial-research-grid">
-        {RESEARCH_MODES.map((mode) => {
-          const selected = overview.settings.researchMode === mode.value;
-          return <button type="button" key={mode.value} className={`approval-mode-card ${selected ? "selected" : ""}`} onClick={() => void changeSettings({ researchMode: mode.value })}>
-            <strong>{mode.title}</strong><p>{mode.description}</p><span className="mode-check">{selected ? "Attivo" : "Seleziona"}</span>
-          </button>;
-        })}
-      </div>
-    </section>
-
-    <section className="autopilot-flow">
-      <article><span>1</span><div><strong>Capisce l'attività</strong><p>Analizza le pagine del sito per servizi, identità, tono e segnali visivi del brand.</p></div></article>
-      <article><span>2</span><div><strong>Sceglie cosa creare</strong><p>Usa settore, filtro editoriale e, quando attiva, ricerca online verificata per trovare temi pertinenti senza ripetizioni.</p></div></article>
-      <article><span>3</span><div><strong>Crea testo e immagine</strong><p>I modelli AI preparano copy e visual coerenti con il brand.</p></div></article>
-      <article><span>4</span><div><strong>Organizza il calendario</strong><p>Rispetta le frequenze dell'attività e prepara i contenuti nei giorni previsti.</p></div></article>
-    </section>
-
-    <section className="panel">
-      <div className="panel-heading"><div>
-        <h2>Piano editoriale scelto dall'AI</h2>
-        <p>Argomenti selezionati in autonomia per questa attività. Non devi inserirli tu. Le date di pubblicazione effettive sono nel Calendario.</p>
-      </div><Sparkles size={20}/></div>
-      {overview.editorialPlan ? <>
-        <p className="field-help">Piano generato: {overview.editorialPlan.generatedAt ? new Intl.DateTimeFormat("it-IT", {day:"2-digit",month:"long",year:"numeric"}).format(new Date(overview.editorialPlan.generatedAt)) : "data non disponibile"}.
-          {overview.editorialPlan.generatedAt && Date.now() - new Date(overview.editorialPlan.generatedAt).getTime() > 14 * 86400000 ? " Piano datato: l'Autopilot dovrà aggiornarlo prima di utilizzarlo." : ""}
-        </p>
-        <div className="autopilot-plan-preview">
-          {overview.editorialPlan.items.map((item,index) => <article className="autopilot-plan-topic" key={`${item.provider}-${item.dayOffset}-${index}`}>
-            <small>Giorno {item.dayOffset+1} · {PROVIDER_LABELS[item.provider] ?? item.provider} · {item.contentType}</small>
-            <strong>{item.topicDirection}</strong>
-            {item.objective && <p>{item.objective}</p>}
+      {visibleTopics.length ? <>
+        <div className="editorial-topic-list">
+          {visibleTopics.map((item,index) => <article key={`${item.provider}-${item.dayOffset}-${index}`} className="editorial-topic-row">
+            <span className="editorial-topic-index">{String(index+1).padStart(2,"0")}</span>
+            <div>
+              <div className="editorial-topic-meta"><span>{PROVIDER_LABELS[item.provider] ?? item.provider}</span><span>{item.contentType === "CAROUSEL" ? "Carosello" : item.contentType === "STORY" ? "Storia" : "Post"}</span><span>Giorno {item.dayOffset + 1}</span></div>
+              <h3>{item.topicDirection}</h3>
+              {item.objective && <p>{item.objective}</p>}
+            </div>
           </article>)}
         </div>
-      </> : <p>Il piano non è ancora disponibile. L'Autopilot dovrà crearlo attraverso i servizi AI configurati quando saranno disponibili le credenziali e il budget.</p>}
+        {plan && plan.items.length > 5 && <button type="button" className="editorial-more-topics" aria-expanded={showAllTopics} onClick={() => setShowAllTopics(value => !value)}>{showAllTopics ? "Mostra solo i primi cinque" : `Vedi tutti i ${plan.items.length} argomenti`} <ChevronDown size={17} /></button>}
+      </> : <div className="editorial-plan-empty"><WandSparkles size={24}/><strong>Piano non ancora disponibile</strong><p>L'automazione preparerà gli argomenti quando il servizio AI e il budget dell'attività saranno disponibili. Non vengono mostrati titoli inventati.</p></div>}
     </section>
 
-    <section className="panel">
-      <div className="panel-heading"><div><h2>Ricerca dei concorrenti</h2><p>Solo siti pubblici identificati e verificati tramite fonti di ricerca; nessuna metrica social dei concorrenti viene inventata.</p></div><Globe2 size={20}/></div>
-      {overview.competitorResearch.competitors.length ? <div className="autopilot-plan-preview">
-        {overview.competitorResearch.competitors.map(competitor => <article className="autopilot-plan-topic" key={competitor.website}>
-          <strong>{competitor.name}</strong>
-          <p>{competitor.editorialOpportunity}</p>
-          <a href={competitor.website} target="_blank" rel="noopener noreferrer">Sito pubblico verificato</a>
-        </article>)}
-      </div> : <p>Non risultano ancora concorrenti verificati per questa attività. La ricerca sarà eseguita nel prossimo aggiornamento della strategia; finché non ci sono fonti reali, non vengono mostrati risultati inventati.</p>}
+    <div className="editorial-context-grid">
+      <section className="panel editorial-context-card" aria-labelledby="editorial-frequency-title">
+        <div className="editorial-context-top"><CalendarDays size={19}/><h2 id="editorial-frequency-title">Frequenza</h2></div>
+        <p>Le uscite sono separate per attività e per social.</p>
+        {activeSchedules.length ? <div className="editorial-frequency-list">
+          {activeSchedules.map(schedule => <div key={schedule.provider}><span>{PROVIDER_LABELS[schedule.provider] ?? schedule.provider}</span><strong>{schedule.posts_per_week} / settimana</strong></div>)}
+        </div> : <p className="editorial-minor-note">Nessun canale ha una frequenza attiva.</p>}
+        <NavLink to="/app/calendario">Modifica calendario <ArrowRight size={15}/></NavLink>
+      </section>
+
+      <section className="panel editorial-context-card" aria-labelledby="editorial-research-title">
+        <div className="editorial-context-top"><Globe2 size={19}/><h2 id="editorial-research-title">Fonti e concorrenti</h2></div>
+        <p>Ricerca: <strong>{currentResearch}</strong>. Il sito della tua attività resta la fonte per servizi e promesse del brand.</p>
+        {overview.competitorResearch.competitors.length ? <ul className="editorial-competitor-list">{overview.competitorResearch.competitors.map(competitor => <li key={competitor.website}><a href={competitor.website} target="_blank" rel="noopener noreferrer">{competitor.name} <ArrowRight size={13}/></a><small>{competitor.editorialOpportunity}</small></li>)}</ul> :
+          <p className="editorial-minor-note">Nessun concorrente verificato nelle fonti disponibili. Il sistema non ne inventa.</p>}
+        <NavLink to="/app/sito">Vedi analisi sito <ArrowRight size={15}/></NavLink>
+      </section>
+    </div>
+
+    <details className="panel editorial-preferences">
+      <summary><span><Settings2 size={21}/><span><strong>Preferenze dell'automazione</strong><small>Approvazione, ricerca e regole per questa attività</small></span></span><ChevronDown size={19}/></summary>
+      <div className="editorial-preferences-body">
+        <h3>Prima della pubblicazione</h3>
+        <p>Scegli se controllare tu i contenuti o lasciare che il sistema li approvi e programmi. La pubblicazione esterna rimane bloccata senza un social realmente collegato.</p>
+        <div className="approval-mode-grid">
+          <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} aria-pressed={!automaticApproval} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
+            <span className="approval-mode-icon"><Eye size={19}/></span><strong>Approvo io</strong><p>I contenuti arrivano nelle Revisioni prima della pubblicazione.</p><span className="mode-check">{!automaticApproval ? "Attivo" : "Seleziona"}</span>
+          </button>
+          <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} aria-pressed={automaticApproval} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
+            <span className="approval-mode-icon"><Sparkles size={19}/></span><strong>Gestisci automaticamente</strong><p>Approvazione e programmazione automatiche, solo sui canali autorizzati.</p><span className="mode-check">{automaticApproval ? "Attivo" : "Seleziona"}</span>
+          </button>
+        </div>
+        <h3>Strategia dei contenuti</h3>
+        <div className="approval-mode-grid editorial-research-grid">
+          {RESEARCH_MODES.map(mode => <button type="button" key={mode.value} className={`approval-mode-card ${overview.settings.researchMode === mode.value ? "selected" : ""}`} aria-pressed={overview.settings.researchMode === mode.value} onClick={() => void changeSettings({ researchMode: mode.value })}>
+            <strong>{mode.title}</strong><p>{mode.description}</p><span className="mode-check">{overview.settings.researchMode === mode.value ? "Attivo" : "Seleziona"}</span>
+          </button>)}
+        </div>
+        {(overview.settings.websitePilotEnabled || /web design|creazione siti|sviluppo siti|agenzia web/i.test(selectedProfile.industry ?? "")) && <div className="editorial-experimental">
+          <h3>Pilota Instagram · siti web</h3><p>Solo per attività che vendono siti: massimo due post Instagram a settimana con revisione manuale.</p>
+          <button type="button" className="secondary-button" aria-pressed={overview.settings.websitePilotEnabled} onClick={() => void changeSettings({
+            websitePilotEnabled: !overview.settings.websitePilotEnabled, approvalMode: "MANUAL_REVIEW",
+            enabled: overview.settings.websitePilotEnabled ? overview.settings.enabled : true,
+          })}>{overview.settings.websitePilotEnabled ? "Disattiva pilota" : "Attiva pilota Instagram"}</button>
+        </div>}
+      </div>
+    </details>
+
+    <section className="panel editorial-manual">
+      <div><h2>Un contenuto fuori piano?</h2><p>La creazione manuale è facoltativa: usala solo per una richiesta speciale.</p></div>
+      <button type="button" className="secondary-button" aria-expanded={showManualComposer} onClick={() => setShowManualComposer(value => !value)}>{showManualComposer ? "Chiudi strumento" : "Apri creazione manuale"} <ChevronDown size={16}/></button>
+      {showManualComposer && <div className="editorial-manual-composer"><ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} profileType={selectedProfile.profile_type} profiles={profiles} researchMode={overview.settings.researchMode} /></div>}
     </section>
 
-    <section className="panel autopilot-plan-panel">
-      <div className="panel-heading"><div><h2>Piano attuale</h2><p>Le frequenze si modificano dal calendario; qui vedi cosa sta usando l'autopilot.</p></div><CalendarDays size={20} /></div>
-      {overview.schedules.length ? <div className="autopilot-schedule-list">{overview.schedules.filter((schedule) => schedule.enabled).map((schedule) => <div key={schedule.provider}><span>{PROVIDER_LABELS[schedule.provider] ?? schedule.provider}</span><strong>{schedule.posts_per_week} {schedule.posts_per_week === 1 ? "contenuto" : "contenuti"} / settimana</strong></div>)}</div> : <p className="autopilot-preparing">Il piano iniziale viene preparato automaticamente.</p>}
-      <div className="autopilot-counters"><div><span>In revisione</span><strong>{overview.inReview}</strong></div><div><span>Nel calendario</span><strong>{overview.upcoming}</strong></div></div>
-      <div className="autopilot-links"><NavLink to="/app/calendario">Apri calendario</NavLink>{!automaticApproval && <NavLink to="/app/approvazioni">Apri Revisioni</NavLink>}</div>
-    </section>
-    <section className="panel">
-      <div className="panel-heading"><div><h2>Creazione manuale (facoltativa)</h2><p>Non necessaria per usare Post Automatici. Puoi intervenire soltanto se vuoi un contenuto straordinario fuori dal piano automatico.</p></div></div>
-      <button type="button" className="secondary-button" aria-expanded={showManualComposer} onClick={() => setShowManualComposer(value => !value)}>{showManualComposer ? "Chiudi creazione manuale" : "Apri creazione manuale"}</button>
-      {showManualComposer && <ManualContentComposer profileId={selectedProfile.id} profileName={selectedProfile.name} profileType={selectedProfile.profile_type} profiles={profiles} researchMode={overview.settings.researchMode} />}
-    </section>
+    <section className="editorial-workflow-footer" aria-label="Prossime sezioni"><p className="eyebrow">NEL TUO FLUSSO DI LAVORO</p><CustomerWorkflowJourney current="CREATE" /></section>
   </div>;
 }
