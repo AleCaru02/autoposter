@@ -19,6 +19,7 @@ jobs:
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Same-origin Auth proxy regression, run: "npm run test:auth-proxy" }
+      - { name: Autonomous editorial website and verified competitor grounding, run: "npx tsx tests/autonomous-editorial-engine.test.ts" }
       - { name: Vercel Google Auth canonical and preview origins, run: "npx tsx tests/vercel-auth-route.test.ts" }
       - { name: Vercel Google OAuth preview callback isolation, run: "npx tsx tests/vercel-oauth-preview.test.ts" }
       - { name: Same-origin Auth boundary static regression, run: "npm run test:auth-boundary-static" }
