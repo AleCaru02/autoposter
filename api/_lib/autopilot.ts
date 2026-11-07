@@ -436,9 +436,102 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   }
   if(imageAssetId)await sql`update public.content_variants set image_asset_id=${imageAssetId}::uuid,approval_status='PENDING',updated_at=now() where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
   if(imageEventId&&imageAssetId){await imageMeter.storeResult(imageEventId,{response:{assetId:imageAssetId,duplicate:true},assetId:imageAssetId,variantId});await imageMeter.commit(imageEventId);imageCommitted=true;}
+
+  // Carousel visuals are generated per slide; a single hero image cannot make
+  // a real Instagram carousel. Each slide has independent metering and QA.
+  let carouselVisualReady=false;
+  if(format==="CAROUSEL"&&variant.eligible&&allowImageGeneration){
+    const usedAssets=new Set<string>();
+    const carouselBudget=new ActivityBudgetEngine(env.DATABASE_URL!);
+    const slidePlans=variant.carouselSlides??[];
+    for(let index=0;index<slidePlans.length;index++){
+      const slide=slidePlans[index];
+      const slideId=carouselSlideIds[index];
+      if(!slide||!slideId)continue;
+      let slideUsageId:string|null=null;
+      let slideCommitted=false;
+      let createdAssetId:string|null=null;
+      try{
+        const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
+          from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+        const reuse=await findReusableAsset({visualBrief:slide.visualBrief,aspectRatio:"1:1",candidates:candidates.filter(item=>!usedAssets.has(item.id))});
+        if(reuse){
+          usedAssets.add(reuse.asset.id);
+          await sql`update public.content_carousel_slides set asset_id=${reuse.asset.id}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+            where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+          continue;
+        }
+        const reserved=await imageMeter.reserve({
+          profileId:profile.id,source:"AUTOPILOT",
+          operationIdentity:`autopilot-carousel:${profile.id}:${variantId}:${slide.position}`,
+          referenceId:slideId,
+          requestFingerprint:{provider,format,variantId,slideId,visualBrief:slide.visualBrief,headline:slide.headline,body:slide.body},
+        });
+        if(reserved.status==="COMPLETED"){
+          const previous=reserved.cached.assetId;
+          if(typeof previous==="string"&&previous){
+            usedAssets.add(previous);
+            await sql`update public.content_carousel_slides set asset_id=${previous}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+              where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+          }
+          continue;
+        }
+        if(reserved.status!=="RESERVED")throw new Error("AUTOPILOT_CAROUSEL_IMAGE_RESERVATION_BLOCKED");
+        slideUsageId=reserved.eventId;
+        const budget=await carouselBudget.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
+        if(!budget.allowed)throw new Error(budget.reason??"AUTOPILOT_CAROUSEL_IMAGE_BUDGET_STOP");
+        const typography={brand:profile.name,headline:slide.headline,subheadline:slide.body||null,logoDataUrl,style:brandTextStyle(brandVisual.activeSocialPalette)};
+        const [width,height]=imageSizeForFormat("CAROUSEL","INSTAGRAM").split("x").map(Number);
+        await preflightDeterministicTypography({width,height,...typography});
+        await imageMeter.markProviderStarted(slideUsageId);
+        const image=await generateRoutedImage({
+          env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget,importance:"STANDARD",
+          profileName:profile.name,profileType:profile.profile_type,
+          industry:profile.industry,tone:context.tone,
+          brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],
+          brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,
+          provider:"INSTAGRAM",format:"CAROUSEL",visualBrief:slide.visualBrief,
+          caption:[slide.headline,slide.body].filter(Boolean).join(" — "),typography,
+        });
+        await imageMeter.persistTechnicalEvents(profile.id,slideUsageId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,slide_position:slide.position,variant_id:variantId}));
+        const size=/^([0-9]+)x([0-9]+)$/.exec(String(image.size));
+        const assetId=crypto.randomUUID();
+        createdAssetId=assetId;
+        const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        const hash=await assetContentHashFromBase64(image.base64);
+        await sql`insert into public.assets
+          (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at)
+          values (${assetId}::uuid,${profile.id}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
+          ${`INSTAGRAM-CAROUSEL-${slideId}.png`},${dataUrl},${image.mimeType},
+          ${JSON.stringify(["INSTAGRAM","CAROUSEL","AI_GENERATED","AUTOPILOT"])}::jsonb,
+          ${JSON.stringify({visual_brief:slide.visualBrief,slide_position:slide.position,brand_palette:brandVisual.activeSocialPalette,brand_fonts:brandVisual.fonts,text_compositor:image.textCompositor,aspect_ratio:image.aspectRatio,model:image.model})}::jsonb,
+          'OPENAI',${image.model},${Number(image.usage.estimatedCostUsd??0.25)*budget.usdToEurRate},
+          ${size?Number(size[1]):null},${size?Number(size[2]):null},${image.aspectRatio},'PENDING','NOT_REQUIRED',${hash},now())`;
+        await sql`update public.content_carousel_slides set asset_id=${assetId}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+          where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+        await imageMeter.storeResult(slideUsageId,{response:{assetId,duplicate:true},assetId,variantId});
+        await imageMeter.commit(slideUsageId);
+        slideCommitted=true;
+        usedAssets.add(assetId);
+      }catch(reason){
+        const code=reason instanceof Error?reason.message:"AUTOPILOT_CAROUSEL_IMAGE_FAILED";
+        if(slideUsageId&&!slideCommitted)await imageMeter.release(slideUsageId,code).catch(()=>undefined);
+        if(createdAssetId&&!slideCommitted)await sql`delete from public.assets where id=${createdAssetId}::uuid and profile_id=${profile.id}::uuid`.catch(()=>undefined);
+        await sql`update public.content_carousel_slides set visual_generation_status='FAIL',visual_generation_error=${code.slice(0,200)},updated_at=now()
+          where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`.catch(()=>undefined);
+        console.error("autopilot-carousel-image",{profileId:profile.id,variantId,position:slide.position,code});
+        if(code.includes("BUDGET"))break;
+      }
+    }
+    const readyRows=await sql`select count(*)::int as total,count(*) filter(where asset_id is not null)::int as ready
+      from public.content_carousel_slides where profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid` as unknown as Array<{total:number;ready:number}>;
+    carouselVisualReady=Number(readyRows[0]?.total)===slidePlans.length&&Number(readyRows[0]?.ready)===slidePlans.length;
+  }
   let canAutoApprove=false;
   if(approvalMode==="AUTOMATIC"&&variant.eligible){
-    if(!imageAssetId)throw new Error("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL");
+    const visualReady=format==="CAROUSEL"?carouselVisualReady:Boolean(imageAssetId);
+    if(!visualReady)console.log("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL",{profileId:profile.id,variantId,format});
+    if(visualReady){
     const finalQa=await runContentQa({
       databaseUrl:env.DATABASE_URL!,
       apiKey:env.OPENAI_API_KEY,
@@ -450,7 +543,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     if(finalQa.overallStatus==="PASS"){
       const approvedRows=await sql`select public.auto_approve_content_variant(${profile.id}::uuid,${variantId}::uuid,'SYSTEM_AUTOPILOT') as approved` as unknown as Array<{approved:boolean}>;
       canAutoApprove=approvedRows[0]?.approved===true;
-    }
+      }
+  }
   }
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
   if(variant.eligible){await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
