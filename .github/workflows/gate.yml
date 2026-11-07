@@ -22,6 +22,7 @@ jobs:
       - { name: Autonomous editorial website and verified competitor grounding, run: "npx tsx tests/autonomous-editorial-engine.test.ts" }
       - { name: Vercel Google Auth canonical and preview origins, run: "npx tsx tests/vercel-auth-route.test.ts" }
       - { name: Vercel Google OAuth preview callback isolation, run: "npx tsx tests/vercel-oauth-preview.test.ts" }
+      - { name: Preview canonical autopilot authorized fallback and errors, run: "npx tsx tests/vercel-autopilot-preview-delegate.test.ts" }
       - { name: Same-origin Auth boundary static regression, run: "npm run test:auth-boundary-static" }
       - { name: Recovery Neon endpoint regression, run: "npm run test:recovery-neon-endpoints" }
       - { name: User-facing error boundary regression, run: "npm run test:user-error-boundary" }
