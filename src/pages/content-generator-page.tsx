@@ -232,7 +232,7 @@ export function ContentGeneratorPage() {
             {item.objective && <p>{item.objective}</p>}
           </article>)}
         </div>
-      </> : <p>Il piano non è ancora disponibile. L'Autopilot dovrà crearlo tramite OpenAI quando saranno disponibili configurazione API e budget.</p>}
+      </> : <p>Il piano non è ancora disponibile. L'Autopilot dovrà crearlo attraverso i servizi AI configurati quando saranno disponibili le credenziali e il budget.</p>}
     </section>
 
     <section className="panel">
