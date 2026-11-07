@@ -372,7 +372,7 @@ export function providerCapabilities(provider: SocialProvider) {
 }
 
 export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
-  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
+  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile sul server della versione corrente." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
   if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
