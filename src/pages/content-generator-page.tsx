@@ -14,6 +14,7 @@ type AutopilotRunResponse = {
   generated?: number;
   blockedForReview?: number;
   skipped?: number;
+  deferred?: number;
   errors?: string[];
   error?: string;
 };
@@ -33,6 +34,11 @@ function autopilotFailureMessage(code: string): string {
       return "Sessione scaduta: accedi di nuovo per avviare l'Autopilot.";
     case "PROFILE_NOT_FOUND":
       return "Non hai accesso all'attività selezionata. Controlla il profilo.";
+    case "OPENAI_EDITORIAL_QUALITY_BLOCKED":
+    case "OPENAI_FACTCHECK_BLOCK":
+      return "La bozza non ha superato i controlli editoriali. Non sarà pubblicata; il sistema deve trovare un contenuto verificabile.";
+    case "AUTOPILOT_ACTIVITY_BUDGET_STOP":
+      return "La generazione è stata fermata dal limite di spesa dell'attività. Nessun ulteriore costo è autorizzato.";
     case "AUTOPILOT_AI_LIMIT_REACHED":
       return "Il limite AI dell'attività è stato raggiunto. Nessuna nuova generazione viene avviata.";
     case "PROFILE_DATA_API_UNAVAILABLE":
@@ -43,12 +49,21 @@ function autopilotFailureMessage(code: string): string {
 }
 
 function autopilotResultMessage(value: AutopilotRunResponse): string | null {
-  if (typeof value.generated === "number" && value.generated > 0) return null;
   const firstError = value.errors?.find(e => typeof e === "string" && e.trim());
-  if (!firstError) return null;
-  const code = firstError.split(":").find(part => part.startsWith("AUTOPILOT_AI_LIMIT_REACHED") || part.startsWith("OPENAI_")) ??
-    firstError.split(":").at(-1) ?? "AUTOPILOT_RUN_FAILED";
-  return autopilotFailureMessage(code);
+  if (firstError) {
+    const code = firstError.split(":").find(part => part.startsWith("AUTOPILOT_AI_LIMIT_REACHED") || part.startsWith("OPENAI_")) ??
+      firstError.split(":").at(-1) ?? "AUTOPILOT_RUN_FAILED";
+    const description = autopilotFailureMessage(code);
+    return (value.generated ?? 0) > 0
+      ? `${value.generated} contenuti preparati, ma non tutti i tentativi sono riusciti. ${description}`
+      : description;
+  }
+  if ((value.deferred ?? 0) > 0 && (value.generated ?? 0) === 0) {
+    return "Nessun nuovo contenuto creato in questo ciclo: alcuni tentativi per queste fasce sono già stati scartati dai controlli di qualità. Il sistema evita di ripetere le stesse chiamate a pagamento e valuta altre date disponibili.";
+  }
+  if ((value.generated ?? 0) > 0) return null;
+  if ((value.skipped ?? 0) > 0) return "Nessun nuovo contenuto necessario o idoneo in questo ciclo. Il piano salvato rimane disponibile.";
+  return "Nessun nuovo contenuto creato in questo ciclo. Controlla le frequenze e i contenuti già programmati.";
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
