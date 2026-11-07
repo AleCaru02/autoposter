@@ -75,6 +75,8 @@ export function ContentGeneratorPage() {
   const [error, setError] = useState<string | null>(null);
   const [showManualComposer, setShowManualComposer] = useState(false);
   const [showAllTopics, setShowAllTopics] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const settingsSavingRef = useRef(false);
   const [autopilotRunning, setAutopilotRunning] = useState(false);
   const [autopilotNotice, setAutopilotNotice] = useState<string | null>(null);
   const triggeredProfile = useRef<string | null>(null);
@@ -183,20 +185,25 @@ export function ContentGeneratorPage() {
   }, [overview?.settings.enabled, selectedProfile?.onboarding_completed, triggerAutopilot]);
 
   async function changeSettings(patch: Partial<AutopilotSettings>) {
-    if (!selectedProfile?.id || !overview) return;
+    if (!selectedProfile?.id || !overview || settingsSavingRef.current) return;
+    settingsSavingRef.current = true;
+    setSettingsSaving(true);
     const previous = overview.settings;
     const next = { ...previous, ...patch };
     setOverview({ ...overview, settings: next });
     setError(null);
     try {
       await saveAutopilotSettings(selectedProfile.id, next);
-      if (next.enabled) {
+      if (next.enabled && !previous.enabled) {
         triggeredProfile.current = null;
         void triggerAutopilot();
       }
     } catch (reason) {
       setOverview({ ...overview, settings: previous });
       setError(reason instanceof Error ? reason.message : "Impostazione non salvata.");
+    } finally {
+      settingsSavingRef.current = false;
+      setSettingsSaving(false);
     }
   }
 
@@ -226,6 +233,7 @@ export function ContentGeneratorPage() {
 
     {error && <div className="editorial-alert" role="alert"><ShieldCheck size={18}/><p>{error}</p></div>}
     {autopilotNotice && <div className="editorial-alert subtle" role="status"><Globe2 size={18}/><p>{autopilotNotice}</p></div>}
+    {settingsSaving && <p className="editorial-saving-status" role="status">Salvataggio preferenze…</p>}
 
     <section className={`autopilot-master editorial-control ${overview.settings.enabled ? "active" : "paused"}`} aria-label="Stato automazione">
       <div className="autopilot-master-icon">{autopilotRunning ? <LoaderCircle className="spin" size={23} /> : overview.settings.enabled ? <WandSparkles size={23} /> : <Pause size={23}/>}</div>
@@ -234,7 +242,7 @@ export function ContentGeneratorPage() {
         <h2>{autopilotRunning ? "Preparazione in corso" : overview.settings.enabled ? "Automazione attiva" : "Automazione in pausa"}</h2>
         <p>{autopilotRunning ? "Il motore sta controllando il piano e preparando eventuali nuovi contenuti." : overview.settings.enabled ? "Il sistema è abilitato a preparare contenuti secondo le frequenze impostate. Le pubblicazioni richiedono comunque autorizzazioni social valide." : "I nuovi contenuti automatici non vengono creati finché non riattivi l'automazione."}</p>
       </div>
-      <button type="button" className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} disabled={autopilotRunning} aria-pressed={overview.settings.enabled} onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>
+      <button type="button" className={`autopilot-toggle ${overview.settings.enabled ? "pause" : "play"}`} disabled={autopilotRunning || settingsSaving} aria-pressed={overview.settings.enabled} onClick={() => void changeSettings({ enabled: !overview.settings.enabled })}>
         {overview.settings.enabled ? <><Pause size={16} /> Metti in pausa</> : <><Play size={16} /> Riattiva</>}
       </button>
     </section>
@@ -291,22 +299,22 @@ export function ContentGeneratorPage() {
         <h3>Prima della pubblicazione</h3>
         <p>Scegli se controllare tu i contenuti o lasciare che il sistema li approvi e programmi. La pubblicazione esterna rimane bloccata senza un social realmente collegato.</p>
         <div className="approval-mode-grid">
-          <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} aria-pressed={!automaticApproval} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
+          <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} aria-pressed={!automaticApproval} disabled={settingsSaving} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
             <span className="approval-mode-icon"><Eye size={19}/></span><strong>Approvo io</strong><p>I contenuti arrivano nelle Revisioni prima della pubblicazione.</p><span className="mode-check">{!automaticApproval ? "Attivo" : "Seleziona"}</span>
           </button>
-          <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} aria-pressed={automaticApproval} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
+          <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} aria-pressed={automaticApproval} disabled={settingsSaving} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
             <span className="approval-mode-icon"><Sparkles size={19}/></span><strong>Gestisci automaticamente</strong><p>Approvazione e programmazione automatiche, solo sui canali autorizzati.</p><span className="mode-check">{automaticApproval ? "Attivo" : "Seleziona"}</span>
           </button>
         </div>
         <h3>Strategia dei contenuti</h3>
         <div className="approval-mode-grid editorial-research-grid">
-          {RESEARCH_MODES.map(mode => <button type="button" key={mode.value} className={`approval-mode-card ${overview.settings.researchMode === mode.value ? "selected" : ""}`} aria-pressed={overview.settings.researchMode === mode.value} onClick={() => void changeSettings({ researchMode: mode.value })}>
+          {RESEARCH_MODES.map(mode => <button type="button" key={mode.value} className={`approval-mode-card ${overview.settings.researchMode === mode.value ? "selected" : ""}`} aria-pressed={overview.settings.researchMode === mode.value} disabled={settingsSaving} onClick={() => void changeSettings({ researchMode: mode.value })}>
             <strong>{mode.title}</strong><p>{mode.description}</p><span className="mode-check">{overview.settings.researchMode === mode.value ? "Attivo" : "Seleziona"}</span>
           </button>)}
         </div>
         {(overview.settings.websitePilotEnabled || /web design|creazione siti|sviluppo siti|agenzia web/i.test(selectedProfile.industry ?? "")) && <div className="editorial-experimental">
           <h3>Pilota Instagram · siti web</h3><p>Solo per attività che vendono siti: massimo due post Instagram a settimana con revisione manuale.</p>
-          <button type="button" className="secondary-button" aria-pressed={overview.settings.websitePilotEnabled} onClick={() => void changeSettings({
+          <button type="button" className="secondary-button" aria-pressed={overview.settings.websitePilotEnabled} disabled={settingsSaving} onClick={() => void changeSettings({
             websitePilotEnabled: !overview.settings.websitePilotEnabled, approvalMode: "MANUAL_REVIEW",
             enabled: overview.settings.websitePilotEnabled ? overview.settings.enabled : true,
           })}>{overview.settings.websitePilotEnabled ? "Disattiva pilota" : "Attiva pilota Instagram"}</button>
