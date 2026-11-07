@@ -6,6 +6,7 @@ import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
 import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
+import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./_lib/brand-visual-assets.js";
 
 export const config = { maxDuration: 60 };
 
@@ -125,6 +126,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
     const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
     const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity, profile.industry);
+    const logoAssetId = confirmedBrandLogoId(brands[0]?.visual_identity);
+    const logoAssets = logoAssetId ? await readRows<{storage_url:string;mime_type:string|null}>(`assets?id=eq.${encodeURIComponent(logoAssetId)}&profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=storage_url,mime_type&limit=1`, token) : [];
+    const logoDataUrl = verifiedBrandLogoDataUrl(logoAssets[0]);
 
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -176,7 +180,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
     }
 
-    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null } : null;
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null, logoDataUrl, style: brandTextStyle(brandVisual.activeSocialPalette) } : null;
     if (typography) {
       const [width, height] = imageSizeForFormat(requestedFormat, requestedProvider).split("x").map(Number);
       await preflightDeterministicTypography({ width, height, ...typography });

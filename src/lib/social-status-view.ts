@@ -3,6 +3,7 @@ export type SocialProviderSnapshot = {
   configured: boolean;
   status: string;
   expiresAt?: string | null;
+  readiness?: { state: "PASS_REAL" | "USER_ACTION_REQUIRED" | "BLOCKED_PROVIDER" | "NOT_SUPPORTED_BY_PROVIDER" | "FAIL"; detail: string };
 };
 
 export type SocialProviderUiState =
@@ -21,7 +22,9 @@ const ERROR = new Set(["ERROR", "FAILED", "PROVIDER_ERROR"]);
 export function socialProviderUiState(provider: SocialProviderSnapshot, now = Date.now()): SocialProviderUiState {
   const status = (provider.status || "").trim().toUpperCase();
 
-  if (!provider.configured) return "UNAVAILABLE";
+  if (!provider.configured || provider.readiness?.state === "BLOCKED_PROVIDER") return "UNAVAILABLE";
+  if (provider.readiness?.state === "FAIL") return "ERROR";
+  if (status === "ACTIVE" && provider.readiness?.state === "USER_ACTION_REQUIRED") return "RECONNECT";
   if (RECONNECT.has(status) || status.includes("RECONNECT_REQUIRED") || status.endsWith("_EXPIRED")) return "RECONNECT";
   if (ERROR.has(status) || status.endsWith("_ERROR") || status.endsWith("_FAILED")) return "ERROR";
 

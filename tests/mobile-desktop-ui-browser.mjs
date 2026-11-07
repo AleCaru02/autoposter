@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 
@@ -198,7 +199,15 @@ function rowsForTable(table, url) {
   if (table === "metric_snapshots") return [metric];
   if (table === "learning_insights") return [];
   if (table === "social_connections") return [{ id: "10000000-0000-4000-8000-000000000006", profile_id: profileId, status: "ACTIVE" }];
-  if (table === "content_strategies") return [{ platform_strategy: {} }];
+  if (table === "content_strategies") return [{ platform_strategy: {
+    autopilotEnabled: false,
+    researchMode: "BALANCED",
+    aiEditorialPlanGeneratedAt: now.toISOString(),
+    aiEditorialPlan: { items: [
+      { dayOffset: 0, provider: "INSTAGRAM", contentType: "POST", topicDirection: "Come scegliere una gestione professionale", objective: "Educare il proprietario" },
+      { dayOffset: 2, provider: "FACEBOOK", contentType: "CAROUSEL", topicDirection: "Le domande più comuni prima di affidare un immobile", objective: "Rispondere alle domande" }
+    ] },
+  } }];
   if (table === "content_carousel_slides" || table === "assets" || table === "schedules") return [];
   if (table === "profile_entitlements" || table === "capability_usage_buckets") return [];
   if (table === "brand_profiles" || table === "website_scans" || table === "website_scan_pages") return [];
@@ -244,7 +253,7 @@ async function installFixtureRoutes(page, { authenticated = true, socialFailure 
         return;
       }
       if (url.pathname.endsWith("/token")) {
-        await route.fulfill({ status: authenticated ? 200 : 401, headers: { "content-type": "application/json" }, body: JSON.stringify(authenticated ? { token: "fixture-session-token" } : { error: "AUTH_REQUIRED" }) });
+        await route.fulfill({ status: authenticated ? 200 : 401, headers: { "content-type": "application/json" }, body: JSON.stringify(authenticated ? { token: "fixture.header.signature" } : { error: "AUTH_REQUIRED" }) });
         return;
       }
       if (!["GET", "HEAD"].includes(method)) {
@@ -323,7 +332,12 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
   page.on("console", (message) => { if (message.type() === "error") critical.push("console:" + message.text()); });
 
   try {
-    await open(page, "/app/dashboard", "Cosa richiede attenzione oggi");
+    await open(page, "/app/dashboard", "I tuoi social, sotto controllo.");
+    assert.equal(await page.locator(".creator-ig-frame").count(), 0, label + " must not render a fictional Instagram preview");
+    if (process.env.UI_QA_SCREENSHOTS === "1" && [390, 1440].includes(viewport.width)) {
+      mkdirSync("qa-artifacts", {recursive:true});
+      await page.screenshot({path:`qa-artifacts/dashboard-${viewport.width}.png`, fullPage:true, animations:"disabled"});
+    }
     await assertNoDocumentOverflow(page, label + " dashboard");
 
     const desktop = viewport.width > 760;
@@ -347,6 +361,24 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
       }
       await page.getByRole("button", { name: "Chiudi menu" }).click();
       await dialog.waitFor({ state: "hidden" });
+    }
+
+    await open(page, "/app/contenuti", "Il tuo piano editoriale");
+    await page.getByRole("heading", { name:"I prossimi argomenti", exact:true }).waitFor({state:"visible"});
+    await page.getByText("Come scegliere una gestione professionale", {exact:true}).waitFor({state:"visible"});
+    assert.equal(await page.locator(".editorial-manual-composer").count(), 0, label + " manual composer must not be rendered by default");
+    assert.equal(await page.locator(".editorial-preferences").evaluate(node=>node.hasAttribute("open")), false, label + " advanced settings should initially be collapsed");
+    const planBox=await page.locator(".editorial-plan-surface").boundingBox();
+    const settingsBox=await page.locator(".editorial-preferences").boundingBox();
+    assert.ok(planBox && settingsBox && planBox.y < settingsBox.y, label + " real AI plan must appear before settings");
+    await page.locator(".editorial-preferences summary").click();
+    await page.getByRole("button", { name:/Approvo io/ }).waitFor({state:"visible"});
+    await assertNoDocumentOverflow(page,label + " editorial");
+    if (process.env.UI_QA_SCREENSHOTS === "1" && [390, 1440].includes(viewport.width)) {
+      mkdirSync("qa-artifacts", {recursive:true});
+      await page.locator(".editorial-preferences summary").click();
+      await page.evaluate(() => { window.scrollTo(0, 0); if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
+      await page.screenshot({path:`qa-artifacts/contenuti-${viewport.width}.png`,fullPage:true,animations:"disabled"});
     }
 
     await open(page, "/app/approvazioni", "Revisione contenuti");

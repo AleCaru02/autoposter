@@ -20,7 +20,7 @@ export type RoutedImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  typography?: { brand: string; headline: string; subheadline?: string | null } | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number } } | null;
   reusableAssetAvailable?: boolean;
   difficultPhotoEditing?: boolean;
   fetcher?: typeof fetch;
