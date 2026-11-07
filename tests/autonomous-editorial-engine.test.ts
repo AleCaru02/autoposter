@@ -35,6 +35,8 @@ assert.ok(store.indexOf("I prossimi argomenti") < store.indexOf("Preferenze dell
 assert.ok(store.includes("showManualComposer && <div className=\"editorial-manual-composer\""),"Manual composer must be opt-in");
 assert.ok(store.includes("I prossimi argomenti"),"The autonomous editorial plan must be immediately visible");
 assert.ok(store.includes("Fonti e concorrenti"),"Competitor research status must be visible without invented claims");
+assert.ok(store.includes("currentProfileIdRef.current !== profileId"),"Ignore stale AI responses after switching activities");
+assert.ok(store.includes("overviewLoadedFor !== selectedProfile.id"),"Display only the selected activity's plan");
 const storeApi=readFileSync(new URL("../src/features/content/autopilot-store.ts",import.meta.url),"utf8");
 assert.ok(storeApi.includes("aiEditorialPlan"),"Topics must come from actual saved AI plan");
 assert.ok(storeApi.includes("VERIFIED_PUBLIC_SOURCES"),"Only verified competitor results may be displayed");
