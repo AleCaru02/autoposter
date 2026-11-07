@@ -377,6 +377,7 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
     if (process.env.UI_QA_SCREENSHOTS === "1" && [390, 1440].includes(viewport.width)) {
       mkdirSync("qa-artifacts", {recursive:true});
       await page.locator(".editorial-preferences summary").click();
+      await page.evaluate(() => { window.scrollTo(0, 0); if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
       await page.screenshot({path:`qa-artifacts/contenuti-${viewport.width}.png`,fullPage:true,animations:"disabled"});
     }
 
