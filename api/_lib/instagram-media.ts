@@ -20,7 +20,9 @@ export function validateInstagramPublishImage(asset: InstagramPublishImage, form
   if (asset.qa_status !== "PASS") return "INSTAGRAM_ASSET_QA_NOT_APPROVED";
   if (asset.asset_quality_status !== "PASS") return "INSTAGRAM_ASSET_QUALITY_NOT_APPROVED";
   if (asset.asset_identity_status !== "PASS" && asset.asset_identity_status !== "NOT_REQUIRED") return "INSTAGRAM_ASSET_IDENTITY_NOT_APPROVED";
-  if ((asset.mime_type ?? "").split(";")[0].trim().toLowerCase() !== "image/jpeg") return "INSTAGRAM_ASSET_JPEG_REQUIRED";
+  // PNG from AutoPoster is transcoded to JPEG at the signed media delivery URL.
+  const mediaMime = (asset.mime_type ?? "").split(";")[0].trim().toLowerCase();
+  if (mediaMime !== "image/jpeg" && mediaMime !== "image/png") return "INSTAGRAM_ASSET_IMAGE_FORMAT_UNSUPPORTED";
   const w = Number(asset.width);
   const h = Number(asset.height);
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return "INSTAGRAM_ASSET_DIMENSIONS_REQUIRED";
