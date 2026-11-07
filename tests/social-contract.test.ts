@@ -53,6 +53,11 @@ async function run() {
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: false, status: "NOT_CONNECTED" }).state, "BLOCKED_PROVIDER");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "NOT_CONNECTED" }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "PASS_REAL");
+  const referenceNow = Date.UTC(2026, 10, 7);
+  assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "expired Google tokens must never be PASS_REAL");
+  assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-09-27T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "stale connections must not be treated as freshly validated");
+  assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "PASS_REAL", "recently validated providers remain ready");
+
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: [] }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "PROVIDER_ERROR" }).state, "FAIL");
   assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "NOT_CONNECTED", lastError: "GBP_API_NOT_ENABLED" }).state, "FAIL", "a stored OAuth failure must remain visible after redirect");
@@ -137,6 +142,9 @@ async function run() {
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "NOT_CONNECTED" }), "DISCONNECTED", "no connection record must render as disconnected");
   assert.equal(socialProviderUiLabel("DISCONNECTED"), "Non collegato");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ACTIVE" }), "ACTIVE");
+  assert.equal(socialProviderUiState({ provider: "GBP", configured: true, status: "ACTIVE", readiness: { state: "USER_ACTION_REQUIRED", detail: "Token scaduto" } }), "RECONNECT", "a stale or expired provider must not count as a working connection");
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ACTIVE", readiness: { state: "BLOCKED_PROVIDER", detail: "Manca OAuth" } }), "UNAVAILABLE", "missing credentials must never look active");
+
   assert.equal(socialProviderUiLabel("ACTIVE"), "Collegato");
   assert.equal(socialProviderUiState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", expiresAt: "2026-01-01T00:00:00.000Z" }, Date.UTC(2026, 8, 23)), "RECONNECT", "expired LinkedIn authorization must request reconnect");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "RECONNECT_REQUIRED" }), "RECONNECT");
