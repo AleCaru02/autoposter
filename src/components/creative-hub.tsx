@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, CircleCheck, Image as ImageIcon, Instagram, LayoutGrid, ShieldCheck, Sparkles, WandSparkles, Zap } from "lucide-react";
+import { ArrowRight, BarChart3, CalendarDays, CircleAlert, Clock3, FileCheck2, Settings2, ShieldCheck, WandSparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 type CreativeHubProps = {
@@ -9,48 +9,52 @@ type CreativeHubProps = {
   connectedCount: number;
 };
 
-/** Operational quick-start: never pretends that a provider is connected or a Reel is already generated. */
+/**
+ * A profile-scoped operational overview, not a marketing demo.
+ * Figures arrive from the existing dashboard's real read paths.
+ * No fake Instagram preview, competitor claims or simulated analytics.
+ */
 export function CreativeHub({ profileName, publishedCount, reviewCount, scheduledCount, connectedCount }: CreativeHubProps) {
-  return <div className="creator-hub-v2">
-    <section className="creator-main-hero" aria-label="Studio creativo">
-      <div className="creator-hero-orb" aria-hidden="true" />
-      <div className="creator-hero-content">
-        <p className="creator-overline"><Sparkles size={15} /> CONTENT STUDIO · {profileName}</p>
-        <h1>Il tuo prossimo contenuto <span>inizia qui.</span></h1>
-        <p className="creator-hero-summary">Un solo posto per creare post professionali, preparare caroselli, programmare e leggere i risultati. Nessun follower o dato inventato.</p>
-        <div className="creator-hero-actions">
-          <NavLink className="creator-action-primary" to="/app/contenuti"><WandSparkles size={18} /> Crea con AI <ArrowRight size={18} /></NavLink>
-          <NavLink className="creator-action-secondary" to="/app/calendario"><CalendarDays size={17} /> Calendario editoriale</NavLink>
+  const next = reviewCount > 0
+    ? { label: "Revisioni da completare", description: `${reviewCount} contenut${reviewCount === 1 ? "o" : "i"} attend${reviewCount === 1 ? "e" : "ono"} il tuo controllo.`, to: "/app/approvazioni", action: "Apri revisioni", Icon: FileCheck2 }
+    : connectedCount === 0
+      ? { label: "Verifica i canali social", description: "Nessun canale risulta attualmente verificato per la pubblicazione. I collegamenti storici non vengono cancellati.", to: "/app/social", action: "Verifica canali", Icon: CircleAlert }
+      : scheduledCount > 0
+        ? { label: "Il calendario è pronto", description: `${scheduledCount} contenut${scheduledCount === 1 ? "o" : "i"} in programmazione: controlla le prossime uscite.`, to: "/app/calendario", action: "Apri calendario", Icon: CalendarDays }
+        : { label: "Consulta il piano editoriale", description: "Controlla i temi selezionati per questa attività e lo stato dell'automazione.", to: "/app/contenuti", action: "Vai al piano", Icon: WandSparkles };
+  const NextIcon = next.Icon;
+
+  return <div className="creator-hub-v2 studio-command">
+    <section className="studio-command-hero" aria-labelledby="studio-heading">
+      <div className="studio-command-intro">
+        <p className="studio-command-eyebrow"><span className="studio-command-dot" aria-hidden="true" /> POST AUTOMATICI <span className="studio-command-divider">/</span> <span>{profileName}</span></p>
+        <h1 id="studio-heading">I tuoi social, <em>sotto controllo.</em></h1>
+        <p className="studio-command-lede">Un unico spazio per seguire i contenuti scelti dall'AI, controllare quelli pronti e verificare le pubblicazioni. Senza dover inventare ogni post.</p>
+        <div className="studio-command-actions">
+          <NavLink className="studio-command-primary" to="/app/contenuti"><WandSparkles size={18} /> Apri piano editoriale <ArrowRight size={17} /></NavLink>
+          <NavLink className="studio-command-secondary" to="/app/calendario"><CalendarDays size={17} /> Calendario</NavLink>
         </div>
-        <div className="creator-trust"><ShieldCheck size={15} /> Revisione prima di pubblicare · Costi AI sotto controllo</div>
+        <div className="studio-command-safety"><ShieldCheck size={15} /> Pubblicazione subordinata a consenso e collegamenti social verificati</div>
       </div>
-      <div className="creator-device-art" aria-hidden="true">
-        <div className="creator-ig-frame">
-          <div className="creator-ig-top"><div className="creator-avatar">{profileName.trim().charAt(0).toUpperCase() || "A"}</div><span>{profileName}</span><span className="creator-dots">•••</span></div>
-          <div className="creator-ig-visual"><div className="creator-line-mini">ANTEPRIMA GRAFICA</div><strong>IL TUO<br /><em>BRAND</em><br />AL CENTRO.</strong><div className="creator-ig-line" /></div>
-          <div className="creator-ig-footer"><div className="creator-ig-miniicons"><span>♡</span><span>▢</span><span>↗</span></div><div className="creator-ig-caption">Esempio illustrativo · non generato e non pubblicato</div></div>
-        </div>
-      </div>
+      <aside className="studio-command-next" aria-label="Prossima azione operativa">
+        <p className="studio-command-next-kicker">DA CONTROLLARE</p>
+        <div className="studio-command-next-icon"><NextIcon size={22} /></div>
+        <h2>{next.label}</h2>
+        <p>{next.description}</p>
+        <NavLink to={next.to}>{next.action} <ArrowRight size={16} /></NavLink>
+      </aside>
     </section>
-    <section className="creator-essentials" aria-label="Stato reale del flusso">
-      <div><span>Pubblicazioni recenti</span><strong>{publishedCount}</strong></div>
-      <div><span>Da approvare</span><strong>{reviewCount}</strong></div>
-      <div><span>Prossime uscite</span><strong>{scheduledCount}</strong></div>
-      <div><span>Canali pronti</span><strong>{connectedCount}</strong></div>
-    </section>
-    <div className="creator-section-title"><div><p>CREA E DISTRIBUISCI</p><h2>Cosa vuoi fare oggi?</h2></div><span>4 azioni essenziali, senza menu complicati</span></div>
-    <section className="creator-tool-grid">
-      <NavLink to="/app/contenuti" className="creator-tool-tile"><span className="creator-tool-icon purple"><ImageIcon size={22} /></span><strong>Post con immagini AI</strong><p>Brief, copy, visual e revisione con i modelli cloud già integrati.</p><span className="creator-tool-cta">Apri generatore <ArrowRight size={15} /></span></NavLink>
-      <NavLink to="/app/contenuti" className="creator-tool-tile"><span className="creator-tool-icon orange"><LayoutGrid size={22} /></span><strong>Caroselli Instagram</strong><p>Crea le slide e prepara i visual originali, senza collage casuali.</p><span className="creator-tool-cta">Crea carosello <ArrowRight size={15} /></span></NavLink>
-      <NavLink to="/app/social" className="creator-tool-tile"><span className="creator-tool-icon pink"><Instagram size={22} /></span><strong>Collegamento Instagram</strong><p>Autorizza Meta e verifica che la pubblicazione sia davvero disponibile.</p><span className="creator-tool-cta">Verifica Instagram <ArrowRight size={15} /></span></NavLink>
-      <NavLink to="/app/analytics" className="creator-tool-tile"><span className="creator-tool-icon mint"><Zap size={22} /></span><strong>Visualizzazioni e risultati</strong><p>Analizza soltanto dati reali, per capire quali contenuti attirano clienti.</p><span className="creator-tool-cta">Apri risultati <ArrowRight size={15} /></span></NavLink>
-    </section>
-    <section className="creator-planning">
-      <div className="creator-plan-head">
-        <div><p className="creator-overline dark">COSTI AI REALI</p><h2>Budget sotto controllo</h2><p>Testi e immagini sono elaborati con OpenAI. I costi reali vengono registrati per attività quando il provider fornisce dati verificabili: non mostriamo simulazioni con modelli non utilizzati.</p></div>
-        <div className="creator-plan-total"><span>Controllo spesa</span><NavLink to="/app/impostazioni">Apri budget AI <ArrowRight size={15} /></NavLink><small>Imposta limiti per account e attività</small></div>
-      </div>
-      <p className="creator-plan-note"><CircleCheck size={15} /> I Reel AI non sono ancora attivi: la pubblicazione video richiede renderer, file persistenti, collegamenti social e controlli reali. Non vengono effettuate chiamate video o addebiti da questa schermata.</p>
-    </section>
+
+    <nav className="studio-command-metrics" aria-label="Stato reale dell'attività">
+      <NavLink to="/app/approvazioni"><FileCheck2 size={18}/><strong>{reviewCount}</strong><span>Da approvare</span></NavLink>
+      <NavLink to="/app/calendario"><Clock3 size={18}/><strong>{scheduledCount}</strong><span>In calendario</span></NavLink>
+      <NavLink to="/app/social"><ShieldCheck size={18}/><strong>{connectedCount}<small>/4</small></strong><span>Canali pronti</span></NavLink>
+      <NavLink to="/app/analytics"><BarChart3 size={18}/><strong>{publishedCount}</strong><span>Pubblicati recenti</span></NavLink>
+    </nav>
+
+    <div className="studio-command-foot">
+      <p>Le statistiche compaiono solo quando le piattaforme restituiscono dati reali. I Reel AI non sono ancora attivi.</p>
+      <NavLink to="/app/impostazioni"><Settings2 size={15}/> Apri budget AI <ArrowRight size={14}/></NavLink>
+    </div>
   </div>;
 }
