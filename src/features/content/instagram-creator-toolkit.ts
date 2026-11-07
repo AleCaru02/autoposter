@@ -115,8 +115,9 @@ export function instagramImagePreflight(input: InstagramImageInput) {
   const blockingIssues: string[] = [];
   const warnings: string[] = [];
   const mimeType = input.mimeType?.split(";")[0]?.trim().toLowerCase();
-  if (!mimeType) blockingIssues.push("Tipo file sconosciuto: verifica che sia un'immagine JPEG.");
-  else if (mimeType !== "image/jpeg") blockingIssues.push("Instagram Graph API richiede una foto JPEG: converti il file prima della pubblicazione.");
+  if (!mimeType) blockingIssues.push("Tipo file sconosciuto: controlla l'immagine.");
+  else if (mimeType !== "image/jpeg" && mimeType !== "image/png") blockingIssues.push("Formato non supportato: usa JPEG o PNG.");
+  else if (mimeType === "image/png") warnings.push("Il PNG verrà convertito automaticamente in JPEG dal server prima della pubblicazione.");
   const width = input.width ?? 0;
   const height = input.height ?? 0;
   if (!(width > 0 && height > 0)) {
