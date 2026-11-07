@@ -71,7 +71,7 @@ export function DashboardPage() {
         neonClient.from("publication_jobs").select("id,provider,state,scheduled_at,next_attempt_at,published_at,outcome_unknown,updated_at,last_error").eq("profile_id", profileId).order("scheduled_at", { ascending: false }).limit(100),
         neonClient.from("metric_snapshots").select("id,provider,external_post_id,metrics,captured_at").eq("profile_id", profileId).order("captured_at", { ascending: false }).limit(100),
         neonClient.from("learning_insights").select("id,insight,confidence,recommended_action,created_at").eq("profile_id", profileId).is("applied_at", null).order("created_at", { ascending: false }).limit(1),
-        verifiedSocialCount(profileId),
+        verifiedSocialCount(profileId!),
       ]);
       const firstError = [content.error, approvals.error, jobs.error, metrics.error, insights.error].find(Boolean);
       if (!active) return;
