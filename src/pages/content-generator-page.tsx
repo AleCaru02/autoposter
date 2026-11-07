@@ -69,6 +69,10 @@ const RESEARCH_MODES: Array<{ value: EditorialResearchMode; title: string; descr
 export function ContentGeneratorPage() {
   const { profiles, selectedProfile, reload: reloadProfiles } = useProfiles();
   const [overview, setOverview] = useState<AutopilotOverview | null>(null);
+  const [overviewLoadedFor, setOverviewLoadedFor] = useState<string | null>(null);
+  const currentProfileIdRef = useRef<string | null>(selectedProfile?.id ?? null);
+  currentProfileIdRef.current = selectedProfile?.id ?? null;
+  const loadSequenceRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [bootstrapPages, setBootstrapPages] = useState(0);
@@ -89,14 +93,20 @@ export function ContentGeneratorPage() {
   const load = useCallback(async () => {
     const profileId = selectedProfile?.id;
     if (!profileId) return;
+    const sequence = ++loadSequenceRef.current;
     setLoading(true);
     try {
-      setOverview(await loadAutopilotOverview(profileId));
+      const next = await loadAutopilotOverview(profileId);
+      if (currentProfileIdRef.current !== profileId || loadSequenceRef.current !== sequence) return;
+      setOverview(next);
+      setOverviewLoadedFor(profileId);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Impossibile caricare l'automazione contenuti.");
+      if (currentProfileIdRef.current === profileId && loadSequenceRef.current === sequence) {
+        setError(reason instanceof Error ? reason.message : "Impossibile caricare l'automazione contenuti.");
+      }
     } finally {
-      setLoading(false);
+      if (currentProfileIdRef.current === profileId && loadSequenceRef.current === sequence) setLoading(false);
     }
   }, [selectedProfile?.id]);
 
@@ -145,6 +155,10 @@ export function ContentGeneratorPage() {
 
   useEffect(() => {
     triggeredProfile.current = null;
+    setShowAllTopics(false);
+    setAutopilotNotice(null);
+    setOverview(null);
+    setOverviewLoadedFor(null);
     if (!selectedProfile) return;
     if (!selectedProfile.onboarding_completed) {
       setOverview(null);
@@ -168,15 +182,18 @@ export function ContentGeneratorPage() {
         body: JSON.stringify({ profileId }),
       });
       const body = await response.json().catch(() => null) as AutopilotRunResponse | null;
+      if (currentProfileIdRef.current !== profileId) return;
       if (!response.ok) throw new Error(autopilotFailureMessage(body?.error ?? `HTTP_${response.status}`));
       if (!body) throw new Error(autopilotFailureMessage("AUTOPILOT_CANONICAL_INVALID_RESPONSE"));
       setAutopilotNotice(autopilotResultMessage(body));
       await load();
     } catch (reason) {
-      triggeredProfile.current = null;
-      setError(reason instanceof Error ? reason.message : "Autopilot non avviato.");
+      if (currentProfileIdRef.current === profileId) {
+        triggeredProfile.current = null;
+        setError(reason instanceof Error ? reason.message : "Autopilot non avviato.");
+      }
     } finally {
-      setAutopilotRunning(false);
+      if (currentProfileIdRef.current === profileId) setAutopilotRunning(false);
     }
   }, [selectedProfile?.id, selectedProfile?.onboarding_completed, jwt, load]);
 
@@ -209,8 +226,8 @@ export function ContentGeneratorPage() {
 
   if (!selectedProfile) return null;
   if (bootstrapping) return <div className="page-content"><section className="panel onboarding-loading"><Globe2 size={24} /><LoaderCircle className="spin" size={28} /><h2>Sto preparando l'attività</h2><p>{bootstrapPages > 0 ? `${bootstrapPages} pagine del sito analizzate. ` : ""}Scansione del sito e analisi del brand stanno avvenendo automaticamente. Non devi fare nulla.</p></section></div>;
-  if ((loading || !overview) && !error) return <div className="page-content"><section className="panel">Caricamento automazione…</section></div>;
-  if (!overview) return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1></div></header>{error && <p className="form-error" role="alert">{error}</p>}</div>;
+  if ((loading || !overview || overviewLoadedFor !== selectedProfile.id) && !error) return <div className="page-content"><section className="panel">Caricamento automazione…</section></div>;
+  if (!overview || overviewLoadedFor !== selectedProfile.id) return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Contenuti · {selectedProfile.name}</p><h1>Contenuti automatici</h1></div></header>{error && <p className="form-error" role="alert">{error}</p>}</div>;
 
   const automaticApproval = overview.settings.approvalMode === "AUTOMATIC";
 
