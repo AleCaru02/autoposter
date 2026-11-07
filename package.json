@@ -14,6 +14,7 @@
     "test:fase7a-editable-brand": "node tests/fase7a-editable-brand.test.mjs",
     "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs && node --import tsx tests/auth-token-runtime.test.ts",
     "test:autopilot-carousel": "tsx tests/autopilot-carousel.test.ts",
+    "test:brand-kit-render": "tsx tests/brand-kit-render.test.ts",
     "test:brand-kit-integration": "tsx tests/brand-kit-integration.test.ts",
     "test:instagram-jpeg": "tsx tests/instagram-jpeg.test.ts",
     "test:instagram-meta-media": "tsx tests/instagram-meta-media.test.ts",
