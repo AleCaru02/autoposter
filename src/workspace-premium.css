@@ -4,6 +4,9 @@
    Progressive overrides scoped to the actual dashboard/editorial workspace. */
 
 .studio-command{gap:14px;margin-bottom:26px}
+/* The new command center already includes the priority, so do not repeat it below. */
+.dashboard-page:has(.creator-hub-v2)>.dashboard-priority{display:none}
+.editorial-saving-status{margin:0 0 12px;color:#2d7846;font-size:12px;font-weight:730}
 .studio-command-hero{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(260px,.75fr);gap:20px;padding:27px;background:#17221c;border:1px solid #203428;border-radius:23px;color:#fff;box-shadow:0 18px 40px rgba(18,38,26,.08)}
 .studio-command-intro{padding:19px 11px 17px 12px}
 .studio-command-eyebrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 26px;color:#b4d9be;font-size:11px;line-height:1.4;font-weight:780;letter-spacing:.08em;text-transform:uppercase}
