@@ -37,3 +37,25 @@ npm run build
 ```
 
 Una verifica automatica locale non sostituisce un test end-to-end su account Instagram professionale e ambiente di staging.
+
+## Aggiornamento implementazione — 7 novembre 2026
+
+Fase post e caroselli: implementata sul ramo PR #330, non rilasciata.
+
+- Brand Kit per attività: selezione logo dalla Libreria, palette, font rilevati e conferma; nuovi scans non sovrascrivono identità approvata.
+- Il compositore applica logo effettivo e colori contrastati. Con font non installato usa Inter come fallback dichiarato.
+- Conversione server-side PNG a JPEG sul link media Meta firmato, senza abbonamento terzo.
+- Pubblicazione caroselli Meta con contenitori figli, contenitore padre, processing e un solo media_publish; guardie QA/approvazione/identità/per-profili.
+- Autopilot Instagram genera ogni slide singolarmente, con costi misurati e blocco se immagini/QA/permessi non sono pronti.
+- Test GitHub Actions: instagram-creator-toolkit, instagram-meta-media, instagram-jpeg, brand-kit-integration, brand-kit-render, autopilot-carousel.
+
+Fase Reel: provider adapter, NON flusso completo.
+
+- Modulo api/_lib/reel-video-provider.ts: integrazione API Higgsfield Kling 4.0 text-to-video 9:16 con submit/poll e preflight video. Non è collegato ad Autopilot o Meta.
+- Qualsiasi generazione richiede HF_CREDENTIALS, HF_VIDEO_ENABLED=true, preventivo positivo e autorizzazione di una spesa massima. Questo progetto non configura questi valori e non ha effettuato chiamate a pagamento.
+- Da completare: storage permanente video, sequenze audio/sottotitoli e assemblaggio MP4, media QA, formato REEL in schema/editor, pianificazione e media_type=REELS, test reali.
+- La Higgsfield API è a pagamento separato dall'abbonamento web; minimo $5 di ricarica secondo documentazione ufficiale 2026.
+- Esempio documentazione provider: https://open.higgsfield.ai/models/kling-video/v4.0/text-to-video/api-reference
+- Documentazione pubblicazione Meta: https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
+
+Non fare merge o deploy finché non sono verificati CI, immagini renderizzate, account Instagram di test, permessi Meta e OAuth, sicurezza del cron e QA mobile.
