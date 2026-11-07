@@ -67,7 +67,7 @@ function readableError(value: string) {
     NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA: "Non trovo un account Instagram professionale collegato a una Pagina Facebook gestibile.",
     NESSUNA_PAGINA_FACEBOOK_GESTIBILE: "Non trovo Pagine Facebook gestibili con questo account.",
     NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO: "Non trovo una Pagina LinkedIn amministrata oppure l’app non ha ancora l’accesso Community Management.",
-    LINKEDIN_CLIENT_CREDENTIALS_INVALID: "Le credenziali OAuth di LinkedIn configurate nel Worker non corrispondono all’app LinkedIn. Devono essere aggiornate lato server.",
+    LINKEDIN_CLIENT_CREDENTIALS_INVALID: "Le credenziali OAuth di LinkedIn configurate sul server non corrispondono all’app LinkedIn. Devono essere aggiornate lato server.",
     LINKEDIN_REDIRECT_URI_MISMATCH: "Nell’app LinkedIn manca o non coincide questo Redirect URL: https://autoposter.02alessandrocaruso.workers.dev/api/social/callback/linkedin",
     LINKEDIN_AUTHORIZATION_CODE_INVALID: "Il codice di autorizzazione LinkedIn è scaduto o già usato. Premi Ricollega e completa il consenso una sola volta.",
     LINKEDIN_PROFILE_ACCESS_DENIED: "LinkedIn ha rifiutato la lettura del profilo o i permessi richiesti. Verifica i prodotti e gli scope autorizzati nella tua app LinkedIn.",
