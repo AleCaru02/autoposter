@@ -13,6 +13,7 @@ import {
   type ContentCarouselSlideRow,
   type StoredMasterDecision,
 } from "../features/content/content-store";
+import { instagramImagePreflight } from "../features/content/instagram-creator-toolkit";
 import "../approvals.css";
 import { NavLink } from "react-router-dom";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
@@ -437,6 +438,28 @@ export function ApprovalsPage() {
                   {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
                   {variant.visual_generation_status === "FAIL" && <p className="manual-warning">{visualGenerationErrorMessage(variant.visual_generation_error)}</p>}
                 </>}
+                {variant.provider === "INSTAGRAM" && <details className="decision-record">
+                  <summary>Verifica file Instagram · formato e JPEG</summary>
+                  <p className="field-help">Questo controllo locale non sostituisce il QA, il controllo tecnico del file e i permessi Meta.</p>
+                  {variant.format === "CAROUSEL" ? slides.map((slide) => {
+                    const slideAsset = slide.asset_id ? assetMap.get(slide.asset_id) : undefined;
+                    const check = slideAsset ? instagramImagePreflight({ mimeType: slideAsset.mime_type, width: slideAsset.width, height: slideAsset.height, format: "CAROUSEL" }) : null;
+                    return <div key={slide.id}>
+                      <strong>Slide {slide.position}</strong>
+                      {!slideAsset && <p className="manual-warning">Immagine non ancora generata.</p>}
+                      {check?.blockingIssues.map((issue) => <p key={issue} className="manual-warning">{issue}</p>)}
+                      {check?.warnings.map((warning) => <p key={warning} className="field-help">{warning}</p>)}
+                      {check?.ready && <p className="field-help">File JPEG e proporzioni preliminarmente conformi.</p>}
+                    </div>;
+                  }) : asset ? (() => {
+                    const check = instagramImagePreflight({ mimeType: asset.mime_type, width: asset.width, height: asset.height, format: variant.format === "STORY" ? "STORY" : "POST" });
+                    return <div>
+                      {check.blockingIssues.map((issue) => <p key={issue} className="manual-warning">{issue}</p>)}
+                      {check.warnings.map((warning) => <p key={warning} className="field-help">{warning}</p>)}
+                      {check.ready && <p className="field-help">File JPEG e proporzioni preliminarmente conformi.</p>}
+                    </div>;
+                  })() : <p className="manual-warning">Immagine non ancora disponibile.</p>}
+                </details>}
                 <details className="decision-record"><summary>Approvazione · {workflowStatusLabel(variant.workflow_status)}</summary>
                   <dl>
                     <div><dt>Modalità</dt><dd>{variant.approval_mode === "AUTO" ? "Automatica" : "Manuale"}</dd></div>

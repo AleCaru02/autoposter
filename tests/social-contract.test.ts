@@ -47,12 +47,17 @@ async function run() {
   assert.deepEqual(missingProviderConfiguration("FACEBOOK", base), ["META_APP_ID", "META_APP_SECRET"]);
   assert.deepEqual(missingProviderConfiguration("GBP", { ...base, SOCIAL_TOKEN_KEY: "short" }), ["SOCIAL_TOKEN_KEY (minimo 24 caratteri)", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]);
 
-  assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY"]);
+  assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY", "CAROUSEL"]);
   assert.deepEqual(providerCapabilities("GBP").publish, ["POST"]);
   assert.equal(providerCapabilities("FACEBOOK").note.includes("non vengono simulati"), true);
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: false, status: "NOT_CONNECTED" }).state, "BLOCKED_PROVIDER");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "NOT_CONNECTED" }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "PASS_REAL");
+  const referenceNow = Date.UTC(2026, 10, 7);
+  assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "expired Google tokens must never be PASS_REAL");
+  assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-09-27T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "stale connections must not be treated as freshly validated");
+  assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "PASS_REAL", "recently validated providers remain ready");
+
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: [] }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "PROVIDER_ERROR" }).state, "FAIL");
   assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "NOT_CONNECTED", lastError: "GBP_API_NOT_ENABLED" }).state, "FAIL", "a stored OAuth failure must remain visible after redirect");
@@ -137,13 +142,20 @@ async function run() {
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "NOT_CONNECTED" }), "DISCONNECTED", "no connection record must render as disconnected");
   assert.equal(socialProviderUiLabel("DISCONNECTED"), "Non collegato");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ACTIVE" }), "ACTIVE");
+  assert.equal(socialProviderUiState({ provider: "GBP", configured: true, status: "ACTIVE", readiness: { state: "USER_ACTION_REQUIRED", detail: "Token scaduto" } }), "RECONNECT", "a stale or expired provider must not count as a working connection");
+  assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ACTIVE", readiness: { state: "BLOCKED_PROVIDER", detail: "Manca OAuth" } }), "UNAVAILABLE", "missing credentials must never look active");
+
   assert.equal(socialProviderUiLabel("ACTIVE"), "Collegato");
   assert.equal(socialProviderUiState({ provider: "LINKEDIN", configured: true, status: "ACTIVE", expiresAt: "2026-01-01T00:00:00.000Z" }, Date.UTC(2026, 8, 23)), "RECONNECT", "expired LinkedIn authorization must request reconnect");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "RECONNECT_REQUIRED" }), "RECONNECT");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ERROR" }), "ERROR", "real provider errors must remain errors");
   assert.equal(socialProviderUiState({ provider: "GBP", configured: false, status: "NOT_CONNECTED" }), "UNAVAILABLE", "missing provider configuration must not pretend to be disconnected");
-  assert.equal(socialUiSource.includes("Nessun social collegato"), true, "0/4 must be a normal empty state");
-  assert.equal(socialUiSource.includes("Collega almeno un account per iniziare a pubblicare."), true, "0/4 must explain the next action");
+  assert.equal(socialUiSource.includes("Canali verificati e pronti"), true, "0/4 denotes verified publishing readiness, not loss of saved accounts");
+  assert.equal(socialUiSource.includes("Collegamenti precedenti recuperati"), true, "existing OAuth account records must be visible separately from provider readiness");
+  assert.equal(socialUiSource.includes('.select("provider,status,account_name,last_validated_at,expires_at")'), true, "historical connection recovery reads only safe profile-scoped metadata");
+  assert.equal(socialUiSource.includes('.eq("profile_id", profileId)'), true, "historical connections must be scoped to the selected activity");
+  assert.equal(socialUiSource.includes("token_reference"), true, "UI comments must document that token references are never read");
+  assert.equal(socialUiSource.includes('"provider,status,account_name,last_validated_at,expires_at,token_reference"'), false, "frontend must never query OAuth references");
   assert.equal(socialUiSource.includes("Collega account"), true, "a disconnected provider must expose the correct CTA");
   assert.equal(socialUiSource.includes("PASS REAL"), true, "the UI must expose a truthful provider readiness matrix");
   assert.equal(socialUiSource.includes("provider.lastError ? readableError(provider.lastError)"), true, "the last safe OAuth error must remain visible after the callback redirect");

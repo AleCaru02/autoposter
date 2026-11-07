@@ -22,6 +22,7 @@ import { decideVisualRuntime } from "./visual-runtime-decision.js";
 import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./brand-visual-assets.js";
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
 
@@ -44,7 +45,8 @@ type RecentContentRow = { id: string; topic: string; title: string | null; pilla
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
-type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; errors: string[] };
+type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
+type PlannedContentOutcome = { scheduled: boolean; blocked: boolean; skipped?: boolean; deferred?: boolean };
 
 const AUTO_QA_RESERVE_USD = 0.03;
 const MAX_PROFILES_PER_RUN = 100;
@@ -56,7 +58,7 @@ const DEFAULT_SCHEDULES: Array<{ provider: SocialProvider; posts: number }> = [
 ];
 const PROVIDER_BASE_TIME: Record<SocialProvider, string> = { INSTAGRAM: "18:00", FACEBOOK: "12:30", LINKEDIN: "09:00", GBP: "10:00" };
 const PROVIDER_OFFSET: Record<SocialProvider, number> = { INSTAGRAM: 0, FACEBOOK: 1, LINKEDIN: 2, GBP: 3 };
-export const AUTOPILOT_PUBLISH_FORMATS: Record<SocialProvider, SocialFormat[]> = { INSTAGRAM: ["POST","STORY"], FACEBOOK: ["POST"], LINKEDIN: ["POST"], GBP: ["POST"] };
+export const AUTOPILOT_PUBLISH_FORMATS: Record<SocialProvider, SocialFormat[]> = { INSTAGRAM: ["POST","STORY","CAROUSEL"], FACEBOOK: ["POST"], LINKEDIN: ["POST"], GBP: ["POST"] };
 
 function asObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function summary(value: unknown) { const text = asObject(value).summary; return typeof text === "string" && text.trim() ? text.trim() : null; }
@@ -149,6 +151,23 @@ async function loadBrandContext(sql:Sql,profile:ProfileRow):Promise<{context:Bra
   const own=await loadProfileBrandContext(sql,profile);
   return{context:own.brand,visualIdentity:own.visualIdentity,personalBrand:null};
 }
+/**
+ * A rejected and fully released logical attempt is not a database metering
+ * failure. Treat quality/fact-check rejection as a 24h cooldown for that
+ * exact profile/provider/slot, regardless of any later topic fingerprint.
+ * The UI may retry other eligible slots without incurring the same OpenAI
+ * costs every time the user visits the page or the hourly cron runs.
+ */
+export function shouldDeferRejectedAutopilotSlot(
+  record: { state: string; reason: string | null; created_at: string },
+  now = new Date(),
+): boolean {
+  if (record.state !== "RELEASED") return false;
+  if (!/^(OPENAI_EDITORIAL_QUALITY_BLOCKED|OPENAI_FACTCHECK_BLOCK|AUTOPILOT_DUPLICATE_CONTENT)(:|$)/.test(record.reason ?? "")) return false;
+  const age = now.getTime() - new Date(record.created_at).getTime();
+  return Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
+}
+
 export function chooseAutopilotPublishFormat(provider:SocialProvider,recentCount:number,requested?:SocialFormat|null,learned?:SocialFormat|null):SocialFormat{const supported=AUTOPILOT_PUBLISH_FORMATS[provider];if(learned&&supported.includes(learned))return learned;if(requested&&supported.includes(requested))return requested;return supported[recentCount%supported.length]??"POST";}
 export function chooseAutopilotContentType(format:SocialFormat):ContentType{return format==="STORY"?"SINGLE_STORY":format==="CAROUSEL"?"CAROUSEL":"SINGLE_POST";}
 async function recentTopics(sql:Sql,profileId:string){const rows=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 24` as unknown as RecentItemRow[];return rows.map(r=>r.topic).filter(Boolean);}
@@ -158,8 +177,23 @@ async function recentVariantCount(sql:Sql,profileId:string,provider:SocialProvid
 async function persistMasterDecision(sql:Sql,profileId:string,strategy:StrategyRow|undefined,decision:MasterEditorialDecision){const existing=asObject(strategy?.platform_strategy);const previous=asObject(existing.masterEditorialDecisions);const entries=Object.entries(previous).slice(-39);await sql`update public.content_strategies set platform_strategy=${JSON.stringify({...existing,masterEditorialDecisions:Object.fromEntries([...entries,[decision.id,decision]])})}::jsonb,updated_at=now() where profile_id=${profileId}::uuid`;}
 export async function currentSpend(sql:Sql,profileId:string){const rows=await sql`select coalesce(sum(cost_usd),0)::float8 as spend from public.ai_usage_events where profile_id=${profileId}::uuid and created_at>=${monthStartIso()}::timestamptz and operation in ('GENERATE_SOCIAL_TEXT','AGENT_RESEARCH','AGENT_FACTCHECK','AGENT_EDITORIAL_QA')` as unknown as SpendRow[];return Number(rows[0]?.spend??0)||0;}
 
-async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
-  const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
+async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}):Promise<PlannedContentOutcome>{
+  const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;
+  const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
+  // Read-only cooldown. Preserve rejected events for audit and real cost tracking.
+  const previousRejections = await sql`
+    select state, created_at, metadata->>'release_reason' as reason
+    from public.capability_usage_events
+    where profile_id=${profile.id}::uuid and capability_key='ai.content.generate_text'
+      and source='AI_TEXT_AUTOPILOT'
+      and metadata->>'client_operation_identity'=${operationIdentity}
+      and state='RELEASED' and created_at >= now() - interval '24 hours'
+    order by created_at desc limit 20
+  ` as unknown as Array<{state:string;reason:string|null;created_at:string}>;
+  if (previousRejections.some(record=>shouldDeferRejectedAutopilotSlot(record))) {
+    return {scheduled:false,blocked:false,skipped:true,deferred:true};
+  }
+  const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const websitePilot=provider==="INSTAGRAM"&&instagramWebsitePilotEnabled(strategy?.platform_strategy);const availableFormats:SocialFormat[]=websitePilot?["POST"]:AUTOPILOT_PUBLISH_FORMATS[provider];const learning=await activeLearningInsights(sql,profile.id);const planItem=websitePilot?null:selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,availableFormats,learning);const objective=websitePilot?"Ricevere richieste qualificate di bozza gratuita per siti web a 99 euro al mese":planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
   const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
@@ -239,19 +273,18 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     },
   });
   master.timing={scheduledAt,source:timingSource};
-  if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
+  if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false,skipped:true};}
   const baseTopicRequest=websitePilot?instagramWebsitePilotBrief(count):effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");
   const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);
   const profileStrategyInstruction=profileTypeStrategyInstruction({profileType:profile.profile_type,industry:profile.industry,businessModel:context.businessModel,offer:context.description,audience:context.target,objective,provider});
   const memoryInstruction=buildEditorialMemoryInstruction(memory);
   const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction].filter(Boolean).join("\n\n");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
-  const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
   const reservation=await meter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity,requestFingerprint:{provider,format,scheduledAt,topicRequest,objective,researchMode}});
   if(reservation.status==="DENIED")throw new Error(reservation.code);
   if(reservation.status==="COMPLETED")return reservation.cached.response as {scheduled:boolean;blocked:boolean};
   if(reservation.status==="IN_PROGRESS")throw new Error("AUTOPILOT_GENERATION_IN_PROGRESS");
-  if(reservation.status==="RELEASED")throw new Error("METERING_FAILED");
+  if(reservation.status==="RELEASED")return {scheduled:false,blocked:false,skipped:true,deferred:true};
   const logicalEventId=reservation.eventId;let logicalCommitted=false;const imageMeter=new ImageGenerationMetering(env.DATABASE_URL!);let imageEventId:string|null=null;let imageCommitted=false;let imageAssetId:string|null=null;
   try{
   const upper=estimateTextRequestUpperBoundUsd({topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode});const qaReserve=approvalMode==="AUTOMATIC"?AUTO_QA_RESERVE_USD:0;
@@ -298,6 +331,9 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
   const brandVisual=normalizeBrandVisualIdentity(loaded.visualIdentity,profile.industry);
+  const logoAssetId=confirmedBrandLogoId(loaded.visualIdentity);
+  const logoRows=logoAssetId?await sql`select storage_url,mime_type from public.assets where id=${logoAssetId}::uuid and profile_id=${profile.id}::uuid and kind='IMAGE' limit 1` as unknown as Array<{storage_url:string;mime_type:string|null}>:[];
+  const logoDataUrl=verifiedBrandLogoDataUrl(logoRows[0]);
   const decisionRecord=JSON.stringify({
     source:"AUTOPILOT",
     masterDecisionId:master.id,
@@ -349,7 +385,20 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     await sql`insert into public.content_items (id,profile_id,topic,objective,title,status,pillar,decision_record,series_id,sequence_number,previous_content_id,next_topic_intent,continuity_reason,visual_archetype,subject_strategy,updated_at) values (${contentId}::uuid,${profile.id}::uuid,${generated.content.editorialTopic},${objective},${generated.content.editorialAngle.slice(0,240)},'IN_REVIEW',${generatedPillar},${decisionRecord}::jsonb,${continuityDecision.seriesId}::uuid,${continuityDecision.sequenceNumber},${continuityDecision.previousContentId}::uuid,${continuityDecision.nextTopicIntent},${continuityDecision.continuityReason},${subjectDecision.visualArchetype},${subjectDecision.subject},${now}::timestamptz)`;
   }
   await sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,alt_text,factual_basis,approval_status,approval_mode,workflow_status,updated_at) values (${variantId}::uuid,${contentId}::uuid,${profile.id}::uuid,${provider},${format},${variant.eligible},${variant.hook},${variant.caption},${variant.cta},${JSON.stringify(variant.hashtags)}::jsonb,${variant.visualBrief},${variant.altText},${JSON.stringify(variant.factualBasis)}::jsonb,'PENDING',${approvalMode==="AUTOMATIC"?"AUTO":"MANUAL"},'DRAFT',${now}::timestamptz)`;
-  if(variant.eligible&&allowImageGeneration){
+
+  const carouselSlideIds:string[]=[];
+  if(format==="CAROUSEL"){
+    const slides=variant.carouselSlides??[];
+    if(slides.length<4||slides.length>10)throw new Error("AUTOPILOT_CAROUSEL_SLIDES_INVALID");
+    for(const slide of slides){
+      const slideId=crypto.randomUUID();
+      carouselSlideIds.push(slideId);
+      await sql`insert into public.content_carousel_slides
+        (id,profile_id,content_id,variant_id,position,purpose,headline,body,hierarchy,visual_brief,alt_text,width,height,qa_status,updated_at)
+        values (${slideId}::uuid,${profile.id}::uuid,${contentId}::uuid,${variantId}::uuid,${slide.position},${slide.purpose},${slide.headline},${slide.body},${slide.hierarchy},${slide.visualBrief},${slide.altText},1080,1080,'PENDING',now())`;
+    }
+  }
+  if(variant.eligible&&allowImageGeneration&&format!=="CAROUSEL"){
     const aspectRatio=format==="STORY"?"2:3":"1:1";
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
@@ -393,7 +442,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         imageEventId=imageReservation.eventId;
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
-        const typography={brand:profile.name,headline:variant.hook,subheadline:null};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
+        const typography={brand:profile.name,headline:variant.hook,subheadline:null,logoDataUrl,style:brandTextStyle(brandVisual.activeSocialPalette)};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
@@ -419,9 +468,102 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   }
   if(imageAssetId)await sql`update public.content_variants set image_asset_id=${imageAssetId}::uuid,approval_status='PENDING',updated_at=now() where id=${variantId}::uuid and profile_id=${profile.id}::uuid`;
   if(imageEventId&&imageAssetId){await imageMeter.storeResult(imageEventId,{response:{assetId:imageAssetId,duplicate:true},assetId:imageAssetId,variantId});await imageMeter.commit(imageEventId);imageCommitted=true;}
+
+  // Carousel visuals are generated per slide; a single hero image cannot make
+  // a real Instagram carousel. Each slide has independent metering and QA.
+  let carouselVisualReady=false;
+  if(format==="CAROUSEL"&&variant.eligible&&allowImageGeneration){
+    const usedAssets=new Set<string>();
+    const carouselBudget=new ActivityBudgetEngine(env.DATABASE_URL!);
+    const slidePlans=variant.carouselSlides??[];
+    for(let index=0;index<slidePlans.length;index++){
+      const slide=slidePlans[index];
+      const slideId=carouselSlideIds[index];
+      if(!slide||!slideId)continue;
+      let slideUsageId:string|null=null;
+      let slideCommitted=false;
+      let createdAssetId:string|null=null;
+      try{
+        const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
+          from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+        const reuse=await findReusableAsset({visualBrief:slide.visualBrief,aspectRatio:"1:1",candidates:candidates.filter(item=>!usedAssets.has(item.id))});
+        if(reuse){
+          usedAssets.add(reuse.asset.id);
+          await sql`update public.content_carousel_slides set asset_id=${reuse.asset.id}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+            where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+          continue;
+        }
+        const reserved=await imageMeter.reserve({
+          profileId:profile.id,source:"AUTOPILOT",
+          operationIdentity:`autopilot-carousel:${profile.id}:${variantId}:${slide.position}`,
+          referenceId:slideId,
+          requestFingerprint:{provider,format,variantId,slideId,visualBrief:slide.visualBrief,headline:slide.headline,body:slide.body},
+        });
+        if(reserved.status==="COMPLETED"){
+          const previous=reserved.cached.assetId;
+          if(typeof previous==="string"&&previous){
+            usedAssets.add(previous);
+            await sql`update public.content_carousel_slides set asset_id=${previous}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+              where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+          }
+          continue;
+        }
+        if(reserved.status!=="RESERVED")throw new Error("AUTOPILOT_CAROUSEL_IMAGE_RESERVATION_BLOCKED");
+        slideUsageId=reserved.eventId;
+        const budget=await carouselBudget.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
+        if(!budget.allowed)throw new Error(budget.reason??"AUTOPILOT_CAROUSEL_IMAGE_BUDGET_STOP");
+        const typography={brand:profile.name,headline:slide.headline,subheadline:slide.body||null,logoDataUrl,style:brandTextStyle(brandVisual.activeSocialPalette)};
+        const [width,height]=imageSizeForFormat("CAROUSEL","INSTAGRAM").split("x").map(Number);
+        await preflightDeterministicTypography({width,height,...typography});
+        await imageMeter.markProviderStarted(slideUsageId);
+        const image=await generateRoutedImage({
+          env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget,importance:"STANDARD",
+          profileName:profile.name,profileType:profile.profile_type,
+          industry:profile.industry,tone:context.tone,
+          brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],
+          brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,
+          provider:"INSTAGRAM",format:"CAROUSEL",visualBrief:slide.visualBrief,
+          caption:[slide.headline,slide.body].filter(Boolean).join(" — "),typography,
+        });
+        await imageMeter.persistTechnicalEvents(profile.id,slideUsageId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,slide_position:slide.position,variant_id:variantId}));
+        const size=/^([0-9]+)x([0-9]+)$/.exec(String(image.size));
+        const assetId=crypto.randomUUID();
+        createdAssetId=assetId;
+        const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        const hash=await assetContentHashFromBase64(image.base64);
+        await sql`insert into public.assets
+          (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at)
+          values (${assetId}::uuid,${profile.id}::uuid,${contentId}::uuid,'AI_IMAGE','IMAGE',
+          ${`INSTAGRAM-CAROUSEL-${slideId}.png`},${dataUrl},${image.mimeType},
+          ${JSON.stringify(["INSTAGRAM","CAROUSEL","AI_GENERATED","AUTOPILOT"])}::jsonb,
+          ${JSON.stringify({visual_brief:slide.visualBrief,slide_position:slide.position,brand_palette:brandVisual.activeSocialPalette,brand_fonts:brandVisual.fonts,text_compositor:image.textCompositor,aspect_ratio:image.aspectRatio,model:image.model})}::jsonb,
+          'OPENAI',${image.model},${Number(image.usage.estimatedCostUsd??0.25)*budget.usdToEurRate},
+          ${size?Number(size[1]):null},${size?Number(size[2]):null},${image.aspectRatio},'PENDING','NOT_REQUIRED',${hash},now())`;
+        await sql`update public.content_carousel_slides set asset_id=${assetId}::uuid,visual_generation_status='PASS',qa_status='PENDING',updated_at=now()
+          where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`;
+        await imageMeter.storeResult(slideUsageId,{response:{assetId,duplicate:true},assetId,variantId});
+        await imageMeter.commit(slideUsageId);
+        slideCommitted=true;
+        usedAssets.add(assetId);
+      }catch(reason){
+        const code=reason instanceof Error?reason.message:"AUTOPILOT_CAROUSEL_IMAGE_FAILED";
+        if(slideUsageId&&!slideCommitted)await imageMeter.release(slideUsageId,code).catch(()=>undefined);
+        if(createdAssetId&&!slideCommitted)await sql`delete from public.assets where id=${createdAssetId}::uuid and profile_id=${profile.id}::uuid`.catch(()=>undefined);
+        await sql`update public.content_carousel_slides set visual_generation_status='FAIL',visual_generation_error=${code.slice(0,200)},updated_at=now()
+          where id=${slideId}::uuid and profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid`.catch(()=>undefined);
+        console.error("autopilot-carousel-image",{profileId:profile.id,variantId,position:slide.position,code});
+        if(code.includes("BUDGET"))break;
+      }
+    }
+    const readyRows=await sql`select count(*)::int as total,count(*) filter(where asset_id is not null)::int as ready
+      from public.content_carousel_slides where profile_id=${profile.id}::uuid and variant_id=${variantId}::uuid` as unknown as Array<{total:number;ready:number}>;
+    carouselVisualReady=Number(readyRows[0]?.total)===slidePlans.length&&Number(readyRows[0]?.ready)===slidePlans.length;
+  }
   let canAutoApprove=false;
   if(approvalMode==="AUTOMATIC"&&variant.eligible){
-    if(!imageAssetId)throw new Error("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL");
+    const visualReady=format==="CAROUSEL"?carouselVisualReady:Boolean(imageAssetId);
+    if(!visualReady)console.log("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL",{profileId:profile.id,variantId,format});
+    if(visualReady){
     const finalQa=await runContentQa({
       databaseUrl:env.DATABASE_URL!,
       apiKey:env.OPENAI_API_KEY,
@@ -433,7 +575,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     if(finalQa.overallStatus==="PASS"){
       const approvedRows=await sql`select public.auto_approve_content_variant(${profile.id}::uuid,${variantId}::uuid,'SYSTEM_AUTOPILOT') as approved` as unknown as Array<{approved:boolean}>;
       canAutoApprove=approvedRows[0]?.approved===true;
-    }
+      }
+  }
   }
   await sql`update public.content_items set status=${canAutoApprove?"APPROVED":"IN_REVIEW"},updated_at=now() where id=${contentId}::uuid and profile_id=${profile.id}::uuid`;
   if(variant.eligible){await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const jobId=crypto.randomUUID();const state=canAutoApprove?"SCHEDULED":"BLOCKED_APPROVAL";const idempotencyKey=`autopilot:${variantId}:${scheduledAt}`;await sql`insert into public.publication_jobs (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at) values (${jobId}::uuid,${profile.id}::uuid,${variantId}::uuid,${provider},${state},${scheduledAt}::timestamptz,${idempotencyKey},0,now()) on conflict (idempotency_key) do nothing`;const response={scheduled:canAutoApprove,blocked:!canAutoApprove};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;}await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});const response={scheduled:false,blocked:false};await meter.storeResult(logicalEventId,{response,contentId,variantId});await meter.commit(logicalEventId);logicalCommitted=true;return response;
@@ -447,7 +590,29 @@ export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}
   const result:RunResult={profilesChecked:0,generated:0,scheduled:0,blockedForReview:0,skipped:0,errors:[]};const now=new Date();const horizon=new Date(now.getTime()+8*DAY_MS).toISOString();
   for(const profile of profiles){if(result.generated>=maxGenerations)break;result.profilesChecked+=1;try{await ensureStrategy(sql,profile.id);await ensureSchedules(sql,profile);const strategies=await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profile.id}::uuid limit 1` as unknown as StrategyRow[];const strategy=strategies[0];const settings=settingsFromStrategy(strategy?.platform_strategy);if(!settings.enabled){result.skipped+=1;continue;}const schedules=await sql`select provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled from public.schedules where profile_id=${profile.id}::uuid and provider is not null and enabled=true and posts_per_week>0 order by provider asc` as unknown as ScheduleRow[];
     for(const schedule of schedules){if(result.generated>=maxGenerations)break;if(settings.websitePilot&&schedule.provider!=="INSTAGRAM")continue;const desired=Math.min(Math.max(Math.floor(schedule.posts_per_week),0),settings.websitePilot?2:21);if(!desired)continue;const jobs=await sql`select provider,scheduled_at from public.publication_jobs where profile_id=${profile.id}::uuid and provider=${schedule.provider} and scheduled_at>${now.toISOString()}::timestamptz and scheduled_at<${horizon}::timestamptz and state in ('SCHEDULED','BLOCKED_APPROVAL','QUEUED') order by scheduled_at asc` as unknown as JobRow[];if(jobs.length>=desired)continue;const learning=await activeLearningInsights(sql,profile.id);const learnedTiming=learnedTimingPreference(profile.id,schedule.provider,learning);const usedDates=new Set(jobs.map(job=>localDateKey(new Date(job.scheduled_at),schedule.timezone||profile.timezone||"Europe/Rome")));const candidates=candidateSlots(schedule,now,learnedTiming).filter(slot=>!usedDates.has(localDateKey(new Date(slot.scheduledAt),schedule.timezone||profile.timezone||"Europe/Rome")));const missing=Math.max(desired-jobs.length,0);
-      for(const slot of candidates.slice(0,missing)){if(result.generated>=maxGenerations)break;try{const created=await createPlannedContent({sql,env:env as Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv,profile,strategy,provider:schedule.provider,scheduledAt:slot.scheduledAt,timingSource:slot.timingSource,approvalMode:settings.websitePilot?"MANUAL_REVIEW":settings.approvalMode,allowImageGeneration});result.generated+=1;if(created.scheduled)result.scheduled+=1;if(created.blocked)result.blockedForReview+=1;}catch(reason){const detail=reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED";result.errors.push(`${profile.id}:${schedule.provider}:${detail}`);if(detail==="AUTOPILOT_ACTIVITY_BUDGET_STOP")return result;}}
+      // A rejected prior attempt does not consume a generation slot. Inspect
+      // other eligible dates but cap NEW paid AI attempts at the requested gap.
+      let newAttempts=0;let filled=0;
+      for(const slot of candidates){
+        if(result.generated>=maxGenerations||filled>=missing||newAttempts>=missing)break;
+        if(new Date(slot.scheduledAt).getTime()>=new Date(horizon).getTime())continue;
+        try{
+          const created=await createPlannedContent({sql,env:env as Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv,profile,strategy,provider:schedule.provider,scheduledAt:slot.scheduledAt,timingSource:slot.timingSource,approvalMode:settings.websitePilot?"MANUAL_REVIEW":settings.approvalMode,allowImageGeneration});
+          if(created.skipped){
+            result.skipped+=1;
+            if(created.deferred)result.deferred=(result.deferred??0)+1;
+            continue;
+          }
+          newAttempts+=1;filled+=1;result.generated+=1;
+          if(created.scheduled)result.scheduled+=1;
+          if(created.blocked)result.blockedForReview+=1;
+        }catch(reason){
+          newAttempts+=1;
+          const detail=reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED";
+          result.errors.push(`${profile.id}:${schedule.provider}:${detail}`);
+          if(detail==="AUTOPILOT_ACTIVITY_BUDGET_STOP")return result;
+        }
+      }
     }
   }catch(reason){result.errors.push(`${profile.id}:${reason instanceof Error?reason.message:"AUTOPILOT_PROFILE_FAILED"}`);}}
   return result;

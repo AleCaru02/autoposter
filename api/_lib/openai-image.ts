@@ -53,7 +53,7 @@ export type OpenAIImageResult = {
   outputFormat: "png";
   promptVersion: typeof IMAGE_PROMPT_VERSION;
   generationTimestamp: string;
-  textCompositor: { renderer: "RESVG_WASM"; font: "Inter"; layout: Record<string, unknown> } | null;
+  textCompositor: { renderer: "RESVG_WASM"; font: "Inter"; layout: Record<string, unknown>; logoApplied?: boolean } | null;
   mediaManager: {
     model: "gpt-5.6-terra";
     responseId: string;
@@ -80,7 +80,7 @@ export type GenerateImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  typography?: { brand: string; headline: string; subheadline?: string | null } | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number } } | null;
   fetcher?: typeof fetch;
 };
 
@@ -272,7 +272,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     outputFormat: "png",
     promptVersion: IMAGE_PROMPT_VERSION,
     generationTimestamp: typeof body.created === "number" ? new Date(body.created * 1_000).toISOString() : new Date().toISOString(),
-    textCompositor: options.typography ? { renderer: "RESVG_WASM", font: "Inter", layout: typographyLayout ?? {} } : null,
+    textCompositor: options.typography ? { renderer: "RESVG_WASM", font: "Inter", layout: typographyLayout ?? {}, logoApplied: Boolean(options.typography.logoDataUrl) } : null,
     mediaManager: {
       model: mediaManager.model,
       responseId: mediaManager.responseId,

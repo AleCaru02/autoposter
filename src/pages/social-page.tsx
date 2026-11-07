@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Link2, LoaderCircle, RefreshCw, Share2, Unplug } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { authClient } from "../lib/neon-client";
+import { authClient, neonClient } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { socialProviderUiLabel, socialProviderUiState } from "../lib/social-status-view";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -29,6 +29,14 @@ type StatusResponse = {
   linkedinOrganizationMode?: boolean;
   publishingBaseUrlConfigured?: boolean;
   error?: string;
+};
+
+type SavedConnection = {
+  provider: Provider;
+  status: string;
+  account_name: string | null;
+  last_validated_at: string | null;
+  expires_at: string | null;
 };
 
 type SessionData = { session?: { token?: string | null }; token?: string | null; access_token?: string | null };
@@ -59,7 +67,7 @@ function readableError(value: string) {
     NESSUN_ACCOUNT_INSTAGRAM_PROFESSIONALE_COLLEGATO_A_UNA_PAGINA: "Non trovo un account Instagram professionale collegato a una Pagina Facebook gestibile.",
     NESSUNA_PAGINA_FACEBOOK_GESTIBILE: "Non trovo Pagine Facebook gestibili con questo account.",
     NESSUNA_PAGINA_LINKEDIN_AMMINISTRATA_O_ACCESSO_COMMUNITY_MANAGEMENT_NON_ATTIVO: "Non trovo una Pagina LinkedIn amministrata oppure l’app non ha ancora l’accesso Community Management.",
-    LINKEDIN_CLIENT_CREDENTIALS_INVALID: "Le credenziali OAuth di LinkedIn configurate nel Worker non corrispondono all’app LinkedIn. Devono essere aggiornate lato server.",
+    LINKEDIN_CLIENT_CREDENTIALS_INVALID: "Le credenziali OAuth di LinkedIn configurate sul server non corrispondono all’app LinkedIn. Devono essere aggiornate lato server.",
     LINKEDIN_REDIRECT_URI_MISMATCH: "Nell’app LinkedIn manca o non coincide questo Redirect URL: https://autoposter.02alessandrocaruso.workers.dev/api/social/callback/linkedin",
     LINKEDIN_AUTHORIZATION_CODE_INVALID: "Il codice di autorizzazione LinkedIn è scaduto o già usato. Premi Ricollega e completa il consenso una sola volta.",
     LINKEDIN_PROFILE_ACCESS_DENIED: "LinkedIn ha rifiutato la lettura del profilo o i permessi richiesti. Verifica i prodotti e gli scope autorizzati nella tua app LinkedIn.",
@@ -132,6 +140,8 @@ export function SocialPage() {
   const sessionPending = authSession.isPending;
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
+  const loadRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [busyProvider, setBusyProvider] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,8 +150,21 @@ export function SocialPage() {
   const load = useCallback(async () => {
     const profileId = selectedProfile?.id;
     if (!profileId || sessionPending) return;
+    const revision = ++loadRevision.current;
+    setStatus(null);
+    setSavedConnections([]);
     setLoading(true);
     setError(null);
+    // Read only safe, owner-scoped historical metadata. Neon RLS enforces
+    // ownership; never read or expose token_reference or OAuth secrets here.
+    // This is NOT proof of a currently valid provider connection.
+    const saved = await neonClient.from("social_connections")
+      .select("provider,status,account_name,last_validated_at,expires_at")
+      .eq("profile_id", profileId)
+      .limit(8);
+    if (revision !== loadRevision.current) return;
+    if (!saved.error) setSavedConnections((saved.data ?? []) as SavedConnection[]);
+    else setSavedConnections([]);
     let lastError: unknown = new Error("SOCIAL_STATUS_FAILED");
     const retryDelays = [0, 300, 900];
     for (const delay of retryDelays) {
@@ -149,6 +172,7 @@ export function SocialPage() {
       try {
         const token = await jwt(sessionToken);
         const body = await apiJson<StatusResponse>(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, token);
+        if (revision !== loadRevision.current) return;
         setStatus(body);
         setLoading(false);
         return;
@@ -156,6 +180,7 @@ export function SocialPage() {
         lastError = reason;
       }
     }
+    if (revision !== loadRevision.current) return;
     setError(readableError(lastError instanceof Error ? lastError.message : "SOCIAL_STATUS_FAILED"));
     setLoading(false);
   }, [selectedProfile?.id, sessionPending, sessionToken]);
@@ -236,6 +261,8 @@ export function SocialPage() {
 
   const providers = status?.providers ?? [];
   const connectedCount = useMemo(() => providers.filter((provider) => socialProviderUiState(provider) === "ACTIVE").length, [providers]);
+  const storedCount = savedConnections.filter((row) => row.status === "ACTIVE").length;
+  const configurationBlocked = providers.some((provider) => provider.readiness.state === "BLOCKED_PROVIDER");
 
   if (!selectedProfile) return null;
   const demo = selectedProfile.tenant_type === "DEMO_PERSISTENT";
@@ -246,7 +273,15 @@ export function SocialPage() {
     {demo && <p className="form-success social-message" role="status"><CheckCircle2 size={17} /> DEMO DATA · Nessun social reale collegato. La pubblicazione esterna è disabilitata lato server.</p>}
     {error && <p className="form-error social-message" role="alert"><AlertTriangle size={17} /> {error}</p>}
 
-    {status && <section className={`social-summary ${connectedCount === 0 ? "empty" : ""}`}><div><Share2 size={20} /><span>{connectedCount === 0 ? "Nessun social collegato" : "Account collegati"}</span><strong>{connectedCount}/4</strong></div><p>{connectedCount === 0 ? "Collega almeno un account per iniziare a pubblicare." : "La pubblicazione automatica parte soltanto sui social collegati e per contenuti approvati."}</p></section>}
+    {status && <section className={`social-summary ${connectedCount === 0 ? "empty" : ""}`}><div><Share2 size={20} /><span>Canali verificati e pronti</span><strong>{connectedCount}/4</strong></div><p>{storedCount > 0 && connectedCount === 0
+        ? `${storedCount} collegament${storedCount === 1 ? "o" : "i"} precedentemente registrat${storedCount === 1 ? "o" : "i"} per questa attività. I dati non sono stati cancellati: il server deve recuperare le credenziali e riconvalidare i provider prima di pubblicare.`
+        : connectedCount === 0 ? "Nessun canale attualmente verificato per la pubblicazione. Controlla la configurazione del server; non eliminare i collegamenti storici."
+        : "La pubblicazione automatica parte soltanto sui social verificati e per contenuti approvati."}</p></section>}
+    {storedCount > 0 && configurationBlocked && <section className="panel social-connection-recovery" role="status">
+      <h2>Collegamenti precedenti recuperati</h2>
+      <p>Nel database risultano {storedCount} account con stato storico ACTIVE. La versione attuale non dispone ancora di tutte le chiavi server necessarie per verificare o utilizzare le autorizzazioni cifrate. Non è necessario scollegarli.</p>
+      <p>I provider richiedono una verifica reale prima di poter pubblicare: un vecchio stato ACTIVE non costituisce una connessione live.</p>
+    </section>}
 
     {loading && !status ? <section className="panel social-loading"><LoaderCircle className="spin" size={22} /> Caricamento collegamenti…</section>
       : !status ? <section className="unavailable-panel social-status-load-error"><AlertTriangle size={24} /><div><h2>Stato social non disponibile</h2><p>Non riesco a leggere i collegamenti dal backend. Questo è un errore temporaneo reale, non significa che gli account siano scollegati.</p><button className="compact-action" type="button" onClick={() => void load()}><RefreshCw size={15} /> Riprova</button></div></section>
@@ -261,10 +296,17 @@ export function SocialPage() {
             const unavailable = uiState === "UNAVAILABLE";
             const disconnected = uiState === "DISCONNECTED";
             const analyticsMissing = active && analyticsPermissionMissing(provider);
+            const saved = savedConnections.find((row) => row.provider === provider.provider);
             const accountPresent = Boolean(provider.accountName || provider.accountId);
             return <article className={`panel social-card ${active ? "connected" : reconnect ? "reconnect" : providerError ? "provider-error" : ""}`} key={provider.provider}>
               <div className="social-card-head"><div className="social-provider-icon"><Share2 size={19} /></div><div><h2>{PROVIDER_LABELS[provider.provider]}</h2><p>{PROVIDER_DESCRIPTIONS[provider.provider]}</p></div><span className={`social-status ${uiState.toLowerCase()}`}>{READINESS_LABELS[provider.readiness.state]}</span></div>
 
+              {unavailable && saved?.status === "ACTIVE" && <div className="social-account">
+                <small>Collegamento storico salvato, da riconvalidare</small>
+                <strong>{saved.account_name || PROVIDER_LABELS[provider.provider]}</strong>
+                {saved.last_validated_at && <span>Ultima verifica: {new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", year: "numeric" }).format(new Date(saved.last_validated_at))}</span>}
+                {saved.expires_at && new Date(saved.expires_at).getTime() <= Date.now() && <span>Il token registrato è scaduto.</span>}
+              </div>}
               {accountPresent && (active || reconnect || providerError) && <div className="social-account"><small>Account utilizzato</small><strong>{provider.accountName || provider.accountId}</strong>{provider.accountType && <span>{provider.accountType === "ORGANIZATION" ? "Pagina aziendale" : provider.accountType === "MEMBER" ? "Profilo personale" : provider.accountType}</span>}</div>}
 
               {connecting && provider.status === "PENDING_SELECTION" && provider.candidates.length > 0 && <div className="social-candidates"><p>Puoi collegare un solo account a questa attività. Scegli quale usare:</p>{provider.candidates.map((candidate) => <button type="button" key={candidate.id} disabled={busy} onClick={() => void selectAccount(provider.provider, candidate.id)}><span><strong>{candidate.name}</strong>{candidate.username && <small>@{candidate.username}</small>}</span><CheckCircle2 size={17} /></button>)}</div>}

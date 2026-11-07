@@ -15,8 +15,18 @@ export type AutopilotSchedule = {
   enabled: boolean;
 };
 
+export type EditorialPlanPreview = {
+  generatedAt: string | null;
+  items: Array<{dayOffset:number;provider:string;contentType:string;topicDirection:string;objective:string}>;
+};
+export type CompetitorOverview = {
+  status: string;
+  competitors: Array<{name:string;website:string;editorialOpportunity:string}>;
+};
 export type AutopilotOverview = {
   settings: AutopilotSettings;
+  editorialPlan: EditorialPlanPreview | null;
+  competitorResearch: CompetitorOverview;
   schedules: AutopilotSchedule[];
   inReview: number;
   upcoming: number;
@@ -47,8 +57,43 @@ export async function loadAutopilotOverview(profileId: string): Promise<Autopilo
     throw new Error("Impossibile caricare l’automazione contenuti. Riprova.");
   }
   const strategyData = strategy.data as { platform_strategy?: unknown } | null;
+  const strategyOptions = object(strategyData?.platform_strategy);
+  const storedPlan = object(strategyOptions.aiEditorialPlan);
+  const storedStrategy = object(strategyOptions.aiStrategy);
+  const research = object(storedStrategy.competitorResearch);
+  const planItems = Array.isArray(storedPlan.items) ? storedPlan.items.flatMap((value) => {
+    const item = object(value);
+    if (!Number.isInteger(item.dayOffset) || typeof item.provider !== "string" ||
+        typeof item.topicDirection !== "string" || !item.topicDirection.trim()) return [];
+    return [{
+      dayOffset: item.dayOffset as number,
+      provider: item.provider as string,
+      contentType: typeof item.contentType === "string" ? item.contentType : "SINGLE_POST",
+      topicDirection: (item.topicDirection as string).trim(),
+      objective: typeof item.objective === "string" ? item.objective : "",
+    }];
+  }).sort((a,b)=>a.dayOffset-b.dayOffset).slice(0,60) : [];
+  const competitors = research.status === "VERIFIED_PUBLIC_SOURCES" && Array.isArray(research.competitors)
+    ? research.competitors.flatMap(value => {
+      const item = object(value);
+      if (typeof item.name !== "string" || typeof item.website !== "string" ||
+          !item.verifiedSource || typeof item.verifiedSource !== "string") return [];
+      return [{
+        name: item.name as string,
+        website: item.website as string,
+        editorialOpportunity: typeof item.editorialOpportunity === "string" ? item.editorialOpportunity : "",
+      }];
+    }).slice(0,4) : [];
   return {
     settings: parseSettings(strategyData?.platform_strategy),
+    editorialPlan: planItems.length ? {
+      generatedAt: typeof strategyOptions.aiEditorialPlanGeneratedAt === "string" ? strategyOptions.aiEditorialPlanGeneratedAt : null,
+      items: planItems,
+    } : null,
+    competitorResearch: {
+      status: typeof research.status === "string" ? research.status : "NOT_SEARCHED",
+      competitors,
+    },
     schedules: (schedules.data ?? []) as AutopilotSchedule[],
     inReview: review.count ?? 0,
     upcoming: upcoming.count ?? 0,
