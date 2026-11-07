@@ -102,3 +102,33 @@ export function instagramDraftPreflight(variant: InstagramDraft): InstagramDraft
   const preview = snippet.length > 125 ? snippet.slice(0, 125).join("") + "…" : snippet.join("");
   return { caption, captionLength, preview, warnings, blockingIssues };
 }
+
+
+export type InstagramImageInput = {
+  mimeType?: string | null;
+  width?: number | null;
+  height?: number | null;
+  format: SocialFormat;
+};
+
+export function instagramImagePreflight(input: InstagramImageInput) {
+  const blockingIssues: string[] = [];
+  const warnings: string[] = [];
+  const mimeType = input.mimeType?.split(";")[0]?.trim().toLowerCase();
+  if (!mimeType) blockingIssues.push("Tipo file sconosciuto: verifica che sia un'immagine JPEG.");
+  else if (mimeType !== "image/jpeg") blockingIssues.push("Instagram Graph API richiede una foto JPEG: converti il file prima della pubblicazione.");
+  const width = input.width ?? 0;
+  const height = input.height ?? 0;
+  if (!(width > 0 && height > 0)) {
+    warnings.push("Dimensioni non rilevate: serve una verifica del file prima della pubblicazione.");
+  } else {
+    const ratio = width / height;
+    if (input.format !== "STORY" && (ratio < 0.8 - 0.0001 || ratio > 1.91 + 0.0001)) {
+      blockingIssues.push("Il formato feed richiede un rapporto tra 4:5 e circa 1,91:1.");
+    }
+    if (input.format === "STORY" && Math.abs(ratio - 9 / 16) > 0.02) {
+      warnings.push("Per una Storia senza tagli usa preferibilmente 9:16.");
+    }
+  }
+  return { blockingIssues, warnings, ready: blockingIssues.length === 0 && warnings.length === 0 };
+}
