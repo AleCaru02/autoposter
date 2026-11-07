@@ -49,16 +49,21 @@ function textSvg(layout: TypographyLayout, fontFamily: string, style: Required<T
   }).join("");
 }
 
-export async function composeDeterministicTypography(input: { backgroundPngBase64: string; width: number; height: number; brand: string; headline: string; subheadline?: string | null; brandFonts?: BrandFonts; style?: TypographyStyle }) {
+export async function composeDeterministicTypography(input: { backgroundPngBase64: string; width: number; height: number; brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; brandFonts?: BrandFonts; style?: TypographyStyle }) {
   const font = await effectiveFonts(input.brandFonts);
   const layout = createTypographyLayout({ canvas: { width: input.width, height: input.height }, fontRegular: font.regular, fontBold: font.bold, brand: input.brand, headline: input.headline, subheadline: input.subheadline });
   await ready();
   const style: Required<TypographyStyle> = { panelColor: input.style?.panelColor || "#fffdf8", textColor: input.style?.textColor || "#172430", brandColor: input.style?.brandColor || "#0e5973", panelOpacity: input.style?.panelOpacity ?? 0.94 };
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${input.width}" height="${input.height}" viewBox="0 0 ${input.width} ${input.height}"><image href="data:image/png;base64,${input.backgroundPngBase64}" width="${input.width}" height="${input.height}" preserveAspectRatio="xMidYMid slice"/><rect x="${layout.textZone.x - 34}" y="${layout.textZone.y - 34}" width="${layout.textZone.width + 68}" height="${layout.textZone.height + 68}" rx="36" fill="${style.panelColor}" fill-opacity="${style.panelOpacity}"/>${textSvg(layout, font.family, style)}</svg>`;
+  const logoDataUrl = typeof input.logoDataUrl==="string" && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(input.logoDataUrl) && input.logoDataUrl.length<=3_000_040 ? input.logoDataUrl : null;
+  const logoWidth = Math.min(Math.round(input.width*0.18),240);
+  const logoX = input.width-logoWidth-Math.max(28,Math.round(input.width*0.04));
+  const logoY = Math.max(24,Math.round(input.height*0.035));
+  const logoMarkup = logoDataUrl ? `<rect x="${logoX-16}" y="${logoY-12}" width="${logoWidth+32}" height="112" rx="18" fill="${style.panelColor}" fill-opacity="0.92"/><image href="${logoDataUrl}" x="${logoX}" y="${logoY}" width="${logoWidth}" height="84" preserveAspectRatio="xMidYMid meet"/>` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${input.width}" height="${input.height}" viewBox="0 0 ${input.width} ${input.height}"><image href="data:image/png;base64,${input.backgroundPngBase64}" width="${input.width}" height="${input.height}" preserveAspectRatio="xMidYMid slice"/><rect x="${layout.textZone.x - 34}" y="${layout.textZone.y - 34}" width="${layout.textZone.width + 68}" height="${layout.textZone.height + 68}" rx="36" fill="${style.panelColor}" fill-opacity="${style.panelOpacity}"/>${textSvg(layout, font.family, style)}${logoMarkup}</svg>`;
   const image = new Resvg(svg, { font: { fontBuffers: [font.regular, font.bold], defaultFontFamily: font.family }, textRendering: 2, imageRendering: 0, shapeRendering: 2 }).render();
   const png = image.asPng();
   const base64 = typeof Buffer !== "undefined" ? Buffer.from(png).toString("base64") : btoa(String.fromCharCode(...png));
-  return { base64, layout, mimeType: "image/png" as const, font: { family: font.family, source: font.source } };
+  return { base64, layout, mimeType: "image/png" as const, font: { family: font.family, source: font.source }, logoApplied: Boolean(logoDataUrl) };
 }
 
 export async function preflightDeterministicTypography(input: { width: number; height: number; brand: string; headline: string; subheadline?: string | null; brandFonts?: BrandFonts }) {
