@@ -156,7 +156,16 @@ jobs:
         env:
           UI_SMOKE_BASE: http://127.0.0.1:4173
           UI_SMOKE_START_LOCAL: "1"
+          UI_QA_SCREENSHOTS: "1"
         run: node tests/mobile-desktop-ui-browser.mjs
+      - name: Upload premium workspace visual QA screenshots
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/instagram-creator-toolkit-20261107' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-automatici-premium-ux-qa
+          path: qa-artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 2
       - { name: Cloudflare bundle dry run, run: "npx wrangler deploy --dry-run" }
 
 
