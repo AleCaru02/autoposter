@@ -33,6 +33,7 @@ jobs:
       - { name: Admin Impersonation UI regression, run: "npm run test:admin-impersonation-ui" }
       - { name: FASE 6A design system and app shell regression, run: "npm run test:fase6a-design-system" }
       - { name: FASE 6B customer dashboard regression, run: "npm run test:fase6b-customer-dashboard" }
+      - { name: Creative Hub AI cost and profile integrity, run: "node tests/creative-hub-integrity.test.mjs" }
       - { name: FASE 6C content workflow UX regression, run: "npm run test:fase6c-content-workflow-ux" }
       - { name: Mobile / desktop UI QA contract, run: "npm run test:mobile-desktop-ui-qa" }
       - { name: FASE 6D Admin UX regression, run: "npm run test:fase6d-admin-ux" }
