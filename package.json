@@ -13,6 +13,7 @@
     "test:fase7c-content-generation": "tsx tests/fase7c-content-generation.test.ts",
     "test:fase7a-editable-brand": "node tests/fase7a-editable-brand.test.mjs",
     "test:fase7a-brand-reanalysis-auth": "node tests/fase7a-brand-reanalysis-auth.test.mjs && node --import tsx tests/auth-token-runtime.test.ts",
+    "test:instagram-meta-media": "tsx tests/instagram-meta-media.test.ts",
     "test:instagram-creator-toolkit": "tsx tests/instagram-creator-toolkit.test.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
