@@ -150,8 +150,12 @@ async function run() {
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "RECONNECT_REQUIRED" }), "RECONNECT");
   assert.equal(socialProviderUiState({ provider: "FACEBOOK", configured: true, status: "ERROR" }), "ERROR", "real provider errors must remain errors");
   assert.equal(socialProviderUiState({ provider: "GBP", configured: false, status: "NOT_CONNECTED" }), "UNAVAILABLE", "missing provider configuration must not pretend to be disconnected");
-  assert.equal(socialUiSource.includes("Nessun social collegato"), true, "0/4 must be a normal empty state");
-  assert.equal(socialUiSource.includes("Collega almeno un account per iniziare a pubblicare."), true, "0/4 must explain the next action");
+  assert.equal(socialUiSource.includes("Canali verificati e pronti"), true, "0/4 denotes verified publishing readiness, not loss of saved accounts");
+  assert.equal(socialUiSource.includes("Collegamenti precedenti recuperati"), true, "existing OAuth account records must be visible separately from provider readiness");
+  assert.equal(socialUiSource.includes('.select("provider,status,account_name,last_validated_at,expires_at")'), true, "historical connection recovery reads only safe profile-scoped metadata");
+  assert.equal(socialUiSource.includes('.eq("profile_id", profileId)'), true, "historical connections must be scoped to the selected activity");
+  assert.equal(socialUiSource.includes("token_reference"), true, "UI comments must document that token references are never read");
+  assert.equal(socialUiSource.includes('"provider,status,account_name,last_validated_at,expires_at,token_reference"'), false, "frontend must never query OAuth references");
   assert.equal(socialUiSource.includes("Collega account"), true, "a disconnected provider must expose the correct CTA");
   assert.equal(socialUiSource.includes("PASS REAL"), true, "the UI must expose a truthful provider readiness matrix");
   assert.equal(socialUiSource.includes("provider.lastError ? readableError(provider.lastError)"), true, "the last safe OAuth error must remain visible after the callback redirect");
