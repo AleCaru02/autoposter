@@ -37,7 +37,7 @@ assert.ok(store.includes("I prossimi argomenti"),"The autonomous editorial plan 
 assert.ok(store.includes("Fonti e concorrenti"),"Competitor research status must be visible without invented claims");
 assert.ok(store.includes("currentProfileIdRef.current !== profileId"),"Ignore stale AI responses after switching activities");
 assert.ok(store.includes("overviewLoadedFor !== selectedProfile.id"),"Display only the selected activity's plan");
-assert.equal(/useEffect\\(\\(\\) => \\{\\s*if \\(overview\\?\\.settings\\.enabled.*triggerAutopilot/.test(store),false,"Opening Contenuti must not start paid AI requests");
+assert.equal(store.includes("if (overview?.settings.enabled && selectedProfile?.onboarding_completed) void triggerAutopilot()"),false,"Opening Contenuti must not start paid AI requests");
 assert.ok(store.includes("next.enabled && !previous.enabled"),"Only explicitly reactivating the Autopilot may request an immediate run");
 const storeApi=readFileSync(new URL("../src/features/content/autopilot-store.ts",import.meta.url),"utf8");
 assert.ok(storeApi.includes("aiEditorialPlan"),"Topics must come from actual saved AI plan");
