@@ -31,9 +31,10 @@ assert.equal(verifyCompetitorResearch({candidates:[{name:"Fake",website:"https:/
 assert.equal(verifyCompetitorResearch({candidates:[],providerSources:[],ownWebsite:null,searched:false}).status,"NOT_SEARCHED");
 const store=readFileSync(new URL("../src/pages/content-generator-page.tsx",import.meta.url),"utf8");
 assert.ok(store.indexOf("autopilot-master")<store.indexOf("<ManualContentComposer"),"Autopilot must come before manual form");
-assert.ok(store.includes("showManualComposer && <ManualContentComposer"),"Manual composer must be opt-in");
-assert.ok(store.includes("Piano editoriale scelto dall\'AI"),"The autonomous editorial plan must be visible");
-assert.ok(store.includes("Ricerca dei concorrenti"),"Competitor research status must be visible without invented claims");
+assert.ok(store.indexOf("I prossimi argomenti") < store.indexOf("Preferenze dell\'automazione"), "Saved AI plan must precede optional settings");
+assert.ok(store.includes("showManualComposer && <div className=\"editorial-manual-composer\""),"Manual composer must be opt-in");
+assert.ok(store.includes("I prossimi argomenti"),"The autonomous editorial plan must be immediately visible");
+assert.ok(store.includes("Fonti e concorrenti"),"Competitor research status must be visible without invented claims");
 const storeApi=readFileSync(new URL("../src/features/content/autopilot-store.ts",import.meta.url),"utf8");
 assert.ok(storeApi.includes("aiEditorialPlan"),"Topics must come from actual saved AI plan");
 assert.ok(storeApi.includes("VERIFIED_PUBLIC_SOURCES"),"Only verified competitor results may be displayed");
