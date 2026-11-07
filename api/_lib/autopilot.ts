@@ -44,7 +44,8 @@ type RecentContentRow = { id: string; topic: string; title: string | null; pilla
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
-type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; errors: string[] };
+type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
+type PlannedContentOutcome = { scheduled: boolean; blocked: boolean; skipped?: boolean; deferred?: boolean };
 
 const AUTO_QA_RESERVE_USD = 0.03;
 const MAX_PROFILES_PER_RUN = 100;
@@ -149,6 +150,17 @@ async function loadBrandContext(sql:Sql,profile:ProfileRow):Promise<{context:Bra
   const own=await loadProfileBrandContext(sql,profile);
   return{context:own.brand,visualIdentity:own.visualIdentity,personalBrand:null};
 }
+/** Prevent a previously rejected QA slot from being charged repeatedly by cron/page refresh. */
+export function shouldDeferRejectedAutopilotSlot(
+  record: { state: string; reason: string | null; created_at: string },
+  now = new Date(),
+): boolean {
+  if (record.state !== "RELEASED") return false;
+  if (!/^(OPENAI_EDITORIAL_QUALITY_BLOCKED|OPENAI_FACTCHECK_BLOCK|AUTOPILOT_DUPLICATE_CONTENT)(:|$)/.test(record.reason ?? "")) return false;
+  const age = now.getTime() - new Date(record.created_at).getTime();
+  return Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
+}
+
 export function chooseAutopilotPublishFormat(provider:SocialProvider,recentCount:number,requested?:SocialFormat|null,learned?:SocialFormat|null):SocialFormat{const supported=AUTOPILOT_PUBLISH_FORMATS[provider];if(learned&&supported.includes(learned))return learned;if(requested&&supported.includes(requested))return requested;return supported[recentCount%supported.length]??"POST";}
 export function chooseAutopilotContentType(format:SocialFormat):ContentType{return format==="STORY"?"SINGLE_STORY":format==="CAROUSEL"?"CAROUSEL":"SINGLE_POST";}
 async function recentTopics(sql:Sql,profileId:string){const rows=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 24` as unknown as RecentItemRow[];return rows.map(r=>r.topic).filter(Boolean);}
@@ -158,8 +170,20 @@ async function recentVariantCount(sql:Sql,profileId:string,provider:SocialProvid
 async function persistMasterDecision(sql:Sql,profileId:string,strategy:StrategyRow|undefined,decision:MasterEditorialDecision){const existing=asObject(strategy?.platform_strategy);const previous=asObject(existing.masterEditorialDecisions);const entries=Object.entries(previous).slice(-39);await sql`update public.content_strategies set platform_strategy=${JSON.stringify({...existing,masterEditorialDecisions:Object.fromEntries([...entries,[decision.id,decision]])})}::jsonb,updated_at=now() where profile_id=${profileId}::uuid`;}
 export async function currentSpend(sql:Sql,profileId:string){const rows=await sql`select coalesce(sum(cost_usd),0)::float8 as spend from public.ai_usage_events where profile_id=${profileId}::uuid and created_at>=${monthStartIso()}::timestamptz and operation in ('GENERATE_SOCIAL_TEXT','AGENT_RESEARCH','AGENT_FACTCHECK','AGENT_EDITORIAL_QA')` as unknown as SpendRow[];return Number(rows[0]?.spend??0)||0;}
 
-async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
-  const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
+async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}):Promise<PlannedContentOutcome>{
+  const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;
+  const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
+  const previousRejections=await sql`
+    select state,created_at,metadata->>'release_reason' as reason
+    from public.capability_usage_events
+    where profile_id=${profile.id}::uuid and capability_key='ai.content.generate_text'
+      and source='AI_TEXT_AUTOPILOT' and metadata->>'client_operation_identity'=${operationIdentity}
+      and state='RELEASED' and created_at>=now()-interval '24 hours'
+    order by created_at desc limit 20
+  ` as unknown as Array<{state:string;reason:string|null;created_at:string}>;
+  if(previousRejections.some(record=>shouldDeferRejectedAutopilotSlot(record)))
+    return {scheduled:false,blocked:false,skipped:true,deferred:true};
+  const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const websitePilot=provider==="INSTAGRAM"&&instagramWebsitePilotEnabled(strategy?.platform_strategy);const availableFormats:SocialFormat[]=websitePilot?["POST"]:AUTOPILOT_PUBLISH_FORMATS[provider];const learning=await activeLearningInsights(sql,profile.id);const planItem=websitePilot?null:selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,availableFormats,learning);const objective=websitePilot?"Ricevere richieste qualificate di bozza gratuita per siti web a 99 euro al mese":planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
   const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
@@ -239,19 +263,18 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     },
   });
   master.timing={scheduledAt,source:timingSource};
-  if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false};}
+  if(master.status==="SKIP_PUBLICATION"){await persistMasterDecision(sql,profile.id,strategy,master);return {scheduled:false,blocked:false,skipped:true};}
   const baseTopicRequest=websitePilot?instagramWebsitePilotBrief(count):effectivePlanItem?buildPlanDrivenTopicRequest(effectivePlanItem,topics):[pillar.instruction||"Scegli autonomamente un nuovo tema editoriale specifico e utile per questa attività.","Per i fatti specifici dell'attività usa solo sito e brand; per conoscenze di settore, consigli e aggiornamenti segui il filtro editoriale e usa ricerca esterna verificata quando consentita.",`Il contenuto è destinato a ${provider} nel formato ${format}.`,topics.length?`Evita di ripetere questi temi recenti: ${topics.join(" | ")}.`:"Evita temi generici e ripetitivi."].join(" ");
   const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);
   const profileStrategyInstruction=profileTypeStrategyInstruction({profileType:profile.profile_type,industry:profile.industry,businessModel:context.businessModel,offer:context.description,audience:context.target,objective,provider});
   const memoryInstruction=buildEditorialMemoryInstruction(memory);
   const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction].filter(Boolean).join("\n\n");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
-  const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
   const reservation=await meter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity,requestFingerprint:{provider,format,scheduledAt,topicRequest,objective,researchMode}});
   if(reservation.status==="DENIED")throw new Error(reservation.code);
   if(reservation.status==="COMPLETED")return reservation.cached.response as {scheduled:boolean;blocked:boolean};
   if(reservation.status==="IN_PROGRESS")throw new Error("AUTOPILOT_GENERATION_IN_PROGRESS");
-  if(reservation.status==="RELEASED")throw new Error("METERING_FAILED");
+  if(reservation.status==="RELEASED")return {scheduled:false,blocked:false,skipped:true,deferred:true};
   const logicalEventId=reservation.eventId;let logicalCommitted=false;const imageMeter=new ImageGenerationMetering(env.DATABASE_URL!);let imageEventId:string|null=null;let imageCommitted=false;let imageAssetId:string|null=null;
   try{
   const upper=estimateTextRequestUpperBoundUsd({topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode});const qaReserve=approvalMode==="AUTOMATIC"?AUTO_QA_RESERVE_USD:0;
@@ -447,7 +470,27 @@ export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}
   const result:RunResult={profilesChecked:0,generated:0,scheduled:0,blockedForReview:0,skipped:0,errors:[]};const now=new Date();const horizon=new Date(now.getTime()+8*DAY_MS).toISOString();
   for(const profile of profiles){if(result.generated>=maxGenerations)break;result.profilesChecked+=1;try{await ensureStrategy(sql,profile.id);await ensureSchedules(sql,profile);const strategies=await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profile.id}::uuid limit 1` as unknown as StrategyRow[];const strategy=strategies[0];const settings=settingsFromStrategy(strategy?.platform_strategy);if(!settings.enabled){result.skipped+=1;continue;}const schedules=await sql`select provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled from public.schedules where profile_id=${profile.id}::uuid and provider is not null and enabled=true and posts_per_week>0 order by provider asc` as unknown as ScheduleRow[];
     for(const schedule of schedules){if(result.generated>=maxGenerations)break;if(settings.websitePilot&&schedule.provider!=="INSTAGRAM")continue;const desired=Math.min(Math.max(Math.floor(schedule.posts_per_week),0),settings.websitePilot?2:21);if(!desired)continue;const jobs=await sql`select provider,scheduled_at from public.publication_jobs where profile_id=${profile.id}::uuid and provider=${schedule.provider} and scheduled_at>${now.toISOString()}::timestamptz and scheduled_at<${horizon}::timestamptz and state in ('SCHEDULED','BLOCKED_APPROVAL','QUEUED') order by scheduled_at asc` as unknown as JobRow[];if(jobs.length>=desired)continue;const learning=await activeLearningInsights(sql,profile.id);const learnedTiming=learnedTimingPreference(profile.id,schedule.provider,learning);const usedDates=new Set(jobs.map(job=>localDateKey(new Date(job.scheduled_at),schedule.timezone||profile.timezone||"Europe/Rome")));const candidates=candidateSlots(schedule,now,learnedTiming).filter(slot=>!usedDates.has(localDateKey(new Date(slot.scheduledAt),schedule.timezone||profile.timezone||"Europe/Rome")));const missing=Math.max(desired-jobs.length,0);
-      for(const slot of candidates.slice(0,missing)){if(result.generated>=maxGenerations)break;try{const created=await createPlannedContent({sql,env:env as Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv,profile,strategy,provider:schedule.provider,scheduledAt:slot.scheduledAt,timingSource:slot.timingSource,approvalMode:settings.websitePilot?"MANUAL_REVIEW":settings.approvalMode,allowImageGeneration});result.generated+=1;if(created.scheduled)result.scheduled+=1;if(created.blocked)result.blockedForReview+=1;}catch(reason){const detail=reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED";result.errors.push(`${profile.id}:${schedule.provider}:${detail}`);if(detail==="AUTOPILOT_ACTIVITY_BUDGET_STOP")return result;}}
+      let newAttempts=0;let filled=0;
+      for(const slot of candidates){
+        if(result.generated>=maxGenerations||filled>=missing||newAttempts>=missing)break;
+        if(new Date(slot.scheduledAt).getTime()>=new Date(horizon).getTime())continue;
+        try{
+          const created=await createPlannedContent({sql,env:env as Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv,profile,strategy,provider:schedule.provider,scheduledAt:slot.scheduledAt,timingSource:slot.timingSource,approvalMode:settings.websitePilot?"MANUAL_REVIEW":settings.approvalMode,allowImageGeneration});
+          if(created.skipped){
+            result.skipped+=1;
+            if(created.deferred)result.deferred=(result.deferred??0)+1;
+            continue;
+          }
+          newAttempts+=1;filled+=1;result.generated+=1;
+          if(created.scheduled)result.scheduled+=1;
+          if(created.blocked)result.blockedForReview+=1;
+        }catch(reason){
+          newAttempts+=1;
+          const detail=reason instanceof Error?reason.message:"AUTOPILOT_GENERATION_FAILED";
+          result.errors.push(`${profile.id}:${schedule.provider}:${detail}`);
+          if(detail==="AUTOPILOT_ACTIVITY_BUDGET_STOP")return result;
+        }
+      }
     }
   }catch(reason){result.errors.push(`${profile.id}:${reason instanceof Error?reason.message:"AUTOPILOT_PROFILE_FAILED"}`);}}
   return result;
