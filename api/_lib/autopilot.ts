@@ -22,6 +22,7 @@ import { decideVisualRuntime } from "./visual-runtime-decision.js";
 import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./brand-visual-assets.js";
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
 
@@ -298,6 +299,9 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
   const brandVisual=normalizeBrandVisualIdentity(loaded.visualIdentity,profile.industry);
+  const logoAssetId=confirmedBrandLogoId(loaded.visualIdentity);
+  const logoRows=logoAssetId?await sql`select storage_url,mime_type from public.assets where id=${logoAssetId}::uuid and profile_id=${profile.id}::uuid and kind='IMAGE' limit 1` as unknown as Array<{storage_url:string;mime_type:string|null}>:[];
+  const logoDataUrl=verifiedBrandLogoDataUrl(logoRows[0]);
   const decisionRecord=JSON.stringify({
     source:"AUTOPILOT",
     masterDecisionId:master.id,
@@ -393,7 +397,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         imageEventId=imageReservation.eventId;
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
-        const typography={brand:profile.name,headline:variant.hook,subheadline:null};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
+        const typography={brand:profile.name,headline:variant.hook,subheadline:null,logoDataUrl,style:brandTextStyle(brandVisual.activeSocialPalette)};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
