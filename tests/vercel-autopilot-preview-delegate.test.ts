@@ -80,6 +80,6 @@ try {
 const page=readFileSync(new URL("../src/pages/content-generator-page.tsx",import.meta.url),"utf8");
 assert.match(page,/AutopilotRunResponse/);
 assert.match(page,/autopilotFailureMessage/);
-assert.ok(page.includes("Generazione in corso"));
+assert.ok(page.includes("Preparazione in corso"), "Real Autopilot loading must be visible to users");
 assert.equal(page.includes("Autopilot non avviato. Riprova tra poco."),false,"No generic error concealing server capability");
 console.log("Preview canonical autopilot delegate and truthful execution feedback: PASS");
