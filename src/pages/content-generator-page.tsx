@@ -216,6 +216,36 @@ export function ContentGeneratorPage() {
       <article><span>4</span><div><strong>Organizza il calendario</strong><p>Rispetta le frequenze dell'attività e prepara i contenuti nei giorni previsti.</p></div></article>
     </section>
 
+    <section className="panel">
+      <div className="panel-heading"><div>
+        <h2>Piano editoriale scelto dall'AI</h2>
+        <p>Argomenti selezionati in autonomia per questa attività. Non devi inserirli tu. Le date di pubblicazione effettive sono nel Calendario.</p>
+      </div><Sparkles size={20}/></div>
+      {overview.editorialPlan ? <>
+        <p className="field-help">Piano generato: {overview.editorialPlan.generatedAt ? new Intl.DateTimeFormat("it-IT", {day:"2-digit",month:"long",year:"numeric"}).format(new Date(overview.editorialPlan.generatedAt)) : "data non disponibile"}.
+          {overview.editorialPlan.generatedAt && Date.now() - new Date(overview.editorialPlan.generatedAt).getTime() > 14 * 86400000 ? " Piano datato: l'Autopilot dovrà aggiornarlo prima di utilizzarlo." : ""}
+        </p>
+        <div className="autopilot-plan-preview">
+          {overview.editorialPlan.items.map((item,index) => <article className="autopilot-plan-topic" key={`${item.provider}-${item.dayOffset}-${index}`}>
+            <small>Giorno {item.dayOffset+1} · {PROVIDER_LABELS[item.provider] ?? item.provider} · {item.contentType}</small>
+            <strong>{item.topicDirection}</strong>
+            {item.objective && <p>{item.objective}</p>}
+          </article>)}
+        </div>
+      </> : <p>Il piano non è ancora disponibile. L'Autopilot dovrà crearlo tramite OpenAI quando saranno disponibili configurazione API e budget.</p>}
+    </section>
+
+    <section className="panel">
+      <div className="panel-heading"><div><h2>Ricerca dei concorrenti</h2><p>Solo siti pubblici identificati e verificati tramite fonti di ricerca; nessuna metrica social dei concorrenti viene inventata.</p></div><Globe2 size={20}/></div>
+      {overview.competitorResearch.competitors.length ? <div className="autopilot-plan-preview">
+        {overview.competitorResearch.competitors.map(competitor => <article className="autopilot-plan-topic" key={competitor.website}>
+          <strong>{competitor.name}</strong>
+          <p>{competitor.editorialOpportunity}</p>
+          <a href={competitor.website} target="_blank" rel="noopener noreferrer">Sito pubblico verificato</a>
+        </article>)}
+      </div> : <p>Non risultano ancora concorrenti verificati per questa attività. La ricerca sarà eseguita nel prossimo aggiornamento della strategia; finché non ci sono fonti reali, non vengono mostrati risultati inventati.</p>}
+    </section>
+
     <section className="panel autopilot-plan-panel">
       <div className="panel-heading"><div><h2>Piano attuale</h2><p>Le frequenze si modificano dal calendario; qui vedi cosa sta usando l'autopilot.</p></div><CalendarDays size={20} /></div>
       {overview.schedules.length ? <div className="autopilot-schedule-list">{overview.schedules.filter((schedule) => schedule.enabled).map((schedule) => <div key={schedule.provider}><span>{PROVIDER_LABELS[schedule.provider] ?? schedule.provider}</span><strong>{schedule.posts_per_week} {schedule.posts_per_week === 1 ? "contenuto" : "contenuti"} / settimana</strong></div>)}</div> : <p className="autopilot-preparing">Il piano iniziale viene preparato automaticamente.</p>}
