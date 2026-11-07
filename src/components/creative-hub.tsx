@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, CalendarDays, CircleCheck, Film, Image as ImageIcon, Instagram, LayoutGrid, ShieldCheck, Sparkles, WandSparkles, Zap } from "lucide-react";
+import { ArrowRight, CalendarDays, CircleCheck, Image as ImageIcon, Instagram, LayoutGrid, ShieldCheck, Sparkles, WandSparkles, Zap } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 type CreativeHubProps = {
@@ -12,16 +11,6 @@ type CreativeHubProps = {
 
 /** Operational quick-start: never pretends that a provider is connected or a Reel is already generated. */
 export function CreativeHub({ profileName, publishedCount, reviewCount, scheduledCount, connectedCount }: CreativeHubProps) {
-  const [videoClips, setVideoClips] = useState(12);
-  const [images, setImages] = useState(20);
-  const [quality, setQuality] = useState<"lite" | "standard">("standard");
-  const budget = useMemo(() => {
-    const videoUsd = videoClips * 6 * 0.10;
-    const imageUsd = images * (quality === "lite" ? 0.0336 : 0.067);
-    return { videoUsd, imageUsd, subtotalUsd: videoUsd + imageUsd };
-  }, [videoClips, images, quality]);
-  const money = (n: number) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "USD" }).format(n);
-
   return <div className="creator-hub-v2">
     <section className="creator-main-hero" aria-label="Studio creativo">
       <div className="creator-hero-orb" aria-hidden="true" />
@@ -37,9 +26,9 @@ export function CreativeHub({ profileName, publishedCount, reviewCount, schedule
       </div>
       <div className="creator-device-art" aria-hidden="true">
         <div className="creator-ig-frame">
-          <div className="creator-ig-top"><div className="creator-avatar">A</div><span>@alessandro.sitiweb</span><span className="creator-dots">•••</span></div>
-          <div className="creator-ig-visual"><div className="creator-line-mini">NON È SOLO UN SITO.</div><strong>È LA TUA<br /><em>VETRINA</em><br />DIGITALE.</strong><div className="creator-ig-line" /></div>
-          <div className="creator-ig-footer"><div className="creator-ig-miniicons"><span>♡</span><span>▢</span><span>↗</span></div><div className="creator-ig-caption">Concept di anteprima · non pubblicato</div></div>
+          <div className="creator-ig-top"><div className="creator-avatar">{profileName.trim().charAt(0).toUpperCase() || "A"}</div><span>{profileName}</span><span className="creator-dots">•••</span></div>
+          <div className="creator-ig-visual"><div className="creator-line-mini">ANTEPRIMA GRAFICA</div><strong>IL TUO<br /><em>BRAND</em><br />AL CENTRO.</strong><div className="creator-ig-line" /></div>
+          <div className="creator-ig-footer"><div className="creator-ig-miniicons"><span>♡</span><span>▢</span><span>↗</span></div><div className="creator-ig-caption">Esempio illustrativo · non generato e non pubblicato</div></div>
         </div>
       </div>
     </section>
@@ -57,13 +46,11 @@ export function CreativeHub({ profileName, publishedCount, reviewCount, schedule
       <NavLink to="/app/analytics" className="creator-tool-tile"><span className="creator-tool-icon mint"><Zap size={22} /></span><strong>Visualizzazioni e risultati</strong><p>Analizza soltanto dati reali, per capire quali contenuti attirano clienti.</p><span className="creator-tool-cta">Apri risultati <ArrowRight size={15} /></span></NavLink>
     </section>
     <section className="creator-planning">
-      <div className="creator-plan-head"><div><p className="creator-overline dark">PIANIFICA SENZA SORPRESE</p><h2>Quanto spenderai in AI?</h2><p>Simulatore di costo, non spesa reale. Stima di 6 secondi a clip per Gemini Omni Flash 720p, più immagini Nano Banana.</p></div><div className="creator-plan-total"><span>Stima contenuti AI</span><strong>{money(budget.subtotalUsd)}</strong><small>esclusi input, rigenerazioni, montaggio, hosting e imposte</small></div></div>
-      <div className="creator-plan-controls">
-        <label><span>Clip AI al mese <strong>{videoClips}</strong></span><input aria-label="Numero di clip AI al mese" type="range" min="0" max="60" step="1" value={videoClips} onChange={e => setVideoClips(Number(e.target.value))}/><small>Gemini Omni Flash · {money(budget.videoUsd)}</small></label>
-        <label><span>Immagini AI al mese <strong>{images}</strong></span><input aria-label="Numero di immagini AI al mese" type="range" min="0" max="150" step="5" value={images} onChange={e => setImages(Number(e.target.value))}/><small>Nano Banana · {money(budget.imageUsd)}</small></label>
-        <label><span>Qualità immagini</span><select value={quality} onChange={e => setQuality(e.target.value as "lite" | "standard")}><option value="lite">Lite · 1K, $0,0336/immagine</option><option value="standard">Standard · 1K, $0,067/immagine</option></select><small>Prezzi indicativi API novembre 2026</small></label>
+      <div className="creator-plan-head">
+        <div><p className="creator-overline dark">COSTI AI REALI</p><h2>Budget sotto controllo</h2><p>Testi e immagini sono elaborati con OpenAI. I costi reali vengono registrati per attività quando il provider fornisce dati verificabili: non mostriamo simulazioni con modelli non utilizzati.</p></div>
+        <div className="creator-plan-total"><span>Controllo spesa</span><NavLink to="/app/impostazioni">Apri budget AI <ArrowRight size={15} /></NavLink><small>Imposta limiti per account e attività</small></div>
       </div>
-      <p className="creator-plan-note"><CircleCheck size={15} /> Questo calcolo non avvia la generazione e non crea costi. I video AI cloud richiedono la relativa chiave API, un limite di spesa lato server e l'attivazione del renderer.</p>
+      <p className="creator-plan-note"><CircleCheck size={15} /> I Reel AI non sono ancora attivi: la pubblicazione video richiede renderer, file persistenti, collegamenti social e controlli reali. Non vengono effettuate chiamate video o addebiti da questa schermata.</p>
     </section>
   </div>;
 }
