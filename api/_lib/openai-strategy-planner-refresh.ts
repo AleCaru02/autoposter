@@ -46,8 +46,8 @@ export async function ensureOpenAIStrategyPlannerFresh(env: StrategyPlannerRefre
     await meter.markProviderStarted(eventId);
     let strategy=validStrategy(existing.aiStrategy)?existing.aiStrategy:null;let strategyResult:Awaited<ReturnType<typeof generateOpenAIStrategy>>|null=null;
     if(decision.refreshStrategy){
-      strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives,websiteEvidence,learningInsights:learning});
-      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_STRATEGIST",model:"gpt-5.6-terra",inputTokens:strategyResult.usage.inputTokens,outputTokens:strategyResult.usage.outputTokens,responseId:strategyResult.responseId,requestId:strategyResult.requestId,metadata:{agent:"STRATEGIST",refresh:true}});
+      strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives,websiteEvidence,enablePublicMarketSearch:existing.researchMode!=="WEBSITE_ONLY",learningInsights:learning});
+      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_STRATEGIST",model:"gpt-5.6-terra",inputTokens:strategyResult.usage.inputTokens,outputTokens:strategyResult.usage.outputTokens,responseId:strategyResult.responseId,requestId:strategyResult.requestId,webSearchCalls:strategyResult.usage.webSearchCalls??0,metadata:{agent:"STRATEGIST",refresh:true,web_search_calls:strategyResult.usage.webSearchCalls??0,verified_competitors:strategyResult.output.competitorResearch?.competitors.length??0}});
       strategy=strategyResult.output;const total=Object.values(strategy.contentMix).reduce((sum,value)=>sum+value,0);if(total!==100)throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
     }
     if(!strategy)throw new Error("OPENAI_STRATEGY_MISSING");
