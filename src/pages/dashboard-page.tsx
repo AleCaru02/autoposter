@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, BarChart3, CalendarClock, CheckCircle2, File
 import { NavLink } from "react-router-dom";
 import { CreativeHub } from "../components/creative-hub";
 import { neonClient } from "../lib/neon-client";
+import { authenticatedApiToken } from "../lib/auth-token";
 import { useProfiles } from "../features/profiles/profile-context";
 
 type DashboardJob = { id: string; provider: string; state: string; scheduled_at: string; next_attempt_at: string | null; published_at: string | null; outcome_unknown: boolean; updated_at: string; last_error: string | null };
@@ -12,6 +13,29 @@ type DashboardData = { content: number; approvals: number; connected: number; jo
 
 const emptyData: DashboardData = { content: 0, approvals: 0, connected: 0, jobs: [], metrics: [], insights: [] };
 const providerNames: Record<string, string> = { FACEBOOK: "Facebook", INSTAGRAM: "Instagram", LINKEDIN: "LinkedIn" };
+/**
+ * Counts only profile-scoped connections whose server-side provider preflight
+ * reports PASS_REAL. A stale ACTIVE database row is not proof of readiness.
+ * Unavailable status endpoints fail closed: never invent a connected channel.
+ */
+async function verifiedSocialCount(profileId: string) {
+  try {
+    const token = await authenticatedApiToken();
+    const response = await fetch(`/api/social/status?profileId=${encodeURIComponent(profileId)}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!response.ok) return 0;
+    const body = await response.json() as { providers?: Array<{ readiness?: { state?: string } }> };
+    return Array.isArray(body.providers)
+      ? body.providers.filter((provider) => provider.readiness?.state === "PASS_REAL").length
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
 
 function providerName(value: string) { return providerNames[value.toUpperCase()] ?? value; }
 function formatMoment(value: string, includeTime = true) {
@@ -41,15 +65,15 @@ export function DashboardPage() {
     async function load() {
       setLoading(true);
       setError(null);
-      const [content, approvals, jobs, connections, metrics, insights] = await Promise.all([
+      const [content, approvals, jobs, metrics, insights, connected] = await Promise.all([
         neonClient.from("content_items").select("id", { count: "exact", head: true }).eq("profile_id", profileId),
         neonClient.from("content_variants").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("approval_status", "PENDING"),
         neonClient.from("publication_jobs").select("id,provider,state,scheduled_at,next_attempt_at,published_at,outcome_unknown,updated_at,last_error").eq("profile_id", profileId).order("scheduled_at", { ascending: false }).limit(100),
-        neonClient.from("social_connections").select("id", { count: "exact", head: true }).eq("profile_id", profileId).eq("status", "ACTIVE"),
         neonClient.from("metric_snapshots").select("id,provider,external_post_id,metrics,captured_at").eq("profile_id", profileId).order("captured_at", { ascending: false }).limit(100),
         neonClient.from("learning_insights").select("id,insight,confidence,recommended_action,created_at").eq("profile_id", profileId).is("applied_at", null).order("created_at", { ascending: false }).limit(1),
+        verifiedSocialCount(profileId),
       ]);
-      const firstError = [content.error, approvals.error, jobs.error, connections.error, metrics.error, insights.error].find(Boolean);
+      const firstError = [content.error, approvals.error, jobs.error, metrics.error, insights.error].find(Boolean);
       if (!active) return;
       setLoading(false);
       if (firstError) {
@@ -57,7 +81,7 @@ export function DashboardPage() {
         setError("Non riesco ad aggiornare la panoramica. I tuoi dati non sono stati modificati.");
         return;
       }
-      setData({ content: content.count ?? 0, approvals: approvals.count ?? 0, connected: connections.count ?? 0, jobs: (jobs.data ?? []) as DashboardJob[], metrics: (metrics.data ?? []) as MetricSnapshot[], insights: (insights.data ?? []) as LearningInsight[] });
+      setData({ content: content.count ?? 0, approvals: approvals.count ?? 0, connected, jobs: (jobs.data ?? []) as DashboardJob[], metrics: (metrics.data ?? []) as MetricSnapshot[], insights: (insights.data ?? []) as LearningInsight[] });
     }
     void load();
     return () => { active = false; };
@@ -83,7 +107,7 @@ export function DashboardPage() {
     : data.approvals > 0
       ? { icon: FileCheck2, eyebrow: "Da fare ora", title: `${data.approvals} contenut${data.approvals === 1 ? "o" : "i"} da rivedere`, body: "Controlla testo e immagine, poi approva ciò che è pronto per il calendario.", label: "Apri revisioni", to: "/app/approvazioni" }
     : data.connected === 0
-      ? { icon: Share2, eyebrow: "Prossimo passo", title: "Collega il primo canale social", body: "Scegli dove pubblicare: i collegamenti restano separati per questa attività.", label: "Collega un social", to: "/app/social" }
+      ? { icon: Share2, eyebrow: "Prossimo passo", title: "Verifica le connessioni social", body: "Nessun canale risulta pronto per la pubblicazione. Controlla le autorizzazioni nella sezione Social.", label: "Verifica i social", to: "/app/social" }
       : view.upcoming.length === 0
         ? { icon: CalendarClock, eyebrow: "Prossimo passo", title: "Prepara la prossima pubblicazione", body: "Crea un contenuto e scegli quando deve uscire.", label: "Crea contenuto", to: "/app/contenuti" }
         : { icon: CheckCircle2, eyebrow: "Tutto sotto controllo", title: "Il piano editoriale è in movimento", body: `La prossima pubblicazione è prevista ${formatMoment(view.upcoming[0].scheduled_at)}.`, label: "Apri calendario", to: "/app/calendario" };
@@ -101,7 +125,7 @@ export function DashboardPage() {
         <section className="dashboard-card dashboard-schedule"><div className="dashboard-card-head"><div><p className="eyebrow">In calendario</p><h2>Prossime pubblicazioni</h2></div><NavLink to="/app/calendario">Vedi calendario</NavLink></div>{view.upcoming.length ? <div className="dashboard-list">{view.upcoming.map((job) => <article key={job.id}><span className="provider-dot" /><div><strong>{providerName(job.provider)}</strong><small>{job.state === "BLOCKED_APPROVAL" ? "In attesa di approvazione" : job.state === "PROCESSING" ? "In pubblicazione" : job.next_attempt_at ? "Da riprovare" : "Programmato"}</small></div><time>{formatMoment(job.next_attempt_at || job.scheduled_at)}</time></article>)}</div> : <div className="dashboard-empty"><CalendarClock size={22} /><div><strong>Calendario libero</strong><p>Il prossimo contenuto che programmi comparirà qui.</p></div></div>}<div className="dashboard-recent"><strong>Pubblicato di recente</strong>{view.published.length ? <div className="dashboard-list">{view.published.slice(0, 2).map((job) => <article key={job.id}><span className="provider-dot published" /><div><strong>{providerName(job.provider)}</strong><small>Pubblicato</small></div><time>{formatMoment(job.published_at || job.updated_at)}</time></article>)}</div> : <p>Nessuna pubblicazione completata per questa attività.</p>}</div></section>
         <section className="dashboard-card dashboard-performance"><div className="dashboard-card-head"><div><p className="eyebrow">Risultati</p><h2>Come stanno andando i social</h2></div><NavLink to="/app/analytics">Apri analytics</NavLink></div>{view.metricEntries.length ? <><div className="dashboard-metrics">{view.metricEntries.map((entry) => <article key={entry.label}><strong>{entry.value}</strong><span>{entry.label}</span></article>)}</div><small className="dashboard-source">{view.metricPostCount} post · aggiornato {formatMoment(data.metrics[0].captured_at, false)}</small></> : <div className="dashboard-empty"><BarChart3 size={22} /><div><strong>Risultati non ancora disponibili</strong><p>Compariranno dopo le prime pubblicazioni e la raccolta dei dati reali.</p></div></div>}</section>
         <section className="dashboard-card dashboard-advice"><div className="dashboard-card-head"><div><p className="eyebrow">Consiglio AI</p><h2>La prossima ottimizzazione</h2></div><Lightbulb size={21} /></div>{advice ? <><blockquote>{advice}</blockquote><NavLink className="text-link" to="/app/apprendimento">Vedi tutti i consigli <ArrowRight size={14} /></NavLink></> : <div className="dashboard-empty"><Lightbulb size={22} /><div><strong>Sto raccogliendo segnali utili</strong><p>Dopo abbastanza pubblicazioni, qui apparirà un consiglio basato sui risultati reali.</p></div></div>}</section>
-        <section className={`dashboard-card dashboard-issues ${view.failed.length || data.connected === 0 ? "needs-attention" : ""}`}><div className="dashboard-card-head"><div><p className="eyebrow">Controlli</p><h2>Problemi da risolvere</h2></div>{view.failed.length || data.connected === 0 ? <AlertTriangle size={21} /> : <CheckCircle2 size={21} />}</div>{view.failed.length ? <div className="dashboard-issue"><strong>{view.failed.length} pubblicazion{view.failed.length === 1 ? "e" : "i"} non riuscit{view.failed.length === 1 ? "a" : "e"}</strong><p>Apri il calendario per verificare il canale e riprogrammare.</p><NavLink to="/app/calendario">Risolvi <ArrowRight size={14} /></NavLink></div> : data.connected === 0 ? <div className="dashboard-issue"><strong>Nessun social collegato</strong><p>Collega almeno un canale prima di pubblicare.</p><NavLink to="/app/social">Collega ora <ArrowRight size={14} /></NavLink></div> : <div className="dashboard-clear"><CheckCircle2 size={20} /><span>Nessun problema operativo rilevato.</span></div>}</section>
+        <section className={`dashboard-card dashboard-issues ${view.failed.length || data.connected === 0 ? "needs-attention" : ""}`}><div className="dashboard-card-head"><div><p className="eyebrow">Controlli</p><h2>Problemi da risolvere</h2></div>{view.failed.length || data.connected === 0 ? <AlertTriangle size={21} /> : <CheckCircle2 size={21} />}</div>{view.failed.length ? <div className="dashboard-issue"><strong>{view.failed.length} pubblicazion{view.failed.length === 1 ? "e" : "i"} non riuscit{view.failed.length === 1 ? "a" : "e"}</strong><p>Apri il calendario per verificare il canale e riprogrammare.</p><NavLink to="/app/calendario">Risolvi <ArrowRight size={14} /></NavLink></div> : data.connected === 0 ? <div className="dashboard-issue"><strong>Nessun social pronto</strong><p>Verifica credenziali, autorizzazioni e stato delle connessioni prima di pubblicare.</p><NavLink to="/app/social">Verifica ora <ArrowRight size={14} /></NavLink></div> : <div className="dashboard-clear"><CheckCircle2 size={20} /><span>Nessun problema operativo rilevato.</span></div>}</section>
       </div>
     </>}
   </div>;
