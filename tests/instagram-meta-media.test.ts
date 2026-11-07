@@ -48,7 +48,7 @@ const social=readFileSync(new URL("../api/_lib/social.ts",import.meta.url),"utf8
 assert.match(social,/publishInstagramCarousel/);
 assert.match(social,/validateInstagramCarousel\(slides\)/);
 assert.match(social,/beforeVisibleWrite/);
-assert.match(social,/is_carousel_item/);
+assert.match(readFileSync(new URL("../api/_lib/instagram-media.ts",import.meta.url),"utf8"),/is_carousel_item/);
 assert.match(social,/validateInstagramPublishImage/);
 assert.match(social,/JPEG_MEDIA_INVALID/);
 assert.match(social,/childContainerIds/);
