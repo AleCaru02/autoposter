@@ -6,8 +6,12 @@ const source = readFileSync(new URL("../src/components/creative-hub.tsx", import
 for (const forbidden of ["Gemini Omni Flash", "Nano Banana", "@alessandro.sitiweb"]) {
   assert.ok(!source.includes(forbidden), `Dashboard must not show unconfigured providers or a fixed external brand: ${forbidden}`);
 }
-assert.match(source, /<span>\{profileName\}<\/span>/, "The graphic demo must use the selected profile name");
-assert.match(source, /Esempio illustrativo · non generato e non pubblicato/, "Graphic example must be labeled non-real");
+assert.match(source, /STUDIO|POST AUTOMATICI/, "The command center must show product identity");
+assert.match(source, /\{profileName\}/, "The workspace must remain scoped to the selected profile");
+assert.doesNotMatch(source, /creator-ig-frame|creator-ig-visual|Esempio illustrativo/, "Do not use fake Instagram screenshots in an operational dashboard");
+assert.match(source, /reviewCount > 0[\s\S]*connectedCount === 0/, "The primary action must prioritize real reviews and social readiness");
+assert.match(source, /\{publishedCount\}/, "Real published-job counts must remain visible");
+assert.match(source, /\{scheduledCount\}/, "Real upcoming-job counts must remain visible");
 assert.match(source, /Apri budget AI/, "Budget actions must open the real settings");
 assert.match(source, /I Reel AI non sono ancora attivi/, "Reels must be explicitly unavailable until configured");
 assert.ok(!source.includes("Simulatore di costo"), "Unverified price estimates must not be shown");
