@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { handleSameOriginAuthProxy } from "../../cloudflare/auth-proxy.js";
-import { APP_ORIGIN, normalizeNeonAuthCookie } from "../auth.js";
+import { resolveAuthOrigin, normalizeNeonAuthCookie } from "../auth.js";
 
 const CHALLENGE_COOKIE = /(?:^|;\s*)__Secure-neon-auth\.session_chall(?:enge|ange)=/;
 const SESSION_COOKIE = /^__Secure-neon-auth\.session_token=/;
@@ -14,10 +14,10 @@ type Failure =
   | "session_cookie_missing"
   | "callback_failed";
 
-function fail(res: VercelResponse, code: Failure, linking = false) {
+function fail(res: VercelResponse, code: Failure, appOrigin: string, linking = false) {
   res.setHeader("cache-control", "no-store");
   res.setHeader("referrer-policy", "no-referrer");
-  res.setHeader("location", APP_ORIGIN + (linking ? "/collega-google" : "/login") + "?oauth=" + code);
+  res.setHeader("location", appOrigin + (linking ? "/collega-google" : "/login") + "?oauth=" + code);
   return res.status(302).send("");
 }
 
@@ -47,9 +47,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("referrer-policy", "no-referrer");
 
   if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
-  if (first(req.headers.host) !== new URL(APP_ORIGIN).host) return res.status(403).json({ error: "CALLBACK_HOST_NOT_ALLOWED" });
+  const appOrigin = resolveAuthOrigin(first(req.headers.host));
+  if (!appOrigin) return res.status(403).json({ error: "CALLBACK_HOST_NOT_ALLOWED" });
   const linking = first(req.query.after) === "link";
-  const successDestination = APP_ORIGIN + (linking ? "/collega-google?linked=1" : "/app/dashboard");
+  const successDestination = appOrigin + (linking ? "/collega-google?linked=1" : "/app/dashboard");
   // Better Auth sends a reason through the provider's error callback.
   // Earlier versions collapsed every reason to provider_failed, making
   // account linking, Google denial and malformed OAuth state indistinguishable.
@@ -70,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.warn("google-oauth-return-error", { reason: code });
     res.setHeader("cache-control", "no-store");
     res.setHeader("referrer-policy", "no-referrer");
-    res.setHeader("location", APP_ORIGIN + (linking ? "/collega-google" : "/login") + "?oauth=provider_" + code);
+    res.setHeader("location", appOrigin + (linking ? "/collega-google" : "/login") + "?oauth=provider_" + code);
     return res.status(302).send("");
   }
 
@@ -82,29 +83,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // listAccounts() before reporting that Google is actually connected.
   if (linking && !verifier) {
     if (!/(?:^|;\s*)__Secure-neon-auth\.session_token=/.test(incomingCookies)) {
-      return fail(res, "session_cookie_missing", true);
+      return fail(res, "session_cookie_missing", appOrigin, true);
     }
     try {
-      const request = new Request(APP_ORIGIN + "/api/auth/get-session?disableCookieCache=true", {
+      const request = new Request(appOrigin + "/api/auth/get-session?disableCookieCache=true", {
         method: "GET", headers: { cookie: incomingCookies, accept: "application/json" },
         redirect: "manual",
       });
-      const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: APP_ORIGIN });
+      const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: appOrigin });
       const body = response?.ok ? await response.json().catch(() => null) as { session?: unknown; user?: unknown } | null : null;
-      if (!body?.session || !body.user) return fail(res, "exchange_failed", true);
+      if (!body?.session || !body.user) return fail(res, "exchange_failed", appOrigin, true);
       const cookies = response?.headers.getSetCookie().map(normalizeNeonAuthCookie).filter(Boolean) ?? [];
       if (cookies.length) res.setHeader("set-cookie", cookies);
       res.setHeader("location", successDestination);
       return res.status(302).send("");
     } catch {
-      return fail(res, "callback_failed", true);
+      return fail(res, "callback_failed", appOrigin, true);
     }
   }
 
-  if (!verifier || verifier.length > MAX_VERIFIER_LENGTH || /\s/.test(verifier)) return fail(res, "missing_verifier", linking);
-  if (!CHALLENGE_COOKIE.test(incomingCookies)) return fail(res, "missing_challenge", linking);
+  if (!verifier || verifier.length > MAX_VERIFIER_LENGTH || /\s/.test(verifier)) return fail(res, "missing_verifier", appOrigin, linking);
+  if (!CHALLENGE_COOKIE.test(incomingCookies)) return fail(res, "missing_challenge", appOrigin, linking);
 
-  const target = new URL(`${APP_ORIGIN}/api/auth/get-session`);
+  const target = new URL(`${appOrigin}/api/auth/get-session`);
   target.searchParams.set("neon_auth_session_verifier", verifier);
   const request = new Request(target.toString(), {
     method: "GET",
@@ -113,15 +114,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   try {
-    const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: APP_ORIGIN });
-    if (!response?.ok) return fail(res, "exchange_failed", linking);
+    const response = await handleSameOriginAuthProxy(request, { APP_BASE_URL: appOrigin });
+    if (!response?.ok) return fail(res, "exchange_failed", appOrigin, linking);
     const cookies = response.headers.getSetCookie().map(normalizeNeonAuthCookie).filter(Boolean);
-    if (!cookies.some(activeSessionCookie)) return fail(res, "session_cookie_missing", linking);
+    if (!cookies.some(activeSessionCookie)) return fail(res, "session_cookie_missing", appOrigin, linking);
 
     res.setHeader("set-cookie", cookies);
     res.setHeader("location", successDestination);
     return res.status(302).send("");
   } catch {
-    return fail(res, "callback_failed", linking);
+    return fail(res, "callback_failed", appOrigin, linking);
   }
 }
