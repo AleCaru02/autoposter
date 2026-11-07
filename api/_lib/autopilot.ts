@@ -46,6 +46,7 @@ type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
 type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
 type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
+type PlannedContentOutcome = { scheduled: boolean; blocked: boolean; skipped?: boolean; deferred?: boolean };
 
 const AUTO_QA_RESERVE_USD = 0.03;
 const MAX_PROFILES_PER_RUN = 100;
@@ -176,7 +177,7 @@ async function recentVariantCount(sql:Sql,profileId:string,provider:SocialProvid
 async function persistMasterDecision(sql:Sql,profileId:string,strategy:StrategyRow|undefined,decision:MasterEditorialDecision){const existing=asObject(strategy?.platform_strategy);const previous=asObject(existing.masterEditorialDecisions);const entries=Object.entries(previous).slice(-39);await sql`update public.content_strategies set platform_strategy=${JSON.stringify({...existing,masterEditorialDecisions:Object.fromEntries([...entries,[decision.id,decision]])})}::jsonb,updated_at=now() where profile_id=${profileId}::uuid`;}
 export async function currentSpend(sql:Sql,profileId:string){const rows=await sql`select coalesce(sum(cost_usd),0)::float8 as spend from public.ai_usage_events where profile_id=${profileId}::uuid and created_at>=${monthStartIso()}::timestamptz and operation in ('GENERATE_SOCIAL_TEXT','AGENT_RESEARCH','AGENT_FACTCHECK','AGENT_EDITORIAL_QA')` as unknown as SpendRow[];return Number(rows[0]?.spend??0)||0;}
 
-async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}){
+async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEnv,"OPENAI_API_KEY">>&AutopilotEnv;profile:ProfileRow;strategy:StrategyRow|undefined;provider:SocialProvider;scheduledAt:string;timingSource:AutopilotCandidateSlot["timingSource"];approvalMode:ApprovalMode;allowImageGeneration:boolean}):Promise<PlannedContentOutcome>{
   const{sql,env,profile,strategy,provider,scheduledAt,timingSource,approvalMode,allowImageGeneration}=input;
   const operationIdentity=`autopilot:${profile.id}:${provider}:${scheduledAt}`;
   // Read-only cooldown. Preserve rejected events for audit and real cost tracking.
