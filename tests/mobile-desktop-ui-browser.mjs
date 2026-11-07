@@ -200,7 +200,7 @@ function rowsForTable(table, url) {
   if (table === "learning_insights") return [];
   if (table === "social_connections") return [{ id: "10000000-0000-4000-8000-000000000006", profile_id: profileId, status: "ACTIVE" }];
   if (table === "content_strategies") return [{ platform_strategy: {
-    autopilotEnabled: false,
+    autopilotEnabled: true,
     researchMode: "BALANCED",
     aiEditorialPlanGeneratedAt: now.toISOString(),
     aiEditorialPlan: { items: [
