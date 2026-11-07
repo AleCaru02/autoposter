@@ -159,56 +159,6 @@ jobs:
       - { name: Cloudflare bundle dry run, run: "npx wrangler deploy --dry-run" }
 
 
-  recoverable-secret-presence:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'AleCaru02/autoposter'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check presence of historical provider and Vercel deployment secrets ONLY
-        shell: bash
-        env:
-          SOCIAL_TOKEN_KEY_VALUE: ${{ secrets.SOCIAL_TOKEN_KEY }}
-          META_APP_SECRET_VALUE: ${{ secrets.META_APP_SECRET }}
-          LINKEDIN_CLIENT_SECRET_VALUE: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
-          GOOGLE_CLIENT_SECRET_VALUE: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          VERCEL_TOKEN_VALUE: ${{ secrets.VERCEL_TOKEN }}
-          CLOUDFLARE_API_TOKEN_VALUE: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID_VALUE: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          for k in SOCIAL_TOKEN_KEY META_APP_SECRET LINKEDIN_CLIENT_SECRET GOOGLE_CLIENT_SECRET VERCEL_TOKEN CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
-            var="${k}_VALUE"
-            if [ -n "${!var}" ]; then echo "${k}=PRESENT"; else echo "${k}=MISSING"; fi
-          done
-
-
-  cloudflare-binding-audit:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == 'AleCaru02/autoposter'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Inspect Cloudflare Worker secret binding NAMES, not their values
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          curl -fsSL --max-time 20 --retry 1 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/autoposter/settings"             -o /tmp/worker-bindings.json
-          python3 - <<'PY'
-          import json
-          data=json.load(open('/tmp/worker-bindings.json'))
-          if data.get('success') is not True:
-              print('WORKER_BINDINGS=UNAVAILABLE')
-              raise SystemExit(1)
-          bindings=data.get('result',{}).get('bindings',[])
-          binding_names={b.get('name') for b in bindings if b.get('type') in ('secret_text','secret_key','secret')}
-          for name in ('SOCIAL_TOKEN_KEY','META_APP_SECRET','LINKEDIN_CLIENT_SECRET','GOOGLE_CLIENT_SECRET'):
-              print(f'WORKER_{name}=' + ('PRESENT' if name in binding_names else 'MISSING'))
-          PY
-          rm -f /tmp/worker-bindings.json
-
   fresh-database:
     runs-on: ubuntu-latest
     timeout-minutes: 12
