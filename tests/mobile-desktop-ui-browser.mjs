@@ -244,7 +244,7 @@ async function installFixtureRoutes(page, { authenticated = true, socialFailure 
         return;
       }
       if (url.pathname.endsWith("/token")) {
-        await route.fulfill({ status: authenticated ? 200 : 401, headers: { "content-type": "application/json" }, body: JSON.stringify(authenticated ? { token: "fixture-session-token" } : { error: "AUTH_REQUIRED" }) });
+        await route.fulfill({ status: authenticated ? 200 : 401, headers: { "content-type": "application/json" }, body: JSON.stringify(authenticated ? { token: "fixture.header.signature" } : { error: "AUTH_REQUIRED" }) });
         return;
       }
       if (!["GET", "HEAD"].includes(method)) {
