@@ -32,6 +32,11 @@ assert.equal(verifyCompetitorResearch({candidates:[],providerSources:[],ownWebsi
 const store=readFileSync(new URL("../src/pages/content-generator-page.tsx",import.meta.url),"utf8");
 assert.ok(store.indexOf("autopilot-master")<store.indexOf("<ManualContentComposer"),"Autopilot must come before manual form");
 assert.ok(store.includes("showManualComposer && <ManualContentComposer"),"Manual composer must be opt-in");
+assert.ok(store.includes("Piano editoriale scelto dall\'AI"),"The autonomous editorial plan must be visible");
+assert.ok(store.includes("Ricerca dei concorrenti"),"Competitor research status must be visible without invented claims");
+const storeApi=readFileSync(new URL("../src/features/content/autopilot-store.ts",import.meta.url),"utf8");
+assert.ok(storeApi.includes("aiEditorialPlan"),"Topics must come from actual saved AI plan");
+assert.ok(storeApi.includes("VERIFIED_PUBLIC_SOURCES"),"Only verified competitor results may be displayed");
 const cron=readFileSync(new URL("../api/_lib/autopilot-serialized.ts",import.meta.url),"utf8");
 assert.match(cron,/order by activity\.last_generated asc nulls first/);
 console.log("autonomous website/competitor grounding, fair profiles and UX: PASS");
