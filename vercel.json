@@ -44,7 +44,6 @@
   "functions": {
     "api/render.ts": {
       "maxDuration": 300,
-      "memory": 3009,
       "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm}"
     }
   }
