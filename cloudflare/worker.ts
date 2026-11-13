@@ -1,7 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import { crawlWebsite } from "../api/_lib/crawler.js";
+import { isPrivateAddress } from "../api/_lib/network-guard.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, type BrandContext, type SocialFormat, type SocialProvider } from "../api/_lib/openai-text.js";
-import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
+import { imageAspectRatioForFormat, imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "../api/_lib/openai-image.js";
 import { generateRoutedImage } from "../api/_lib/routed-image.js";
 import { preflightDeterministicTypography } from "../api/_lib/deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "../api/_lib/image-generation-metering.js";
@@ -113,11 +114,7 @@ async function setVisualGenerationState(input: {
 }
 
 function privateIp(address: string) {
-  if (address === "::1" || address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd")) return true;
-  const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ipv4)) return false;
-  const [a, b] = ipv4.split(".").map(Number);
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  return isPrivateAddress(address);
 }
 
 function literalIp(hostname: string) {
@@ -357,7 +354,7 @@ async function handleGenerateImage(request: Request, env: Env) {
       });
       if (stateWrite && !stateWrite.ok) throw new Error(`VISUAL_STATE_START_${stateWrite.status}`);
     }
-    const aspectRatio = format === "STORY" ? "2:3" : "1:1";
+    const aspectRatio = imageAspectRatioForFormat(format, provider ?? undefined);
     const candidates = await rows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,reuse_count,created_at&order=created_at.desc&limit=100`, token);
     const reusable = await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {

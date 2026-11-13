@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
+import { imageAspectRatioForFormat, imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { generateRoutedImage } from "./_lib/routed-image.js";
 import { preflightDeterministicTypography } from "./_lib/deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
@@ -161,7 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
-    const aspectRatio = requestedFormat === "STORY" ? "2:3" : "1:1";
+    const aspectRatio = imageAspectRatioForFormat(requestedFormat, requestedProvider);
     const candidates = await readRows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
     const reusable = forceNewImage ? null : await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {

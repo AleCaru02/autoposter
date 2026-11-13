@@ -19,6 +19,10 @@ assert.equal(contentNeedsFactCheck({ caption: "Contenuto editoriale senza dati n
 assert.equal(contentNeedsFactCheck({ caption: "3 consigli pratici per gestire meglio un immobile." }, "WEBSITE_ONLY"), false, "structural list counts must not trigger external fact-checking");
 assert.equal(contentNeedsFactCheck({ caption: "Abbiamo seguito 100 clienti." }, "WEBSITE_ONLY"), true, "material bare-number claims must still require fact-checking");
 assert.equal(contentNeedsFactCheck({ caption: "Il valore è aumentato del 12%." }, "BALANCED"), true);
+assert.equal(contentNeedsFactCheck({ caption: "Un nostro cliente ci ha scritto che non tornerebbe mai indietro." }, "WEBSITE_ONLY"), true, "client testimonials are factual claims and must be verified");
+assert.equal(contentNeedsFactCheck({ caption: "Leggi le recensioni dei proprietari che seguiamo." }, "BALANCED"), true, "review references must be verified");
+assert.equal(contentNeedsFactCheck({ caption: "Ecco un caso studio su come abbiamo aiutato un proprietario a Milano." }, "BALANCED"), true, "case studies must be verified");
+assert.equal(contentNeedsFactCheck({ caption: "Come scegliere il check-in giusto per il tuo appartamento." }, "BALANCED"), false, "generic editorial advice stays cheap");
 assert.equal(contentNeedsFactCheck({ caption: "Il servizio costa 100 €." }, "WEBSITE_ONLY"), true);
 assert.equal(contentNeedsFactCheck({ caption: "La regola cambia nel 2026." }, "WEBSITE_ONLY"), true);
 assert.equal(contentNeedsFactCheck({ caption: "Aggiornamento di settore" }, "NEWS"), true);

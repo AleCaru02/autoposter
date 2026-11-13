@@ -10,6 +10,8 @@ Flusso obbligatorio:
 
 `GitHub main -> build verificata -> Vercel`
 
+Runtime canonico: Vercel (`post-automatici-canonical`). Il Cloudflare Worker resta solo come fallback con scheduler disattivato (`WORKER_SCHEDULER_ENABLED=false`).
+
 Lovable viene usato come editor/prototipatore collegato a questo repository; nessuna copia parallela deve diventare sorgente di produzione.
 
 ## Fase corrente

@@ -36,6 +36,8 @@ const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon
 type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
+  /** Vercel is the canonical scheduler. Only the exact value "true" re-enables Worker cron work (fallback). */
+  WORKER_SCHEDULER_ENABLED?: string;
   PREPUBLISH_QA_TOKEN?: string;
   PROVIDER_ANALYTICS_QA_TOKEN?: string;
   HF_CREDENTIALS?: string;
@@ -214,6 +216,12 @@ export default {
     return worker.fetch(request, env);
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: WorkerContext) {
+    if (env.WORKER_SCHEDULER_ENABLED?.trim().toLowerCase() !== "true") {
+      // Single canonical runtime: Vercel crons own autopilot, learning, analytics and publishing.
+      // Running both schedulers against the same database would double AI spend.
+      console.log("worker-scheduler-disabled", { cron: controller.cron, canonicalScheduler: "vercel" });
+      return;
+    }
     if (controller.cron === "*/5 * * * *") {
       const cronMeta = {
         cron: controller.cron,

@@ -2,6 +2,7 @@ import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { crawlWebsite } from "./_lib/crawler.js";
+import { isPrivateAddress } from "./_lib/network-guard.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "./_lib/website-scan-policy.js";
 
 export const config = { maxDuration: 60 };
@@ -13,11 +14,7 @@ type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed
 type ScanPageStateRow = { url: string; normalized_url: string; status: "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED"; depth: number; discovered_from: string | null };
 
 function privateIp(address: string) {
-  if (address === "::1" || address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd")) return true;
-  const ipv4 = address.startsWith("::ffff:") ? address.slice(7) : address;
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ipv4)) return false;
-  const [a, b] = ipv4.split(".").map(Number);
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  return isPrivateAddress(address);
 }
 
 async function assertPublicTarget(url: URL) {

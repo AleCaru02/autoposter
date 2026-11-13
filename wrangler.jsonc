@@ -22,7 +22,8 @@
     "META_APP_ID": "900306149763443",
     "META_GRAPH_VERSION": "v26.0",
     "LINKEDIN_API_VERSION": "202608",
-    "LINKEDIN_ORGANIZATION_ACCESS": "false"
+    "LINKEDIN_ORGANIZATION_ACCESS": "false",
+    "WORKER_SCHEDULER_ENABLED": "false"
   },
   "triggers": {
     "crons": [

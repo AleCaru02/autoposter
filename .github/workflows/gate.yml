@@ -19,6 +19,8 @@ jobs:
       - { name: Typecheck, run: "npm run typecheck" }
       - { name: Auth security regression, run: "npm run test:auth-security" }
       - { name: Same-origin Auth proxy regression, run: "npm run test:auth-proxy" }
+      - { name: SSRF network guard and redirect validation, run: "npm run test:network-guard" }
+      - { name: Worker scheduler disabled by default (Vercel canonical), run: "npm run test:worker-scheduler-guard" }
       - { name: Autonomous editorial website and verified competitor grounding, run: "npx tsx tests/autonomous-editorial-engine.test.ts" }
       - { name: Autopilot released QA retry and metering regression, run: "npx tsx tests/autopilot-rejected-metering.test.ts" }
       - { name: Vercel Google Auth canonical and preview origins, run: "npx tsx tests/vercel-auth-route.test.ts" }

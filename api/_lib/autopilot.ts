@@ -6,7 +6,7 @@ import { buildPlanDrivenTopicRequest, selectPlanItem } from "./autopilot-ai-plan
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { runContentQa } from "./content-qa.js";
 import { estimateTextRequestUpperBoundUsd, generateSocialText, OpenAITextPipelineError, type BrandContext, type SocialFormat, type SocialProvider } from "./openai-text.js";
-import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
+import { imageAspectRatioForFormat, imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./openai-image.js";
 import { generateRoutedImage } from "./routed-image.js";
 import { preflightDeterministicTypography } from "./deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./image-generation-metering.js";
@@ -399,7 +399,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     }
   }
   if(variant.eligible&&allowImageGeneration&&format!=="CAROUSEL"){
-    const aspectRatio=format==="STORY"?"2:3":"1:1";
+    const aspectRatio=imageAspectRatioForFormat(format as ImageSocialFormat,provider as ImageSocialProvider);
     const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
@@ -449,7 +449,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
         const actualEur=Number(actualRows[0]?.actual_eur??visualDecision.estimatedCostEur);
-        const sizeMatch=/^(\\d+)x(\\d+)$/.exec(String(image.size??""));
+        const sizeMatch=/^(\d+)x(\d+)$/.exec(String(image.size??""));
         const contentHash=await assetContentHashFromBase64(image.base64);
         await sql`insert into public.assets (
           id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,
