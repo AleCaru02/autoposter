@@ -6,6 +6,7 @@ import { advanceRenderJob, ReelPipelineError } from "./_lib/reel/reel-pipeline.j
 import { claimDueRenderJobs, claimRenderJob, classifyRenderError, enqueueReelJob, failRenderJob, listRenderJobs, yieldRenderJob } from "./_lib/reel/render-jobs.js";
 import { createReelRuntime } from "./_lib/reel/reel-runtime.js";
 import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
+import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
 
 export const config = { maxDuration: 300 };
@@ -89,6 +90,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const states = [];
     for (const job of jobs) states.push(await runJob(job, deadlineAt));
     return res.status(200).json({ ok: true, processed: jobs.length, states });
+  }
+
+  if (path === "selftest") {
+    // Zero-cost cloud proof: synthetic stills + tone, real FFmpeg render inside this function.
+    // No database, no provider call, no user data. Preview is behind Vercel SSO; production needs CRON_SECRET.
+    if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
+    if (process.env.VERCEL_ENV !== "preview" && !cronAuthorized(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
+    try {
+      return res.status(200).json(await renderSelfTest());
+    } catch (reason) {
+      return res.status(500).json({ ok: false, error: reason instanceof Error ? reason.message.slice(0, 300) : "UNKNOWN" });
+    }
   }
 
   const token = bearer(req);

@@ -49,3 +49,13 @@ assert.match(source, /authorizedUser\(token, profileId\)/, "every user route che
 assert.match(source, /waitUntil\(/, "rendering continues after the 202 response");
 assert.doesNotMatch(source, /processDuePublications|publishVariant|SAFE_MODE/, "the render route never publishes");
 console.log("PASS vercel render route: fail-closed (flag, cron secret, sessione), nessuna pubblicazione, bundle con FFmpeg/font.");
+
+{
+  delete process.env.VERCEL_ENV;
+  const denied = await call({ method: "GET", path: "selftest" });
+  assert.equal(denied.status, 401, "production self-test requires CRON_SECRET");
+  const allowed = await call({ method: "GET", path: "selftest", headers: { authorization: `Bearer ${"s".repeat(32)}` } });
+  assert.equal(allowed.status, 200);
+  assert.equal((allowed.body as { ok?: boolean }).ok, true, `self-test render: ${JSON.stringify(allowed.body).slice(0, 300)}`);
+  console.log("PASS render self-test: rendering sintetico nella route senza DB né provider.");
+}
