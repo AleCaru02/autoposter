@@ -1,6 +1,7 @@
 import { Resvg, initWasm } from "@resvg/resvg-wasm";
 import { createTypographyLayout, escapeXml, type TypographyLayout } from "./deterministic-text-layout.js";
 import { logoSvgOverlay } from "./deterministic-logo.js";
+import { woffToSfnt } from "./woff-to-sfnt.js";
 
 /** Optional per-profile font data.  A complete pair is used as supplied; an
  * incomplete or unavailable pair deliberately falls back to bundled Inter and
@@ -22,15 +23,16 @@ function bytes(asset: ArrayBuffer) {
   return new Uint8Array(asset);
 }
 
+// resvg-wasm ignores WOFF data (text would silently render as nothing): always hand it SFNT.
 async function fonts() {
-  fontsReady ??= workerAssets().then(({ interRegular, interBold }) => ({ regular: bytes(interRegular), bold: bytes(interBold) }));
+  fontsReady ??= workerAssets().then(async ({ interRegular, interBold }) => ({ regular: await woffToSfnt(bytes(interRegular)), bold: await woffToSfnt(bytes(interBold)) }));
   return fontsReady;
 }
 
-function effectiveFonts(brandFonts?: BrandFonts) {
+async function effectiveFonts(brandFonts?: BrandFonts) {
   if (brandFonts?.regular instanceof ArrayBuffer && brandFonts.bold instanceof ArrayBuffer) {
     return {
-      regular: new Uint8Array(brandFonts.regular), bold: new Uint8Array(brandFonts.bold),
+      regular: await woffToSfnt(new Uint8Array(brandFonts.regular)), bold: await woffToSfnt(new Uint8Array(brandFonts.bold)),
       family: brandFonts.family?.trim() || "Brand-provided font", source: "brand" as const,
     };
   }
