@@ -219,13 +219,16 @@ function editorialPlatformStatus(checks: Awaited<ReturnType<typeof runOpenAIEdit
   return checks.platformFit === "PASS" && checks.formatFit === "PASS" ? "PASS" : "FAIL";
 }
 
-function expectedAspect(format: SocialFormat) {
-  return format === "STORY" ? 2 / 3 : 1;
+// Ratios actually produced by the image pipeline (imageSizeForFormat): Story/Reel 9:16,
+// Instagram/Facebook feed 4:5, LinkedIn/GBP 1:1. Legacy 2:3 Story and 1:1 feed assets stay valid.
+export function expectedAspects(format: string) {
+  return format === "STORY" || format === "REEL" ? [9 / 16, 2 / 3] : [1, 4 / 5];
 }
 
-function assetDimensionsFit(asset: AssetRow, format: SocialFormat) {
+export function assetDimensionsFit(asset: Pick<AssetRow, "width" | "height">, format: string) {
   if (!asset.width || !asset.height) return false;
-  return Math.abs(asset.width / asset.height - expectedAspect(format)) <= 0.08;
+  const ratio = asset.width / asset.height;
+  return expectedAspects(format).some((expected) => Math.abs(ratio - expected) <= 0.03);
 }
 
 function identityStatus(profileType: "BUSINESS" | "PERSONAL_BRAND", subject: ContentSubject | null, asset: AssetRow): ContentQaDimensionStatus {
