@@ -17,6 +17,7 @@ import { instagramImagePreflight } from "../features/content/instagram-creator-t
 import "../approvals.css";
 import { NavLink } from "react-router-dom";
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
+import { ReelVariantPreview } from "../components/reel-variant-preview";
 import { buildEditorialDecisionRecord } from "../../api/_lib/editorial-decision-record";
 
 type DraftFields = {
@@ -435,7 +436,7 @@ export function ApprovalsPage() {
                   })}
                   {!carouselReady && <p className="manual-warning">Approvazione bloccata: ogni slide deve avere un visuale distinto e QA PASS.</p>}
                 </div> : <>
-                  {asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
+                  {variant.format === "REEL" ? <ReelVariantPreview profileId={variant.profile_id} contentId={item.id} posterUrl={asset?.storage_url ?? null} /> : asset ? <figure className="approval-image"><img src={asset.storage_url} alt={draft.altText || "Immagine generata"} /><figcaption>Immagine salvata · {asset.source}</figcaption></figure> : <div className="no-image-state">Nessuna immagine salvata per questa variante.</div>}
                   {variant.visual_generation_status === "FAIL" && <p className="manual-warning">{visualGenerationErrorMessage(variant.visual_generation_error)}</p>}
                 </>}
                 {variant.provider === "INSTAGRAM" && <details className="decision-record">
@@ -476,7 +477,7 @@ export function ApprovalsPage() {
                 </details>
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
-                  {variant.format !== "CAROUSEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING"} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING" ? "Generazione visuale…" : variant.visual_generation_status === "FAIL" ? "Riprova visuale" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
+                  {variant.format !== "CAROUSEL" && variant.format !== "REEL" && <button className="secondary-button" type="button" disabled={busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING"} onClick={() => void generateImage(variant)}><ImageIcon size={16} /> {busy[`image-${variant.id}`] || variant.visual_generation_status === "GENERATING" ? "Generazione visuale…" : variant.visual_generation_status === "FAIL" ? "Riprova visuale" : asset ? "Rigenera immagine" : "Genera immagine"}</button>}
                   <button className="secondary-button" type="button" disabled={busy[`qa-${variant.id}`] || currentSaveStatus === "SAVING" || currentSaveStatus === "WAITING"} onClick={() => void runQa(variant)}><CheckCircle2 size={16} /> {busy[`qa-${variant.id}`] ? "QA in corso…" : variant.qa_status === "PASS" ? "Riesegui QA" : "Esegui QA"}</button>
                   <button className="approval-button approve" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING" || !carouselReady || variant.qa_status !== "PASS"} onClick={() => void approve(variant, "APPROVED")}><Check size={16} /> Approva</button>
                   <button className="approval-button changes" type="button" disabled={busy[`approval-${variant.id}`] || currentSaveStatus === "SAVING"} onClick={() => void approve(variant, "CHANGES_REQUESTED")}><X size={16} /> Rifiuta</button>

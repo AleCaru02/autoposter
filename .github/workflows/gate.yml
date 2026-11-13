@@ -24,6 +24,7 @@ jobs:
       - { name: Reel engine real FFmpeg render and technical QA, run: "npm run test:reel-render" }
       - { name: Reel pipeline resumable steps, cost and anti-fabrication, run: "npm run test:reel-pipeline" }
       - { name: Vercel render route fail-closed contract, run: "npm run test:vercel-render-route" }
+      - { name: Reel studio UI real state and mobile contract, run: "npm run test:reel-studio-ui" }
       - { name: Autonomous editorial website and verified competitor grounding, run: "npx tsx tests/autonomous-editorial-engine.test.ts" }
       - { name: Autopilot released QA retry and metering regression, run: "npx tsx tests/autopilot-rejected-metering.test.ts" }
       - { name: Vercel Google Auth canonical and preview origins, run: "npx tsx tests/vercel-auth-route.test.ts" }
