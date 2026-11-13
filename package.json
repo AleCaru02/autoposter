@@ -138,7 +138,9 @@
     "test:vercel-cron-route": "tsx tests/vercel-cron-route.test.ts",
     "test:network-guard": "tsx tests/network-guard.test.ts",
     "test:worker-scheduler-guard": "tsx tests/worker-scheduler-guard.test.ts",
-    "test:reel-render": "tsx tests/reel-render.test.ts"
+    "test:reel-render": "tsx tests/reel-render.test.ts",
+    "test:reel-pipeline": "tsx tests/reel-pipeline.test.ts",
+    "test:vercel-render-route": "tsx tests/vercel-render-route.test.ts"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
@@ -148,6 +150,7 @@
     "@neondatabase/serverless": "^1.0.1",
     "@resvg/resvg-wasm": "^2.6.2",
     "@vercel/blob": "^2.9.0",
+    "@vercel/functions": "3.1.4",
     "cheerio": "^1.1.2",
     "fontkit": "^2.0.4",
     "lucide-react": "^0.575.0",

@@ -9,6 +9,10 @@
     {
       "path": "/api/cron-social",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/render/tick",
+      "schedule": "30 * * * *"
     }
   ],
   "rewrites": [
@@ -29,8 +33,19 @@
       "destination": "/api/learning?path=:path*"
     },
     {
+      "source": "/api/render/:path*",
+      "destination": "/api/render?path=:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
-  ]
+  ],
+  "functions": {
+    "api/render.ts": {
+      "maxDuration": 300,
+      "memory": 3009,
+      "includeFiles": "{node_modules/@ffmpeg-installer/linux-x64/**,node_modules/@ffprobe-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff,node_modules/@resvg/resvg-wasm/index_bg.wasm}"
+    }
+  }
 }

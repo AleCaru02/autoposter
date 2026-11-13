@@ -49,6 +49,13 @@ export async function probeReel(path: string): Promise<ReelProbe> {
   return parseFfprobeJson(result.stdout, statSync(path).size);
 }
 
+export async function probeAudioSeconds(path: string) {
+  const result = await runMediaBinary("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path], { timeoutMs: 20_000 });
+  const seconds = Number(result.stdout.trim());
+  if (result.code !== 0 || !Number.isFinite(seconds) || seconds <= 0) throw new Error("REEL_AUDIO_PROBE_FAILED");
+  return Number(seconds.toFixed(3));
+}
+
 /**
  * Technical QA gate for a publishable Instagram/Facebook Reel. Combines the provider-neutral
  * preflight from the Higgsfield adapter with the stricter house spec (exact 1080x1920, audio, fps).
