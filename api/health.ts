@@ -1,5 +1,14 @@
 import { neon } from "@neondatabase/serverless";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { isIsolatedPreview } from "./_lib/neon-endpoints.js";
+
+/** Non-secret runtime facts, never exposed on production: proves which DB/Data API a preview uses. */
+function previewDiagnostics() {
+  if (process.env.VERCEL_ENV === "production") return {};
+  let databaseEndpoint: string | null = null;
+  try { databaseEndpoint = new URL(process.env.DATABASE_URL ?? "").hostname.split(".")[0].replace(/-pooler$/, "") || null; } catch { databaseEndpoint = null; }
+  return { runtime: { vercelEnv: process.env.VERCEL_ENV ?? null, targetEnv: process.env.VERCEL_TARGET_ENV ?? null, isolatedNeon: isIsolatedPreview(), databaseEndpoint } };
+}
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
   const startedAt = Date.now();
@@ -24,6 +33,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       ready: databaseReady,
       database: databaseReady ? "postgres_ready" : "postgres_unhealthy",
       latencyMs: Date.now() - startedAt,
+      ...previewDiagnostics(),
     });
   } catch (error) {
     console.error("health.database", error);
