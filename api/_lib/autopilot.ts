@@ -187,7 +187,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     where profile_id=${profile.id}::uuid and capability_key='ai.content.generate_text'
       and source='AI_TEXT_AUTOPILOT'
       and metadata->>'client_operation_identity'=${operationIdentity}
-      and state='RELEASED' and created_at >= now() - interval '24 hours'
+      and state='RELEASED' and created_at>=now()-interval '24 hours'
     order by created_at desc limit 20
   ` as unknown as Array<{state:string;reason:string|null;created_at:string}>;
   if (previousRejections.some(record=>shouldDeferRejectedAutopilotSlot(record))) {
