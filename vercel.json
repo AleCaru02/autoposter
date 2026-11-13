@@ -45,7 +45,7 @@
     "api/render.ts": {
       "maxDuration": 300,
       "memory": 3009,
-      "includeFiles": "{node_modules/@ffmpeg-installer/linux-x64/**,node_modules/@ffprobe-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff,node_modules/@resvg/resvg-wasm/index_bg.wasm}"
+      "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm}"
     }
   }
 }

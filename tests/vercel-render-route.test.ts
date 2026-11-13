@@ -42,7 +42,8 @@ assert.ok(config.crons.some((entry: { path: string; schedule: string }) => entry
 assert.ok(config.rewrites.findIndex((rule: { source: string }) => rule.source === "/api/render/:path*") < config.rewrites.findIndex((rule: { source: string }) => rule.source === "/((?!api/).*)"));
 const fn = config.functions["api/render.ts"];
 assert.equal(fn.maxDuration, 300);
-for (const file of ["@ffmpeg-installer/linux-x64", "@ffprobe-installer/linux-x64", "inter-latin-700-normal.woff", "resvg-wasm/index_bg.wasm"]) assert.ok(fn.includeFiles.includes(file), `binary/font missing from function bundle: ${file}`);
+for (const file of ["@ff*-installer/linux-x64/**", "inter-latin-[47]00-normal.woff", "@resvg/resvg-wasm/*.wasm"]) assert.ok(fn.includeFiles.includes(file), `binary/font missing from function bundle: ${file}`);
+assert.ok(fn.includeFiles.length <= 256, "Vercel rejects includeFiles longer than 256 characters");
 
 const source = readFileSync(new URL("../api/render.ts", import.meta.url), "utf8");
 assert.match(source, /authorizedUser\(token, profileId\)/, "every user route checks profile ownership through the RLS-scoped Data API");
