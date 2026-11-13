@@ -114,6 +114,7 @@ jobs:
       - { name: Profile Autonomous SMM certification simulation, run: "npm run test:profile-smm-certification" }
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
       - { name: Autopilot AI plan runtime regression, run: "npm run test:autopilot-ai-plan" }
+      - { name: Autopilot released QA metering regression, run: "npx tsx tests/autopilot-released-metering.test.ts" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
       - { name: Vercel authenticated learning route regression, run: "npm run test:vercel-learning-route" }
       - { name: Vercel assets route regression, run: "npm run test:vercel-assets-route" }
