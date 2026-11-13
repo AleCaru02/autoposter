@@ -6,8 +6,11 @@ const DEFAULT_APP_ORIGIN = "https://autoposter.02alessandrocaruso.workers.dev";
 const browserOrigin = typeof window === "undefined" ? DEFAULT_APP_ORIGIN : window.location.origin;
 
 export const NEON_AUTH_URL = `${browserOrigin}${SAME_ORIGIN_AUTH_PATH}`;
+declare const __NEON_DATA_API_URL__: string | undefined;
+const PRODUCTION_DATA_API_URL = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+// Injected at build time (vite.config.ts): production unless an isolated Vercel preview is configured.
 export const NEON_DATA_API_URL =
-  "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+  typeof __NEON_DATA_API_URL__ === "string" && __NEON_DATA_API_URL__ ? __NEON_DATA_API_URL__ : PRODUCTION_DATA_API_URL;
 
 export const neonClient = createClient({
   auth: {

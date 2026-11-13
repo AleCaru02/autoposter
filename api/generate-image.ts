@@ -7,10 +7,11 @@ import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
 import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./_lib/brand-visual-assets.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const VALID_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 

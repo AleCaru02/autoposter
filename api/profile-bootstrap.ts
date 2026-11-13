@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { BootstrappedProfile } from "./_lib/profile-bootstrap.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 /**
  * Vercel's production /api/profile-bootstrap endpoint.
@@ -9,7 +10,7 @@ import type { BootstrappedProfile } from "./_lib/profile-bootstrap.js";
  * No privileged DATABASE_URL, admin role or service key is needed.
  */
 export const NEON_PROFILES_DATA_API =
-  "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+  neonDataApiUrl();
 
 const PROFILE_COLUMNS =
   "id,name,slug,website_url,industry,timezone,locale,onboarding_completed,created_at,profile_type";

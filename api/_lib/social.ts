@@ -3,8 +3,9 @@ import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { CapabilityKey } from "./capabilities.js";
 import { assertInstagramCaption, instagramCarouselChildForm, instagramCarouselParentForm, validateInstagramCarousel, validateInstagramPublishImage, type InstagramPublishImage } from "./instagram-media.js";
 import { toInstagramJpeg } from "./instagram-jpeg.js";
+import { neonDataApiUrl } from "./neon-endpoints.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
 const META_SCOPES = {
   FACEBOOK: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],

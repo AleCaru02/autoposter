@@ -8,10 +8,11 @@ import { createReelRuntime } from "./_lib/reel/reel-runtime.js";
 import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
 import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 300 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WORK_BUDGET_MS = 270_000;
 

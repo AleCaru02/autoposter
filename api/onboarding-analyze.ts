@@ -3,10 +3,11 @@ import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "./_lib/brand-a
 import { BrandAnalysisMetering } from "./_lib/brand-analysis-metering.js";
 import { completeOnboardingProfile } from "./_lib/onboarding-completion.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type ScanRow = { id: string };

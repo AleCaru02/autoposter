@@ -4,10 +4,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { crawlWebsite } from "./_lib/crawler.js";
 import { isPrivateAddress } from "./_lib/network-guard.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "./_lib/website-scan-policy.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 type ProfileRow = { id: string; website_url: string | null };
 type ScanRow = { id: string; state?: string; discovered_pages?: number; analyzed_pages?: number; skipped_pages?: number; failed_pages?: number; root_url?: string; error?: string | null };

@@ -8,10 +8,11 @@ import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 import { buildPersonalBrandEditorialContext, loadEditorialProfile, loadProfileBrandContext, resolvePersonalBrandSource } from "./_lib/personal-brand-sources.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 

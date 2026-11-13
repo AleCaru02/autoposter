@@ -107,7 +107,7 @@ async function run() {
     const vercelEditorialSource = await readFile(new URL("../api/editorial-agents.ts", import.meta.url), "utf8");
     const vercelBrandSource = await readFile(new URL("../api/onboarding-analyze.ts", import.meta.url), "utf8");
     for (const [name, source] of [["autopilot", vercelAutopilotSource], ["images", vercelImageSource], ["profiles", vercelProfileSource], ["editorial", vercelEditorialSource], ["brand", vercelBrandSource]] as const) {
-      assert.ok(source.includes(liveDataApi), name + " must use the live Neon Data API for auth/RLS");
+      assert.ok(source.includes(liveDataApi) || source.includes("neonDataApiUrl()"), name + " must use the live Neon Data API for auth/RLS");
       assert.doesNotMatch(source, /ep-nameless-truth|aws\\.neondb/, name + " cannot use the retired Neon endpoint");
     }
 

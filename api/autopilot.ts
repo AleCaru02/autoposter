@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "./_lib/autopilot.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 300 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 const CANONICAL_AUTOPILOT_RUN = "https://post-automatici-canonical.vercel.app/api/autopilot/run";
 
