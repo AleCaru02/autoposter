@@ -64,7 +64,9 @@ async function runJob(job: RenderJob, deadlineAt: number) {
     const deps = job.dry_run
       ? createDryRunReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN })
       : createReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, OPENAI_API_KEY: process.env.OPENAI_API_KEY, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN });
-    const result = await advanceRenderJob(job, deps, { deadlineAt });
+    const configuredCap = Number(process.env.REEL_JOB_MAX_COST_USD);
+    const maxCostUsd = Number.isFinite(configuredCap) && configuredCap > 0 ? Math.min(configuredCap, 10) : 2;
+    const result = await advanceRenderJob(job, deps, { deadlineAt, maxCostUsd });
     if (result.state === "RUNNING") await yieldRenderJob(sql, job);
     console.log("reel-render", { jobId: job.id, profileId: job.profile_id, state: result.state, step: job.step, costUsd: job.cost_usd });
     return result.state;

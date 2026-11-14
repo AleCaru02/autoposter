@@ -74,6 +74,18 @@ export class ReelPipelineError extends Error {
   }
 }
 
+/** Worst-case reserves per paid call (same values the entitlement packages reserve). */
+export const REEL_COST_RESERVE_USD = { script: 0.08, image: 0.25, voice: 0.05 } as const;
+export const DEFAULT_REEL_JOB_MAX_COST_USD = 2;
+
+/** Hard per-job spending cap: refuse a paid step if the worst case of what is left would exceed it. */
+export function assertWithinJobCap(job: RenderJob, projectedRemainingUsd: number, capUsd: number) {
+  if (!(capUsd > 0)) throw new ReelPipelineError("REEL_JOB_BUDGET_CAP_INVALID", false);
+  if (job.cost_usd + projectedRemainingUsd > capUsd + 1e-9) {
+    throw new ReelPipelineError("AI_BUDGET_REEL_JOB_CAP", false, `Spesa prevista ${(job.cost_usd + projectedRemainingUsd).toFixed(2)} $ oltre il tetto di ${capUsd.toFixed(2)} $ per Reel`);
+  }
+}
+
 function nextStep(step: ReelStep): ReelStep {
   const index = REEL_STEPS.indexOf(step as (typeof REEL_STEPS)[number]);
   return index < 0 || index === REEL_STEPS.length - 1 ? "DONE" : REEL_STEPS[index + 1];
@@ -89,8 +101,9 @@ export function sceneDurations(script: ReelScript, narrationSeconds: number, tai
   return durations.map((value) => Number((value * scale).toFixed(3)));
 }
 
-async function runScript(job: RenderJob, deps: ReelDeps, context: ReelContext) {
+async function runScript(job: RenderJob, deps: ReelDeps, context: ReelContext, capUsd: number) {
   if (job.artifacts.script) return { artifacts: job.artifacts, cost: 0 }; // resume: already paid and persisted
+  assertWithinJobCap(job, REEL_COST_RESERVE_USD.script + 6 * REEL_COST_RESERVE_USD.image + REEL_COST_RESERVE_USD.voice, capUsd);
   const result = await deps.metered({
     capability: "ai.reel.script",
     idempotencyKey: `reel-script:v1:${job.id}`,
@@ -104,11 +117,13 @@ async function runScript(job: RenderJob, deps: ReelDeps, context: ReelContext) {
   return { artifacts: { ...job.artifacts, script: result.value }, cost: result.costUsd };
 }
 
-async function runVisuals(job: RenderJob, deps: ReelDeps, context: ReelContext) {
+async function runVisuals(job: RenderJob, deps: ReelDeps, context: ReelContext, capUsd: number) {
   const script = job.artifacts.script;
   if (!script) throw new ReelPipelineError("REEL_SCRIPT_MISSING", false);
   const scenes = [...(job.artifacts.scenes ?? [])];
   let cost = 0;
+  const missingScenes = script.scenes.length - scenes.length;
+  assertWithinJobCap(job, missingScenes * REEL_COST_RESERVE_USD.image + (job.artifacts.voice ? 0 : REEL_COST_RESERVE_USD.voice), capUsd);
   for (const [index, scene] of script.scenes.entries()) {
     if (scenes.some((stored) => stored.index === index)) continue; // resume: never regenerate a stored still
     const image = await deps.generateSceneImage({ job, context, index, visualBrief: scene.visualBrief, voiceover: scene.voiceover });
@@ -122,10 +137,11 @@ async function runVisuals(job: RenderJob, deps: ReelDeps, context: ReelContext) 
   return { artifacts: { ...job.artifacts, scenes: scenes.sort((a, b) => a.index - b.index) }, cost: 0, alreadyCounted: cost };
 }
 
-async function runVoice(job: RenderJob, deps: ReelDeps, context: ReelContext) {
+async function runVoice(job: RenderJob, deps: ReelDeps, context: ReelContext, capUsd: number) {
   const script = job.artifacts.script;
   if (!script) throw new ReelPipelineError("REEL_SCRIPT_MISSING", false);
   if (job.artifacts.voice) return { artifacts: job.artifacts, cost: 0 }; // resume: already paid and persisted
+  assertWithinJobCap(job, REEL_COST_RESERVE_USD.voice, capUsd);
   const text = narrationText(script);
   type Voice = NonNullable<ReelArtifacts["voice"]>;
   const result = await deps.metered<Voice>({
@@ -201,15 +217,16 @@ export type AdvanceResult =
   | { state: "RUNNING"; step: ReelStep; reason: "DEADLINE" };
 
 /** Runs steps until done or until the deadline would be exceeded by the next heavy step. */
-export async function advanceRenderJob(job: RenderJob, deps: ReelDeps, options: { deadlineAt: number; reserveMs?: Partial<Record<ReelStep, number>> }): Promise<AdvanceResult> {
+export async function advanceRenderJob(job: RenderJob, deps: ReelDeps, options: { deadlineAt: number; reserveMs?: Partial<Record<ReelStep, number>>; maxCostUsd?: number }): Promise<AdvanceResult> {
+  const capUsd = options.maxCostUsd ?? DEFAULT_REEL_JOB_MAX_COST_USD;
   const reserve = { SCRIPT: 45_000, VISUALS: 90_000, VOICE: 45_000, RENDER: 150_000, QA: 10_000, DONE: 0, ...(options.reserveMs ?? {}) };
   const context = await deps.loadContext(job);
   while (job.step !== "DONE") {
     if (deps.now() + reserve[job.step] > options.deadlineAt) return { state: "RUNNING", step: job.step, reason: "DEADLINE" };
     const step = job.step;
-    const outcome = step === "SCRIPT" ? await runScript(job, deps, context)
-      : step === "VISUALS" ? await runVisuals(job, deps, context)
-      : step === "VOICE" ? await runVoice(job, deps, context)
+    const outcome = step === "SCRIPT" ? await runScript(job, deps, context, capUsd)
+      : step === "VISUALS" ? await runVisuals(job, deps, context, capUsd)
+      : step === "VOICE" ? await runVoice(job, deps, context, capUsd)
       : step === "RENDER" ? await runRender(job, deps, context)
       : runQa(job);
     const following = nextStep(step);

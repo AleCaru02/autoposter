@@ -104,6 +104,17 @@ try {
   assert.ok(job.artifacts.voice && job.artifacts.voice.seconds > 11.5);
   assert.ok(job.cost_usd > 1.2 && job.cost_usd < 1.4, `costo tracciato ${job.cost_usd}`);
 
+  // Hard per-job cap: with a 1 $ cap the job stops before any paid call (worst case 1,63 $).
+  const capped: RenderJob = { ...job, id: "66666666-6666-4666-8666-666666666666", step: "SCRIPT", steps_completed: 0, artifacts: {}, cost_usd: 0 };
+  const scriptCallsBefore = calls.script;
+  await assert.rejects(advanceRenderJob(capped, deps, { deadlineAt: Number.POSITIVE_INFINITY, maxCostUsd: 1 }), (error: unknown) => error instanceof ReelPipelineError && error.code === "AI_BUDGET_REEL_JOB_CAP" && !error.retryable);
+  assert.equal(calls.script, scriptCallsBefore, "no paid call is made when the cap would be exceeded");
+  // Mid-job: script already paid, a cap that cannot cover the remaining stills blocks before VISUALS spends.
+  const midway: RenderJob = { ...job, id: "77777777-7777-4777-8777-777777777777", step: "VISUALS", steps_completed: 1, artifacts: { script: structuredClone(script) }, cost_usd: 1.2 };
+  const scenesBefore = calls.scenes.length;
+  await assert.rejects(advanceRenderJob(midway, deps, { deadlineAt: Number.POSITIVE_INFINITY, maxCostUsd: 2 }), (error: unknown) => error instanceof ReelPipelineError && error.code === "AI_BUDGET_REEL_JOB_CAP");
+  assert.equal(calls.scenes.length, scenesBefore, "no still is generated when the remaining worst case exceeds the cap");
+
   // A fabricated script is rejected, never rendered.
   const bad: RenderJob = { ...job, id: "55555555-5555-4555-8555-555555555555", step: "SCRIPT", steps_completed: 0, artifacts: {}, cost_usd: 0 };
   const badDeps: ReelDeps = { ...deps, generateScript: async () => ({ value: { ...structuredClone(script), caption: "Più 40% di prenotazioni garantito." }, usage: [] }) };
