@@ -38,17 +38,18 @@ Il costo reale viene registrato in `render_jobs.cost_usd`, `ai_usage_events` e `
 - Elaborazione end-to-end: circa 3-6 minuti, quasi tutti per la generazione delle immagini.
 - La pipeline si spezza in step: se supera i 270 s per invocazione riprende al tick successivo.
 
-## Prerequisiti ancora mancanti
+## Ambiente di test (configurato il 14/11/2026)
 
-Richiedono un'azione tua: le API Vercel restituiscono 403 sulle variabili d'ambiente.
+- Ambiente Vercel custom `reel-qa` (tipo preview), alias stabile: https://post-automatici-canonical-env-reel-qa-ales-projects-b8ec22ac.vercel.app (protetto da Vercel; serve login Vercel o share link).
+- Database: branch Neon `qa-reel-engine-20261113`, ruolo `reel_preview_app` esistente solo su quel branch.
+- Data API e Auth: endpoint del branch QA (`ep-fragrant-mud-ara6ysty`), verificati con `/api/health` → `runtime.isolatedNeon=true`.
+- Storage: Vercel Blob `post-automatici-reel-preview` (quota inclusa nel piano Pro, nessuno store preesistente).
+- `SAFE_MODE=true`, `REEL_ENGINE_ENABLED=true`, nessuna `OPENAI_API_KEY`: il motore è fermo con "Da configurare: chiave OpenAI".
 
-1. Variabili **Preview** solo per il branch `feature/reel-engine-20261113`:
-   - `DATABASE_URL`: credenziale del solo branch QA.
-   - `NEON_DATA_API_URL` = `https://ep-fragrant-mud-ara6ysty.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1`
-   - `NEON_AUTH_URL` = `https://ep-fragrant-mud-ara6ysty.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth`
-   - `AUTH_PREVIEW_ORIGIN` = `https://post-automatici-canonical-git-fea-361482-ales-projects-b8ec22ac.vercel.app`
-   - `SAFE_MODE=true`
-   - `REEL_ENGINE_ENABLED=true`
-   - `SOCIAL_TOKEN_KEY`: valore di test, solo preview.
-2. Store Vercel Blob collegato **solo** a Preview (fornisce `BLOB_READ_WRITE_TOKEN`).
-3. Solo al momento del test autorizzato: `OPENAI_API_KEY` in Preview. È la chiave di produzione: quella sul PC locale non vede i modelli usati dal progetto.
+## Unico passo per eseguire il test (solo con autorizzazione)
+
+```
+vercel env add OPENAI_API_KEY --environment reel-qa --sensitive
+```
+
+Incolla la chiave di produzione quando la CLI la chiede; poi rideploy di `reel-qa` e "Crea Reel" dal pannello Contenuti con il contenuto sorgente indicato sopra.
