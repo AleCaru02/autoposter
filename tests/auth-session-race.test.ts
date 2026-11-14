@@ -8,6 +8,7 @@ assert.match(guard, /session\.refetch\?\.\(\)/, "an empty cached session is re-c
 assert.match(guard, /session\.isRefetching/, "a refetch in progress must not trigger a redirect");
 assert.match(guard, /if \(checking && !user\) return <main className="center-state">Verifica sessione…<\/main>;/);
 assert.ok(guard.indexOf("Verifica sessione") < guard.indexOf('<Navigate to="/login" replace />'), "redirect to /login only after the check");
-assert.match(login, /if \(alreadySignedIn && !busy\) navigate\("\/app\/dashboard", \{ replace: true \}\);/, "a signed-in user is never stranded on the login form");
-assert.match(login, /const alreadySignedIn = Boolean\(existingSession\.data\?\.user\) && !oauthError;/, "OAuth error returns stay on the login page to show the error");
+// Regression (preview iPhone, 14/11): a LoginPage redirect based on the cached session bounced
+// users back into the app right after sign-out and caused a get-session polling loop.
+assert.doesNotMatch(login, /existingSession|alreadySignedIn/, "the login page must not auto-redirect from a possibly stale cached session");
 console.log("PASS auth session race: niente rimbalzo su /login dopo un accesso riuscito.");

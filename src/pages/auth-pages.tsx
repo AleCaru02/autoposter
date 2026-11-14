@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/neon-client";
@@ -101,13 +101,8 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const existingSession = authClient.useSession();
-  const alreadySignedIn = Boolean(existingSession.data?.user) && !oauthError;
-
-  // A signed-in user must never be stranded on the login form (e.g. after a session-cache race).
-  useEffect(() => {
-    if (alreadySignedIn && !busy) navigate("/app/dashboard", { replace: true });
-  }, [alreadySignedIn, busy, navigate]);
+  // No automatic redirect from the cached session here: right after sign-out the cache can still
+  // hold the user and would bounce back to the app. RequireAuth re-checks the session instead.
 
   async function submit(event: FormEvent) {
     event.preventDefault();
