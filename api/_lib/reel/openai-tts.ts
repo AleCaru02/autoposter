@@ -1,3 +1,4 @@
+import { openAiErrorDetail } from "./openai-access.js";
 /**
  * Generic (non-cloned) Italian narration through OpenAI TTS. Voice cloning of the owner is a
  * separate, consent-gated provider track and is never simulated here.
@@ -25,7 +26,7 @@ export async function synthesizeNarration(input: { apiKey: string; text: string;
       response_format: "mp3",
     }),
   });
-  if (!response.ok) throw new Error(`OPENAI_TTS_HTTP_${response.status}`);
+  if (!response.ok) throw new Error(`OPENAI_TTS_HTTP_${response.status}: ${await openAiErrorDetail(response)}`);
   const audio = new Uint8Array(await response.arrayBuffer());
   if (audio.byteLength < 2_000) throw new Error("OPENAI_TTS_EMPTY_AUDIO");
   return { audio, mimeType: "audio/mpeg" as const, model: REEL_TTS_MODEL, voice: REEL_TTS_VOICE, requestId: response.headers.get("x-request-id") };

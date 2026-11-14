@@ -80,6 +80,7 @@ export async function yieldRenderJob(sql: Sql, job: RenderJob) {
 
 export function classifyRenderError(code: string) {
   if (/^(AI_BUDGET_|PROVIDER_COST_BUDGET|CAPABILITY_|AUTOPILOT_IMAGE_BUDGET|MODEL_ROUTER_BLOCKED_BUDGET)/.test(code)) return { state: "BLOCKED" as const, retryable: false };
+  if (/^OPENAI_[A-Z_]+_HTTP_(400|401|403|404)$/.test(code)) return { state: "FAILED" as const, retryable: false };
   if (/^(REEL_SCRIPT_REJECTED|REEL_TECHNICAL_QA_FAILED|REEL_SOURCE_NOT_ELIGIBLE|REEL_STORAGE_NOT_CONFIGURED|OPENAI_NOT_CONFIGURED|REEL_RENDER_INPUTS_MISSING|REEL_SCRIPT_MISSING|REEL_VIDEO_MISSING)/.test(code)) return { state: "FAILED" as const, retryable: false };
   return { state: "FAILED" as const, retryable: true };
 }

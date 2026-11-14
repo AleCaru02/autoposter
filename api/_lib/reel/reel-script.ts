@@ -1,4 +1,5 @@
 import { estimateTerraCostUsd } from "../openai-text.js";
+import { openAiErrorDetail } from "./openai-access.js";
 
 /**
  * Reel scene planner. It does NOT invent a new message: it adapts an existing, already
@@ -126,8 +127,8 @@ export async function generateReelScript(input: { apiKey: string; source: ReelSo
       max_output_tokens: 2200,
     }),
   });
+  if (!response.ok) throw new Error(`OPENAI_REEL_SCRIPT_HTTP_${response.status}: ${await openAiErrorDetail(response)}`);
   const raw = await response.text();
-  if (!response.ok) throw new Error(`OPENAI_REEL_SCRIPT_HTTP_${response.status}`);
   const body = JSON.parse(raw) as Record<string, unknown>;
   const text = outputText(body);
   if (!text) throw new Error("OPENAI_REEL_SCRIPT_EMPTY");

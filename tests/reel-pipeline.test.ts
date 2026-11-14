@@ -45,6 +45,7 @@ assert.deepEqual(classifyRenderError("AI_BUDGET_HARD_STOP"), { state: "BLOCKED",
 assert.deepEqual(classifyRenderError("CAPABILITY_CAPABILITY_LIMIT_REACHED"), { state: "BLOCKED", retryable: false });
 assert.deepEqual(classifyRenderError("REEL_SCRIPT_REJECTED"), { state: "FAILED", retryable: false });
 assert.deepEqual(classifyRenderError("OPENAI_TTS_HTTP_503"), { state: "FAILED", retryable: true });
+assert.deepEqual(classifyRenderError("OPENAI_REEL_SCRIPT_HTTP_403"), { state: "FAILED", retryable: false }, "permission errors are not retried");
 
 // --- Pipeline with fake providers and the real FFmpeg renderer ---
 const dir = mkdtempSync(join(tmpdir(), "reel-pipeline-test-"));

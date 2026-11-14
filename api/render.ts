@@ -8,6 +8,7 @@ import { createReelRuntime } from "./_lib/reel/reel-runtime.js";
 import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
 import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
 import { createDryRunReelRuntime, dryRunAllowed } from "./_lib/reel/reel-dry-run.js";
+import { checkOpenAiModelAccess } from "./_lib/reel/openai-access.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
@@ -104,6 +105,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
     if (process.env.VERCEL_ENV !== "preview" && !cronAuthorized(req)) return res.status(401).json({ error: "UNAUTHORIZED" });
     try {
+      if (req.query.check === "openai") {
+        // Model metadata only: no generation, no cost. Never returns the key.
+        if (!process.env.OPENAI_API_KEY) return res.status(200).json({ ready: false, error: "OPENAI_API_KEY_MISSING" });
+        return res.status(200).json(await checkOpenAiModelAccess(process.env.OPENAI_API_KEY));
+      }
       return res.status(200).json(await renderSelfTest());
     } catch (reason) {
       return res.status(500).json({ ok: false, error: reason instanceof Error ? reason.message.slice(0, 300) : "UNKNOWN" });
