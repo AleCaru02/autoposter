@@ -21,8 +21,28 @@ Va eseguita solo sul branch QA, mai sulla produzione.
 | JWKS produzione | kid invariato |
 | Firma token QA (verifica Ed25519 locale) | valida con la JWKS QA, non valida con quella di produzione |
 
+## Limite verificato di Neon e soluzione adottata
+
+La rotazione sul branch rende i token QA inutilizzabili in produzione. Però la Data API del branch QA non riconosce più nemmeno i token QA, con `jwk not found` o errori 500, anche dopo averla riconfigurata con provider `neon_auth` o `external`. Il motivo: branch e produzione condividono lo stesso progetto di autenticazione (`auth_provider_project_id`), quindi nello stesso progetto Neon non si ottengono insieme isolamento e funzionamento.
+
+**Soluzione:** progetto Neon separato e gratuito, `post-automatici-reel-qa` (`sparkling-frog-58730535`), con progetto di autenticazione proprio (`809cf2f3…`), chiavi proprie e Data API propria. Lo schema viene ricreato con tutte le migrazioni del repository (44/44 senza errori). I dati di test sono copiati solo per il profilo necessario (brand e 12 varianti), senza copiare utenti né password.
+
+Il ruolo applicativo `reel_qa_app` riceve `EXECUTE` sulle funzioni dello schema `public`: in produzione il server usa il proprietario del DB. Il ruolo browser `authenticated` resta senza accesso alle funzioni di claim.
+
 ## Esito 14/11/2026 (branch `qa-reel-engine-20261113`)
 
 - Kid produzione: `fce8cf0d…`, invariato. Kid QA: `b753f7fe…`, nuovo.
 - Tutti i test di isolamento verso la produzione: PASS.
 - Gli utenti reali non sono toccati: la tabella delle chiavi di produzione e la configurazione della Data API di produzione non sono state modificate.
+
+## Esito 14/11/2026 (progetto separato `post-automatici-reel-qa`)
+
+| Test | Esito |
+|---|---|
+| Token QA → Data API produzione | 401 `jwk not found` |
+| Token QA con `kid` di produzione falsificato → produzione | 401 `signature error` |
+| Utente solo-QA → login produzione | 401 |
+| Cookie QA → `get-session` / `/token` produzione | `null` / 401 |
+| Token QA → vecchio branch QA (copia di produzione) | 401 |
+| Token QA → Data API QA (propri dati) | 200 |
+| JWKS produzione invariata (`fce8cf0d…`) | PASS |

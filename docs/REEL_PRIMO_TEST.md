@@ -41,8 +41,10 @@ Il costo reale viene registrato in `render_jobs.cost_usd`, `ai_usage_events` e `
 ## Ambiente di test (configurato il 14/11/2026)
 
 - Ambiente Vercel custom `reel-qa` (tipo preview), alias stabile: https://post-automatici-canonical-env-reel-qa-ales-projects-b8ec22ac.vercel.app (protetto da Vercel; serve login Vercel o share link).
-- Database: branch Neon `qa-reel-engine-20261113`, ruolo `reel_preview_app` esistente solo su quel branch.
-- Data API e Auth: endpoint del branch QA (`ep-fragrant-mud-ara6ysty`), verificati con `/api/health` → `runtime.isolatedNeon=true`.
+- Database: progetto Neon **separato** `post-automatici-reel-qa`, con Auth, chiavi JWT e Data API propri e ruolo `reel_qa_app`. Profilo di test "Il Tuo Property Manager" `08d029d7-40dd-4885-b0fb-1114206923b5`, contenuto sorgente `12d672b4-…` (copiato).
+- Data API e Auth: `ep-damp-credit-bfj03vrj` (cella c-5), verificati con `/api/health` → `runtime.isolatedNeon=true`.
+- Prova a secco end-to-end, senza AI e a costo 0: PASS. Reel di 15,0 s H.264/AAC 1080x1920 su Blob, variante REEL non pianificabile, riprodotto su iPhone (Playwright).
+- Tetto di spesa per singolo Reel: `REEL_JOB_MAX_COST_USD=2`.
 - Storage: Vercel Blob `post-automatici-reel-preview` (quota inclusa nel piano Pro, nessuno store preesistente).
 - `SAFE_MODE=true`, `REEL_ENGINE_ENABLED=true`, nessuna `OPENAI_API_KEY`: il motore è fermo con "Da configurare: chiave OpenAI".
 

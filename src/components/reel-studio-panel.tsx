@@ -137,7 +137,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
       {!jobs.length && <p className="field-help">Nessun Reel ancora creato per questa attività.</p>}
       {jobs.map((job) => <article className={`reel-job reel-job-${job.state.toLowerCase()}`} key={job.id}>
         <header>
-          <strong>{job.dry_run ? "Prova a secco · " : ""}{job.title || job.hook || "Reel"}</strong>
+          <strong>{job.dry_run && !(job.title ?? "").startsWith("Prova a secco") ? "Prova a secco · " : ""}{job.title || job.hook || "Reel"}</strong>
           <span className="reel-job-state">{STATE_LABEL[job.state]}</span>
         </header>
         {(job.state === "QUEUED" || job.state === "RUNNING") && <div className="reel-progress" role="progressbar" aria-valuemin={0} aria-valuemax={job.steps_total} aria-valuenow={job.steps_completed} aria-label="Avanzamento Reel">
