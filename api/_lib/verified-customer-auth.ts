@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
+import { neonDataApiUrl } from "./neon-endpoints.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 function identityFromRpcPayload(payload: unknown): string | null {
   if (typeof payload === "string") return payload.trim() || null;

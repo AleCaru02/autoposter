@@ -2,13 +2,49 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "crons": [
-    { "path": "/api/cron", "schedule": "0 * * * *" }
+    {
+      "path": "/api/cron",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-social",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/render/tick",
+      "schedule": "30 * * * *"
+    }
   ],
   "rewrites": [
-    { "source": "/api/auth/:path*", "destination": "/api/auth?path=:path*" },
-    { "source": "/api/social/:path*", "destination": "/api/social?path=:path*" },
-    { "source": "/api/autopilot/:path*", "destination": "/api/autopilot?path=:path*" },
-    { "source": "/api/learning/:path*", "destination": "/api/learning?path=:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ]
+    {
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?path=:path*"
+    },
+    {
+      "source": "/api/social/:path*",
+      "destination": "/api/social?path=:path*"
+    },
+    {
+      "source": "/api/autopilot/:path*",
+      "destination": "/api/autopilot?path=:path*"
+    },
+    {
+      "source": "/api/learning/:path*",
+      "destination": "/api/learning?path=:path*"
+    },
+    {
+      "source": "/api/render/:path*",
+      "destination": "/api/render?path=:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/render.ts": {
+      "maxDuration": 300,
+      "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm}"
+    }
+  }
 }

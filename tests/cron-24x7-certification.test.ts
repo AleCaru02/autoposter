@@ -41,14 +41,23 @@ async function invokeSafeTick(scheduledTime: number) {
   const ctx = { waitUntil(promise: Promise<unknown>) { waited.push(promise); } };
   await worker.scheduled(
     { cron: "*/5 * * * *", scheduledTime },
-    { SAFE_MODE: "true" } as never,
+    { SAFE_MODE: "true", WORKER_SCHEDULER_ENABLED: "true" } as never,
     ctx,
   );
   assert.equal(waited.length, 1, "each cron invocation must register exactly one publication task");
   await Promise.all(waited);
 }
 
+async function invokeDisabledTick(scheduledTime: number) {
+  const waited: Promise<unknown>[] = [];
+  const ctx = { waitUntil(promise: Promise<unknown>) { waited.push(promise); } };
+  await worker.scheduled({ cron: "*/5 * * * *", scheduledTime }, { SAFE_MODE: "true" } as never, ctx);
+  await worker.scheduled({ cron: "0 * * * *", scheduledTime }, { SAFE_MODE: "true", WORKER_SCHEDULER_ENABLED: "false" } as never, ctx);
+  assert.equal(waited.length, 0, "with Vercel as canonical scheduler the Worker fallback must not start any background work");
+}
+
 try {
+  await invokeDisabledTick(Date.parse("2026-10-01T19:35:00.000Z"));
   const firstTime = Date.parse("2026-10-01T19:40:00.000Z");
   await Promise.all([
     invokeSafeTick(firstTime),

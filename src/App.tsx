@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
@@ -30,10 +30,28 @@ function PageFallback() {
   return <main className="center-state">Caricamento pagina…</main>;
 }
 
-function RequireAuth({ children }: { children: ReactNode }) {
+/**
+ * Right after sign-in the cached session can still be empty for a moment. Before bouncing to
+ * /login, re-check the session once against the server; only a confirmed absence redirects.
+ */
+export function useConfirmedSession() {
   const session = authClient.useSession();
-  if (session.isPending) return <main className="center-state">Verifica sessione…</main>;
-  if (!session.data?.user) return <Navigate to="/login" replace />;
+  const hasUser = Boolean(session.data?.user);
+  const [rechecked, setRechecked] = useState(false);
+  useEffect(() => {
+    if (session.isPending || hasUser || rechecked) return;
+    let active = true;
+    void Promise.resolve(session.refetch?.()).catch(() => undefined).finally(() => { if (active) setRechecked(true); });
+    return () => { active = false; };
+  }, [session.isPending, hasUser, rechecked, session]);
+  const checking = session.isPending || session.isRefetching || (!hasUser && !rechecked);
+  return { checking, user: session.data?.user ?? null };
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { checking, user } = useConfirmedSession();
+  if (checking && !user) return <main className="center-state">Verifica sessione…</main>;
+  if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 

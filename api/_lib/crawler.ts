@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { guardedFetch } from "./network-guard.js";
 import * as cheerio from "cheerio";
 
 export type CrawlPageStatus = "DISCOVERED" | "ANALYZED" | "SKIPPED" | "FAILED";
@@ -283,8 +284,7 @@ async function enrichStylesheets(
   for (const href of stylesheetUrls.slice(0, maxStylesheets)) {
     try {
       const url = new URL(href);
-      await validateTarget?.(url);
-      const response = await fetcher(url.toString(), { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/css,*/*;q=0.5" }, signal: AbortSignal.timeout(8_000) });
+      const { response } = await guardedFetch(fetcher, url, { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/css,*/*;q=0.5" }, signal: AbortSignal.timeout(8_000) }, validateTarget);
       if (!response.ok) continue;
       const type = (response.headers.get("content-type") ?? "").toLowerCase();
       if (type && !type.includes("text/css")) continue;
@@ -324,8 +324,7 @@ async function safeText(response: Response, maxChars: number) {
 
 async function fetchOptionalText(url: URL, fetcher: typeof fetch, validateTarget: CrawlOptions["validateTarget"], maxChars: number) {
   try {
-    await validateTarget?.(url);
-    const response = await fetcher(url.toString(), { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/plain,application/xml,text/xml;q=0.9,*/*;q=0.5" }, signal: AbortSignal.timeout(10_000) });
+    const { response } = await guardedFetch(fetcher, url, { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/plain,application/xml,text/xml;q=0.9,*/*;q=0.5" }, signal: AbortSignal.timeout(10_000) }, validateTarget);
     if (!response.ok) return null;
     return await safeText(response, maxChars);
   } catch { return null; }
@@ -421,9 +420,7 @@ export async function crawlWebsite(input: string, options: CrawlOptions = {}): P
     if (!isRobotsAllowed(url, disallow)) { pages.push({ ...baseSkipped, status: "SKIPPED", skipReason: "ROBOTS_DISALLOW" }); continue; }
 
     try {
-      await options.validateTarget?.(url);
-      const response = await fetcher(url.toString(), { redirect: "follow", headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/html,application/xhtml+xml;q=0.9" }, signal: AbortSignal.timeout(12_000) });
-      const finalUrl = new URL(response.url || url.toString());
+      const { response, finalUrl } = await guardedFetch(fetcher, url, { headers: { "user-agent": "PostAutomaticiBot/1.0", accept: "text/html,application/xhtml+xml;q=0.9" }, signal: AbortSignal.timeout(12_000) }, options.validateTarget);
       if (finalUrl.origin !== root.origin) throw new Error("CROSS_ORIGIN_REDIRECT");
       const finalNormalized = normalizeCrawlUrl(finalUrl.toString(), root);
       if (!finalNormalized) throw new Error("INVALID_REDIRECT_TARGET");

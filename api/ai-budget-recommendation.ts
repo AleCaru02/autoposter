@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { AiBudgetRecommendationEngine } from "./_lib/ai-budget-recommendation.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;

@@ -1,15 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
+import { imageAspectRatioForFormat, imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { generateRoutedImage } from "./_lib/routed-image.js";
 import { preflightDeterministicTypography } from "./_lib/deterministic-text-compositor.js";
 import { ImageGenerationMetering, technicalEventsFromImageResult } from "./_lib/image-generation-metering.js";
 import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
 import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
+import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./_lib/brand-visual-assets.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const VALID_PROVIDERS = new Set<ImageSocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<ImageSocialFormat>(["POST", "CAROUSEL", "STORY"]);
 
@@ -125,6 +127,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!profile) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
     const brands = await readRows<BrandRow>(`brand_profiles?profile_id=eq.${encodeURIComponent(profileId)}&select=tone_of_voice,visual_identity&limit=1`, token);
     const brandVisual = normalizeBrandVisualIdentity(brands[0]?.visual_identity, profile.industry);
+    const logoAssetId = confirmedBrandLogoId(brands[0]?.visual_identity);
+    const logoAssets = logoAssetId ? await readRows<{storage_url:string;mime_type:string|null}>(`assets?id=eq.${encodeURIComponent(logoAssetId)}&profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=storage_url,mime_type&limit=1`, token) : [];
+    const logoDataUrl = verifiedBrandLogoDataUrl(logoAssets[0]);
 
     let savedVariant: VariantRow | null = null;
     if (contentVariantId) {
@@ -157,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
-    const aspectRatio = requestedFormat === "STORY" ? "2:3" : "1:1";
+    const aspectRatio = imageAspectRatioForFormat(requestedFormat, requestedProvider);
     const candidates = await readRows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
     const reusable = forceNewImage ? null : await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {
@@ -176,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
     }
 
-    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null } : null;
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null, logoDataUrl, style: brandTextStyle(brandVisual.activeSocialPalette) } : null;
     if (typography) {
       const [width, height] = imageSizeForFormat(requestedFormat, requestedProvider).split("x").map(Number);
       await preflightDeterministicTypography({ width, height, ...typography });

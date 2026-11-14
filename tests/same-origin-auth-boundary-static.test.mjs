@@ -30,8 +30,12 @@ assert.equal(client.includes("neonauth"), false, "browser Auth client must not c
 assert.equal(frontend.includes(providerHost), false, "production frontend must have zero direct Neon Auth references");
 assert.equal(frontend.includes(providerUrl), false, "production frontend must not retain a direct Auth fallback");
 
-assert.equal((proxy.match(new RegExp(providerHost.replace(/\./g, "\\."), "g")) || []).length, 1, "proxy must define exactly one fixed Neon Auth upstream");
-assert.match(proxy, /const AUTH_UPSTREAM = "https:\/\/ep-divine-band-arrkz7vq\.neonauth\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
+// The fixed production upstream lives in the single preview-safe resolver; the proxy never accepts request-supplied targets.
+const endpoints = read("api/_lib/neon-endpoints.ts");
+assert.equal((endpoints.match(new RegExp(providerHost.replace(/\./g, "\\."), "g")) || []).length, 1, "resolver must define exactly one fixed Neon Auth upstream");
+assert.match(endpoints, /PRODUCTION_NEON_AUTH_URL = "https:\/\/ep-divine-band-arrkz7vq\.neonauth\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/auth"/);
+assert.match(proxy, /const AUTH_UPSTREAM = neonAuthUrl\(\);/);
+assert.equal(proxy.includes("neonauth.c-4"), false, "proxy must not carry a second hardcoded upstream");
 assert.match(proxy, /const AUTH_PREFIX = "\/api\/auth"/);
 assert.match(proxy, /FORBIDDEN_PROXY_QUERY_KEYS = new Set\(\["url", "upstream"\]\)/);
 assert.match(proxy, /FORWARDED_FROM_CLIENT/);

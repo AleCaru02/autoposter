@@ -1,8 +1,11 @@
 import { neon } from "@neondatabase/serverless";
 import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { CapabilityKey } from "./capabilities.js";
+import { assertInstagramCaption, instagramCarouselChildForm, instagramCarouselParentForm, validateInstagramCarousel, validateInstagramPublishImage, type InstagramPublishImage } from "./instagram-media.js";
+import { toInstagramJpeg } from "./instagram-jpeg.js";
+import { neonDataApiUrl } from "./neon-endpoints.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
 const META_SCOPES = {
   FACEBOOK: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
@@ -88,6 +91,10 @@ type VariantRecord = {
   eligible: boolean;
   storage_url: string | null;
   mime_type: string | null;
+  asset_width: number | null;
+  asset_height: number | null;
+  asset_quality_status: string | null;
+  asset_identity_status: string | null;
 };
 type JobRecord = {
   id: string;
@@ -359,19 +366,26 @@ export function providerConfigured(provider: SocialProvider, env: SocialEnv) {
 }
 
 export function providerCapabilities(provider: SocialProvider) {
-  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY"], note: "Il carosello è strutturato e revisionabile, ma la pubblicazione multi-media Instagram resta disabilitata finché il runtime provider non la supporta realmente." };
+  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY", "CAROUSEL"], note: "Pubblicazione di caroselli approvati con immagini JPEG valide; la creazione automatica delle slide e i Reel richiedono ulteriori integrazioni." };
   if (provider === "FACEBOOK") return { publish: ["POST"], note: "Storie e caroselli non vengono simulati finché il contenuto non ha gli asset richiesti dalle API." };
   if (provider === "LINKEDIN") return { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." };
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
 
-export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
-  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
+  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile sul server della versione corrente." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
   if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
-    if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    if (input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) && Date.parse(input.expiresAt) <= now) {
+      return { state: "USER_ACTION_REQUIRED", detail: input.provider === "GBP"
+        ? "Il token Google è scaduto. Ricollega l’account o verifica il rinnovo OAuth prima di pubblicare."
+        : "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    }
+    if (input.lastValidatedAt && (!Number.isFinite(Date.parse(input.lastValidatedAt)) || Date.parse(input.lastValidatedAt) < now - 7 * 24 * 60 * 60 * 1000)) {
+      return { state: "USER_ACTION_REQUIRED", detail: "La connessione non viene verificata con il provider da oltre 7 giorni. Riconvalida l’account prima di pubblicare." };
+    }
     const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : null;
     if (analyticsPermission && !permissions.includes(analyticsPermission)) return { state: "USER_ACTION_REQUIRED", detail: `Manca il consenso ${analyticsPermission} richiesto per Analytics.` };
     return { state: "PASS_REAL", detail: "Account attivo con credenziali cifrate e validazione reale del provider." };
@@ -938,7 +952,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
         lastError,
-        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
+        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, lastValidatedAt: row?.last_validated_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),
@@ -1037,16 +1051,16 @@ function bytesBody(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string) {
-  return hmac(`media:${profileId}:${assetId}:${exp}`, secret);
+async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string, format = "") {
+  return hmac(`media:${profileId}:${assetId}:${exp}${format ? `:${format}` : ""}`, secret);
 }
 
-async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv) {
+async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv, jpeg = false) {
   const root = baseUrl(env);
   if (!root) throw new Error("APP_BASE_URL_NOT_CONFIGURED");
   const exp = Date.now() + 20 * 60_000;
-  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!);
-  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
+  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!, jpeg ? "jpeg" : "");
+  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}${jpeg ? "&fmt=jpeg" : ""}`;
 }
 
 async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
@@ -1055,14 +1069,18 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   const profileId = url.searchParams.get("profile") || "";
   const exp = Number(url.searchParams.get("exp"));
   const sig = url.searchParams.get("sig") || "";
-  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
+  const requestedFormat = url.searchParams.get("fmt") || "";
+  if (requestedFormat && requestedFormat !== "jpeg") return socialJson({ error: "MEDIA_FORMAT_INVALID" }, 403);
+  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY, requestedFormat)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`select storage_url, mime_type from public.assets where id=${assetId}::uuid and profile_id=${profileId}::uuid limit 1` as unknown as Array<{ storage_url: string; mime_type: string | null }>;
   const asset = rows[0];
   if (!asset?.storage_url) return socialJson({ error: "ASSET_NOT_FOUND" }, 404);
   try {
     const data = await assetBytes(asset.storage_url, asset.mime_type || "image/png");
-    return new Response(bytesBody(data.bytes), { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
+    const output = requestedFormat === "jpeg" ? await toInstagramJpeg(data.bytes, data.mimeType) : data.bytes;
+    const outputMime = requestedFormat === "jpeg" ? "image/jpeg" : data.mimeType;
+    return new Response(bytesBody(output), { status: 200, headers: { "content-type": outputMime, "cache-control": "public, max-age=600" } });
   } catch (reason) {
     console.error("social-asset-read-failed", { code: reason instanceof Error ? reason.message : "unknown" });
     return socialJson({ error: "ASSET_READ_FAILED" }, 502);
@@ -1094,13 +1112,70 @@ async function waitForInstagramContainer(containerId: string, accessToken: strin
   throw publishError("INSTAGRAM_MEDIA_PROCESSING_DELAYED", { retryable: true, customerMessage: "Instagram sta ancora elaborando il contenuto. Il sistema riproverà automaticamente." });
 }
 
-async function publishInstagram(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+
+type InstagramCarouselSlideRow = InstagramPublishImage & { alt_text: string | null };
+
+async function publishInstagramCarousel(sql: Sql, variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  // No remote container is created until all slide and content gates have passed.
+  const slides = await sql`
+    select s.position, s.asset_id::text, s.qa_status, s.alt_text,
+           a.mime_type, a.width, a.height,
+           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status
+    from public.content_carousel_slides s
+    left join public.assets a on a.id=s.asset_id and a.profile_id=s.profile_id
+    where s.profile_id=${variant.profile_id}::uuid and s.content_id=${variant.content_id}::uuid and s.variant_id=${variant.id}::uuid
+    order by s.position
+  ` as unknown as InstagramCarouselSlideRow[];
+  const assetIds = validateInstagramCarousel(slides);
+  const caption = composeCaption(variant);
+  assertInstagramCaption(caption);
+  const base = `https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}`;
+  const children: string[] = [];
+  for (const [index, assetId] of assetIds.entries()) {
+    const url = await publicMediaUrl(variant.profile_id, assetId, env, true);
+    const response = await providerRequest(`${base}/media`, {
+      method: "POST", body: instagramCarouselChildForm(url, bundle.accessToken, slides[index]?.alt_text),
+    }, { provider: "INSTAGRAM", stage: "CAROUSEL_CHILD_CREATE" });
+    const body = await providerJson<{id?:string}>(response, "INSTAGRAM", "CAROUSEL_CHILD_CREATE", false);
+    if (!body.id || !/^[0-9]+$/.test(body.id)) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_CHILD_CREATE", null, false);
+    await waitForInstagramContainer(body.id, bundle.accessToken, env);
+    children.push(body.id);
+  }
+  const response = await providerRequest(`${base}/media`, {
+    method: "POST", body: instagramCarouselParentForm(children, caption, bundle.accessToken),
+  }, { provider: "INSTAGRAM", stage: "CAROUSEL_PARENT_CREATE" });
+  const parent = await providerJson<{id?:string}>(response, "INSTAGRAM", "CAROUSEL_PARENT_CREATE", false);
+  if (!parent.id || !/^[0-9]+$/.test(parent.id)) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_PARENT_CREATE", null, false);
+  await waitForInstagramContainer(parent.id, bundle.accessToken, env);
+  // A single externally visible write; uncertain outcomes require human reconciliation.
+  const published = await providerRequest(`${base}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({ creation_id: parent.id, access_token: bundle.accessToken }),
+  }, { provider: "INSTAGRAM", stage: "CAROUSEL_PUBLISH", visibleWrite: true, beforeVisibleWrite });
+  const result = await providerJson<{id?:string}>(published, "INSTAGRAM", "CAROUSEL_PUBLISH", true);
+  if (!result.id) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_PUBLISH", null, true);
+  return { externalId: result.id, metadata: { containerId: parent.id, childContainerIds: children } };
+}
+
+async function publishInstagram(sql: Sql, variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  if (variant.format === "CAROUSEL") return publishInstagramCarousel(sql, variant, connection, bundle, env, beforeVisibleWrite);
   if (!variant.image_asset_id) throw new Error("INSTAGRAM_REQUIRES_MEDIA");
-  if (variant.format === "CAROUSEL") throw new Error("CAROUSEL_REQUIRES_MULTIPLE_MEDIA_ASSETS");
   if (variant.format !== "POST" && variant.format !== "STORY") throw new Error("FORMAT_NOT_SUPPORTED");
-  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env);
+  const issue = validateInstagramPublishImage({
+    position: 1, asset_id: variant.image_asset_id,
+    mime_type: variant.mime_type, width: variant.asset_width, height: variant.asset_height,
+    qa_status: variant.qa_status, asset_quality_status: variant.asset_quality_status,
+    asset_identity_status: variant.asset_identity_status,
+  }, variant.format);
+  if (issue) throw new Error(issue);
+  const caption = composeCaption(variant);
+  if (variant.format === "POST") assertInstagramCaption(caption);
+  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env, true);
   const form = new URLSearchParams({ image_url: mediaUrl, access_token: bundle.accessToken });
-  if (variant.format === "POST") form.set("caption", composeCaption(variant));
+  if (variant.format === "POST") {
+    form.set("caption", caption);
+    if (variant.alt_text?.trim()) form.set("alt_text", variant.alt_text.trim().slice(0,100));
+  }
   if (variant.format === "STORY") form.set("media_type", "STORIES");
   const create = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media`, { method: "POST", body: form }, { provider: "INSTAGRAM", stage: "MEDIA_CREATE" });
   const createBody = await providerJson<{ id?: string }>(create, "INSTAGRAM", "MEDIA_CREATE", false);
@@ -1186,7 +1261,8 @@ async function loadVariant(sql: Sql, variantId: string, profileId: string): Prom
   const rows = await sql`
     select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id,
            v.approval_status, v.workflow_status, v.qa_status, v.qa_fingerprint, v.approved_fingerprint, v.approved_by, v.approved_at, v.eligible,
-           a.storage_url, a.mime_type
+           a.storage_url, a.mime_type, a.width as asset_width, a.height as asset_height,
+           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status
     from public.content_variants v
     left join public.assets a on a.id = v.image_asset_id and a.profile_id = v.profile_id
     where v.id=${variantId}::uuid and v.profile_id=${profileId}::uuid
@@ -1212,7 +1288,7 @@ async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv, 
   const connection = await storedConnection(sql, variant.profile_id, variant.provider);
   if (!connection || connection.status !== "ACTIVE" || !connection.token_reference || !connection.provider_account_id) throw new Error("SOCIAL_NOT_CONNECTED");
   const bundle = await decryptTokenBundle(connection.token_reference, env.SOCIAL_TOKEN_KEY!);
-  if (variant.provider === "INSTAGRAM") return publishInstagram(variant, connection, bundle, env, beforeVisibleWrite);
+  if (variant.provider === "INSTAGRAM") return publishInstagram(sql, variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.provider === "FACEBOOK") return publishFacebook(variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.provider === "LINKEDIN") return publishLinkedIn(variant, connection, bundle, env, beforeVisibleWrite);
   return publishGoogle(variant, connection, bundle, env, sql, beforeVisibleWrite);

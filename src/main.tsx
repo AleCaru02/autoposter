@@ -19,6 +19,7 @@ import "./creator-hub.css";
 import "./workflow-journey.css";
 import "./decision-record.css";
 import "./assets.css";
+import "./workspace-premium.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

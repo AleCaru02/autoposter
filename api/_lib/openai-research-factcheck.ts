@@ -208,6 +208,8 @@ export function contentNeedsFactCheck(content: unknown, mode: EditorialResearchM
   if (mode === "NEWS") return true;
   const serialized = JSON.stringify(content ?? "");
   if (/BASE ESTERNA/i.test(serialized)) return true;
+  // Social proof is a factual claim: testimonials, reviews, case studies and client outcomes must be verified, never invented.
+  if (/\b(?:recension[ei]|testimonian(?:za|ze)|caso studio|casi studio|case study|stelle su (?:google|booking|airbnb)|\d\s*stelle|un(?:a)? (?:nostr[oa]|mi[oa]) client[ei]|i nostri clienti (?:dicono|hanno)|abbiamo aiutato|ci ha scritto|mi ha scritto|ha dichiarato|clienti soddisfatti)\b/i.test(serialized)) return true;
   const text = serialized.replace(/\b\d+\s+(?:consigli|passi|idee|errori|modi|motivi|strategie|azioni|domande|suggerimenti|slide)\b/gi, "");
   return /\b\d+(?:[.,]\d+)?\s*(?:%|€|eur|euro|usd|km|kg|ore|giorni|anni)?\b|\b(?:legge|norma|regolamento|obbligo|scadenza|dal\s+\d|entro\s+il|202\d)\b/i.test(text);
 }

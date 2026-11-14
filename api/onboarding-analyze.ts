@@ -3,10 +3,11 @@ import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "./_lib/brand-a
 import { BrandAnalysisMetering } from "./_lib/brand-analysis-metering.js";
 import { completeOnboardingProfile } from "./_lib/onboarding-completion.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 type ProfileRow = { id: string; name: string; website_url: string | null; industry: string | null };
 type ScanRow = { id: string };
@@ -139,11 +140,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : detectedGoals.filter((goal) => existingGoals.includes(goal));
     const activeGoals = [...new Set([...preservedOtherGoals, ...activeDetectedGoals])];
     const now = new Date().toISOString();
+    // An approved Brand Kit is customer-owned: a re-scan may update editorial
+    // evidence, but must never silently replace approved colors, font or logo.
+    const brandKitApproved = existingVisualIdentity.brandKitApproved === true;
     const visualIdentity = {
+      ...existingVisualIdentity,
       source: "website_scan",
-      observedColors: visualHints.colors,
-      observedFonts: visualHints.fontFamilies,
-      logoUrl: visualHints.logoUrl,
+      observedColors: brandKitApproved && Array.isArray(existingVisualIdentity.observedColors) ? existingVisualIdentity.observedColors : visualHints.colors,
+      observedFonts: brandKitApproved && Array.isArray(existingVisualIdentity.observedFonts) ? existingVisualIdentity.observedFonts : visualHints.fontFamilies,
+      logoUrl: brandKitApproved ? (existingVisualIdentity.logoUrl ?? null) : visualHints.logoUrl,
+      logoAssetId: existingVisualIdentity.logoAssetId ?? null,
+      brandKitApproved,
+      brandKitApprovedAt: brandKitApproved ? (existingVisualIdentity.brandKitApprovedAt ?? null) : null,
       logoCandidates: visualHints.logoCandidates,
       observedImages: visualHints.imageUrls,
       stylesheets: visualHints.stylesheetUrls,

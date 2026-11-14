@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { neonDataApiUrl } from "./api/_lib/neon-endpoints";
 
 function vendorChunk(id: string) {
   if (!id.includes("node_modules")) return undefined;
@@ -19,6 +20,8 @@ function vendorChunk(id: string) {
 
 export default defineConfig({
   plugins: [react()],
+  // Same rule as the server: only a Vercel preview with a valid QA-branch URL overrides production.
+  define: { __NEON_DATA_API_URL__: JSON.stringify(neonDataApiUrl(process.env)) },
   build: {
     sourcemap: true,
     rollupOptions: {

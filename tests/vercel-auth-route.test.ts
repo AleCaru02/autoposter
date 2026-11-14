@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import handler, { APP_ORIGIN, normalizeNeonAuthCookie } from "../api/auth.js";
+import handler, { APP_ORIGIN, normalizeNeonAuthCookie, resolveAuthOrigin } from "../api/auth.js";
 
 const UPSTREAM = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
 const originalFetch = globalThis.fetch;
@@ -101,6 +101,43 @@ async function run() {
       assert.ok(data.status >= 400 && data.status < 500);
     }
     assert.equal(called, false);
+  }
+  // Preview login is only allowed for one explicit HTTPS host in a preview runtime.
+  const PREVIEW_ORIGIN = "https://post-automatici-canonical-git-fea-5b851e-ales-projects-b8ec22ac.vercel.app";
+  const previewEnv = { VERCEL_ENV: "preview" as const, AUTH_PREVIEW_ORIGIN: PREVIEW_ORIGIN };
+  assert.equal(resolveAuthOrigin(new URL(PREVIEW_ORIGIN).host, previewEnv), PREVIEW_ORIGIN);
+  assert.equal(resolveAuthOrigin("evil.vercel.app", previewEnv), null);
+  assert.equal(resolveAuthOrigin("post-automatici-canonical-git-fea-5b851e-ales-projects-b8ec22ac.vercel.app.evil.com", previewEnv), null);
+  assert.equal(resolveAuthOrigin(new URL(PREVIEW_ORIGIN).host, { ...previewEnv, VERCEL_ENV: "production" }), null);
+  assert.equal(resolveAuthOrigin(new URL(PREVIEW_ORIGIN).host, { ...previewEnv, AUTH_PREVIEW_ORIGIN: "http://evil.vercel.app" }), null);
+  assert.equal(resolveAuthOrigin(new URL(APP_ORIGIN).host, previewEnv), APP_ORIGIN);
+
+  const savedVercelEnv = process.env.VERCEL_ENV;
+  const savedPreviewOrigin = process.env.AUTH_PREVIEW_ORIGIN;
+  try {
+    process.env.VERCEL_ENV = "preview";
+    process.env.AUTH_PREVIEW_ORIGIN = PREVIEW_ORIGIN;
+    let called = 0;
+    globalThis.fetch = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      called++;
+      assert.equal(new Headers(init?.headers).get("origin"), PREVIEW_ORIGIN);
+      return Response.json({ url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=test" });
+    }) as typeof fetch;
+    const {data: preview, res} = capture();
+    await handler(req("sign-in/social", "POST", {
+      host: new URL(PREVIEW_ORIGIN).host,
+      origin: PREVIEW_ORIGIN,
+      "content-type": "application/json",
+    }, {provider:"google",callbackURL: PREVIEW_ORIGIN + "/api/oauth/complete"}) as never, res as never);
+    assert.equal(preview.status, 200);
+    assert.equal(called, 1);
+    const {data: denied, res: deniedRes} = capture();
+    await handler(req("get-session", "GET", {host:"untrusted.vercel.app"}) as never, deniedRes as never);
+    assert.equal(denied.status, 403);
+    assert.equal(called, 1);
+  } finally {
+    if (savedVercelEnv === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = savedVercelEnv;
+    if (savedPreviewOrigin === undefined) delete process.env.AUTH_PREVIEW_ORIGIN; else process.env.AUTH_PREVIEW_ORIGIN = savedPreviewOrigin;
   }
   console.log("Vercel same-origin Google Auth route: PASS");
  } finally { globalThis.fetch = originalFetch; }

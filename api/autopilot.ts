@@ -1,10 +1,60 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
 import type { AutopilotEnv } from "./_lib/autopilot.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
 export const config = { maxDuration: 300 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
+
+const CANONICAL_AUTOPILOT_RUN = "https://post-automatici-canonical.vercel.app/api/autopilot/run";
+
+/**
+ * The owner's temporary QA preview is intentionally not provisioned with
+ * DATABASE_URL or OPENAI_API_KEY. Delegate the authenticated command to the
+ * canonical production runtime instead of copying secrets into preview.
+ *
+ * This is explicitly ONE branch/host; never proxy production, arbitrary
+ * deployments, or user-selected destinations. Canonical still performs its
+ * own mandatory Neon JWT/profile authorization, rate and budget checks.
+ */
+export function canDelegatePreviewAutopilot(input: {
+  vercelEnv?: string;
+  gitRef?: string;
+  configuredPreviewOrigin?: string;
+  requestHost?: string;
+}): boolean {
+  if (input.vercelEnv !== "preview" || input.gitRef !== "feature/instagram-creator-toolkit-20261107") return false;
+  const expectedOrigin = "https://post-automatici-canonical-git-fea-5b851e-ales-projects-b8ec22ac.vercel.app";
+  return input.configuredPreviewOrigin === expectedOrigin
+    && input.requestHost === new URL(expectedOrigin).host;
+}
+
+async function delegatePreviewAutopilot(token: string, profileId: string, res: VercelResponse) {
+  try {
+    const response = await fetch(CANONICAL_AUTOPILOT_RUN, {
+      method: "POST",
+      headers: { "authorization": `Bearer ${token}`, "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ profileId }),
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(270000),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return res.status(502).json({ error: "AUTOPILOT_CANONICAL_INVALID_RESPONSE" });
+    }
+    res.setHeader("cache-control", "no-store");
+    return res.status(response.status).json(body);
+  } catch (reason) {
+    // Never log or forward credentials. The error type is enough for support.
+    console.error("vercel.autopilot.preview_delegate_failed", {
+      detail: reason instanceof Error ? reason.name : "UNKNOWN",
+    });
+    return res.status(502).json({ error: "AUTOPILOT_CANONICAL_UNAVAILABLE" });
+  }
+}
+
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -57,8 +107,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authorized) return res.status(404).json({ error: "PROFILE_NOT_FOUND" });
 
   const runtime = env();
-  if (!runtime.DATABASE_URL) return res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" });
-  if (!runtime.OPENAI_API_KEY) return res.status(503).json({ error: "OPENAI_NOT_CONFIGURED" });
+  if (!runtime.DATABASE_URL || !runtime.OPENAI_API_KEY) {
+    if (canDelegatePreviewAutopilot({
+      vercelEnv: process.env.VERCEL_ENV,
+      gitRef: process.env.VERCEL_GIT_COMMIT_REF,
+      configuredPreviewOrigin: process.env.AUTH_PREVIEW_ORIGIN,
+      requestHost: req.headers.host,
+    })) return delegatePreviewAutopilot(token, profileId, res);
+    return res.status(503).json({
+      error: !runtime.DATABASE_URL ? "DATABASE_NOT_CONFIGURED" : "OPENAI_NOT_CONFIGURED",
+    });
+  }
 
   try {
     const result = await runContentAutopilotSerialized(runtime, { profileId, maxGenerations: 6 });
