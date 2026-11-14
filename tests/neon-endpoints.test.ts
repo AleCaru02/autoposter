@@ -23,3 +23,9 @@ for (const file of ["api/autopilot.ts", "api/render.ts", "api/generate-image.ts"
 }
 assert.match(readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8"), /__NEON_DATA_API_URL__: JSON\.stringify\(neonDataApiUrl\(process\.env\)\)/);
 console.log("PASS neon endpoints: produzione blindata, preview isolata solo con URL Neon validi per Data API e Auth.");
+{
+  const qa5 = "https://ep-damp-credit-bfj03vrj.apirest.c-5.us-west-2.aws.neon.tech/neondb/rest/v1";
+  assert.equal(neonDataApiUrl({ VERCEL_ENV: "preview", NEON_DATA_API_URL: qa5 }), qa5, "a separate QA project on another Neon cell is accepted in preview");
+  assert.equal(neonDataApiUrl({ VERCEL_ENV: "preview", NEON_DATA_API_URL: qa5.replace("c-5", "c-x") }), PRODUCTION_NEON_DATA_API_URL);
+  console.log("PASS neon endpoints: celle Neon diverse accettate solo in preview.");
+}

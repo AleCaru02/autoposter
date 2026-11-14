@@ -8,8 +8,8 @@
 export const PRODUCTION_NEON_DATA_API_URL = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 export const PRODUCTION_NEON_AUTH_URL = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
 
-const DATA_API_SHAPE = /^https:\/\/ep-[a-z0-9-]{3,60}\.apirest\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/rest\/v1$/;
-const AUTH_SHAPE = /^https:\/\/ep-[a-z0-9-]{3,60}\.neonauth\.c-4\.us-west-2\.aws\.neon\.tech\/neondb\/auth$/;
+const DATA_API_SHAPE = /^https:\/\/ep-[a-z0-9-]{3,60}\.apirest\.c-[0-9]{1,2}\.us-west-2\.aws\.neon\.tech\/neondb\/rest\/v1$/;
+const AUTH_SHAPE = /^https:\/\/ep-[a-z0-9-]{3,60}\.neonauth\.c-[0-9]{1,2}\.us-west-2\.aws\.neon\.tech\/neondb\/auth$/;
 
 type EndpointEnv = { VERCEL_ENV?: string; NEON_DATA_API_URL?: string; NEON_AUTH_URL?: string };
 
