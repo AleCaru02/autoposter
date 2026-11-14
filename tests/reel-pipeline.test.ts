@@ -77,7 +77,7 @@ try {
     saveStep: async (_job, patch) => { calls.saves += 1; persisted.step = patch.step; persisted.steps = patch.stepsCompleted; persisted.cost += patch.costDeltaUsd; },
     finalize: async (job, _context, artifacts) => { calls.finalize += 1; assert.equal(artifacts.qa?.technical, "PASS"); return { outputVariantId: "variant-1", videoAssetId: "asset-1" }; },
   };
-  const job: RenderJob = { id: "11111111-1111-4111-8111-111111111111", profile_id: "22222222-2222-4222-8222-222222222222", source_variant_id: "33333333-3333-4333-8333-333333333333", step: "SCRIPT", steps_completed: 0, steps_total: 5, attempt_count: 1, max_attempts: 3, claim_token: "44444444-4444-4444-8444-444444444444", artifacts: {}, cost_usd: 0 };
+  const job: RenderJob = { id: "11111111-1111-4111-8111-111111111111", profile_id: "22222222-2222-4222-8222-222222222222", source_variant_id: "33333333-3333-4333-8333-333333333333", step: "SCRIPT", steps_completed: 0, steps_total: 5, attempt_count: 1, max_attempts: 3, claim_token: "44444444-4444-4444-8444-444444444444", artifacts: {}, cost_usd: 0, dry_run: false };
 
   // First invocation: deadline hits during VISUALS (each scene costs 20s of fake clock).
   const first = await advanceRenderJob(job, deps, { deadlineAt: 150_000 });

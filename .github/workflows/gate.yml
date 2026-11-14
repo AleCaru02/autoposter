@@ -27,6 +27,7 @@ jobs:
       - { name: Reel studio UI real state and mobile contract, run: "npm run test:reel-studio-ui" }
       - { name: Preview-only Neon endpoint isolation, run: "npm run test:neon-endpoints" }
       - { name: Login session race does not bounce to login, run: "npm run test:auth-session-race" }
+      - { name: Reel dry run preview-only without paid providers, run: "npm run test:reel-dry-run" }
       - { name: Autonomous editorial website and verified competitor grounding, run: "npx tsx tests/autonomous-editorial-engine.test.ts" }
       - { name: Autopilot released QA retry and metering regression, run: "npx tsx tests/autopilot-rejected-metering.test.ts" }
       - { name: Vercel Google Auth canonical and preview origins, run: "npx tsx tests/vercel-auth-route.test.ts" }

@@ -39,6 +39,8 @@ export type RenderJob = {
   claim_token: string;
   artifacts: ReelArtifacts;
   cost_usd: number;
+  /** Preview-only pipeline check with deterministic stand-ins instead of paid AI providers. */
+  dry_run: boolean;
 };
 
 export type ReelContext = { source: ReelSource; contentId: string; provider: "INSTAGRAM" | "FACEBOOK"; brandAccent: string | null };

@@ -7,6 +7,7 @@ import { claimDueRenderJobs, claimRenderJob, classifyRenderError, enqueueReelJob
 import { createReelRuntime } from "./_lib/reel/reel-runtime.js";
 import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
 import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
+import { createDryRunReelRuntime, dryRunAllowed } from "./_lib/reel/reel-dry-run.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
@@ -60,7 +61,9 @@ async function authorizedUser(token: string, profileId: string) {
 async function runJob(job: RenderJob, deadlineAt: number) {
   const sql = neon(process.env.DATABASE_URL!);
   try {
-    const deps = createReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, OPENAI_API_KEY: process.env.OPENAI_API_KEY, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN });
+    const deps = job.dry_run
+      ? createDryRunReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN })
+      : createReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, OPENAI_API_KEY: process.env.OPENAI_API_KEY, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN });
     const result = await advanceRenderJob(job, deps, { deadlineAt });
     if (result.state === "RUNNING") await yieldRenderJob(sql, job);
     console.log("reel-render", { jobId: job.id, profileId: job.profile_id, state: result.state, step: job.step, costUsd: job.cost_usd });
@@ -118,17 +121,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
       if (!process.env.DATABASE_URL) return res.status(200).json({ engine: { ready: false, missing: readiness.missing }, jobs: [] });
       const jobs = await listRenderJobs(neon(process.env.DATABASE_URL), profileId);
-      return res.status(200).json({ engine: readiness, jobs });
+      return res.status(200).json({ engine: { ...readiness, dryRunAvailable: dryRunAllowed() }, jobs });
     }
 
     if (path === "enqueue") {
       if (req.method !== "POST") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
-      if (!readiness.ready) return res.status(409).json({ error: "REEL_ENGINE_NOT_CONFIGURED", missing: readiness.missing });
+      const dryRun = req.body?.dryRun === true;
+      if (dryRun && !dryRunAllowed()) return res.status(403).json({ error: "REEL_DRY_RUN_NOT_ALLOWED" });
+      const missing = dryRun ? readiness.missing.filter((key) => key !== "OPENAI_API_KEY") : readiness.missing;
+      if (missing.length) return res.status(409).json({ error: "REEL_ENGINE_NOT_CONFIGURED", missing });
       const sourceVariantId = String(req.body?.sourceVariantId ?? "");
       const requestId = String(req.body?.requestId ?? "");
       if (!UUID.test(sourceVariantId) || !UUID.test(requestId)) return res.status(400).json({ error: "REEL_ENQUEUE_INPUT_INVALID" });
       const sql = neon(process.env.DATABASE_URL!);
-      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId });
+      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId, dryRun });
       if (queued.created) {
         const deadlineAt = Date.now() + WORK_BUDGET_MS;
         waitUntil(claimRenderJob(sql, queued.id).then((job) => (job ? runJob(job, deadlineAt) : null)).catch((reason) => {

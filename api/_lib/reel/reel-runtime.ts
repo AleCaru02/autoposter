@@ -17,6 +17,39 @@ function base64ToBytes(value: string) {
   return new Uint8Array(Buffer.from(value, "base64"));
 }
 
+/** Loads the source content and brand context for a job (shared by the real and dry-run runtimes). */
+export async function loadReelContext(sql: ReturnType<typeof neon>, job: RenderJob): Promise<ReelContext> {
+  if (!job.source_variant_id) throw new ReelPipelineError("REEL_SOURCE_NOT_ELIGIBLE", false);
+  const rows = await sql`
+    select variant.content_id::text as content_id, variant.provider, variant.hook, variant.caption, variant.cta, variant.visual_brief,
+           item.topic, item.objective
+    from public.content_variants variant
+    join public.content_items item on item.id=variant.content_id and item.profile_id=variant.profile_id
+    where variant.id=${job.source_variant_id}::uuid and variant.profile_id=${job.profile_id}::uuid
+    limit 1` as unknown as Array<{ content_id: string; provider: string; hook: string | null; caption: string | null; cta: string | null; visual_brief: string | null; topic: string; objective: string | null }>;
+  const row = rows[0];
+  if (!row) throw new ReelPipelineError("REEL_SOURCE_NOT_ELIGIBLE", false);
+  const profile = await loadEditorialProfile(sql, job.profile_id, null);
+  const brand = await loadProfileBrandContext(sql, profile);
+  const visual = normalizeBrandVisualIdentity(brand.visualIdentity);
+  return {
+    contentId: row.content_id,
+    provider: row.provider === "FACEBOOK" ? "FACEBOOK" : "INSTAGRAM",
+    brandAccent: visual.activeSocialPalette?.primary ?? null,
+    source: {
+      profileName: profile.name,
+      industry: profile.industry ?? null,
+      tone: brand.brand.tone ?? null,
+      topic: row.topic,
+      hook: row.hook,
+      caption: row.caption,
+      cta: row.cta,
+      visualBrief: row.visual_brief,
+      confirmedFacts: [brand.brand.description, brand.brand.userContext, brand.brand.location, brand.brand.serviceArea].filter((value): value is string => Boolean(value)),
+    },
+  };
+}
+
 /** Production dependencies: Neon persistence, entitlement + budget metering, OpenAI, Vercel Blob. */
 export function createReelRuntime(env: ReelRuntimeEnv): ReelDeps {
   if (!env.DATABASE_URL) throw new ReelPipelineError("DATABASE_URL_REQUIRED", false);
@@ -76,35 +109,7 @@ export function createReelRuntime(env: ReelRuntimeEnv): ReelDeps {
     now: () => Date.now(),
     async loadContext(job) {
       currentJob = job;
-      if (!job.source_variant_id) throw new ReelPipelineError("REEL_SOURCE_NOT_ELIGIBLE", false);
-      const rows = await sql`
-        select variant.content_id::text as content_id, variant.provider, variant.hook, variant.caption, variant.cta, variant.visual_brief,
-               item.topic, item.objective
-        from public.content_variants variant
-        join public.content_items item on item.id=variant.content_id and item.profile_id=variant.profile_id
-        where variant.id=${job.source_variant_id}::uuid and variant.profile_id=${job.profile_id}::uuid
-        limit 1` as unknown as Array<{ content_id: string; provider: string; hook: string | null; caption: string | null; cta: string | null; visual_brief: string | null; topic: string; objective: string | null }>;
-      const row = rows[0];
-      if (!row) throw new ReelPipelineError("REEL_SOURCE_NOT_ELIGIBLE", false);
-      const { profile, brand } = await profileContext(job.profile_id);
-      const visual = normalizeBrandVisualIdentity(brand.visualIdentity);
-      const context: ReelContext = {
-        contentId: row.content_id,
-        provider: row.provider === "FACEBOOK" ? "FACEBOOK" : "INSTAGRAM",
-        brandAccent: visual.activeSocialPalette?.primary ?? null,
-        source: {
-          profileName: profile.name,
-          industry: profile.industry ?? null,
-          tone: brand.brand.tone ?? null,
-          topic: row.topic,
-          hook: row.hook,
-          caption: row.caption,
-          cta: row.cta,
-          visualBrief: row.visual_brief,
-          confirmedFacts: [brand.brand.description, brand.brand.userContext, brand.brand.location, brand.brand.serviceArea].filter((value): value is string => Boolean(value)),
-        },
-      };
-      return context;
+      return loadReelContext(sql, job);
     },
     metered,
     async generateScript(source) {

@@ -143,7 +143,8 @@
     "test:vercel-render-route": "tsx tests/vercel-render-route.test.ts",
     "test:reel-studio-ui": "tsx tests/reel-studio-ui.test.ts",
     "test:neon-endpoints": "tsx tests/neon-endpoints.test.ts",
-    "test:auth-session-race": "tsx tests/auth-session-race.test.ts"
+    "test:auth-session-race": "tsx tests/auth-session-race.test.ts",
+    "test:reel-dry-run": "tsx tests/reel-dry-run.test.ts"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

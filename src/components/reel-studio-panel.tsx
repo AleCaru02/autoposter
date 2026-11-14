@@ -21,9 +21,10 @@ type RenderJobView = {
   duration_seconds: number | null;
   output_workflow_status: string | null;
   output_qa_status: string | null;
+  dry_run?: boolean;
 };
 type SourceVariant = { id: string; provider: string; format: string; hook: string | null; created_at: string };
-type Engine = { ready: boolean; missing: string[] };
+type Engine = { ready: boolean; missing: string[]; dryRunAvailable?: boolean };
 
 const STEP_LABEL: Record<string, string> = { SCRIPT: "Script", VISUALS: "Immagini delle scene", VOICE: "Voce", RENDER: "Montaggio video", QA: "Controllo qualità", DONE: "Completato" };
 const STATE_LABEL: Record<RenderJobView["state"], string> = { QUEUED: "In coda", RUNNING: "In lavorazione", READY_FOR_REVIEW: "Pronto per la revisione", FAILED: "Non riuscito", BLOCKED: "Bloccato dal budget", CANCELED: "Annullato" };
@@ -84,11 +85,11 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
     return () => window.clearInterval(timer);
   }, [active, refresh]);
 
-  async function createReel() {
+  async function createReel(dryRun = false) {
     if (!sourceId) return;
     setBusy(true); setError(null);
     try {
-      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID() }) });
+      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID(), dryRun }) });
       if (!result.ok) {
         const code = String(result.body.error ?? "");
         setError(code === "REEL_QUEUE_FULL" ? "Ci sono già 3 Reel in lavorazione per questa attività." : code === "REEL_SOURCE_NOT_ELIGIBLE" ? "Il contenuto scelto non ha un testo sufficiente per un Reel." : code === "REEL_ENGINE_NOT_CONFIGURED" ? "Il motore Reel non è ancora configurato." : "Avvio del Reel non riuscito. Riprova.");
@@ -127,6 +128,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
         {busy ? <LoaderCircle className="spin" size={16} /> : <Clapperboard size={16} />} Crea Reel
       </button>
     </div>
+    {engine?.dryRunAvailable && <button className="secondary-button reel-dry-run" type="button" onClick={() => void createReel(true)} disabled={!sourceId || busy}>Prova a secco senza AI (solo ambiente di test, costo 0)</button>}
     <p className="field-help">Costo stimato: circa 1,3–1,6 $ per Reel (immagini, voce, script), conteggiato nel budget AI dell'attività.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
 
@@ -135,7 +137,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
       {!jobs.length && <p className="field-help">Nessun Reel ancora creato per questa attività.</p>}
       {jobs.map((job) => <article className={`reel-job reel-job-${job.state.toLowerCase()}`} key={job.id}>
         <header>
-          <strong>{job.title || job.hook || "Reel"}</strong>
+          <strong>{job.dry_run ? "Prova a secco · " : ""}{job.title || job.hook || "Reel"}</strong>
           <span className="reel-job-state">{STATE_LABEL[job.state]}</span>
         </header>
         {(job.state === "QUEUED" || job.state === "RUNNING") && <div className="reel-progress" role="progressbar" aria-valuemin={0} aria-valuemax={job.steps_total} aria-valuenow={job.steps_completed} aria-label="Avanzamento Reel">
