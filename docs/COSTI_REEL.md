@@ -2,7 +2,24 @@
 
 Valori in USD, IVA esclusa. Le cifre provider sono stime da verificare; il sistema registra i costi reali in `ai_usage_events` e `provider_cost_attempts` per ogni Reel (`render_jobs.cost_usd`).
 
-## Ipotesi Reel faceless (implementato)
+## Costi reali misurati (14/11/2026, primo Reel reale su reel-qa)
+
+Tariffe ufficiali `gpt-image-2.5-sunburst` (verificate il 14/11/2026 su developers.openai.com): input testo 5 $/M token, input immagine 8 $/M, output immagine 30 $/M. Il sistema ora calcola il costo dall'usage restituito da OpenAI:
+- se l'input è suddiviso tra testo e immagini, applica le tariffe esatte (`cost_basis = OPENAI_USAGE_X_PUBLISHED_RATES`);
+- altrimenti prezza tutto l'input alla tariffa più alta (`CONSERVATIVE_ESTIMATE_UNSPLIT_INPUT`);
+- se manca l'usage, addebita la riserva di 0,25 $ (`RESERVE_FALLBACK_MISSING_USAGE`).
+
+| Voce (Reel da 6 scene, 53 s) | Costo |
+|---|---|
+| Script `gpt-5.6-terra` | 0,011 $ |
+| Direzione artistica 6 immagini `gpt-5.6-terra` | 0,085 $ |
+| 6 immagini 1440×2560 high (~1.050 token in, 1.843 out ciascuna) | 0,382 $ (stima prudenziale; 0,064 $/immagine) |
+| Voce `gpt-4o-mini-tts` 52,8 s | 0,013 $ |
+| **Totale registrato** | **0,491 $** |
+
+Con il limite 20–40 s (3–6 scene) il costo atteso è **0,30–0,50 $ per Reel**. In caso di riscrittura correttiva dello script si aggiungono circa 0,01 $. Il tetto per singolo Reel resta di 2 $ (`REEL_JOB_MAX_COST_USD`).
+
+## Ipotesi Reel faceless (ipotesi iniziale 13/11, superata dai dati reali)
 
 - Durata 25–35 s, 1080×1920, 30 fps, 4–5 scene.
 - Script: 1 chiamata `gpt-5.6-terra` (~2–4k token) ≈ 0,02–0,05 $.
