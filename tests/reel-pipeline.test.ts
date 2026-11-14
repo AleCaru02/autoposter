@@ -78,7 +78,7 @@ try {
     saveStep: async (_job, patch) => { calls.saves += 1; persisted.step = patch.step; persisted.steps = patch.stepsCompleted; persisted.cost += patch.costDeltaUsd; },
     finalize: async (job, _context, artifacts) => { calls.finalize += 1; assert.equal(artifacts.qa?.technical, "PASS"); return { outputVariantId: "variant-1", videoAssetId: "asset-1" }; },
   };
-  const job: RenderJob = { id: "11111111-1111-4111-8111-111111111111", profile_id: "22222222-2222-4222-8222-222222222222", source_variant_id: "33333333-3333-4333-8333-333333333333", step: "SCRIPT", steps_completed: 0, steps_total: 5, attempt_count: 1, max_attempts: 3, claim_token: "44444444-4444-4444-8444-444444444444", artifacts: {}, cost_usd: 0, dry_run: false };
+  const job: RenderJob = { id: "11111111-1111-4111-8111-111111111111", profile_id: "22222222-2222-4222-8222-222222222222", source_variant_id: "33333333-3333-4333-8333-333333333333", step: "SCRIPT", steps_completed: 0, steps_total: 5, attempt_count: 1, max_attempts: 3, claim_token: "44444444-4444-4444-8444-444444444444", artifacts: {}, cost_usd: 0, dry_run: false, duration: { minSeconds: 10, maxSeconds: 30, source: "CONTENT" } };
 
   // First invocation: deadline hits during VISUALS (each scene costs 20s of fake clock).
   const first = await advanceRenderJob(job, deps, { deadlineAt: 150_000 });
@@ -88,9 +88,10 @@ try {
   assert.equal(calls.tts, 1);
   assert.equal(job.steps_completed, 3);
 
+  assert.ok(job.artifacts.voice && calls.scenes.length === 4, "la voce (economica) è generata e misurata prima delle immagini");
   // Simulated crash: scene 3 lost from artifacts → resume regenerates only what is missing.
   job.step = "VISUALS";
-  job.steps_completed = 1;
+  job.steps_completed = 2;
   job.artifacts = { ...job.artifacts, scenes: job.artifacts.scenes!.filter((scene) => scene.index !== 3) };
   const second = await advanceRenderJob(job, deps, { deadlineAt: Number.POSITIVE_INFINITY });
   assert.equal(second.state, "READY_FOR_REVIEW");
@@ -111,7 +112,7 @@ try {
   await assert.rejects(advanceRenderJob(capped, deps, { deadlineAt: Number.POSITIVE_INFINITY, maxCostUsd: 1 }), (error: unknown) => error instanceof ReelPipelineError && error.code === "AI_BUDGET_REEL_JOB_CAP" && !error.retryable);
   assert.equal(calls.script, scriptCallsBefore, "no paid call is made when the cap would be exceeded");
   // Mid-job: script already paid, a cap that cannot cover the remaining stills blocks before VISUALS spends.
-  const midway: RenderJob = { ...job, id: "77777777-7777-4777-8777-777777777777", step: "VISUALS", steps_completed: 1, artifacts: { script: structuredClone(script) }, cost_usd: 1.2 };
+  const midway: RenderJob = { ...job, id: "77777777-7777-4777-8777-777777777777", step: "VISUALS", steps_completed: 2, artifacts: { script: structuredClone(script), voice: structuredClone(job.artifacts.voice) }, cost_usd: 1.2 };
   const scenesBefore = calls.scenes.length;
   await assert.rejects(advanceRenderJob(midway, deps, { deadlineAt: Number.POSITIVE_INFINITY, maxCostUsd: 2 }), (error: unknown) => error instanceof ReelPipelineError && error.code === "AI_BUDGET_REEL_JOB_CAP");
   assert.equal(calls.scenes.length, scenesBefore, "no still is generated when the remaining worst case exceeds the cap");

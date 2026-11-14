@@ -41,7 +41,7 @@ const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url
 assert.ok(config.crons.some((entry: { path: string; schedule: string }) => entry.path === "/api/render/tick" && entry.schedule === "30 * * * *"), "hourly recovery tick, not per-minute (keeps Neon free compute asleep)");
 assert.ok(config.rewrites.findIndex((rule: { source: string }) => rule.source === "/api/render/:path*") < config.rewrites.findIndex((rule: { source: string }) => rule.source === "/((?!api/).*)"));
 const fn = config.functions["api/render.ts"];
-assert.equal(fn.maxDuration, 300);
+assert.equal(fn.maxDuration, 800, "Pro + Fluid: a whole Reel fits in one invocation");
 for (const file of ["@ff*-installer/linux-x64/**", "inter-latin-[47]00-normal.woff", "@resvg/resvg-wasm/*.wasm"]) assert.ok(fn.includeFiles.includes(file), `binary/font missing from function bundle: ${file}`);
 assert.ok(fn.includeFiles.length <= 256, "Vercel rejects includeFiles longer than 256 characters");
 

@@ -4,7 +4,8 @@ import { runMediaBinary } from "./media-binaries.js";
 /**
  * Deterministic Reel assembly: one still per scene with a slow Ken Burns move,
  * burned-in caption overlays, narration audio, H.264 High + AAC, 1080x1920, 30 fps, faststart.
- * Uses only filters available in FFmpeg 4.1 (zoompan, fade, concat, overlay, apad).
+ * Uses only filters available in FFmpeg 4.1 (zoompan, fade, concat, overlay, apad, loudnorm, atempo).
+ * Audio is normalised for social playback (two-pass loudnorm, -14 LUFS, true peak -1.5 dBTP).
  */
 export type ReelSceneInput = { imagePath: string; durationSeconds: number };
 export type ReelCaptionInput = { pngPath: string; start: number; end: number };
@@ -14,6 +15,8 @@ export type ReelRenderInput = {
   audioPath: string;
   outputPath: string;
   fps?: number;
+  /** Complete loudnorm filter (second pass, from measureLoudness). Omitted = audio left as is. */
+  loudnorm?: string;
 };
 
 export const REEL_FPS = 30;
@@ -68,7 +71,7 @@ export function buildReelFfmpegArgs(input: ReelRenderInput): string[] {
     last = next;
   });
   filters.push(`[${last}]format=yuv420p[vout]`);
-  filters.push(`[${audioIndex}:a]aresample=48000,apad,atrim=0:${total}[aout]`);
+  filters.push(`[${audioIndex}:a]${input.loudnorm ? `${input.loudnorm},` : ""}aresample=48000,apad,atrim=0:${total}[aout]`);
 
   args.push(
     "-filter_complex", filters.join(";"),
@@ -80,6 +83,13 @@ export function buildReelFfmpegArgs(input: ReelRenderInput): string[] {
     input.outputPath,
   );
   return args;
+}
+
+/** Speeds narration up without changing pitch (atempo), re-encoded as MP3. */
+export async function changeAudioTempo(inputPath: string, outputPath: string, tempo: number) {
+  if (!(tempo >= 1 && tempo <= 1.25)) throw new Error("REEL_TEMPO_INVALID");
+  const result = await runMediaBinary("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", inputPath, "-filter:a", `atempo=${tempo.toFixed(4)}`, "-c:a", "libmp3lame", "-b:a", "128k", outputPath], { timeoutMs: 60_000 });
+  if (result.code !== 0) throw new Error(`REEL_TEMPO_FAILED: ${result.stderrTail.slice(-200)}`);
 }
 
 export async function renderReel(input: ReelRenderInput, options: { timeoutMs?: number } = {}) {

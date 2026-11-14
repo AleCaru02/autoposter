@@ -26,6 +26,14 @@ type RenderJobView = {
 type SourceVariant = { id: string; provider: string; format: string; hook: string | null; created_at: string };
 type Engine = { ready: boolean; missing: string[]; dryRunAvailable?: boolean };
 
+/** Duration presets for a single Reel; "" keeps the profile default (20-40 s if not set). */
+const DURATION_PRESETS: Record<string, { label: string; minSeconds?: number; maxSeconds?: number }> = {
+  "": { label: "Durata predefinita del profilo (20–40 s)" },
+  "15-30": { label: "Breve · 15–30 s", minSeconds: 15, maxSeconds: 30 },
+  "20-40": { label: "Standard · 20–40 s", minSeconds: 20, maxSeconds: 40 },
+  "30-60": { label: "Approfondito · 30–60 s", minSeconds: 30, maxSeconds: 60 },
+};
+
 const STEP_LABEL: Record<string, string> = { SCRIPT: "Script", VISUALS: "Immagini delle scene", VOICE: "Voce", RENDER: "Montaggio video", QA: "Controllo qualità", DONE: "Completato" };
 const STATE_LABEL: Record<RenderJobView["state"], string> = { QUEUED: "In coda", RUNNING: "In lavorazione", READY_FOR_REVIEW: "Pronto per la revisione", FAILED: "Non riuscito", BLOCKED: "Bloccato dal budget", CANCELED: "Annullato" };
 const MISSING_LABEL: Record<string, string> = {
@@ -41,6 +49,8 @@ function errorMessage(code: string | null) {
   if (code.startsWith("CAPABILITY_")) return "Limite mensile Reel raggiunto per questa attività.";
   if (code === "REEL_SCRIPT_REJECTED") return "Lo script conteneva dati non presenti nel contenuto originale ed è stato scartato. Nessun video prodotto.";
   if (code === "REEL_TECHNICAL_QA_FAILED") return "Il video non ha superato il controllo tecnico (formato, audio o durata).";
+  if (code === "REEL_VOICE_TOO_LONG") return "La voce supera la durata massima scelta: il Reel è stato fermato prima di generare le immagini.";
+  if (code === "REEL_VOICE_TOO_SHORT") return "La voce è più corta della durata minima scelta: il Reel è stato fermato prima di generare le immagini.";
   if (code.startsWith("OPENAI_")) return "OpenAI non ha risposto correttamente. Il sistema riprova automaticamente.";
   return `Errore tecnico (${code}).`;
 }
@@ -57,6 +67,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
   const [jobs, setJobs] = useState<RenderJobView[]>([]);
   const [sources, setSources] = useState<SourceVariant[]>([]);
   const [sourceId, setSourceId] = useState("");
+  const [durationKey, setDurationKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentProfile = useRef(profileId);
@@ -89,7 +100,9 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
     if (!sourceId) return;
     setBusy(true); setError(null);
     try {
-      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID(), dryRun }) });
+      const preset = DURATION_PRESETS[durationKey];
+      const duration = preset?.minSeconds && preset.maxSeconds ? { minSeconds: preset.minSeconds, maxSeconds: preset.maxSeconds } : undefined;
+      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID(), dryRun, duration }) });
       if (!result.ok) {
         const code = String(result.body.error ?? "");
         setError(code === "REEL_QUEUE_FULL" ? "Ci sono già 3 Reel in lavorazione per questa attività." : code === "REEL_SOURCE_NOT_ELIGIBLE" ? "Il contenuto scelto non ha un testo sufficiente per un Reel." : code === "REEL_ENGINE_NOT_CONFIGURED" ? "Il motore Reel non è ancora configurato." : "Avvio del Reel non riuscito. Riprova.");
@@ -124,12 +137,17 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
           {sources.map((source) => <option key={source.id} value={source.id}>{source.provider} · {source.format} · {(source.hook ?? "Senza hook").slice(0, 70)}</option>)}
         </select>
       </label>
+      <label>Durata
+        <select value={durationKey} onChange={(event) => setDurationKey(event.target.value)} disabled={!engine?.ready || busy}>
+          {Object.entries(DURATION_PRESETS).map(([key, preset]) => <option key={key || "default"} value={key}>{preset.label}</option>)}
+        </select>
+      </label>
       <button className="primary-button" type="button" onClick={() => void createReel()} disabled={!engine?.ready || !sourceId || busy}>
         {busy ? <LoaderCircle className="spin" size={16} /> : <Clapperboard size={16} />} Crea Reel
       </button>
     </div>
     {engine?.dryRunAvailable && <button className="secondary-button reel-dry-run" type="button" onClick={() => void createReel(true)} disabled={!sourceId || busy}>Prova a secco senza AI (solo ambiente di test, costo 0)</button>}
-    <p className="field-help">Costo stimato: circa 1,3–1,6 $ per Reel (immagini, voce, script), conteggiato nel budget AI dell'attività.</p>
+    <p className="field-help">Costo misurato sul primo Reel reale: circa 0,50 $ con 6 scene (immagini, voce, script). Tetto massimo per Reel: 2 $, conteggiato nel budget AI dell'attività.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
 
     <div className="reel-job-list">

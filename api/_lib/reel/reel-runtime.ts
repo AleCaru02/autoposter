@@ -112,8 +112,8 @@ export function createReelRuntime(env: ReelRuntimeEnv): ReelDeps {
       return loadReelContext(sql, job);
     },
     metered,
-    async generateScript(source) {
-      const result = await generateReelScript({ apiKey, source });
+    async generateScript(source, options) {
+      const result = await generateReelScript({ apiKey, source, policy: options.policy, feedback: options.feedback });
       return { value: result.script, usage: [{ operation: "REEL_SCRIPT", model: result.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, costUsd: result.costUsd, metadata: { response_id: result.responseId } }] };
     },
     async generateSceneImage({ job, context, index, visualBrief, voiceover }) {

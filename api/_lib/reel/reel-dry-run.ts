@@ -5,6 +5,7 @@ import { neon } from "@neondatabase/serverless";
 import { isIsolatedPreview } from "../neon-endpoints.js";
 import { runMediaBinary } from "./media-binaries.js";
 import { ITALIAN_WORDS_PER_SECOND, type ReelScript, type ReelSource } from "./reel-script.js";
+import { countWords, DEFAULT_REEL_DURATION, scriptTargets, type ReelDurationPolicy } from "./reel-duration.js";
 import { fetchArtifact, storeReelArtifact } from "./reel-storage.js";
 import { finalizeRenderJob, saveRenderStep } from "./render-jobs.js";
 import { loadReelContext } from "./reel-runtime.js";
@@ -26,8 +27,18 @@ function sentences(text: string) {
 }
 
 /** Script built only from the source text: no model, no invention. */
-export function dryRunScript(source: ReelSource): ReelScript {
-  const picked = sentences(`${source.hook ?? ""}. ${source.caption ?? ""}`).slice(0, 4);
+export function dryRunScript(source: ReelSource, policy: Pick<ReelDurationPolicy, "minSeconds" | "maxSeconds"> = DEFAULT_REEL_DURATION): ReelScript {
+  // Same length rules as the AI script: whole source sentences until the word target is met.
+  const targets = scriptTargets(policy);
+  const picked: string[] = [];
+  let total = 0;
+  for (const sentence of sentences(`${source.hook ?? ""}. ${source.caption ?? ""}`)) {
+    const count = countWords(sentence);
+    if (total + count > targets.maxWords || picked.length >= targets.maxScenes) break;
+    picked.push(sentence);
+    total += count;
+    if (total >= targets.minWords && picked.length >= targets.minScenes) break;
+  }
   while (picked.length < 3) picked.push(`${source.topic}.`.padEnd(24, "."));
   const palette = ["luce naturale calda", "toni verdi e neutri", "atmosfera ordinata e professionale", "inquadratura verticale pulita"];
   return {
@@ -66,13 +77,14 @@ export function createDryRunReelRuntime(env: { DATABASE_URL?: string; BLOB_READ_
     loadContext: (job) => loadReelContext(sql, job),
     // No entitlement or budget is consumed: nothing here can reach a paid provider.
     metered: async (input) => { const result = await input.run(); return { value: result.value, costUsd: 0 }; },
-    generateScript: async (source) => ({ value: dryRunScript(source), usage: [] }),
+    generateScript: async (source, options) => ({ value: dryRunScript(source, options.policy), usage: [] }),
     async generateSceneImage({ job, index }) {
       const png = await ffmpegToBytes(["-f", "lavfi", "-i", `color=c=${SCENE_COLORS[index % SCENE_COLORS.length]}:s=1440x2560:d=1`, "-frames:v", "1"], "scene.png");
       return { stored: await store(job, `scene-${index}.png`, png, "image/png"), costUsd: 0 };
     },
-    async synthesize(text) {
-      const seconds = Math.min(Math.max(text.split(/\s+/).filter(Boolean).length / ITALIAN_WORDS_PER_SECOND, 12), 45);
+    async synthesize(text, _tone, policy) {
+      // Tone whose length follows the narration, kept inside the policy like a well-sized script.
+      const seconds = Math.min(Math.max(countWords(text) / ITALIAN_WORDS_PER_SECOND, policy.minSeconds + 0.5), policy.maxSeconds - 1.5);
       const audio = await ffmpegToBytes(["-f", "lavfi", "-i", `sine=frequency=220:duration=${seconds.toFixed(2)}`, "-ac", "1", "-c:a", "libmp3lame", "-b:a", "64k"], "voice.mp3");
       return { value: { audio, model: "dry-run-tone", voice: "none" }, usage: [{ operation: "REEL_TTS_DRY_RUN", model: "dry-run-tone", inputTokens: null, outputTokens: null, costUsd: 0 }] };
     },

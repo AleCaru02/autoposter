@@ -9,14 +9,26 @@ import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
 import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
 import { createDryRunReelRuntime, dryRunAllowed } from "./_lib/reel/reel-dry-run.js";
 import { checkOpenAiModelAccess } from "./_lib/reel/openai-access.js";
+import { dispatchContinuation, parseContinuationQuery } from "./_lib/reel/render-continuation.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 
-export const config = { maxDuration: 300 };
+// Pro + Fluid compute: one invocation can finish a whole Reel (script, voice, 6 stills, render).
+export const config = { maxDuration: 800 };
 
 const DATA_API = neonDataApiUrl();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const WORK_BUDGET_MS = 270_000;
+const WORK_BUDGET_MS = workBudgetMs();
+
+/** 760 s of work per invocation; an isolated preview may shorten it (REEL_WORK_BUDGET_MS) to test cloud resume. */
+function workBudgetMs(env: Record<string, string | undefined> = process.env) {
+  const override = Number(env.REEL_WORK_BUDGET_MS);
+  return env.VERCEL_ENV === "preview" && Number.isFinite(override) && override >= 30_000 && override < 760_000 ? override : 760_000;
+}
+/** Minimum time left to start another in-place attempt after a short retry backoff. */
+const MIN_RUN_MS = 120_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Fail-closed switch: the paid Reel pipeline runs only with REEL_ENGINE_ENABLED=true. */
 export function reelEngineReadiness(env: Record<string, string | undefined> = process.env) {
@@ -59,7 +71,9 @@ async function authorizedUser(token: string, profileId: string) {
   return row ? { ownerId: row.owner_auth_user_id ?? null } : null;
 }
 
-async function runJob(job: RenderJob, deadlineAt: number) {
+type RunOutcome = { state: string; retryInSeconds: number | null };
+
+async function runJob(job: RenderJob, deadlineAt: number): Promise<RunOutcome> {
   const sql = neon(process.env.DATABASE_URL!);
   try {
     const deps = job.dry_run
@@ -68,18 +82,58 @@ async function runJob(job: RenderJob, deadlineAt: number) {
     const configuredCap = Number(process.env.REEL_JOB_MAX_COST_USD);
     const maxCostUsd = Number.isFinite(configuredCap) && configuredCap > 0 ? Math.min(configuredCap, 10) : 2;
     const result = await advanceRenderJob(job, deps, { deadlineAt, maxCostUsd });
-    if (result.state === "RUNNING") await yieldRenderJob(sql, job);
     console.log("reel-render", { jobId: job.id, profileId: job.profile_id, state: result.state, step: job.step, costUsd: job.cost_usd });
-    return result.state;
+    if (result.state === "RUNNING") {
+      await yieldRenderJob(sql, job);
+      return { state: "YIELDED", retryInSeconds: 0 };
+    }
+    return { state: result.state, retryInSeconds: null };
   } catch (reason) {
     const code = reason instanceof ReelPipelineError ? reason.code : reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN";
     const detail = reason instanceof Error ? reason.message : "Errore sconosciuto";
     const classified = classifyRenderError(code);
     const retryable = reason instanceof ReelPipelineError ? reason.retryable && classified.retryable : classified.retryable;
-    const state = await failRenderJob(sql, job, code, detail, retryable, classified.state === "BLOCKED").catch(() => "UNKNOWN");
-    console.error("reel-render-failed", { jobId: job.id, profileId: job.profile_id, step: job.step, code, state });
-    return state;
+    const failed = await failRenderJob(sql, job, code, detail, retryable, classified.state === "BLOCKED").catch(() => ({ state: "UNKNOWN", retryInSeconds: null }));
+    console.error("reel-render-failed", { jobId: job.id, profileId: job.profile_id, step: job.step, code, state: failed.state, retryInSeconds: failed.retryInSeconds });
+    return failed;
   }
+}
+
+async function handOff(jobId: string, hop: number, delaySeconds: number) {
+  const result = await dispatchContinuation(process.env, jobId, hop, delaySeconds);
+  console.log("reel-render-continuation", { jobId, hop, delaySeconds, ...result });
+}
+
+/**
+ * Drives one job inside this invocation: claims it (lease + claim_token), runs it, retries a
+ * short backoff in place when time allows, otherwise hands off to a fresh invocation of this
+ * deployment. Never waits for the hourly cron unless the hand-off itself is impossible.
+ */
+async function driveRenderJob(jobId: string | null, deadlineAt: number, hop: number) {
+  const sql = neon(process.env.DATABASE_URL!);
+  const states: string[] = [];
+  let target = jobId;
+  for (let round = 0; round < 4; round += 1) {
+    const job = (target ? await claimRenderJob(sql, target) : null) ?? (await claimDueRenderJobs(sql, 1))[0] ?? null;
+    if (!job) break;
+    const outcome = await runJob(job, deadlineAt);
+    states.push(outcome.state);
+    if (outcome.state === "YIELDED") {
+      await handOff(job.id, hop + 1, 0);
+      break;
+    }
+    if (outcome.state === "QUEUED" && outcome.retryInSeconds !== null) {
+      const waitMs = (outcome.retryInSeconds + 1) * 1_000;
+      if (Date.now() + waitMs + MIN_RUN_MS < deadlineAt) {
+        await sleep(waitMs);
+        target = job.id;
+        continue;
+      }
+      await handOff(job.id, hop + 1, outcome.retryInSeconds + 1);
+    }
+    break;
+  }
+  return states;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -93,10 +147,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!cronAuthorized(req)) return res.status(401).json({ error: "UNAUTHORIZED_CRON" });
     if (!readiness.ready) return res.status(200).json({ ok: true, processed: 0, engine: "DISABLED_CONFIG", missing: readiness.missing });
     const deadlineAt = Date.now() + WORK_BUDGET_MS;
-    const jobs = await claimDueRenderJobs(neon(process.env.DATABASE_URL!), 1);
-    const states = [];
-    for (const job of jobs) states.push(await runJob(job, deadlineAt));
-    return res.status(200).json({ ok: true, processed: jobs.length, states });
+    const continuation = parseContinuationQuery(req.query as Record<string, unknown>);
+    if (continuation.jobId) {
+      // Continuation from a previous invocation: accept at once, work in the background.
+      const { jobId, hop, delaySeconds } = continuation;
+      waitUntil((async () => {
+        if (delaySeconds) await sleep(delaySeconds * 1_000);
+        await driveRenderJob(jobId, deadlineAt, hop);
+      })().catch((reason) => console.error("reel-render-continuation-failed", { jobId, hop, detail: reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN" })));
+      return res.status(202).json({ ok: true, accepted: jobId, hop });
+    }
+    const states = await driveRenderJob(null, deadlineAt, 0);
+    return res.status(200).json({ ok: true, processed: states.length, states });
   }
 
   if (path === "selftest") {
@@ -142,10 +204,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const requestId = String(req.body?.requestId ?? "");
       if (!UUID.test(sourceVariantId) || !UUID.test(requestId)) return res.status(400).json({ error: "REEL_ENQUEUE_INPUT_INVALID" });
       const sql = neon(process.env.DATABASE_URL!);
-      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId, dryRun });
+      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId, dryRun, duration: req.body?.duration ?? undefined });
       if (queued.created) {
         const deadlineAt = Date.now() + WORK_BUDGET_MS;
-        waitUntil(claimRenderJob(sql, queued.id).then((job) => (job ? runJob(job, deadlineAt) : null)).catch((reason) => {
+        waitUntil(driveRenderJob(queued.id, deadlineAt, 0).catch((reason) => {
           console.error("reel-render-start-failed", { jobId: queued.id, detail: reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN" });
         }));
       }
@@ -156,6 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (reason) {
     const code = reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN";
     if (code === "SESSION_INVALID") return res.status(401).json({ error: code });
+    if (code === "REEL_DURATION_INVALID") return res.status(400).json({ error: code });
     if (/^REEL_(SOURCE_NOT_ELIGIBLE|QUEUE_FULL|ENQUEUE_INPUT_INVALID)$/.test(code)) return res.status(409).json({ error: code });
     console.error("reel-render-route-failed", { path, code });
     return res.status(500).json({ error: "RENDER_ROUTE_FAILED" });

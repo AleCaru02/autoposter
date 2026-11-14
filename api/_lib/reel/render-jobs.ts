@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import type { RenderJob, ReelArtifacts, ReelStep, ReelContext } from "./reel-pipeline.js";
+import { normalizeDurationPolicy, resolveDurationPolicy, type ReelDurationPolicy } from "./reel-duration.js";
 
 /**
  * Persistence for render_jobs. Every write after a claim is guarded by claim_token, so a
@@ -14,6 +15,13 @@ type JobRow = {
   attempt_count: number; max_attempts: number; claim_token: string | null; artifacts: unknown; cost_usd: number | string; input?: unknown;
 };
 
+function inputDuration(input: unknown): ReelDurationPolicy | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const duration = (input as Record<string, unknown>).duration as Record<string, unknown> | undefined;
+  const source = duration?.source === "CONTENT" || duration?.source === "PROFILE" ? duration.source : "DEFAULT";
+  return normalizeDurationPolicy(duration, source) ?? undefined;
+}
+
 function toJob(row: JobRow): RenderJob {
   if (!row.claim_token) throw new Error("RENDER_JOB_NOT_CLAIMED");
   return {
@@ -23,18 +31,22 @@ function toJob(row: JobRow): RenderJob {
     artifacts: (row.artifacts && typeof row.artifacts === "object" ? row.artifacts : {}) as ReelArtifacts,
     cost_usd: Number(row.cost_usd) || 0,
     dry_run: Boolean(row.input && typeof row.input === "object" && (row.input as Record<string, unknown>).dryRun === true),
+    duration: inputDuration(row.input),
   };
 }
 
-export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourceVariantId: string; requestId: string; requestedBy: string | null; dryRun?: boolean }) {
+export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourceVariantId: string; requestId: string; requestedBy: string | null; dryRun?: boolean; duration?: unknown }) {
   if (![input.profileId, input.sourceVariantId, input.requestId].every((value) => UUID.test(value))) throw new Error("REEL_ENQUEUE_INPUT_INVALID");
   const sources = await sql`
-    select variant.id::text from public.content_variants variant
+    select variant.id::text, profile.reel_min_seconds as min_seconds, profile.reel_max_seconds as max_seconds from public.content_variants variant
     join public.profiles profile on profile.id=variant.profile_id and profile.archived_at is null
     where variant.id=${input.sourceVariantId}::uuid and variant.profile_id=${input.profileId}::uuid
       and coalesce(variant.format,'') <> 'REEL' and length(coalesce(variant.caption,'')) >= 40
-    limit 1` as unknown as Array<{ id: string }>;
+    limit 1` as unknown as Array<{ id: string; min_seconds: number | null; max_seconds: number | null }>;
   if (!sources[0]) throw new Error("REEL_SOURCE_NOT_ELIGIBLE");
+  if (input.duration !== undefined && input.duration !== null && !normalizeDurationPolicy(input.duration, "CONTENT")) throw new Error("REEL_DURATION_INVALID");
+  // Resolved once here (content > profile > default) and stored, so every resume uses the same limits.
+  const duration = resolveDurationPolicy({ content: input.duration, profile: { minSeconds: sources[0].min_seconds, maxSeconds: sources[0].max_seconds } });
   const active = await sql`
     select count(*)::int as count from public.render_jobs
     where profile_id=${input.profileId}::uuid and state in ('QUEUED','RUNNING')` as unknown as Array<{ count: number }>;
@@ -42,7 +54,7 @@ export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourc
   const rows = await sql`
     insert into public.render_jobs (profile_id,source_variant_id,kind,idempotency_key,input,requested_by)
     values (${input.profileId}::uuid,${input.sourceVariantId}::uuid,'REEL_FACELESS',${`${input.dryRun ? "reel-dry" : "reel"}:v1:${input.sourceVariantId}:${input.requestId}`},
-            ${JSON.stringify({ sourceVariantId: input.sourceVariantId, dryRun: input.dryRun === true })}::jsonb,${input.requestedBy})
+            ${JSON.stringify({ sourceVariantId: input.sourceVariantId, dryRun: input.dryRun === true, duration })}::jsonb,${input.requestedBy})
     on conflict (idempotency_key) do update set updated_at=public.render_jobs.updated_at
     returning id::text, state, (xmax = 0) as created` as unknown as Array<{ id: string; state: string; created: boolean }>;
   return rows[0];
@@ -81,13 +93,19 @@ export async function yieldRenderJob(sql: Sql, job: RenderJob) {
 export function classifyRenderError(code: string) {
   if (/^(AI_BUDGET_|PROVIDER_COST_BUDGET|CAPABILITY_|AUTOPILOT_IMAGE_BUDGET|MODEL_ROUTER_BLOCKED_BUDGET)/.test(code)) return { state: "BLOCKED" as const, retryable: false };
   if (/^OPENAI_[A-Z_]+_HTTP_(400|401|403|404)$/.test(code)) return { state: "FAILED" as const, retryable: false };
+  if (/^(REEL_VOICE_TOO_LONG|REEL_VOICE_TOO_SHORT|REEL_VOICE_MISSING|REEL_DURATION_INVALID)/.test(code)) return { state: "FAILED" as const, retryable: false };
   if (/^(REEL_SCRIPT_REJECTED|REEL_TECHNICAL_QA_FAILED|REEL_SOURCE_NOT_ELIGIBLE|REEL_STORAGE_NOT_CONFIGURED|OPENAI_NOT_CONFIGURED|REEL_RENDER_INPUTS_MISSING|REEL_SCRIPT_MISSING|REEL_VIDEO_MISSING)/.test(code)) return { state: "FAILED" as const, retryable: false };
   return { state: "FAILED" as const, retryable: true };
 }
 
+/** Retry delay after a transient failure: 30 s, 60 s, 120 s… (capped), short enough to resume in the cloud. */
+export function renderRetryBackoffSeconds(attemptCount: number) {
+  return Math.min(30 * 2 ** Math.max(attemptCount - 1, 0), 600);
+}
+
 export async function failRenderJob(sql: Sql, job: RenderJob, code: string, message: string, retryable: boolean, blocked = false) {
   const canRetry = retryable && job.attempt_count < job.max_attempts;
-  const backoffSeconds = Math.min(60 * 2 ** Math.max(job.attempt_count - 1, 0), 900);
+  const backoffSeconds = renderRetryBackoffSeconds(job.attempt_count);
   const state = blocked ? "BLOCKED" : canRetry ? "QUEUED" : "FAILED";
   await sql`
     update public.render_jobs
@@ -97,7 +115,7 @@ export async function failRenderJob(sql: Sql, job: RenderJob, code: string, mess
         completed_at=case when ${state} in ('FAILED','BLOCKED') then clock_timestamp() else null end,
         updated_at=clock_timestamp()
     where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid`;
-  return state;
+  return { state, retryInSeconds: state === "QUEUED" ? backoffSeconds : null };
 }
 
 /** Creates the MP4 + cover assets and the REEL variant atomically, then closes the job. */

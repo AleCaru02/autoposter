@@ -19,22 +19,73 @@ function words(text: string) {
   return text.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
 }
 
-/** Splits narration into short cues (max 2 lines), preferring sentence and clause boundaries. */
+/**
+ * Italian words that must not close a cue or a line: articles, prepositions (simple and
+ * articulated), conjunctions, negation and determiners belong with the word that follows.
+ */
+const WEAK_ENDINGS = new Set([
+  "il", "lo", "la", "i", "gli", "le", "l'", "un", "uno", "una", "un'",
+  "di", "a", "da", "in", "con", "su", "per", "tra", "fra",
+  "del", "dello", "della", "dei", "degli", "delle", "al", "allo", "alla", "ai", "agli", "alle",
+  "dal", "dallo", "dalla", "dai", "dagli", "dalle", "nel", "nello", "nella", "nei", "negli", "nelle",
+  "sul", "sullo", "sulla", "sui", "sugli", "sulle", "col", "coi",
+  "e", "ed", "o", "od", "ma", "che", "se", "come", "ciò", "non", "né", "anche", "più", "meno", "molto",
+  "ogni", "questo", "questa", "questi", "queste", "quel", "quello", "quella", "quei", "quelle",
+  "mio", "mia", "tuo", "tua", "suo", "sua", "nostro", "nostra", "vostro", "vostra", "loro",
+  "è", "sono", "ha", "hai", "ho", "va", "vanno", "può", "puoi", "devi", "deve", "ti", "ci", "si", "mi", "vi",
+]);
+
+function bareWord(word: string) {
+  return word.toLowerCase().replace(/^[«"“(]+|[»"”).,;:!?…]+$/g, "");
+}
+
+/** Cost of ending a cue/line after `word`: 0 at punctuation, high after a weak word. */
+export function breakPenalty(word: string) {
+  if (/[.!?…]["»”)]?$/.test(word)) return 0;
+  if (/[,;:]["»”)]?$/.test(word)) return 1;
+  const bare = bareWord(word);
+  if (WEAK_ENDINGS.has(bare) || /'$/.test(bare)) return 60;
+  return 8;
+}
+
+function sentences(narration: string) {
+  return narration.replace(/\s+/g, " ").trim().split(/(?<=[.!?…]["»”)]?)\s+/).filter(Boolean);
+}
+
+/**
+ * Splits narration into cues of at most two lines. Each sentence is segmented with dynamic
+ * programming: segments fit MAX_CUE_CHARS, prefer punctuation, never end on an article,
+ * preposition or conjunction when an alternative exists, and avoid one-word fragments.
+ */
 export function splitCaptionCues(narration: string): string[] {
   const cues: string[] = [];
-  let current: string[] = [];
-  const flush = () => { if (current.length) cues.push(current.join(" ")); current = []; };
-  for (const word of words(narration)) {
-    const candidate = [...current, word].join(" ");
-    if (current.length && candidate.length > MAX_CUE_CHARS) flush();
-    current.push(word);
-    if (/[.!?…]$/.test(word) || (/[,;:]$/.test(word) && current.join(" ").length >= MAX_CUE_CHARS * 0.55)) flush();
+  for (const sentence of sentences(narration)) {
+    const list = words(sentence);
+    if (sentence.length <= MAX_CUE_CHARS) { cues.push(list.join(" ")); continue; }
+    const n = list.length;
+    const best = new Array<number>(n + 1).fill(Number.POSITIVE_INFINITY);
+    const from = new Array<number>(n + 1).fill(-1);
+    best[0] = 0;
+    for (let end = 1; end <= n; end += 1) {
+      for (let begin = end - 1; begin >= 0; begin -= 1) {
+        const text = list.slice(begin, end).join(" ");
+        if (text.length > MAX_CUE_CHARS && end - begin > 1) break;
+        if (!Number.isFinite(best[begin])) continue;
+        const fill = MAX_CUE_CHARS - text.length;
+        let cost = best[begin] + (fill * fill) / 40 + (end === n ? 0 : breakPenalty(list[end - 1]));
+        if (end - begin === 1 && n > 1) cost += 40;
+        if (text.length < 12 && n > 1) cost += 20;
+        if (cost < best[end]) { best[end] = cost; from[end] = begin; }
+      }
+    }
+    const parts: string[] = [];
+    for (let end = n; end > 0; end = from[end]) parts.unshift(list.slice(from[end], end).join(" "));
+    cues.push(...parts);
   }
-  flush();
   return cues;
 }
 
-/** Wraps a cue on at most two balanced lines. */
+/** Wraps a cue on at most two balanced lines, never leaving a weak word at the end of line one. */
 export function wrapCaptionLines(cue: string): string[] {
   const all = words(cue);
   if (cue.length <= MAX_LINE_CHARS || all.length < 2) return [cue];
@@ -43,7 +94,7 @@ export function wrapCaptionLines(cue: string): string[] {
   for (let split = 1; split < all.length; split += 1) {
     const first = all.slice(0, split).join(" ");
     const second = all.slice(split).join(" ");
-    const score = Math.max(first.length, second.length) * 10 + Math.abs(first.length - second.length);
+    const score = Math.max(first.length, second.length) * 10 + Math.abs(first.length - second.length) + breakPenalty(all[split - 1]) * 6;
     if (score < bestScore) { bestScore = score; best = [first, second]; }
   }
   return best;
