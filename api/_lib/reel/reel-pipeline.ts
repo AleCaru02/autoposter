@@ -7,7 +7,7 @@ import { narrationText, REEL_SCRIPT_LENGTH_ERRORS, validateReelScript, type Reel
 import { renderCaptionPng, splitCaptionCues, timeCaptionCues } from "./reel-captions.js";
 import { changeAudioTempo, extractFrame, renderReel } from "./reel-render.js";
 import { loudnessQa, loudnormFilter, measureLoudness, probeAudioSeconds, probeReel, reelTechnicalQa, type LoudnessMeasure, type ReelProbe } from "./reel-probe.js";
-import { estimateTtsCostUsd } from "./openai-tts.js";
+import { estimateTtsCostUsd, TTS_COST_BASIS, TTS_RATES } from "./openai-tts.js";
 import { countWords, DEFAULT_REEL_DURATION, planVoiceFit, REEL_TAIL_SECONDS, scriptTargets, type ReelDurationPolicy } from "./reel-duration.js";
 
 /**
@@ -200,7 +200,7 @@ async function runVoice(job: RenderJob, deps: ReelDeps, context: ReelContext, ca
           seconds = await probeAudioSeconds(fittedPath);
         }
         const stored = await deps.store(job, "voice.mp3", audio, "audio/mpeg");
-        const usage = spoken.usage.map((event) => ({ ...event, costUsd: event.costUsd ?? estimateTtsCostUsd(rawSeconds), metadata: { ...(event.metadata ?? {}), seconds: rawSeconds } }));
+        const usage = spoken.usage.map((event) => ({ ...event, costUsd: event.costUsd ?? estimateTtsCostUsd(rawSeconds, text.length), metadata: { ...(event.metadata ?? {}), seconds: rawSeconds, ...(event.costUsd == null ? { cost_basis: TTS_COST_BASIS, rates_verified_at: TTS_RATES.verifiedAt } : {}) } }));
         const value: ReelVoiceArtifact = {
           ...stored, seconds, rawSeconds, model: spoken.value.model, voice: spoken.value.voice,
           tempo: fit.action === "SPEED_UP" ? fit.tempo : 1,

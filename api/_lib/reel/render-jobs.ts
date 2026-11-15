@@ -8,7 +8,13 @@ import { normalizeDurationPolicy, resolveDurationPolicy, type ReelDurationPolicy
  */
 type Sql = ReturnType<typeof neon>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const RENDER_LEASE_SECONDS = 290;
+/**
+ * Lease longer than the function's maxDuration (800 s): a lease can expire only after the
+ * invocation holding it has certainly been terminated, so no second runner can ever claim a
+ * job whose first runner is still alive (no concurrent render, no duplicate output).
+ */
+export const RENDER_FUNCTION_MAX_DURATION_SECONDS = 800;
+export const RENDER_LEASE_SECONDS = RENDER_FUNCTION_MAX_DURATION_SECONDS + 40;
 
 type JobRow = {
   id: string; profile_id: string; source_variant_id: string | null; step: ReelStep; steps_completed: number; steps_total: number;
@@ -51,13 +57,32 @@ export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourc
     select count(*)::int as count from public.render_jobs
     where profile_id=${input.profileId}::uuid and state in ('QUEUED','RUNNING')` as unknown as Array<{ count: number }>;
   if ((active[0]?.count ?? 0) >= 3) throw new Error("REEL_QUEUE_FULL");
-  const rows = await sql`
-    insert into public.render_jobs (profile_id,source_variant_id,kind,idempotency_key,input,requested_by)
-    values (${input.profileId}::uuid,${input.sourceVariantId}::uuid,'REEL_FACELESS',${`${input.dryRun ? "reel-dry" : "reel"}:v1:${input.sourceVariantId}:${input.requestId}`},
-            ${JSON.stringify({ sourceVariantId: input.sourceVariantId, dryRun: input.dryRun === true, duration })}::jsonb,${input.requestedBy})
-    on conflict (idempotency_key) do update set updated_at=public.render_jobs.updated_at
-    returning id::text, state, (xmax = 0) as created` as unknown as Array<{ id: string; state: string; created: boolean }>;
-  return rows[0];
+  const dryRun = input.dryRun === true;
+  // One active job per source (unique partial index render_jobs_one_active_per_source): a double
+  // click or a second tab with a new requestId gets the job already running, never a second paid run.
+  const activeForSource = () => sql`
+    select id::text, state, false as created from public.render_jobs
+    where profile_id=${input.profileId}::uuid and source_variant_id=${input.sourceVariantId}::uuid and kind='REEL_FACELESS'
+      and state in ('QUEUED','RUNNING') and coalesce((input->>'dryRun')::boolean,false)=${dryRun}
+    order by created_at limit 1` as unknown as Promise<Array<{ id: string; state: string; created: boolean }>>;
+  const existing = await activeForSource();
+  if (existing[0]) return existing[0];
+  try {
+    const rows = await sql`
+      insert into public.render_jobs (profile_id,source_variant_id,kind,idempotency_key,input,requested_by)
+      values (${input.profileId}::uuid,${input.sourceVariantId}::uuid,'REEL_FACELESS',${`${dryRun ? "reel-dry" : "reel"}:v1:${input.sourceVariantId}:${input.requestId}`},
+              ${JSON.stringify({ sourceVariantId: input.sourceVariantId, dryRun, duration })}::jsonb,${input.requestedBy})
+      on conflict (idempotency_key) do update set updated_at=public.render_jobs.updated_at
+      returning id::text, state, (xmax = 0) as created` as unknown as Array<{ id: string; state: string; created: boolean }>;
+    return rows[0];
+  } catch (reason) {
+    // Lost the race against a concurrent enqueue for the same source: return the winner.
+    if ((reason as { code?: string })?.code === "23505") {
+      const winner = await activeForSource();
+      if (winner[0]) return winner[0];
+    }
+    throw reason;
+  }
 }
 
 export async function claimRenderJob(sql: Sql, jobId: string) {
@@ -127,24 +152,32 @@ export async function finalizeRenderJob(sql: Sql, job: RenderJob, context: ReelC
   const variantId = crypto.randomUUID();
   const costEur = Number(job.cost_usd.toFixed(4));
   const tags = JSON.stringify(job.dry_run ? ["REEL", "DRY_RUN", context.provider] : ["REEL", "AI_GENERATED", context.provider]);
-  await sql.transaction([
+  // Statement 1 locks the job row for this transaction; every insert runs only while this
+  // runner still owns the claim, so a runner that lost its lease can never add a second output.
+  const results = await sql.transaction([
+    sql`select id from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING' for update`,
     sql`insert into public.assets (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,model,cost_eur,width,height,format,quality_status,identity_status,updated_at)
-        values (${videoAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_RENDER','VIDEO',${`reel-${job.id}.mp4`},${video.url},'video/mp4',${tags}::jsonb,
+        select ${videoAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_RENDER','VIDEO',${`reel-${job.id}.mp4`},${video.url},'video/mp4',${tags}::jsonb,
                 ${JSON.stringify({ render_job_id: job.id, probe: video.probe, render_ms: video.renderMs, storage_mode: "VERCEL_BLOB_PUBLIC_V1", narration: artifacts.voice ? { model: artifacts.voice.model, voice: artifacts.voice.voice, seconds: artifacts.voice.seconds } : null })}::jsonb,
-                'ffmpeg-4.1-libx264',${costEur},${video.probe.width},${video.probe.height},'9:16','PASS','NOT_REQUIRED',now())`,
+                'ffmpeg-4.1-libx264',${costEur},${video.probe.width},${video.probe.height},'9:16','PASS','NOT_REQUIRED',now()
+        where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`insert into public.assets (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,model,cost_eur,width,height,format,quality_status,identity_status,updated_at)
-        values (${coverAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_COVER','IMAGE',${`reel-${job.id}-cover.png`},${cover.url},'image/png',${tags}::jsonb,
+        select ${coverAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_COVER','IMAGE',${`reel-${job.id}-cover.png`},${cover.url},'image/png',${tags}::jsonb,
                 ${JSON.stringify({ render_job_id: job.id, aspect_ratio: "9:16", storage_mode: "VERCEL_BLOB_PUBLIC_V1" })}::jsonb,
-                'ffmpeg-4.1-frame',0,${video.probe.width},${video.probe.height},'9:16','PENDING','NOT_REQUIRED',now())`,
+                'ffmpeg-4.1-frame',0,${video.probe.width},${video.probe.height},'9:16','PENDING','NOT_REQUIRED',now()
+        where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,video_asset_id,alt_text,approval_status,workflow_status,qa_status,approval_mode)
-        values (${variantId}::uuid,${context.contentId}::uuid,${job.profile_id}::uuid,${context.provider},'REEL',${!job.dry_run},${script.hook},${script.caption},${script.cta},
+        select ${variantId}::uuid,${context.contentId}::uuid,${job.profile_id}::uuid,${context.provider},'REEL',${!job.dry_run},${script.hook},${script.caption},${script.cta},
                 ${JSON.stringify(script.hashtags)}::jsonb,${script.scenes.map((scene) => scene.visualBrief).join(" | ").slice(0, 2000)},${coverAssetId}::uuid,${videoAssetId}::uuid,
-                ${`Reel: ${script.coverText}`.slice(0, 300)},'PENDING','REVIEW_REQUIRED','PENDING','MANUAL')`,
+                ${`Reel: ${script.coverText}`.slice(0, 300)},'PENDING','REVIEW_REQUIRED','PENDING','MANUAL'
+        where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`update public.render_jobs
         set state='READY_FOR_REVIEW', step='DONE', steps_completed=steps_total, output_variant_id=${variantId}::uuid, video_asset_id=${videoAssetId}::uuid,
             qa=${JSON.stringify(qa)}::jsonb, claim_token=null, lease_expires_at=null, completed_at=clock_timestamp(), updated_at=clock_timestamp()
-        where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING'`,
-  ]);
+        where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING'
+        returning id`,
+  ]) as unknown as Array<Array<{ id: string }>>;
+  if (!results[0]?.length || !results[4]?.length) throw new Error("RENDER_LEASE_LOST");
   return { outputVariantId: variantId, videoAssetId };
 }
 

@@ -8,7 +8,7 @@ import { countWords, normalizeDurationPolicy, planVoiceFit, resolveDurationPolic
 import { narrationText, scriptLengthInstructions, validateReelScript, type ReelScript, type ReelSource } from "../api/_lib/reel/reel-script.js";
 import { breakPenalty, splitCaptionCues, wrapCaptionLines } from "../api/_lib/reel/reel-captions.js";
 import { loudnessQa, parseLoudnormJson } from "../api/_lib/reel/reel-probe.js";
-import { classifyRenderError, renderRetryBackoffSeconds } from "../api/_lib/reel/render-jobs.js";
+import { classifyRenderError, enqueueReelJob, RENDER_FUNCTION_MAX_DURATION_SECONDS, RENDER_LEASE_SECONDS, renderRetryBackoffSeconds } from "../api/_lib/reel/render-jobs.js";
 import { dispatchContinuation, MAX_CONTINUATION_HOPS, parseContinuationQuery, planContinuation } from "../api/_lib/reel/render-continuation.js";
 
 // ---------- 2. Duration policy ----------
@@ -176,6 +176,60 @@ try {
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------- TTS cost from official rates ----------
+{
+  const { estimateTtsCostUsd, TTS_ESTIMATED_USD_PER_MINUTE } = await import("../api/_lib/reel/openai-tts.js");
+  assert.ok(Math.abs(TTS_ESTIMATED_USD_PER_MINUTE - 0.015) < 1e-12, "1,250 audio tokens/min x $12/M = $0.015/min");
+  assert.ok(Math.abs(estimateTtsCostUsd(52.8, 600) - 0.01329) < 1e-6, `first real Reel narration: ${estimateTtsCostUsd(52.8, 600)}`);
+  assert.equal(estimateTtsCostUsd(0, 0), 0);
+}
+
+// ---------- No double execution ----------
+{
+  const routeSource = readFileSync(new URL("../api/render.ts", import.meta.url), "utf8");
+  const vercelConfig = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+  const routeMax = Number(/maxDuration:\s*(\d+)/.exec(routeSource)?.[1]);
+  const configMax = Number(Object.values(vercelConfig.functions ?? {}).map((item) => (item as { maxDuration?: number }).maxDuration).find((value) => value === routeMax));
+  assert.equal(routeMax, RENDER_FUNCTION_MAX_DURATION_SECONDS, "lease constant tracks the route maxDuration");
+  assert.equal(configMax, RENDER_FUNCTION_MAX_DURATION_SECONDS, "vercel.json maxDuration matches");
+  assert.ok(RENDER_LEASE_SECONDS > routeMax && RENDER_LEASE_SECONDS <= 900, "a lease outlives the invocation that holds it (claim functions accept up to 900 s)");
+  const jobsSource = readFileSync(new URL("../api/_lib/reel/render-jobs.ts", import.meta.url), "utf8");
+  const finalize = jobsSource.slice(jobsSource.indexOf("export async function finalizeRenderJob"), jobsSource.indexOf("export async function listRenderJobs"));
+  assert.match(finalize, /state='RUNNING' for update/, "finalize locks the job row first");
+  assert.equal((finalize.match(/where exists \(select 1 from public\.render_jobs where id=\$\{job\.id\}::uuid and claim_token=\$\{job\.claim_token\}::uuid and state='RUNNING'\)/g) ?? []).length, 3, "every output insert requires the live claim");
+  assert.match(finalize, /RENDER_LEASE_LOST/, "a runner without the claim gets an error, not a second output");
+  const migration = readFileSync(new URL("../db/migrations/20261116_render_jobs_single_active.sql", import.meta.url), "utf8");
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS render_jobs_one_active_per_source/);
+  assert.match(migration, /WHERE state IN \('QUEUED','RUNNING'\)/);
+
+  // enqueue: an active job for the same source is returned, never duplicated (also after a 23505 race).
+  const sourceRow = [{ id: "s", min_seconds: null, max_seconds: null }];
+  const ids = { profileId: "11111111-1111-4111-8111-111111111111", sourceVariantId: "22222222-2222-4222-8222-222222222222", requestedBy: null };
+  let inserts = 0;
+  const fakeSql = (active: Array<Record<string, unknown>>, raceWinner: Array<Record<string, unknown>> | null) => {
+    let activeCalls = 0;
+    return ((strings: TemplateStringsArray) => {
+      const text = strings.join("?");
+      if (text.includes("from public.content_variants variant")) return Promise.resolve(sourceRow);
+      if (text.includes("count(*)::int")) return Promise.resolve([{ count: 0 }]);
+      if (text.includes("false as created")) { activeCalls += 1; return Promise.resolve(activeCalls === 1 ? active : raceWinner ?? []); }
+      if (text.includes("insert into public.render_jobs")) {
+        inserts += 1;
+        if (raceWinner) return Promise.reject(Object.assign(new Error("duplicate key"), { code: "23505" }));
+        return Promise.resolve([{ id: "new", state: "QUEUED", created: true }]);
+      }
+      throw new Error(`unexpected query: ${text.slice(0, 60)}`);
+    }) as unknown as Parameters<typeof enqueueReelJob>[0];
+  };
+  const reused = await enqueueReelJob(fakeSql([{ id: "running", state: "RUNNING", created: false }], null), { ...ids, requestId: "33333333-3333-4333-8333-333333333333" });
+  assert.deepEqual(reused, { id: "running", state: "RUNNING", created: false }, "second click returns the active job");
+  assert.equal(inserts, 0, "no insert while a job for the source is active");
+  const raced = await enqueueReelJob(fakeSql([], [{ id: "winner", state: "QUEUED", created: false }]), { ...ids, requestId: "44444444-4444-4444-8444-444444444444" });
+  assert.deepEqual(raced, { id: "winner", state: "QUEUED", created: false }, "lost race returns the winner, created=false (no second drive)");
+  const fresh = await enqueueReelJob(fakeSql([], null), { ...ids, requestId: "55555555-5555-4555-8555-555555555555" });
+  assert.equal(fresh.created, true);
 }
 
 console.log(`PASS reel length/audio/captions/continuation: script 104→${countWords(narrationText(shortScript))} parole con 1 riscrittura, voce accelerata ≤12% o bloccata prima delle immagini, ${cues.length} sottotitoli senza parole deboli a fine riga, loudness -14 LUFS/TP ≤ -1, ripresa cloud con hop limitati.`);

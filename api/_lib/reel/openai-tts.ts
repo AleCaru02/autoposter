@@ -5,11 +5,20 @@ import { openAiErrorDetail } from "./openai-access.js";
  */
 export const REEL_TTS_MODEL = process.env.OPENAI_TTS_MODEL?.trim() || "gpt-4o-mini-tts";
 export const REEL_TTS_VOICE = process.env.OPENAI_TTS_VOICE?.trim() || "alloy";
-/** Community-estimated audio output cost; replaced by real usage when the API reports it. */
-export const TTS_ESTIMATED_USD_PER_MINUTE = 0.015;
+/**
+ * Official gpt-4o-mini-tts rates (developers.openai.com/api/docs/models/gpt-4o-mini-tts, verified
+ * 2026-11-15): text input $0.60 / 1M tokens, audio output $12 / 1M tokens. The speech endpoint
+ * does not return usage, so audio tokens are estimated from the measured duration
+ * (about 1,250 audio tokens per minute = $0.015/min) and text tokens from characters / 4.
+ */
+export const TTS_RATES = Object.freeze({ textInputPerMillion: 0.6, audioOutputPerMillion: 12, audioTokensPerMinute: 1250, verifiedAt: "2026-11-15" });
+export const TTS_ESTIMATED_USD_PER_MINUTE = (TTS_RATES.audioTokensPerMinute * TTS_RATES.audioOutputPerMillion) / 1_000_000;
+export const TTS_COST_BASIS = "OFFICIAL_RATES_ESTIMATED_TOKENS_FROM_DURATION";
 
-export function estimateTtsCostUsd(seconds: number) {
-  return Number(((Math.max(seconds, 0) / 60) * TTS_ESTIMATED_USD_PER_MINUTE).toFixed(5));
+export function estimateTtsCostUsd(seconds: number, characters = 0) {
+  const audio = (Math.max(seconds, 0) / 60) * TTS_ESTIMATED_USD_PER_MINUTE;
+  const text = (Math.ceil(Math.max(characters, 0) / 4) * TTS_RATES.textInputPerMillion) / 1_000_000;
+  return Number((audio + text).toFixed(6));
 }
 
 export async function synthesizeNarration(input: { apiKey: string; text: string; tone?: string | null; fetcher?: typeof fetch }) {
