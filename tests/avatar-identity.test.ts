@@ -128,6 +128,7 @@ try {
       return { pathname: key, seconds: 40, simulated: !live, costUsd: live ? Number((input.targetSeconds * 4.83 / 60).toFixed(4)) : 0 };
     },
     privateUrl: async (key) => `signed://${key}`,
+    fetchPrivate: async (key) => privateFiles.get(key)!,
     storePrivate: async (job, name, body, contentType) => {
       const key = `identity/${job.profile_id}/renders/${job.id}/${name}`;
       privateFiles.set(key, body);

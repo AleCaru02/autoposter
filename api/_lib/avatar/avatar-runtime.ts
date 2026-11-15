@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { neon } from "@neondatabase/serverless";
-import { put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import { probeReel } from "../reel/reel-probe.js";
 import { ReelPipelineError, type ReelDeps, type RenderJob } from "../reel/reel-pipeline.js";
 import { trimVideo } from "../reel/reel-render.js";
@@ -33,6 +33,13 @@ export function createAvatarReelRuntime(env: Env, base: ReelDeps, options: { dry
     return { url: `private:${stored.pathname}`, pathname: stored.pathname, sizeBytes: body.byteLength, contentType };
   };
   const privateUrl = async (pathname: string) => (await presignIdentityRead(pathname, { IDENTITY_BLOB_READ_WRITE_TOKEN: token })).url;
+  const fetchPrivate = async (pathname: string) => {
+    if (!pathname.startsWith("identity/")) throw new ReelPipelineError("IDENTITY_PATHNAME_SCOPE_INVALID", false);
+    const result = await get(pathname, { access: "private", token });
+    if (!result || result.statusCode !== 200) throw new ReelPipelineError("IDENTITY_FILE_NOT_FOUND", false);
+    if (result.blob.size > 200_000_000) throw new ReelPipelineError("IDENTITY_FILE_TOO_LARGE", false);
+    return new Uint8Array(await new Response(result.stream).arrayBuffer());
+  };
 
   async function simulatedClip(job: RenderJob, targetSeconds: number) {
     const rows = await sql`
@@ -91,6 +98,7 @@ export function createAvatarReelRuntime(env: Env, base: ReelDeps, options: { dry
     provider: options.provider,
     storePrivate,
     privateUrl,
+    fetchPrivate,
     avatarClip: (job, input) => (options.dryRun ? simulatedClip(job, input.targetSeconds) : liveClip(job, input.script, input.targetSeconds)),
   };
 }

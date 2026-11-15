@@ -24,8 +24,10 @@ export type AvatarReelDeps = ReelDeps & {
   provider: AvatarProviderId;
   /** Produces the talking-head clip for the script and stores it privately. */
   avatarClip(job: RenderJob, input: { script: string; targetSeconds: number }): Promise<{ pathname: string; seconds: number; simulated: boolean; costUsd: number; renderId?: string }>;
-  /** Short-lived signed URL of a private identity file. */
+  /** Short-lived signed URL of a private identity file (for FFmpeg inputs). */
   privateUrl(pathname: string): Promise<string>;
+  /** Downloads a private identity file through the SDK (owner token, size-capped). */
+  fetchPrivate(pathname: string): Promise<Uint8Array>;
   storePrivate(job: RenderJob, name: string, body: Uint8Array, contentType: string): Promise<StoredArtifact & { pathname: string }>;
 };
 
@@ -59,7 +61,7 @@ async function runAvatarRender(job: RenderJob, deps: AvatarReelDeps, context: Re
   const dir = mkdtempSync(join(tmpdir(), "avatar-render-"));
   try {
     const sourcePath = join(dir, "avatar.mp4");
-    writeFileSync(sourcePath, await deps.fetchArtifact(await deps.privateUrl(avatar.pathname)));
+    writeFileSync(sourcePath, await deps.fetchPrivate(avatar.pathname));
     const sourceProbe = await probeReel(sourcePath);
     const durationSeconds = Math.min(sourceProbe.durationSeconds, jobDurationPolicy(job).maxSeconds);
     const loudness = await measureLoudness(sourcePath);
