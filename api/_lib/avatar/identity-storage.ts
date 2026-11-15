@@ -1,4 +1,4 @@
-import { del, head, issueSignedToken, presignUrl } from "@vercel/blob";
+import { del, head, issueSignedToken, list, presignUrl } from "@vercel/blob";
 
 /**
  * Private object storage for biometric identity materials (face photos, training video,
@@ -61,6 +61,23 @@ export async function presignIdentityRead(pathname: string, env: StorageEnv = pr
 export async function headIdentity(pathname: string, env: StorageEnv = process.env) {
   const result = await head(pathname, { token: token(env) });
   return { sizeBytes: result.size, contentType: result.contentType };
+}
+
+/**
+ * Deletes EVERYTHING stored for a profile (uploads, simulated clips, rendered avatar Reels),
+ * including files no row points to any more. Used by "erase" and revoke-with-deletion.
+ */
+export async function deleteProfileIdentityFolder(profileId: string, env: StorageEnv = process.env) {
+  const prefix = `identity/${profileId}/`;
+  let cursor: string | undefined;
+  let deleted = 0;
+  do {
+    const page = await list({ prefix, cursor, limit: 1000, token: token(env) });
+    const pathnames = page.blobs.map((blob) => blob.pathname).filter((pathname) => pathnameBelongsTo(pathname, profileId));
+    if (pathnames.length) { await del(pathnames, { token: token(env) }); deleted += pathnames.length; }
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  return deleted;
 }
 
 export async function deleteIdentityFiles(pathnames: string[], env: StorageEnv = process.env) {

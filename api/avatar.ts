@@ -6,7 +6,7 @@ import { AVATAR_PROVIDERS, avatarProviderReadiness, estimateAvatarRenderUsd, typ
 import { videoChecks, VIDEO_LIMITS } from "./_lib/avatar/avatar-requirements.js";
 import { IDENTITY_CONSENT_VERSION, identityConsentText } from "./_lib/avatar/consent-text.js";
 import { activeConsent, assetById, completeAsset, getSetup, grantConsent, listAssets, markAssetsDeleted, prepareAsset, refreshSetup, revokeConsent, type Scope } from "./_lib/avatar/identity-store.js";
-import { deleteIdentityFiles, headIdentity, IDENTITY_UPLOAD_RULES, identityStorageConfigured, issueUploadToken, pathnameBelongsTo, presignIdentityRead, type IdentityKind } from "./_lib/avatar/identity-storage.js";
+import { deleteIdentityFiles, deleteProfileIdentityFolder, headIdentity, IDENTITY_UPLOAD_RULES, identityStorageConfigured, issueUploadToken, pathnameBelongsTo, presignIdentityRead, type IdentityKind } from "./_lib/avatar/identity-storage.js";
 import { runMediaBinary } from "./_lib/reel/media-binaries.js";
 
 /**
@@ -102,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path === "consent/revoke") {
       const revoked = await revokeConsent(sql, profileId, actor);
       let deletedFiles = 0;
-      if (req.body?.deleteMaterials === true) deletedFiles = await deleteIdentityFiles(await markAssetsDeleted(sql, profileId, "ALL"));
+      if (req.body?.deleteMaterials === true) { await markAssetsDeleted(sql, profileId, "ALL"); deletedFiles = await deleteProfileIdentityFolder(profileId); }
       return res.status(200).json({ ...revoked, deletedFiles, status: await statusPayload(sql, profileId) });
     }
 
@@ -188,7 +188,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (path === "erase") {
-      const deletedFiles = await deleteIdentityFiles(await markAssetsDeleted(sql, profileId, "ALL"));
+      await markAssetsDeleted(sql, profileId, "ALL");
+      const deletedFiles = await deleteProfileIdentityFolder(profileId);
       return res.status(200).json({ deletedFiles, status: await statusPayload(sql, profileId) });
     }
 

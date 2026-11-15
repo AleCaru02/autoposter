@@ -90,16 +90,16 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
   const grant = () => run("consent", async () => {
     const result = await api("/api/avatar/consent", { method: "POST", body: JSON.stringify({ profileId, subjectName, scopes, accepted, version: IDENTITY_CONSENT_VERSION }) });
     if (!result.ok) throw new Error(String(result.body.error ?? ""));
-    setMessage("Consenso registrato. Ora puoi caricare i materiali.");
     await refresh();
+    setMessage("Consenso registrato. Ora puoi caricare i materiali.");
   });
 
   const revoke = (deleteMaterials: boolean) => run("revoke", async () => {
     const result = await api("/api/avatar/consent/revoke", { method: "POST", body: JSON.stringify({ profileId, deleteMaterials }) });
     if (!result.ok) throw new Error(String(result.body.error ?? ""));
     setConfirmRevoke(false); setPreview(null);
-    setMessage(deleteMaterials ? `Consenso revocato e ${String(result.body.deletedFiles ?? 0)} file eliminati.` : "Consenso revocato: nessuna nuova generazione è possibile.");
     await refresh();
+    setMessage(deleteMaterials ? `Consenso revocato e ${String(result.body.deletedFiles ?? 0)} file eliminati.` : "Consenso revocato: nessuna nuova generazione è possibile.");
   });
 
   const chooseProvider = (provider: Provider["id"]) => run("provider", async () => {
@@ -127,8 +127,8 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
     setProgress(null);
     const completed = await api("/api/avatar/assets/complete", { method: "POST", body: JSON.stringify({ profileId, assetId }) });
     if (!completed.ok) throw new Error(String(completed.body.error ?? ""));
-    setMessage(completed.body.status === "READY" ? `${KIND_LABEL[kind]} caricato e verificato.` : `${KIND_LABEL[kind]} caricato ma non idoneo: ${String(completed.body.rejection ?? "")}`);
     await refresh();
+    setMessage(completed.body.status === "READY" ? `${KIND_LABEL[kind]} caricato e verificato.` : `${KIND_LABEL[kind]} caricato ma non idoneo: ${String(completed.body.rejection ?? "")}`);
   }).finally(() => setProgress(null));
 
   const showPreview = (asset: Asset) => run(`preview-${asset.id}`, async () => {
@@ -141,16 +141,16 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
     const result = await api("/api/avatar/assets/delete", { method: "POST", body: JSON.stringify({ profileId, assetId: asset.id }) });
     if (!result.ok) throw new Error(String(result.body.error ?? ""));
     if (preview?.assetId === asset.id) setPreview(null);
-    setMessage(`${KIND_LABEL[asset.kind]} eliminato dall'archivio privato.`);
     await refresh();
+    setMessage(`${KIND_LABEL[asset.kind]} eliminato dall'archivio privato.`);
   });
 
   const erase = () => run("erase", async () => {
     const result = await api("/api/avatar/erase", { method: "POST", body: JSON.stringify({ profileId }) });
     if (!result.ok) throw new Error(String(result.body.error ?? ""));
     setConfirmErase(false); setPreview(null);
-    setMessage(`Eliminati ${String(result.body.deletedFiles ?? 0)} file dall'archivio privato.`);
     await refresh();
+    setMessage(`Eliminati ${String(result.body.deletedFiles ?? 0)} file dall'archivio privato.`);
   });
 
   const consent = status?.consent ?? null;
@@ -174,7 +174,7 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
       <div className="avatar-status-grid" role="status">
         <div><span>Volto</span><strong className={`avatar-state avatar-state-${status.setup.face_status.toLowerCase()}`}>{STATE_LABEL[status.setup.face_status]}</strong></div>
         <div><span>Voce</span><strong className={`avatar-state avatar-state-${status.setup.voice_status.toLowerCase()}`}>{STATE_LABEL[status.setup.voice_status]}</strong></div>
-        <div><span>Spesa avatar</span><strong>{status.setup.cost_usd.toFixed(2)} $</strong></div>
+        <div><span>Spesa avatar</span><strong>{status.setup.cost_usd.toFixed(2).replace(".", ",")} $</strong></div>
       </div>
       {status.setup.missing.length > 0 && <p className="field-help">Manca: {status.setup.missing.map((item) => MISSING_LABEL[item] ?? item).join(", ")}.</p>}
       {!status.storage.configured && <p className="manual-warning">Archivio privato non configurato in questo ambiente: il caricamento è disattivato.</p>}
@@ -185,7 +185,7 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
           <p><BadgeCheck size={15} aria-hidden="true" /> Consenso attivo di <strong>{consent.subjectName}</strong> per {consent.scopes.map((scope) => (scope === "FACE" ? "volto" : "voce")).join(" e ")} · {new Date(consent.grantedAt).toLocaleDateString("it-IT")} · versione {consent.version}</p>
           {!confirmRevoke ? <button className="secondary-button" type="button" onClick={() => setConfirmRevoke(true)} disabled={Boolean(busy)}>Revoca consenso</button> : <div className="avatar-confirm">
             <p>La revoca blocca subito nuove generazioni e annulla i Reel avatar in corso.</p>
-            <button className="danger-button" type="button" onClick={() => void revoke(true)} disabled={Boolean(busy)}>Revoca ed elimina tutti i materiali</button>
+            <button className="danger-button" type="button" onClick={() => void revoke(true)} disabled={Boolean(busy)}>Revoca ed elimina materiali e video avatar</button>
             <button className="secondary-button" type="button" onClick={() => void revoke(false)} disabled={Boolean(busy)}>Revoca e conserva i materiali</button>
             <button className="text-button" type="button" onClick={() => setConfirmRevoke(false)}>Annulla</button>
           </div>}
@@ -210,7 +210,7 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
         <div className="avatar-providers">
           {status.providers.map((item) => <label key={item.id} className={`avatar-provider ${status.setup.provider === item.id ? "is-selected" : ""}`}>
             <input type="radio" name={`provider-${profileId}`} checked={status.setup.provider === item.id} onChange={() => void chooseProvider(item.id)} disabled={Boolean(busy)} />
-            <span><strong>{item.label}</strong>{item.role === "PRIMARY" ? " · prima scelta" : " · alternativa"}<small>{item.estimate30sUsd !== null ? `circa ${item.estimate30sUsd.toFixed(2)} $ per 30 s (riserva con margine)` : "prezzo in crediti, non pubblicato"} · {item.integrated ? "collegamento pronto, disattivato" : "non integrato"}</small></span>
+            <span><strong>{item.label}</strong>{item.role === "PRIMARY" ? " · prima scelta" : " · alternativa"}<small>{item.estimate30sUsd !== null ? `circa ${item.estimate30sUsd.toFixed(2).replace(".", ",")} $ per 30 s (riserva con margine)` : "prezzo in crediti, non pubblicato"} · {item.integrated ? "collegamento pronto, disattivato" : "non integrato"}</small></span>
           </label>)}
         </div>
         {provider && <ul className="avatar-requirements">{provider.materials.map((item) => <li key={item}>{item}</li>)}</ul>}
@@ -256,7 +256,7 @@ export function AvatarStudioPanel({ profileId }: { profileId: string }) {
           <figcaption>Link temporaneo valido 5 minuti · archivio privato</figcaption>
         </figure>}
         {status.assets.length > 0 && (!confirmErase ? <button className="text-button" type="button" onClick={() => setConfirmErase(true)} disabled={Boolean(busy)}>Elimina tutti i materiali</button> : <div className="avatar-confirm">
-          <p>Elimina definitivamente tutti i file dall'archivio privato.</p>
+          <p>Elimina definitivamente dall'archivio privato tutti i materiali e i video avatar generati per questa attività.</p>
           <button className="danger-button" type="button" onClick={() => void erase()} disabled={Boolean(busy)}>Conferma eliminazione</button>
           <button className="text-button" type="button" onClick={() => setConfirmErase(false)}>Annulla</button>
         </div>)}
