@@ -137,14 +137,17 @@ export async function failRenderJob(sql: Sql, job: RenderJob, code: string, mess
   const canRetry = retryable && job.attempt_count < job.max_attempts;
   const backoffSeconds = renderRetryBackoffSeconds(job.attempt_count);
   const state = blocked ? "BLOCKED" : canRetry ? "QUEUED" : "FAILED";
-  await sql`
+  const updated = await sql`
     update public.render_jobs
     set state=${state}, last_error_code=${code.slice(0, 120)}, last_error_message=${message.slice(0, 500)},
         claim_token=null, lease_expires_at=null,
         next_attempt_at=clock_timestamp()+make_interval(secs => ${canRetry && !blocked ? backoffSeconds : 0}),
         completed_at=case when ${state} in ('FAILED','BLOCKED') then clock_timestamp() else null end,
         updated_at=clock_timestamp()
-    where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid`;
+    where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid
+    returning id` as unknown as Array<{ id: string }>;
+  // Claim already gone (lease expired, job cancelled or revoked): nothing was written, no retry here.
+  if (!updated[0]) return { state: "CLAIM_LOST", retryInSeconds: null };
   return { state, retryInSeconds: state === "QUEUED" ? backoffSeconds : null };
 }
 
