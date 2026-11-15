@@ -34,17 +34,26 @@ function PageFallback() {
  * Right after sign-in the cached session can still be empty for a moment. Before bouncing to
  * /login, re-check the session once against the server; only a confirmed absence redirects.
  */
+/** Longest wait for a session answer: after sign-out the client can stay "pending" and refetch forever. */
+export const SESSION_CHECK_TIMEOUT_MS = 6000;
+
 export function useConfirmedSession() {
   const session = authClient.useSession();
   const hasUser = Boolean(session.data?.user);
   const [rechecked, setRechecked] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
     if (session.isPending || hasUser || rechecked) return;
     let active = true;
     void Promise.resolve(session.refetch?.()).catch(() => undefined).finally(() => { if (active) setRechecked(true); });
     return () => { active = false; };
   }, [session.isPending, hasUser, rechecked, session]);
-  const checking = session.isPending || session.isRefetching || (!hasUser && !rechecked);
+  useEffect(() => {
+    if (hasUser) { setTimedOut(false); return; }
+    const timer = window.setTimeout(() => setTimedOut(true), SESSION_CHECK_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [hasUser]);
+  const checking = !timedOut && (session.isPending || session.isRefetching || (!hasUser && !rechecked));
   return { checking, user: session.data?.user ?? null };
 }
 
@@ -64,9 +73,9 @@ function RequireProfile() {
 }
 
 function RootRedirect() {
-  const session = authClient.useSession();
-  if (session.isPending) return <main className="center-state">Caricamento…</main>;
-  return <Navigate to={session.data?.user ? "/app/dashboard" : "/login"} replace />;
+  const { checking, user } = useConfirmedSession();
+  if (checking && !user) return <main className="center-state">Caricamento…</main>;
+  return <Navigate to={user ? "/app/dashboard" : "/login"} replace />;
 }
 
 export default function App() {

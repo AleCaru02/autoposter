@@ -11,4 +11,12 @@ assert.ok(guard.indexOf("Verifica sessione") < guard.indexOf('<Navigate to="/log
 // Regression (preview iPhone, 14/11): a LoginPage redirect based on the cached session bounced
 // users back into the app right after sign-out and caused a get-session polling loop.
 assert.doesNotMatch(login, /existingSession|alreadySignedIn/, "the login page must not auto-redirect from a possibly stale cached session");
-console.log("PASS auth session race: niente rimbalzo su /login dopo un accesso riuscito.");
+// After sign-out the session client can stay pending and refetch forever: the guard must give up
+// after a bounded wait and send the user to /login (verified on iPhone WebKit, 15/11/2026).
+{
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /SESSION_CHECK_TIMEOUT_MS = \d{4}/);
+  assert.match(app, /const checking = !timedOut &&/, "the wait is bounded");
+  assert.match(app, /function RootRedirect\(\) \{\s+const \{ checking, user \} = useConfirmedSession\(\);/, "root redirect uses the same bounded check");
+}
+console.log("PASS auth session race: niente rimbalzo su /login dopo un accesso riuscito; attesa sessione limitata dopo il logout.");
