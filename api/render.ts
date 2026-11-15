@@ -58,17 +58,28 @@ function cronAuthorized(req: VercelRequest) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-async function authorizedUser(token: string, profileId: string) {
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,owner_auth_user_id&limit=1`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (response.status === 401 || response.status === 403) throw new Error("SESSION_INVALID");
-  if (!response.ok) throw new Error("PROFILE_DATA_API_UNAVAILABLE");
-  const rows = await response.json() as Array<{ id?: string; owner_auth_user_id?: string }>;
-  const row = Array.isArray(rows) ? rows.find((item) => item?.id === profileId) : null;
-  return row ? { ownerId: row.owner_auth_user_id ?? null } : null;
+/**
+ * Verified 15/11/2026: right after a Neon compute resumes from scale-to-zero, the first
+ * authenticated Data API request can answer 200 [] with a valid token. An empty answer is
+ * therefore retried once before concluding the profile is not accessible.
+ */
+export const PROFILE_EMPTY_RETRY_MS = 400;
+
+export async function authorizedUser(token: string, profileId: string, fetcher: typeof fetch = fetch, retryDelayMs = PROFILE_EMPTY_RETRY_MS) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetcher(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,owner_auth_user_id&limit=1`, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (response.status === 401 || response.status === 403) throw new Error("SESSION_INVALID");
+    if (!response.ok) throw new Error("PROFILE_DATA_API_UNAVAILABLE");
+    const rows = await response.json() as Array<{ id?: string; owner_auth_user_id?: string }>;
+    const row = Array.isArray(rows) ? rows.find((item) => item?.id === profileId) : null;
+    if (row) return { ownerId: row.owner_auth_user_id ?? null };
+    if (attempt === 0) await sleep(retryDelayMs);
+  }
+  return null;
 }
 
 type RunOutcome = { state: string; retryInSeconds: number | null };
