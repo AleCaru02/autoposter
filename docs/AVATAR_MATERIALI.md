@@ -4,7 +4,7 @@ Si caricano dalla sezione **Contenuti → "Il tuo avatar con volto e voce"**, an
 
 ## 1. Video di addestramento: obbligatorio
 - **Durata:** 3–5 minuti continui, in un'unica ripresa senza tagli. Il minimo tecnico è 15 s, ma sotto i 2 minuti la qualità cala.
-- **Formato:** 1080p o 4K, 25–30 fps, orizzontale o verticale. Su iPhone: Impostazioni → Fotocamera → Registra video → 4K a 30 fps oppure 1080p a 30 fps.
+- **Formato:** 1080p o 4K, 25–30 fps, **in verticale (9:16)**: HeyGen genera il video con lo stesso orientamento del look addestrato, quindi un video verticale dà Reel senza ritagli. Fonte: `heygen-com/skills`, MIT. Su iPhone: Impostazioni → Fotocamera → Registra video → 4K a 30 fps oppure 1080p a 30 fps.
 - **Inquadratura:**
   - dal petto in su, camera all'altezza degli occhi, telefono su treppiede a 1–1,5 m;
   - il volto occupa almeno un quarto dell'immagine e resta sempre in quadro;

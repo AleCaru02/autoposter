@@ -176,6 +176,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const raw = String(req.body?.storageUrl ?? "");
       const pathname = raw.startsWith("private:") ? raw.slice("private:".length) : "";
       if (!pathnameBelongsTo(pathname, profileId)) return res.status(404).json({ error: "IDENTITY_MEDIA_NOT_FOUND" });
+      // Erased or revoked material: say so instead of signing a URL that would 404.
+      if (!(await headIdentity(pathname).catch(() => null))) return res.status(404).json({ error: "IDENTITY_MEDIA_DELETED" });
       return res.status(200).json(await presignIdentityRead(pathname));
     }
 

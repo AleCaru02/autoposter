@@ -87,8 +87,9 @@ const str = (value: unknown) => (typeof value === "string" && value ? value : nu
  * HeyGen v3 adapter. Request shapes follow developers.heygen.com "avatar-from-video"
  * (read 15/11/2026): POST /v3/avatars {type:"digital_twin", name, file:{type:"url", url}},
  * POST /v3/avatars/{group}/consent, GET /v3/avatars/looks/{id}, POST /v3/videos
- * {type:"avatar", avatar_id, voice_id, script}. The render status path is configurable:
- * it was not on that page and must be confirmed before the first authorised run.
+ * {type:"avatar", avatar_id, voice_id, script}. Render status: GET /v3/videos/{id} (heygen-com/skills,
+ * MIT: `heygen video get <id>`; status completed|failed, `video_url`). The output orientation follows
+ * the trained look, so the training video should be portrait for Reels; RENDER still crops to 9:16.
  */
 export function createHeyGenProvider(input: { apiKey: string; fetcher?: Fetcher; engine?: string; renderStatusPath?: (id: string) => string }): AvatarVideoProvider {
   const fetcher = input.fetcher ?? fetch;

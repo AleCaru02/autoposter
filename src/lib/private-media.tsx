@@ -22,22 +22,22 @@ export async function signedMediaUrl(profileId: string, storageUrl: string) {
 }
 
 export function useResolvedMediaUrl(profileId: string, url: string | null | undefined) {
-  const [resolved, setResolved] = useState<string | null>(isPrivateMedia(url) ? null : url ?? null);
+  const [state, setState] = useState<{ url: string | null; failed: boolean }>({ url: isPrivateMedia(url) ? null : url ?? null, failed: false });
   useEffect(() => {
     let cancelled = false;
-    if (!url) { setResolved(null); return; }
-    if (!isPrivateMedia(url)) { setResolved(url); return; }
-    setResolved(null);
-    void signedMediaUrl(profileId, url).then((signed) => { if (!cancelled) setResolved(signed); }).catch(() => { if (!cancelled) setResolved(null); });
+    if (!url) { setState({ url: null, failed: false }); return; }
+    if (!isPrivateMedia(url)) { setState({ url, failed: false }); return; }
+    setState({ url: null, failed: false });
+    void signedMediaUrl(profileId, url).then((signed) => { if (!cancelled) setState({ url: signed, failed: false }); }).catch(() => { if (!cancelled) setState({ url: null, failed: true }); });
     return () => { cancelled = true; };
   }, [profileId, url]);
-  return resolved;
+  return state;
 }
 
 /** 9:16 player that works for public and private Reel files. */
 export function ReelVideo({ profileId, src, poster, className, style }: { profileId: string; src: string | null; poster?: string | null; className?: string; style?: React.CSSProperties }) {
   const video = useResolvedMediaUrl(profileId, src);
   const cover = useResolvedMediaUrl(profileId, poster ?? null);
-  if (!video) return <div className="no-image-state">{src ? "Caricamento del video privato…" : "Video non disponibile"}</div>;
-  return <video className={className} style={style} src={video} poster={cover ?? undefined} controls playsInline preload="metadata" />;
+  if (!video.url) return <div className="no-image-state">{!src ? "Video non disponibile" : video.failed ? "Video eliminato dall'archivio privato o non più disponibile" : "Caricamento del video privato…"}</div>;
+  return <video className={className} style={style} src={video.url} poster={cover.url ?? undefined} controls playsInline preload="metadata" />;
 }
