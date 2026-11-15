@@ -126,11 +126,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (path === "upload" && uploadBody) {
+      // Only URL issuance is used: completion is confirmed by assets/complete (server-side head()),
+      // so upload-completed callbacks are never requested and are refused here.
+      if (uploadBody.type !== "blob.generate-presigned-url") return res.status(400).json({ error: "IDENTITY_UPLOAD_EVENT_NOT_SUPPORTED" });
       const assetId = String(uploadPayload?.assetId ?? "");
       const request = new Request(`https://${req.headers.host ?? "localhost"}${req.url ?? "/api/avatar/upload"}`, { method: "POST", headers: new Headers(Object.entries(req.headers).flatMap(([key, value]) => (typeof value === "string" ? [[key, value]] : [])) as Array<[string, string]>) });
       const response = await handleUploadPresigned({
         body: uploadBody,
         request,
+        // The SDK insists on a key even without callbacks; no callbackUrl is ever issued, so it is never used.
+        webhookPublicKey: process.env.BLOB_WEBHOOK_PUBLIC_KEY || "callbacks-disabled",
         getSignedToken: async (pathname) => {
           if (!UUID.test(assetId)) throw new Error("IDENTITY_ASSET_REQUIRED");
           const asset = await assetById(sql, profileId, assetId);
