@@ -178,6 +178,14 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------- Captions: ALL-CAPS headings end a cue ----------
+{
+  const headingCues = splitCaptionCues("Verifica sempre i documenti. DOCUMENTI DELL’IMMOBILE Titolo di proprietà, planimetria e regolamento condominiale. IMU e TARI restano a carico tuo.");
+  assert.ok(headingCues.some((cue) => cue === "DOCUMENTI DELL’IMMOBILE"), `heading isolated: ${JSON.stringify(headingCues)}`);
+  assert.ok(!headingCues.some((cue) => /IMMOBILE Titolo/.test(cue)), "heading never merged with the next sentence");
+  assert.ok(headingCues.some((cue) => cue.startsWith("IMU e TARI")), "a single acronym does not split a sentence");
+}
+
 // ---------- TTS cost from official rates ----------
 {
   const { estimateTtsCostUsd, TTS_ESTIMATED_USD_PER_MINUTE } = await import("../api/_lib/reel/openai-tts.js");

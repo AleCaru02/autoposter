@@ -48,8 +48,34 @@ export function breakPenalty(word: string) {
   return 8;
 }
 
+/** A heading word: only capital letters (apostrophes allowed), at least 2 letters. */
+function isHeadingWord(word: string) {
+  const letters = word.replace(/[^\p{L}]/gu, "");
+  return letters.length >= 2 && letters === letters.toUpperCase() && letters !== letters.toLowerCase();
+}
+
+/**
+ * An ALL-CAPS heading of 2+ words followed by a normal capitalised word ends a sentence even
+ * without punctuation ("DOCUMENTI DELL'IMMOBILE Titolo…" → heading | "Titolo…").
+ */
+function splitHeadings(sentence: string) {
+  const list = words(sentence);
+  const parts: string[] = [];
+  let start = 0;
+  for (let index = 2; index < list.length; index += 1) {
+    const next = list[index];
+    const startsUpper = /^[\p{Lu}]/u.test(next) && !isHeadingWord(next);
+    if (startsUpper && isHeadingWord(list[index - 1]) && isHeadingWord(list[index - 2])) {
+      parts.push(list.slice(start, index).join(" "));
+      start = index;
+    }
+  }
+  parts.push(list.slice(start).join(" "));
+  return parts.filter(Boolean);
+}
+
 function sentences(narration: string) {
-  return narration.replace(/\s+/g, " ").trim().split(/(?<=[.!?…]["»”)]?)\s+/).filter(Boolean);
+  return narration.replace(/\s+/g, " ").trim().split(/(?<=[.!?…]["»”)]?)\s+/).filter(Boolean).flatMap(splitHeadings);
 }
 
 /**
