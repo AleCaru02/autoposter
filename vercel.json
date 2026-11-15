@@ -52,7 +52,7 @@
     },
     "api/avatar.ts": {
       "maxDuration": 60,
-      "includeFiles": "{node_modules/@ffprobe-installer/linux-x64/**}"
+      "includeFiles": "node_modules/@ffprobe-installer/linux-x64/**"
     }
   }
 }
