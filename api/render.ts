@@ -11,12 +11,16 @@ import { createDryRunReelRuntime, dryRunAllowed } from "./_lib/reel/reel-dry-run
 import { checkOpenAiModelAccess } from "./_lib/reel/openai-access.js";
 import { dispatchContinuation, parseContinuationQuery } from "./_lib/reel/render-continuation.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
-import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { authorizedUser } from "./_lib/profile-access.js";
+import { advanceAvatarReelJob, DEFAULT_AVATAR_JOB_MAX_COST_USD } from "./_lib/avatar/avatar-reel.js";
+import { createAvatarReelRuntime } from "./_lib/avatar/avatar-runtime.js";
+import { activeConsent, getSetup, listAssets } from "./_lib/avatar/identity-store.js";
+import { identityStorageConfigured } from "./_lib/avatar/identity-storage.js";
+import { avatarProviderReadiness } from "./_lib/avatar/avatar-provider.js";
 
 // Pro + Fluid compute: one invocation can finish a whole Reel (script, voice, 6 stills, render).
 export const config = { maxDuration: 800 };
 
-const DATA_API = neonDataApiUrl();
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const WORK_BUDGET_MS = workBudgetMs();
 
@@ -58,31 +62,23 @@ function cronAuthorized(req: VercelRequest) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/**
- * Verified 15/11/2026: right after a Neon compute resumes from scale-to-zero, the first
- * authenticated Data API request can answer 200 [] with a valid token. An empty answer is
- * therefore retried once before concluding the profile is not accessible.
- */
-export const PROFILE_EMPTY_RETRY_MS = 400;
-
-export async function authorizedUser(token: string, profileId: string, fetcher: typeof fetch = fetch, retryDelayMs = PROFILE_EMPTY_RETRY_MS) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetcher(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,owner_auth_user_id&limit=1`, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (response.status === 401 || response.status === 403) throw new Error("SESSION_INVALID");
-    if (!response.ok) throw new Error("PROFILE_DATA_API_UNAVAILABLE");
-    const rows = await response.json() as Array<{ id?: string; owner_auth_user_id?: string }>;
-    const row = Array.isArray(rows) ? rows.find((item) => item?.id === profileId) : null;
-    if (row) return { ownerId: row.owner_auth_user_id ?? null };
-    if (attempt === 0) await sleep(retryDelayMs);
-  }
-  return null;
-}
+export { authorizedUser };
 
 type RunOutcome = { state: string; retryInSeconds: number | null };
+
+/** Why an avatar Reel cannot be queued (null = allowed). Live renders need the provider switch. */
+export async function avatarEnqueueBlock(sql: ReturnType<typeof neon>, profileId: string, dryRun: boolean) {
+  if (!identityStorageConfigured()) return "IDENTITY_STORAGE_NOT_CONFIGURED";
+  const consent = await activeConsent(sql, profileId);
+  if (!consent?.scopes.includes("FACE")) return "IDENTITY_CONSENT_REQUIRED";
+  if (dryRun) {
+    const assets = await listAssets(sql, profileId);
+    return assets.some((asset) => asset.kind === "VIDEO" && asset.status === "READY") ? null : "AVATAR_TRAINING_VIDEO_MISSING";
+  }
+  const setup = await getSetup(sql, profileId);
+  if (!avatarProviderReadiness(setup.provider).live) return "AVATAR_PROVIDER_NOT_ENABLED";
+  return setup.face_status === "READY" ? null : "AVATAR_NOT_READY";
+}
 
 async function runJob(job: RenderJob, deadlineAt: number): Promise<RunOutcome> {
   const sql = neon(process.env.DATABASE_URL!);
@@ -92,7 +88,18 @@ async function runJob(job: RenderJob, deadlineAt: number): Promise<RunOutcome> {
       : createReelRuntime({ DATABASE_URL: process.env.DATABASE_URL, OPENAI_API_KEY: process.env.OPENAI_API_KEY, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN });
     const configuredCap = Number(process.env.REEL_JOB_MAX_COST_USD);
     const maxCostUsd = Number.isFinite(configuredCap) && configuredCap > 0 ? Math.min(configuredCap, 10) : 2;
-    const result = await advanceRenderJob(job, deps, { deadlineAt, maxCostUsd });
+    let result;
+    if (job.kind === "REEL_AVATAR") {
+      // Consent is re-checked at every run: a revocation stops the job before any new step.
+      const consent = await activeConsent(sql, job.profile_id);
+      if (!consent?.scopes.includes("FACE")) throw new ReelPipelineError("IDENTITY_CONSENT_REQUIRED", false);
+      const setup = await getSetup(sql, job.profile_id);
+      const avatarCap = Number(process.env.AVATAR_JOB_MAX_COST_USD);
+      const avatarDeps = createAvatarReelRuntime(process.env, deps, { dryRun: job.dry_run, provider: setup.provider });
+      result = await advanceAvatarReelJob(job, avatarDeps, { deadlineAt, maxCostUsd: Number.isFinite(avatarCap) && avatarCap > 0 ? Math.min(avatarCap, 10) : DEFAULT_AVATAR_JOB_MAX_COST_USD });
+    } else {
+      result = await advanceRenderJob(job, deps, { deadlineAt, maxCostUsd });
+    }
     console.log("reel-render", { jobId: job.id, profileId: job.profile_id, state: result.state, step: job.step, costUsd: job.cost_usd });
     if (result.state === "RUNNING") {
       await yieldRenderJob(sql, job);
@@ -215,7 +222,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const requestId = String(req.body?.requestId ?? "");
       if (!UUID.test(sourceVariantId) || !UUID.test(requestId)) return res.status(400).json({ error: "REEL_ENQUEUE_INPUT_INVALID" });
       const sql = neon(process.env.DATABASE_URL!);
-      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId, dryRun, duration: req.body?.duration ?? undefined });
+      const kind = req.body?.kind === "REEL_AVATAR" ? "REEL_AVATAR" : "REEL_FACELESS";
+      if (kind === "REEL_AVATAR") {
+        const blocked = await avatarEnqueueBlock(sql, profileId, dryRun);
+        if (blocked) return res.status(409).json({ error: blocked });
+      }
+      const queued = await enqueueReelJob(sql, { profileId, sourceVariantId, requestId, requestedBy: access.ownerId, dryRun, duration: req.body?.duration ?? undefined, kind });
       if (queued.created) {
         const deadlineAt = Date.now() + WORK_BUDGET_MS;
         waitUntil(driveRenderJob(queued.id, deadlineAt, 0).catch((reason) => {

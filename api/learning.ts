@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runLearningRuntime } from "./_lib/learning-runtime.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 // Same authenticated RLS preflight used by other Vercel profile-scoped routes.
 // Do not compute learning for an arbitrary account or accept a profile id as proof of ownership.
@@ -13,7 +14,7 @@ function bearer(req: VercelRequest): string | null {
 }
 
 async function canAccessProfile(token: string, profileId: string) {
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
+  const response = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
     method: "GET",
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
     cache: "no-store",

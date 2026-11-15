@@ -18,7 +18,7 @@ export const RENDER_LEASE_SECONDS = RENDER_FUNCTION_MAX_DURATION_SECONDS + 40;
 
 type JobRow = {
   id: string; profile_id: string; source_variant_id: string | null; step: ReelStep; steps_completed: number; steps_total: number;
-  attempt_count: number; max_attempts: number; claim_token: string | null; artifacts: unknown; cost_usd: number | string; input?: unknown;
+  attempt_count: number; max_attempts: number; claim_token: string | null; artifacts: unknown; cost_usd: number | string; input?: unknown; kind?: string;
 };
 
 function inputDuration(input: unknown): ReelDurationPolicy | undefined {
@@ -38,10 +38,14 @@ function toJob(row: JobRow): RenderJob {
     cost_usd: Number(row.cost_usd) || 0,
     dry_run: Boolean(row.input && typeof row.input === "object" && (row.input as Record<string, unknown>).dryRun === true),
     duration: inputDuration(row.input),
+    kind: row.kind === "REEL_AVATAR" ? "REEL_AVATAR" : "REEL_FACELESS",
   };
 }
 
-export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourceVariantId: string; requestId: string; requestedBy: string | null; dryRun?: boolean; duration?: unknown }) {
+export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourceVariantId: string; requestId: string; requestedBy: string | null; dryRun?: boolean; duration?: unknown; kind?: "REEL_FACELESS" | "REEL_AVATAR" }) {
+  const kind = input.kind ?? "REEL_FACELESS";
+  const keyPrefix = kind === "REEL_AVATAR" ? "avatar" : "reel";
+  const stepsTotal = kind === "REEL_AVATAR" ? 4 : 5;
   if (![input.profileId, input.sourceVariantId, input.requestId].every((value) => UUID.test(value))) throw new Error("REEL_ENQUEUE_INPUT_INVALID");
   const sources = await sql`
     select variant.id::text, profile.reel_min_seconds as min_seconds, profile.reel_max_seconds as max_seconds from public.content_variants variant
@@ -62,15 +66,15 @@ export async function enqueueReelJob(sql: Sql, input: { profileId: string; sourc
   // click or a second tab with a new requestId gets the job already running, never a second paid run.
   const activeForSource = () => sql`
     select id::text, state, false as created from public.render_jobs
-    where profile_id=${input.profileId}::uuid and source_variant_id=${input.sourceVariantId}::uuid and kind='REEL_FACELESS'
+    where profile_id=${input.profileId}::uuid and source_variant_id=${input.sourceVariantId}::uuid and kind=${kind}
       and state in ('QUEUED','RUNNING') and coalesce((input->>'dryRun')::boolean,false)=${dryRun}
     order by created_at limit 1` as unknown as Promise<Array<{ id: string; state: string; created: boolean }>>;
   const existing = await activeForSource();
   if (existing[0]) return existing[0];
   try {
     const rows = await sql`
-      insert into public.render_jobs (profile_id,source_variant_id,kind,idempotency_key,input,requested_by)
-      values (${input.profileId}::uuid,${input.sourceVariantId}::uuid,'REEL_FACELESS',${`${dryRun ? "reel-dry" : "reel"}:v1:${input.sourceVariantId}:${input.requestId}`},
+      insert into public.render_jobs (profile_id,source_variant_id,kind,steps_total,idempotency_key,input,requested_by)
+      values (${input.profileId}::uuid,${input.sourceVariantId}::uuid,${kind},${stepsTotal},${`${dryRun ? `${keyPrefix}-dry` : keyPrefix}:v1:${input.sourceVariantId}:${input.requestId}`},
               ${JSON.stringify({ sourceVariantId: input.sourceVariantId, dryRun, duration })}::jsonb,${input.requestedBy})
       on conflict (idempotency_key) do update set updated_at=public.render_jobs.updated_at
       returning id::text, state, (xmax = 0) as created` as unknown as Array<{ id: string; state: string; created: boolean }>;
@@ -119,6 +123,7 @@ export function classifyRenderError(code: string) {
   if (/^(AI_BUDGET_|PROVIDER_COST_BUDGET|CAPABILITY_|AUTOPILOT_IMAGE_BUDGET|MODEL_ROUTER_BLOCKED_BUDGET)/.test(code)) return { state: "BLOCKED" as const, retryable: false };
   if (/^OPENAI_[A-Z_]+_HTTP_(400|401|403|404)$/.test(code)) return { state: "FAILED" as const, retryable: false };
   if (/^(REEL_VOICE_TOO_LONG|REEL_VOICE_TOO_SHORT|REEL_VOICE_MISSING|REEL_DURATION_INVALID)/.test(code)) return { state: "FAILED" as const, retryable: false };
+  if (/^(IDENTITY_|AVATAR_(TRAINING_VIDEO_MISSING|NOT_READY|PROVIDER_NOT_ENABLED|PROVIDER_PRICE_UNKNOWN|JOB_STEP_INVALID|RENDER_FAILED)|FACELESS_JOB_STEP_INVALID|HEYGEN_HTTP_4)/.test(code)) return { state: "FAILED" as const, retryable: false };
   if (/^(REEL_SCRIPT_REJECTED|REEL_TECHNICAL_QA_FAILED|REEL_SOURCE_NOT_ELIGIBLE|REEL_STORAGE_NOT_CONFIGURED|OPENAI_NOT_CONFIGURED|REEL_RENDER_INPUTS_MISSING|REEL_SCRIPT_MISSING|REEL_VIDEO_MISSING)/.test(code)) return { state: "FAILED" as const, retryable: false };
   return { state: "FAILED" as const, retryable: true };
 }
@@ -151,20 +156,24 @@ export async function finalizeRenderJob(sql: Sql, job: RenderJob, context: ReelC
   const coverAssetId = crypto.randomUUID();
   const variantId = crypto.randomUUID();
   const costEur = Number(job.cost_usd.toFixed(4));
-  const tags = JSON.stringify(job.dry_run ? ["REEL", "DRY_RUN", context.provider] : ["REEL", "AI_GENERATED", context.provider]);
+  const avatar = job.kind === "REEL_AVATAR";
+  const tags = JSON.stringify([...(job.dry_run ? ["REEL", "DRY_RUN"] : ["REEL", "AI_GENERATED"]), ...(avatar ? ["AVATAR"] : []), context.provider]);
+  // Avatar Reels keep the MP4/cover in the private identity store; the URL field holds a private: pathname.
+  const storageMode = artifacts.privateMedia ? "VERCEL_BLOB_PRIVATE_IDENTITY" : "VERCEL_BLOB_PUBLIC_V1";
+  const identityStatus = avatar ? "PENDING" : "NOT_REQUIRED";
   // Statement 1 locks the job row for this transaction; every insert runs only while this
   // runner still owns the claim, so a runner that lost its lease can never add a second output.
   const results = await sql.transaction([
     sql`select id from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING' for update`,
     sql`insert into public.assets (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,model,cost_eur,width,height,format,quality_status,identity_status,updated_at)
         select ${videoAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_RENDER','VIDEO',${`reel-${job.id}.mp4`},${video.url},'video/mp4',${tags}::jsonb,
-                ${JSON.stringify({ render_job_id: job.id, probe: video.probe, render_ms: video.renderMs, storage_mode: "VERCEL_BLOB_PUBLIC_V1", narration: artifacts.voice ? { model: artifacts.voice.model, voice: artifacts.voice.voice, seconds: artifacts.voice.seconds } : null })}::jsonb,
-                'ffmpeg-4.1-libx264',${costEur},${video.probe.width},${video.probe.height},'9:16','PASS','NOT_REQUIRED',now()
+                ${JSON.stringify({ render_job_id: job.id, probe: video.probe, render_ms: video.renderMs, storage_mode: storageMode, narration: artifacts.voice ? { model: artifacts.voice.model, voice: artifacts.voice.voice, seconds: artifacts.voice.seconds } : null })}::jsonb,
+                'ffmpeg-4.1-libx264',${costEur},${video.probe.width},${video.probe.height},'9:16','PASS',${identityStatus},now()
         where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`insert into public.assets (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,model,cost_eur,width,height,format,quality_status,identity_status,updated_at)
         select ${coverAssetId}::uuid,${job.profile_id}::uuid,${context.contentId}::uuid,'REEL_COVER','IMAGE',${`reel-${job.id}-cover.png`},${cover.url},'image/png',${tags}::jsonb,
-                ${JSON.stringify({ render_job_id: job.id, aspect_ratio: "9:16", storage_mode: "VERCEL_BLOB_PUBLIC_V1" })}::jsonb,
-                'ffmpeg-4.1-frame',0,${video.probe.width},${video.probe.height},'9:16','PENDING','NOT_REQUIRED',now()
+                ${JSON.stringify({ render_job_id: job.id, aspect_ratio: "9:16", storage_mode: storageMode })}::jsonb,
+                'ffmpeg-4.1-frame',0,${video.probe.width},${video.probe.height},'9:16','PENDING',${identityStatus},now()
         where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`insert into public.content_variants (id,content_id,profile_id,provider,format,eligible,hook,caption,cta,hashtags,visual_brief,image_asset_id,video_asset_id,alt_text,approval_status,workflow_status,qa_status,approval_mode)
         select ${variantId}::uuid,${context.contentId}::uuid,${job.profile_id}::uuid,${context.provider},'REEL',${!job.dry_run},${script.hook},${script.caption},${script.cta},
@@ -185,7 +194,7 @@ export async function listRenderJobs(sql: Sql, profileId: string) {
   return await sql`
     select job.id::text, job.state, job.step, job.steps_completed, job.steps_total, job.attempt_count, job.max_attempts,
            job.last_error_code, job.last_error_message, job.cost_usd::float8 as cost_usd, job.created_at, job.updated_at, job.completed_at,
-           job.source_variant_id::text, job.output_variant_id::text, coalesce((job.input->>'dryRun')::boolean,false) as dry_run,
+           job.source_variant_id::text, job.output_variant_id::text, coalesce((job.input->>'dryRun')::boolean,false) as dry_run, job.kind,
            asset.storage_url as video_url, cover.storage_url as cover_url,
            job.artifacts->'script'->>'title' as title, job.artifacts->'script'->>'hook' as hook,
            (job.artifacts->'video'->'probe'->>'durationSeconds')::float8 as duration_seconds,

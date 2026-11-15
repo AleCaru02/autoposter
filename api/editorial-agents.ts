@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runOpenAIStrategyPlanner } from "./_lib/openai-strategy-planner.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 export const config = { maxDuration: 300 };
 const DATA_API = neonDataApiUrl();
@@ -11,7 +12,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function canAccessProfile(token: string, profileId: string) {
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
+  const response = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
     method: "GET",
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
     cache: "no-store",

@@ -17,7 +17,7 @@ import { countWords, DEFAULT_REEL_DURATION, planVoiceFit, REEL_TAIL_SECONDS, scr
  * before any image is paid for. Progress shown = steps_completed / steps_total.
  */
 export const REEL_STEPS = ["SCRIPT", "VOICE", "VISUALS", "RENDER", "QA"] as const;
-export type ReelStep = (typeof REEL_STEPS)[number] | "DONE";
+export type ReelStep = (typeof REEL_STEPS)[number] | "AVATAR" | "DONE";
 
 export type StoredArtifact = { url: string; sizeBytes: number; contentType: string };
 export type ReelVoiceArtifact = StoredArtifact & {
@@ -33,6 +33,10 @@ export type ReelVoiceArtifact = StoredArtifact & {
 };
 export type ReelArtifacts = {
   script?: ReelScript;
+  /** Avatar Reels: talking-head video kept in the PRIVATE identity store (pathname, never a public URL). */
+  avatar?: { pathname: string; seconds: number; provider: string; simulated: boolean; renderId?: string };
+  /** True when video/cover live in the private identity store (avatar Reels). */
+  privateMedia?: boolean;
   scenes?: Array<StoredArtifact & { index: number }>;
   voice?: ReelVoiceArtifact;
   video?: StoredArtifact & { probe: ReelProbe; renderMs: number; loudness?: Pick<LoudnessMeasure, "integratedLufs" | "truePeakDb" | "lra">; narrationLoudness?: Pick<LoudnessMeasure, "integratedLufs" | "truePeakDb"> };
@@ -57,6 +61,8 @@ export type RenderJob = {
   dry_run: boolean;
   /** Resolved at enqueue (content > profile > default) and stable across resumes. */
   duration?: ReelDurationPolicy;
+  /** REEL_FACELESS (stills + TTS) or REEL_AVATAR (talking avatar of the profile owner). */
+  kind?: "REEL_FACELESS" | "REEL_AVATAR";
 };
 
 export type ReelContext = { source: ReelSource; contentId: string; provider: "INSTAGRAM" | "FACEBOOK"; brandAccent: string | null };
@@ -131,7 +137,8 @@ async function stopAfterSpend(job: RenderJob, deps: ReelDeps, artifacts: ReelArt
   throw error;
 }
 
-async function runScript(job: RenderJob, deps: ReelDeps, context: ReelContext, capUsd: number) {
+/** Script step, shared by faceless and avatar Reels (same limits, rewrite and metering). */
+export async function runScript(job: RenderJob, deps: ReelDeps, context: ReelContext, capUsd: number) {
   if (job.artifacts.script) return { artifacts: job.artifacts, cost: 0 }; // resume: already paid and persisted
   const policy = jobDurationPolicy(job);
   const targets = scriptTargets(policy);
@@ -316,7 +323,8 @@ export type AdvanceResult =
 /** Runs steps until done or until the deadline would be exceeded by the next heavy step. */
 export async function advanceRenderJob(job: RenderJob, deps: ReelDeps, options: { deadlineAt: number; reserveMs?: Partial<Record<ReelStep, number>>; maxCostUsd?: number }): Promise<AdvanceResult> {
   const capUsd = options.maxCostUsd ?? DEFAULT_REEL_JOB_MAX_COST_USD;
-  const reserve = { SCRIPT: 60_000, VOICE: 45_000, VISUALS: 90_000, RENDER: 150_000, QA: 10_000, DONE: 0, ...(options.reserveMs ?? {}) };
+  const reserve: Record<ReelStep, number> = { SCRIPT: 60_000, VOICE: 45_000, VISUALS: 90_000, AVATAR: 0, RENDER: 150_000, QA: 10_000, DONE: 0, ...(options.reserveMs ?? {}) };
+  if (job.step === "AVATAR") throw new ReelPipelineError("FACELESS_JOB_STEP_INVALID", false);
   const context = await deps.loadContext(job);
   while (job.step !== "DONE") {
     if (deps.now() + reserve[job.step] > options.deadlineAt) return { state: "RUNNING", step: job.step, reason: "DEADLINE" };

@@ -30,6 +30,7 @@ import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdCreate, 
 import { handlePersonalBrandSources } from "./personal-brand-sources.js";
 import { handleAssetLibrary } from "./asset-library.js";
 import { handleProfileSmmCertification } from "./profile-smm-certification.js";
+import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -114,7 +115,7 @@ function withOAuthProfileRedirect(request: Request, response: Response) {
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+  const response = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
   if (!response.ok) return false;
   const rows = await response.json() as Array<{ id?: string }>;
   return rows.some((row) => row.id === profileId);

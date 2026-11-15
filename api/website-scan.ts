@@ -5,6 +5,7 @@ import { crawlWebsite } from "./_lib/crawler.js";
 import { isPrivateAddress } from "./_lib/network-guard.js";
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "./_lib/website-scan-policy.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 export const config = { maxDuration: 60 };
 
@@ -38,7 +39,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, {
+  return dataApiFetch(`${DATA_API}/${path}`, {
     ...init,
     headers: {
       authorization: `Bearer ${token}`,

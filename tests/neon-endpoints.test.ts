@@ -17,7 +17,7 @@ assert.equal(isIsolatedPreview({ VERCEL_ENV: "preview", NEON_DATA_API_URL: qaDat
 assert.equal(isIsolatedPreview({ VERCEL_ENV: "preview", NEON_DATA_API_URL: qaData }), false, "half-configured previews are not isolated");
 
 // No Vercel API route may hardcode the production Data API any more.
-for (const file of ["api/autopilot.ts", "api/render.ts", "api/generate-image.ts", "api/_lib/social.ts", "api/_lib/verified-customer-auth.ts", "api/profile-bootstrap.ts", "cloudflare/auth-proxy.ts", "src/lib/neon-client.ts"]) {
+for (const file of ["api/autopilot.ts", "api/_lib/profile-access.ts", "api/generate-image.ts", "api/_lib/social.ts", "api/_lib/verified-customer-auth.ts", "api/profile-bootstrap.ts", "cloudflare/auth-proxy.ts", "src/lib/neon-client.ts"]) {
   const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
   assert.ok(/neonDataApiUrl\(\)|neonAuthUrl\(\)|__NEON_DATA_API_URL__/.test(source), `${file} must resolve endpoints through the preview-safe resolver`);
 }

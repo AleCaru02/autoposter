@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -61,7 +62,7 @@ async function verifiedAuthUserId(token: string): Promise<string | null> {
     // The production Neon Data API is the JWT-verifying boundary used by the
     // customer application and RLS. Ask it for the authenticated identity
     // instead of trusting JWT claims decoded in the Worker or client input.
-    const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
+    const response = await dataApiFetch(`${DATA_API}/rpc/current_auth_user_id`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

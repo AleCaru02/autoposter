@@ -186,19 +186,20 @@ try {
   assert.ok(headingCues.some((cue) => cue.startsWith("IMU e TARI")), "a single acronym does not split a sentence");
 }
 
-// ---------- Neon cold start: empty Data API answer retried once ----------
+// ---------- Neon cold start: render route uses the shared guard ----------
 {
   const { authorizedUser } = await import("../api/render.js");
+  const { createColdStartFetch } = await import("../api/_lib/cold-start-fetch.js");
   const answers = (bodies: unknown[]) => { let calls = 0; const fetcher = (async () => new Response(JSON.stringify(bodies[Math.min(calls++, bodies.length - 1)]), { status: 200 })) as unknown as typeof fetch; return { fetcher, calls: () => calls }; };
   const profileId = "08d029d7-40dd-4885-b0fb-1114206923b5";
   const cold = answers([[], [{ id: profileId, owner_auth_user_id: "owner" }]]);
-  assert.deepEqual(await authorizedUser("t", profileId, cold.fetcher, 1), { ownerId: "owner" }, "first empty answer after resume is retried");
+  assert.deepEqual(await authorizedUser("t", profileId, createColdStartFetch(cold.fetcher, { sleep: async () => undefined }) as typeof fetch), { ownerId: "owner" }, "first empty answer after resume is retried");
   assert.equal(cold.calls(), 2);
   const missing = answers([[], []]);
-  assert.equal(await authorizedUser("t", profileId, missing.fetcher, 1), null, "a profile really not accessible stays not found");
+  assert.equal(await authorizedUser("t", profileId, createColdStartFetch(missing.fetcher, { sleep: async () => undefined }) as typeof fetch), null, "a profile really not accessible stays not found");
   assert.equal(missing.calls(), 2, "exactly one retry");
   const denied = (async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
-  await assert.rejects(authorizedUser("t", profileId, denied, 1), /SESSION_INVALID/);
+  await assert.rejects(authorizedUser("t", profileId, denied), /SESSION_INVALID/);
 }
 
 // ---------- TTS cost from official rates ----------

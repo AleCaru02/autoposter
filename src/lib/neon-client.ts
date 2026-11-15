@@ -1,5 +1,9 @@
 import { createClient } from "@neondatabase/neon-js";
 import { BetterAuthReactAdapter } from "@neondatabase/neon-js/auth/react/adapters";
+import { createColdStartFetch } from "../../api/_lib/cold-start-fetch";
+
+/** Every Data API call from the browser goes through the shared Neon cold-start guard. */
+export const dataApiFetch = createColdStartFetch();
 
 export const SAME_ORIGIN_AUTH_PATH = "/api/auth";
 const DEFAULT_APP_ORIGIN = "https://autoposter.02alessandrocaruso.workers.dev";
@@ -19,6 +23,7 @@ export const neonClient = createClient({
   },
   dataApi: {
     url: NEON_DATA_API_URL,
+    options: { global: { fetch: dataApiFetch } },
   },
 });
 

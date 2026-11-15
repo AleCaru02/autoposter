@@ -3,6 +3,7 @@ import { Clapperboard, LoaderCircle, RefreshCcw, TriangleAlert } from "lucide-re
 import { NavLink } from "react-router-dom";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { neonClient } from "../lib/neon-client";
+import { ReelVideo } from "../lib/private-media";
 import "../reel-studio.css";
 
 type RenderJobView = {
@@ -22,6 +23,7 @@ type RenderJobView = {
   output_workflow_status: string | null;
   output_qa_status: string | null;
   dry_run?: boolean;
+  kind?: "REEL_FACELESS" | "REEL_AVATAR";
 };
 type SourceVariant = { id: string; provider: string; format: string; hook: string | null; created_at: string };
 type Engine = { ready: boolean; missing: string[]; dryRunAvailable?: boolean };
@@ -34,7 +36,7 @@ const DURATION_PRESETS: Record<string, { label: string; minSeconds?: number; max
   "30-60": { label: "Approfondito · 30–60 s", minSeconds: 30, maxSeconds: 60 },
 };
 
-const STEP_LABEL: Record<string, string> = { SCRIPT: "Script", VISUALS: "Immagini delle scene", VOICE: "Voce", RENDER: "Montaggio video", QA: "Controllo qualità", DONE: "Completato" };
+const STEP_LABEL: Record<string, string> = { SCRIPT: "Script", VISUALS: "Immagini delle scene", VOICE: "Voce", AVATAR: "Avatar parlante", RENDER: "Montaggio video", QA: "Controllo qualità", DONE: "Completato" };
 const STATE_LABEL: Record<RenderJobView["state"], string> = { QUEUED: "In coda", RUNNING: "In lavorazione", READY_FOR_REVIEW: "Pronto per la revisione", FAILED: "Non riuscito", BLOCKED: "Bloccato dal budget", CANCELED: "Annullato" };
 const MISSING_LABEL: Record<string, string> = {
   REEL_ENGINE_ENABLED: "attivazione del motore Reel (REEL_ENGINE_ENABLED)",
@@ -52,6 +54,9 @@ function errorMessage(code: string | null) {
   if (code === "REEL_VOICE_TOO_LONG") return "La voce supera la durata massima scelta: il Reel è stato fermato prima di generare le immagini.";
   if (code === "REEL_VOICE_TOO_SHORT") return "La voce è più corta della durata minima scelta: il Reel è stato fermato prima di generare le immagini.";
   if (code.startsWith("OPENAI_")) return "OpenAI non ha risposto correttamente. Il sistema riprova automaticamente.";
+  if (code === "IDENTITY_CONSENT_REQUIRED" || code === "IDENTITY_CONSENT_REVOKED") return "Consenso all'uso di volto e voce assente o revocato: il Reel con avatar è stato fermato.";
+  if (code === "AVATAR_TRAINING_VIDEO_MISSING") return "Carica e verifica il video di addestramento nella sezione Avatar.";
+  if (code === "AVATAR_PROVIDER_NOT_ENABLED" || code === "AVATAR_NOT_READY") return "Il provider avatar non è ancora attivo: serve la tua autorizzazione separata.";
   return `Errore tecnico (${code}).`;
 }
 
@@ -68,6 +73,8 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
   const [sources, setSources] = useState<SourceVariant[]>([]);
   const [sourceId, setSourceId] = useState("");
   const [durationKey, setDurationKey] = useState("");
+  const [reelKind, setReelKind] = useState<"REEL_FACELESS" | "REEL_AVATAR">("REEL_FACELESS");
+  const [avatarReady, setAvatarReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const currentProfile = useRef(profileId);
@@ -80,6 +87,11 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
     if (!result.ok) { setEngine({ ready: false, missing: [] }); return; }
     setEngine(result.body.engine as Engine);
     setJobs((result.body.jobs as RenderJobView[]) ?? []);
+    // Avatar Reels need consent + a verified training video (checked again by the server).
+    const avatar = await api(`/api/avatar/status?profileId=${encodeURIComponent(requested)}`).catch(() => null);
+    if (currentProfile.current !== requested) return;
+    const body = avatar?.ok ? avatar.body as { consent?: { scopes?: string[] } | null; assets?: Array<{ kind: string; status: string }> } : null;
+    setAvatarReady(Boolean(body?.consent?.scopes?.includes("FACE") && body.assets?.some((asset) => asset.kind === "VIDEO" && asset.status === "READY")));
   }, [profileId]);
 
   useEffect(() => {
@@ -102,10 +114,11 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
     try {
       const preset = DURATION_PRESETS[durationKey];
       const duration = preset?.minSeconds && preset.maxSeconds ? { minSeconds: preset.minSeconds, maxSeconds: preset.maxSeconds } : undefined;
-      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID(), dryRun, duration }) });
+      const avatar = reelKind === "REEL_AVATAR";
+      const result = await api("/api/render/enqueue", { method: "POST", body: JSON.stringify({ profileId, sourceVariantId: sourceId, requestId: crypto.randomUUID(), dryRun: avatar ? true : dryRun, duration, ...(avatar ? { kind: "REEL_AVATAR" } : {}) }) });
       if (!result.ok) {
         const code = String(result.body.error ?? "");
-        setError(code === "REEL_QUEUE_FULL" ? "Ci sono già 3 Reel in lavorazione per questa attività." : code === "REEL_SOURCE_NOT_ELIGIBLE" ? "Il contenuto scelto non ha un testo sufficiente per un Reel." : code === "REEL_ENGINE_NOT_CONFIGURED" ? "Il motore Reel non è ancora configurato." : "Avvio del Reel non riuscito. Riprova.");
+        setError(code === "REEL_QUEUE_FULL" ? "Ci sono già 3 Reel in lavorazione per questa attività." : code === "REEL_SOURCE_NOT_ELIGIBLE" ? "Il contenuto scelto non ha un testo sufficiente per un Reel." : code === "REEL_ENGINE_NOT_CONFIGURED" ? "Il motore Reel non è ancora configurato." : code === "REEL_DRY_RUN_NOT_ALLOWED" ? "L'anteprima simulata dell'avatar è disponibile solo nell'ambiente di test." : code.startsWith("IDENTITY_") || code.startsWith("AVATAR_") ? errorMessage(code) : "Avvio del Reel non riuscito. Riprova.");
       }
       await refresh();
     } catch {
@@ -137,16 +150,22 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
           {sources.map((source) => <option key={source.id} value={source.id}>{source.provider} · {source.format} · {(source.hook ?? "Senza hook").slice(0, 70)}</option>)}
         </select>
       </label>
+      <label>Tipo
+        <select value={reelKind} onChange={(event) => setReelKind(event.target.value as "REEL_FACELESS" | "REEL_AVATAR")} disabled={!engine?.ready || busy}>
+          <option value="REEL_FACELESS">Senza volto (immagini e voce)</option>
+          <option value="REEL_AVATAR" disabled={!avatarReady || !engine?.dryRunAvailable}>Con il mio avatar · anteprima simulata{avatarReady ? "" : " (configura l'avatar)"}</option>
+        </select>
+      </label>
       <label>Durata
         <select value={durationKey} onChange={(event) => setDurationKey(event.target.value)} disabled={!engine?.ready || busy}>
           {Object.entries(DURATION_PRESETS).map(([key, preset]) => <option key={key || "default"} value={key}>{preset.label}</option>)}
         </select>
       </label>
       <button className="primary-button" type="button" onClick={() => void createReel()} disabled={!engine?.ready || !sourceId || busy}>
-        {busy ? <LoaderCircle className="spin" size={16} /> : <Clapperboard size={16} />} Crea Reel
+        {busy ? <LoaderCircle className="spin" size={16} /> : <Clapperboard size={16} />} {reelKind === "REEL_AVATAR" ? "Crea anteprima avatar" : "Crea Reel"}
       </button>
     </div>
-    {engine?.dryRunAvailable && <button className="secondary-button reel-dry-run" type="button" onClick={() => void createReel(true)} disabled={!sourceId || busy}>Prova a secco senza AI (solo ambiente di test, costo 0)</button>}
+    {engine?.dryRunAvailable && reelKind === "REEL_FACELESS" && <button className="secondary-button reel-dry-run" type="button" onClick={() => void createReel(true)} disabled={!sourceId || busy}>Prova a secco senza AI (solo ambiente di test, costo 0)</button>}
     <p className="field-help">Costo misurato sul primo Reel reale: circa 0,50 $ con 6 scene (immagini, voce, script). Tetto massimo per Reel: 2 $, conteggiato nel budget AI dell'attività.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
 
@@ -155,7 +174,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
       {!jobs.length && <p className="field-help">Nessun Reel ancora creato per questa attività.</p>}
       {jobs.map((job) => <article className={`reel-job reel-job-${job.state.toLowerCase()}`} key={job.id}>
         <header>
-          <strong>{job.dry_run && !(job.title ?? "").startsWith("Prova a secco") ? "Prova a secco · " : ""}{job.title || job.hook || "Reel"}</strong>
+          <strong>{job.kind === "REEL_AVATAR" ? (job.dry_run ? "Avatar · anteprima simulata · " : "Avatar · ") : ""}{job.dry_run && job.kind !== "REEL_AVATAR" && !(job.title ?? "").startsWith("Prova a secco") ? "Prova a secco · " : ""}{job.title || job.hook || "Reel"}</strong>
           <span className="reel-job-state">{STATE_LABEL[job.state]}</span>
         </header>
         {(job.state === "QUEUED" || job.state === "RUNNING") && <div className="reel-progress" role="progressbar" aria-valuemin={0} aria-valuemax={job.steps_total} aria-valuenow={job.steps_completed} aria-label="Avanzamento Reel">
@@ -163,7 +182,7 @@ export function ReelStudioPanel({ profileId }: { profileId: string }) {
           <small>Step {Math.min(job.steps_completed + 1, job.steps_total)} di {job.steps_total} · {STEP_LABEL[job.step] ?? job.step}</small>
         </div>}
         {(job.state === "FAILED" || job.state === "BLOCKED") && <p className="manual-warning">{errorMessage(job.last_error_code)}</p>}
-        {job.video_url && <video className="reel-player" src={job.video_url} poster={job.cover_url ?? undefined} controls playsInline preload="metadata" />}
+        {job.video_url && <ReelVideo className="reel-player" profileId={profileId} src={job.video_url} poster={job.cover_url} />}
         <footer>
           <small>{new Date(job.created_at).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}{job.duration_seconds ? ` · ${job.duration_seconds.toFixed(1)} s` : ""} · costo {job.cost_usd.toFixed(2)} $</small>
           {job.state === "READY_FOR_REVIEW" && <NavLink className="secondary-button" to="/app/approvazioni">Rivedi e approva</NavLink>}

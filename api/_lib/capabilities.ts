@@ -58,6 +58,8 @@ export const CAPABILITY_REGISTRY = define({
   "ai.reel.script": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "ai.voice.tts": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "video.reel.render": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
+  "avatar.identity.setup": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "SCAFFOLD_ONLY" },
+  "video.avatar.render": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "SCAFFOLD_ONLY" },
   "visual.higgsfield.api": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "visual.higgsfield.soul_id": { classification: "USAGE_LIMITED", limitType: "COUNT_PER_MONTH", status: "LIVE_NOT_RUNTIME_VERIFIED" },
   "visual.personal_brand.identity_consistency": { classification: "INTERNAL", limitType: "NOT_APPLICABLE", status: "LIVE_NOT_RUNTIME_VERIFIED" },

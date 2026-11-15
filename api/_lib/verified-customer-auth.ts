@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { neonDataApiUrl } from "./neon-endpoints.js";
+import { dataApiFetch } from "./cold-start-fetch.js";
 
 const DATA_API = neonDataApiUrl();
 
@@ -33,7 +34,7 @@ async function activeSessionAuthUserId(token: string, databaseUrl: string) {
 }
 
 async function jwtAuthUserId(token: string, databaseUrl: string) {
-  const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
+  const response = await dataApiFetch(`${DATA_API}/rpc/current_auth_user_id`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" },
     body: "{}",

@@ -9,6 +9,7 @@ import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, t
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 import { ManualContentComposer } from "../components/manual-content-composer";
 import { ReelStudioPanel } from "../components/reel-studio-panel";
+import { AvatarStudioPanel } from "../components/avatar-studio-panel";
 
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
 type AutopilotRunResponse = {
@@ -355,6 +356,7 @@ export function ContentGeneratorPage() {
       </div>
     </details>
 
+    <AvatarStudioPanel profileId={selectedProfile.id} />
     <ReelStudioPanel profileId={selectedProfile.id} />
 
     <section className="panel editorial-manual">

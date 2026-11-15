@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { BootstrappedProfile } from "./_lib/profile-bootstrap.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 /**
  * Vercel's production /api/profile-bootstrap endpoint.
@@ -39,7 +40,7 @@ async function readAuthenticatedRows<T>(token: string, path: string): Promise<
   | { ok: true; data: T[] }
   | { ok: false; status: number }
 > {
-  const response = await fetch(`${NEON_PROFILES_DATA_API}/${path}`, {
+  const response = await dataApiFetch(`${NEON_PROFILES_DATA_API}/${path}`, {
     method: "GET",
     headers: {
       authorization: `Bearer ${token}`,

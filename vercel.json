@@ -37,6 +37,10 @@
       "destination": "/api/render?path=:path*"
     },
     {
+      "source": "/api/avatar/:path*",
+      "destination": "/api/avatar?path=:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
@@ -45,6 +49,10 @@
     "api/render.ts": {
       "maxDuration": 800,
       "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm}"
+    },
+    "api/avatar.ts": {
+      "maxDuration": 60,
+      "includeFiles": "{node_modules/@ffprobe-installer/linux-x64/**}"
     }
   }
 }

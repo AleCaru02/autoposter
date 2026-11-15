@@ -104,3 +104,51 @@ export async function extractFrame(videoPath: string, atSeconds: number, outputP
   const result = await runMediaBinary("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-ss", String(seconds(atSeconds)), "-i", videoPath, "-frames:v", "1", outputPath], { timeoutMs: 30_000 });
   if (result.code !== 0) throw new Error("REEL_FRAME_EXTRACT_FAILED");
 }
+
+/**
+ * Avatar Reel assembly: the provider's talking-head video (any aspect) is scaled and
+ * centre-cropped to 1080x1920, caption overlays are burned in, the audio is normalised with
+ * the same two-pass loudnorm, and the result is cut to `durationSeconds`.
+ */
+export type AvatarReelRenderInput = { videoPath: string; durationSeconds: number; captions: ReelCaptionInput[]; outputPath: string; fps?: number; loudnorm?: string };
+
+export function buildAvatarReelFfmpegArgs(input: AvatarReelRenderInput): string[] {
+  const total = seconds(input.durationSeconds);
+  if (!(total >= REEL_MIN_SECONDS && total <= REEL_MAX_SECONDS)) throw new Error("REEL_DURATION_INVALID");
+  if (input.captions.length > 80 || input.captions.some((caption) => !(caption.end > caption.start) || caption.start < 0 || caption.end > total + 0.5)) throw new Error("REEL_CAPTION_TIMING_INVALID");
+  const fps = input.fps ?? REEL_FPS;
+  const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", input.videoPath];
+  for (const caption of input.captions) args.push("-i", caption.pngPath);
+  const filters = [`[0:v]scale=${REEL_WIDTH}:${REEL_HEIGHT}:force_original_aspect_ratio=increase,crop=${REEL_WIDTH}:${REEL_HEIGHT},setsar=1,fps=${fps},format=yuv420p[base0]`];
+  let last = "base0";
+  input.captions.forEach((caption, index) => {
+    const next = `cap${index}`;
+    filters.push(`[${last}][${index + 1}:v]overlay=0:0:enable='between(t,${seconds(caption.start)},${seconds(caption.end)})'[${next}]`);
+    last = next;
+  });
+  filters.push(`[${last}]format=yuv420p[vout]`);
+  filters.push(`[0:a]${input.loudnorm ? `${input.loudnorm},` : ""}aresample=48000,apad,atrim=0:${total}[aout]`);
+  args.push(
+    "-filter_complex", filters.join(";"),
+    "-map", "[vout]", "-map", "[aout]",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p", "-r", String(fps),
+    "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "48000",
+    "-t", String(total),
+    "-movflags", "+faststart",
+    input.outputPath,
+  );
+  return args;
+}
+
+export async function renderAvatarReel(input: AvatarReelRenderInput, options: { timeoutMs?: number } = {}) {
+  const result = await runMediaBinary("ffmpeg", buildAvatarReelFfmpegArgs(input), { timeoutMs: options.timeoutMs ?? 240_000 });
+  if (result.code !== 0) throw new Error(`REEL_RENDER_FAILED: ${result.stderrTail.split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`);
+  return { durationMs: result.durationMs, totalSeconds: seconds(input.durationSeconds) };
+}
+
+/** Copies the first `durationSeconds` of a (possibly remote, signed) video, re-encoded to a safe MP4. */
+export async function trimVideo(source: string, durationSeconds: number, outputPath: string) {
+  const result = await runMediaBinary("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-t", String(seconds(durationSeconds)), "-i", source,
+    "-vf", "scale='min(1080,iw)':-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", outputPath], { timeoutMs: 240_000 });
+  if (result.code !== 0) throw new Error(`AVATAR_TRIM_FAILED: ${result.stderrTail.slice(-300)}`);
+}

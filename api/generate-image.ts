@@ -8,6 +8,7 @@ import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } fro
 import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./_lib/brand-visual-assets.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 export const config = { maxDuration: 60 };
 
@@ -34,7 +35,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, {
+  return dataApiFetch(`${DATA_API}/${path}`, {
     ...init,
     headers: {
       authorization: `Bearer ${token}`,

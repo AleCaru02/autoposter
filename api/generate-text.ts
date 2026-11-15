@@ -9,6 +9,7 @@ import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/te
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 import { buildPersonalBrandEditorialContext, loadEditorialProfile, loadProfileBrandContext, resolvePersonalBrandSource } from "./_lib/personal-brand-sources.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 export const config = { maxDuration: 60 };
 
@@ -26,7 +27,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
+  return dataApiFetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
 }
 
 async function readJsonRows<T>(path: string, token: string): Promise<T[]> {

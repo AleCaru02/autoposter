@@ -11,7 +11,8 @@ assert.match(panel, /\/api\/render\/status\?profileId=/, "status comes from the 
 assert.match(panel, /job\.steps_completed \/ job\.steps_total/, "progress is derived from real completed steps only");
 assert.doesNotMatch(panel, /Math\.random|setTimeout\([^)]*progress/i, "no simulated progress");
 assert.match(panel, /currentProfile\.current !== requested/, "stale responses from another activity are ignored");
-assert.match(panel, /playsInline/, "inline playback on iPhone");
+assert.match(panel, /<ReelVideo /, "Reel player shared with private avatar media");
+assert.match(readFileSync(new URL("../src/lib/private-media.tsx", import.meta.url), "utf8"), /playsInline/, "inline playback on iPhone");
 assert.match(panel, /Da configurare/, "missing configuration is shown explicitly instead of a dead button");
 assert.match(panel, /disabled=\{!engine\?\.ready/, "Create is disabled while the engine is not configured");
 assert.match(css, /min-height:44px/, "44px touch targets");

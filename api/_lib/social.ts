@@ -4,6 +4,7 @@ import type { CapabilityKey } from "./capabilities.js";
 import { assertInstagramCaption, instagramCarouselChildForm, instagramCarouselParentForm, validateInstagramCarousel, validateInstagramPublishImage, type InstagramPublishImage } from "./instagram-media.js";
 import { toInstagramJpeg } from "./instagram-jpeg.js";
 import { neonDataApiUrl } from "./neon-endpoints.js";
+import { dataApiFetch } from "./cold-start-fetch.js";
 
 const DATA_API = neonDataApiUrl();
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
@@ -454,7 +455,7 @@ export async function decryptTokenBundle(value: string, secret: string): Promise
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, {
+  return dataApiFetch(`${DATA_API}/${path}`, {
     ...init,
     headers: {
       authorization: `Bearer ${token}`,
