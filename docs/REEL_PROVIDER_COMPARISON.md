@@ -57,11 +57,15 @@ Sono tutte API REST asincrone, con polling o webhook, senza GPU locale. Cosa c'√
 - budget, idempotenza e ripresa automatica sono riutilizzabili;
 - l'MP4 dell'avatar viene salvato su Blob e poi passa dal nostro FFmpeg per sottotitoli, b-roll eventuale, loudness e QA.
 
-Cosa manca, senza duplicare nulla:
-- tabella `identity_consents` e blocco dei job `REEL_AVATAR` in assenza di un consenso attivo;
-- upload privato dei materiali di identit√†;
-- un solo adapter `AvatarVideoProvider`, per il fornitore scelto;
-- nuova capability di costo `video.avatar`.
+**Implementato il 15/11/2026 (PR #332), senza spesa:**
+- consenso esplicito, versionato e revocabile;
+- materiali privati per profilo (store Vercel Blob **privato** separato, URL firmati di 5 minuti);
+- stato di volto e voce, scelta del provider;
+- adapter `AvatarVideoProvider` con HeyGen v3, disattivato da `AVATAR_PROVIDER_LIVE_ENABLED`;
+- job `REEL_AVATAR` nella pipeline esistente, con anteprima simulata gratuita in preview;
+- capability `video.avatar.render`.
+
+Procedura di confronto: `docs/AVATAR_AB_TEST.md`. Materiali da preparare: `docs/AVATAR_MATERIALI.md`.
 
 ### Raccomandazione
 **Test A/B autorizzato, tetto suggerito 25 $:**

@@ -28,7 +28,7 @@ assert.throws(() => identityPathname(P1, "PHOTO", "application/pdf"), /IDENTITY_
 assert.ok(IDENTITY_UPLOAD_RULES.VIDEO.maxBytes >= 500 * 1024 * 1024, "a 5-minute iPhone video fits");
 
 // ---------- 2. Consent ----------
-assert.match(identityConsentText("Alessandro Caruso", ["FACE", "VOICE"]), /Alessandro Caruso.*il mio volto e la mia voce.*revocare/s);
+assert.match(identityConsentText("Alessandro Caruso", ["FACE", "VOICE"]), /Alessandro Caruso.*autorizzo l'uso del mio volto e della mia voce.*revocare/s);
 assert.match(identityConsentText("A B", ["VOICE"]), /la mia voce/);
 assert.equal(await sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 assert.match(IDENTITY_CONSENT_VERSION, /^it-\d{4}-\d{2}-v\d+$/);
