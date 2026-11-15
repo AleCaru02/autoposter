@@ -1,6 +1,10 @@
 # Dismissione del vecchio branch QA `qa-reel-engine-20261113`
 
-**Stato al 15/11/2026: procedura preparata, nessun passo eseguito.** Ogni passo da 2 in poi va eseguito solo con l'ok di Alessandro.
+**Stato al 15/11/2026, 12:32 UTC:**
+- **Passo 2 eseguito** con l'ok di Alessandro: compute `ep-fragrant-mud-ara6ysty` disabilitato. Le connessioni vengono rifiutate con "The endpoint has been disabled".
+- Produzione verificata subito dopo: health 200 `postgres_ready`, conteggi invariati (2 utenti, 6 profili, 25 varianti, 3 asset, 15 publication job).
+- reel-qa verificato: index 200, stato dei job e self-test di render PASS.
+- **Osservazione fino al 17/11/2026 12:32 UTC.** Solo dopo si potrà proporre il passo 4 (eliminazione), che richiede un nuovo ok.
 
 ## Cosa è
 
