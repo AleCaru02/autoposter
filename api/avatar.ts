@@ -200,7 +200,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const code = reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN";
     if (code === "SESSION_INVALID") return res.status(401).json({ error: code });
     if (/^IDENTITY_/.test(code)) return res.status(409).json({ error: code });
-    console.error("avatar-route-failed", { path, code });
+    // Blob SDK errors carry no credentials; the first 300 characters identify the failing step.
+    console.error("avatar-route-failed", { path, code, detail: reason instanceof Error ? reason.message.replace(/vercel_blob_rw_[A-Za-z0-9_]+/g, "[redacted]").slice(0, 300) : null });
     return res.status(500).json({ error: "AVATAR_ROUTE_FAILED" });
   }
 }
