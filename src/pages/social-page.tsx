@@ -18,6 +18,7 @@ type ProviderStatus = {
   permissions: string[];
   expiresAt: string | null;
   lastValidatedAt: string | null;
+  verifiable?: boolean;
   candidates: Candidate[];
   accountType: string | null;
   capabilities: { publish: string[]; note: string };
@@ -71,6 +72,7 @@ function readableError(value: string) {
     LINKEDIN_REDIRECT_URI_MISMATCH: `Nell’app LinkedIn manca o non coincide questo Redirect URL: ${typeof window === "undefined" ? "" : window.location.origin}/api/social/callback/linkedin`,
     SOCIAL_TOKEN_KEY_MISMATCH: "Le credenziali salvate sono state cifrate con una chiave diversa da quella di questo server. Non sono state modificate: serve la chiave originale oppure un nuovo collegamento.",
     SOCIAL_NOT_CONNECTED: "Questo account non risulta collegato: premi Collega account.",
+    GBP_VERIFY_CLIENT_NOT_CONFIGURED: "Il token Google va rinnovato, ma il server non ha ancora le credenziali OAuth Google. Il collegamento non è stato modificato.",
     LINKEDIN_AUTHORIZATION_CODE_INVALID: "Il codice di autorizzazione LinkedIn è scaduto o già usato. Premi Ricollega e completa il consenso una sola volta.",
     LINKEDIN_PROFILE_ACCESS_DENIED: "LinkedIn ha rifiutato la lettura del profilo o i permessi richiesti. Verifica i prodotti e gli scope autorizzati nella tua app LinkedIn.",
     LINKEDIN_TOKEN_REJECTED: "LinkedIn ha rifiutato lo scambio del token. Ricollega: se ricompare, la configurazione dell’app LinkedIn va corretta.",
@@ -345,7 +347,7 @@ export function SocialPage() {
               {providerError && <p className="social-config-error"><AlertTriangle size={15} /> Il provider ha restituito un errore reale. Ricollega l’account o riprova dopo aver verificato il servizio.</p>}
 
               <div className="social-actions">
-                {provider.status === "ACTIVE" && !unavailable && <button type="button" className={active ? "secondary-button" : "primary-button"} disabled={busy || demo} onClick={() => void verify(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />} Verifica</button>}
+                {provider.status === "ACTIVE" && provider.verifiable && <button type="button" className={active ? "secondary-button" : "primary-button"} disabled={busy || demo} onClick={() => void verify(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />} Verifica</button>}
                 {active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></>
                   : reconnect || providerError ? <><button type="button" className={provider.status === "ACTIVE" ? "secondary-button" : "primary-button"} disabled={busy || demo || unavailable} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button>{accountPresent && <button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button>}</>
                     : disconnected ? <button type="button" className="primary-button" disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega account</button>

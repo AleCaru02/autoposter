@@ -944,6 +944,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         provider,
         configured,
         configurationIssues,
+        verifiable: socialVerifiable(env),
         status: row?.status ?? "NOT_CONNECTED",
         accountId: row?.provider_account_id ?? null,
         accountName: row?.account_name ?? null,
@@ -1041,6 +1042,8 @@ export async function verifySocialConnection(connection: VerifiableConnection, b
     let current = bundle;
     if (!current.expiresAt || new Date(current.expiresAt).getTime() <= Date.now() + 5 * 60_000) {
       if (!current.refreshToken) return { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true };
+      // Our own missing OAuth client must never be mistaken for a revoked user grant.
+      if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return { ok: false, code: "GBP_VERIFY_CLIENT_NOT_CONFIGURED", reconnect: false };
       const form = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID!, client_secret: env.GOOGLE_CLIENT_SECRET!, refresh_token: current.refreshToken, grant_type: "refresh_token" });
       const refresh = await fetcher("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
       const refreshed = await refresh.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error?: string };
@@ -1060,6 +1063,11 @@ export async function verifySocialConnection(connection: VerifiableConnection, b
   }
 }
 
+/** Stored connections can be re-verified with the token key alone (no app secret needed for reads). */
+export function socialVerifiable(env: SocialEnv) {
+  return Boolean(env.DATABASE_URL && env.SOCIAL_TOKEN_KEY && env.SOCIAL_TOKEN_KEY.length >= 24);
+}
+
 async function handleVerify(request: Request, env: SocialEnv) {
   if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
   const auth = bearer(request);
@@ -1069,7 +1077,7 @@ async function handleVerify(request: Request, env: SocialEnv) {
   const provider = body.provider;
   if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
   if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
-  if (!providerConfigured(provider, env)) return socialJson({ error: "PROVIDER_NOT_CONFIGURED", missing: missingProviderConfiguration(provider, env) }, 503);
+  if (!socialVerifiable(env)) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
   const sql = neon(env.DATABASE_URL!);
   const row = await storedConnection(sql, profileId, provider);
   if (!row?.token_reference || row.status !== "ACTIVE") return socialJson({ error: "SOCIAL_NOT_CONNECTED" }, 409);

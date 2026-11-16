@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { verifySocialConnection, type SocialEnv } from "../api/_lib/social.js";
+import { socialVerifiable, verifySocialConnection, type SocialEnv } from "../api/_lib/social.js";
 
 // Read-only verification of a stored social connection: no publishing endpoint may be called.
 const env: SocialEnv = { META_GRAPH_VERSION: "v26.0", GOOGLE_CLIENT_ID: "client", GOOGLE_CLIENT_SECRET: "secret" } as SocialEnv;
@@ -57,6 +57,8 @@ const noWrites = (calls: Call[]) => assert.ok(calls.every((c) => c.method === "G
   noWrites(calls);
   const revoked = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: {} }, { accessToken: "old", refreshToken: "r", expiresAt: "2026-09-28T00:00:00Z" }, env, fakeFetch(() => ({ status: 400, body: { error: "invalid_grant" } })).fetcher);
   assert.deepEqual(revoked, { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true });
+  const noClient = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: {} }, { accessToken: "old", refreshToken: "r", expiresAt: "2026-09-28T00:00:00Z" }, {} as SocialEnv, fakeFetch(() => ({ status: 401, body: { error: "invalid_client" } })).fetcher);
+  assert.deepEqual(noClient, { ok: false, code: "GBP_VERIFY_CLIENT_NOT_CONFIGURED", reconnect: false }, "missing server OAuth client never downgrades the user grant");
   const noRefresh = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: {} }, { accessToken: "old", expiresAt: "2026-09-28T00:00:00Z" }, env, fakeFetch(() => ({ status: 200, body: {} })).fetcher);
   assert.deepEqual(noRefresh, { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true });
 }
@@ -68,4 +70,6 @@ const noWrites = (calls: Call[]) => assert.ok(calls.every((c) => c.method === "G
   assert.doesNotMatch(handler, /token_reference=null|delete from/, "verification never deletes stored credentials");
   assert.match(source, /if \(path === "\/api\/social\/verify"\) return handleVerify\(request, env\);/);
 }
+assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: "k".repeat(32) } as SocialEnv), true, "verification needs only DB + token key");
+assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: "short" } as SocialEnv), false);
 console.log("PASS social verify: verifica solo in lettura, 190/401/invalid_grant → ricollega, guasti del provider non declassano, chiave diversa senza scritture.");
