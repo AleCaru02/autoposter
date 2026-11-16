@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       HEALTH_URL: https://app.iltuopropertymanager.it/api/health
       ALERT_TITLE: "[Autoposter] Produzione non disponibile"
     steps:
