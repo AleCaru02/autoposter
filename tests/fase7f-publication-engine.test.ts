@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { classifyProviderFailure, instagramContainerDecision, retryDelaySeconds } from "../api/_lib/social.js";
 
-const [migration, social, store, calendar, dashboard, wrangler, entry] = await Promise.all([
+const [migration, social, store, calendar, dashboard, wrangler, entry, vercel] = await Promise.all([
   readFile("db/migrations/20260908_fase7f_safe_publication_engine.sql", "utf8"),
   readFile("api/_lib/social.ts", "utf8"),
   readFile("src/features/calendar/calendar-store.ts", "utf8"),
@@ -10,6 +10,7 @@ const [migration, social, store, calendar, dashboard, wrangler, entry] = await P
   readFile("src/pages/dashboard-page.tsx", "utf8"),
   readFile("wrangler.jsonc", "utf8"),
   readFile("cloudflare/entry.ts", "utf8"),
+  readFile("vercel.json", "utf8"),
 ]);
 const publisher = social.slice(social.indexOf("async function publishInstagram"), social.indexOf("export async function handleSocialApi"));
 
@@ -45,7 +46,8 @@ assert.match(social, /complete_publication_job/);
 assert.match(social, /fail_publication_job/);
 assert.match(social, /PUBLISH_VIA_CALENDAR_REQUIRED/);
 assert.doesNotMatch(social, /async function handlePublishNow/);
-assert.match(wrangler, /\*\/5 \* \* \* \*/);
+assert.deepEqual(JSON.parse(wrangler).triggers.crons, [], "Worker must not duplicate Vercel scheduled jobs");
+assert.ok(JSON.parse(vercel).crons.some((job: { path: string; schedule: string }) => job.path === "/api/cron-social" && job.schedule === "*/5 * * * *"), "Vercel must schedule social publishing every 5 minutes");
 assert.match(entry, /processDuePublications/);
 
 // Provider safety: bounded requests, safe errors, and profile-bound assets.

@@ -82,6 +82,13 @@ type VariantRecord = {
   hashtags: unknown;
   alt_text: string | null;
   image_asset_id: string | null;
+  video_asset_id: string | null;
+  video_storage_url: string | null;
+  video_mime_type: string | null;
+  video_quality_status: string | null;
+  video_identity_status: string | null;
+  video_width: number | null;
+  video_height: number | null;
   approval_status: string;
   workflow_status: string;
   qa_status: string;
@@ -165,6 +172,8 @@ async function providerErrorNumbers(response: Response): Promise<ProviderErrorNu
 
 export function classifyProviderFailure(provider: SocialProvider, stage: string, status: number | null, visibleWriteStarted: boolean, details: ProviderErrorNumbers = {}) {
   const prefix = provider === "INSTAGRAM" ? "INSTAGRAM" : provider === "FACEBOOK" ? "FACEBOOK" : provider === "LINKEDIN" ? "LINKEDIN" : "GBP";
+  if (provider === "INSTAGRAM" && stage.includes("PUBLISH") && details.providerSubcode === 2207051) return publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true, customerMessage: "Meta potrebbe aver pubblicato nonostante l'errore: verifica prima di riprovare." });
+  if (provider === "INSTAGRAM" && stage.includes("PUBLISH") && details.providerSubcode === 2207027) return publishError("INSTAGRAM_MEDIA_NOT_READY", { retryable: true, customerMessage: "Instagram sta elaborando il media." });
   if (status === 429) return publishError(`${prefix}_RATE_LIMITED`, { retryable: true, customerMessage: "Il social ha chiesto di riprovare più tardi." });
   if (status === 401 || status === 403) return publishError(`${prefix}_RECONNECT_REQUIRED`, { customerMessage: "Ricollega il social prima di riprovare." });
   if (status === 400 || status === 404 || status === 409 || status === 422) {
@@ -367,8 +376,8 @@ export function providerConfigured(provider: SocialProvider, env: SocialEnv) {
 }
 
 export function providerCapabilities(provider: SocialProvider) {
-  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY", "CAROUSEL"], note: "Pubblicazione di caroselli approvati con immagini JPEG valide; la creazione automatica delle slide e i Reel richiedono ulteriori integrazioni." };
-  if (provider === "FACEBOOK") return { publish: ["POST"], note: "Storie e caroselli non vengono simulati finché il contenuto non ha gli asset richiesti dalle API." };
+  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY", "CAROUSEL", "REEL"], note: "Reel solo con MP4 9:16, QA PASS e approvazione." };
+  if (provider === "FACEBOOK") return { publish: ["POST", "REEL"], note: "Reel con sessione ufficiale video_reels e QA PASS." };
   if (provider === "LINKEDIN") return { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." };
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
@@ -1372,7 +1381,100 @@ async function publishInstagramCarousel(sql: Sql, variant: VariantRecord, connec
   return { externalId: result.id, metadata: { containerId: parent.id, childContainerIds: children } };
 }
 
+
+/** Official Meta Reels endpoints; publication remains guarded by the existing QA fingerprint and job lease. */
+export function validatedReelVideoUrl(variant: Pick<VariantRecord,
+  "video_asset_id" | "video_storage_url" | "video_mime_type" | "video_quality_status" |
+  "video_identity_status" | "video_width" | "video_height">) {
+  if (!variant.video_asset_id || variant.video_quality_status !== "PASS" ||
+      !["NOT_REQUIRED", "PASS"].includes(variant.video_identity_status || "") ||
+      variant.video_mime_type !== "video/mp4" ||
+      variant.video_width !== 1080 || variant.video_height !== 1920) throw new Error("REEL_MEDIA_NOT_VERIFIED");
+  let url: URL;
+  try { url = new URL(variant.video_storage_url || ""); }
+  catch { throw new Error("REEL_MEDIA_URL_INVALID"); }
+  if (url.protocol !== "https:" || !/^[a-z0-9]+\.public\.blob\.vercel-storage\.com$/i.test(url.hostname) ||
+      url.username || url.password || url.port || !url.pathname.toLowerCase().endsWith(".mp4")) {
+    throw new Error("REEL_MEDIA_URL_UNTRUSTED");
+  }
+  return url.toString();
+}
+
+export async function publishInstagramReel(
+  variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv,
+  beforeVisibleWrite?: PublishBoundary,
+): Promise<PublishResult> {
+  const videoUrl = validatedReelVideoUrl(variant);
+  const caption = composeCaption(variant);
+  assertInstagramCaption(caption);
+  const base = "https://graph.facebook.com/" + metaVersion(env) + "/" + connection.provider_account_id;
+  const create = await providerRequest(base + "/media", {
+    method: "POST",
+    body: new URLSearchParams({ media_type: "REELS", video_url: videoUrl, caption,
+      share_to_feed: "false", access_token: bundle.accessToken }),
+  }, { provider: "INSTAGRAM", stage: "REEL_CREATE" });
+  const container = await providerJson<{id?: string}>(create, "INSTAGRAM", "REEL_CREATE", false);
+  if (!container.id || !/^[0-9]+$/.test(container.id)) throw new Error("INSTAGRAM_REEL_CONTAINER_INVALID");
+  await waitForInstagramContainer(container.id, bundle.accessToken, env);
+  // A media-not-ready response is safe to retry on the SAME container.
+  // Uncertain outcomes are never retried: prevent duplicates.
+  if (beforeVisibleWrite) await beforeVisibleWrite();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await providerRequest(base + "/media_publish", {
+        method: "POST",
+        body: new URLSearchParams({ creation_id: container.id, access_token: bundle.accessToken }),
+      }, { provider: "INSTAGRAM", stage: "REEL_PUBLISH", visibleWrite: true });
+      const body = await providerJson<{id?: string}>(response, "INSTAGRAM", "REEL_PUBLISH", true);
+      if (!body.id) throw publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true });
+      return { externalId: body.id, metadata: { containerId: container.id, format: "REEL" } };
+    } catch (reason) {
+      if (!(reason instanceof SocialPublishError) || reason.code !== "INSTAGRAM_MEDIA_NOT_READY" || attempt === 2) throw reason;
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  }
+  throw new Error("INSTAGRAM_REEL_PUBLISH_UNREACHABLE");
+}
+
+export async function publishFacebookReel(
+  variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv,
+  beforeVisibleWrite?: PublishBoundary,
+): Promise<PublishResult> {
+  const videoUrl = validatedReelVideoUrl(variant);
+  const pageId = connection.provider_account_id;
+  if (!pageId) throw new Error("FACEBOOK_PAGE_MISSING");
+  const base = "https://graph.facebook.com/" + metaVersion(env) + "/" + encodeURIComponent(pageId) + "/video_reels";
+  const create = await providerRequest(base, {
+    method: "POST", body: new URLSearchParams({ upload_phase: "start", access_token: bundle.accessToken }),
+  }, { provider: "FACEBOOK", stage: "REEL_START" });
+  const session = await providerJson<{video_id?: string; upload_url?: string}>(create, "FACEBOOK", "REEL_START", false);
+  if (!session.video_id || !/^[0-9]+$/.test(session.video_id) || !session.upload_url) throw new Error("FACEBOOK_REEL_SESSION_INVALID");
+  let upload: URL;
+  try { upload = new URL(session.upload_url); }
+  catch { throw new Error("FACEBOOK_REEL_UPLOAD_URL_INVALID"); }
+  if (upload.protocol !== "https:" || upload.hostname !== "rupload.facebook.com" ||
+      !upload.pathname.startsWith("/video-upload/") || upload.username || upload.password || upload.port) {
+    throw new Error("FACEBOOK_REEL_UPLOAD_URL_UNTRUSTED");
+  }
+  const uploaded = await providerRequest(upload, {
+    method: "POST", headers: { Authorization: "OAuth " + bundle.accessToken, file_url: videoUrl },
+  }, { provider: "FACEBOOK", stage: "REEL_UPLOAD", timeoutMs: 60_000 });
+  const uploadBody = await providerJson<{success?: boolean}>(uploaded, "FACEBOOK", "REEL_UPLOAD", false);
+  if (uploadBody.success !== true) throw new Error("FACEBOOK_REEL_UPLOAD_FAILED");
+  const response = await providerRequest(base, {
+    method: "POST", body: new URLSearchParams({
+      upload_phase: "finish", video_id: session.video_id, video_state: "PUBLISHED",
+      description: composeCaption(variant).slice(0, 2200), title: (variant.hook || "Reel").slice(0, 200),
+      access_token: bundle.accessToken,
+    }),
+  }, { provider: "FACEBOOK", stage: "REEL_FINISH", visibleWrite: true, beforeVisibleWrite });
+  const body = await providerJson<{success?: boolean; post_id?: string}>(response, "FACEBOOK", "REEL_FINISH", true);
+  if (body.success !== true) throw publishError("PROVIDER_OUTCOME_UNKNOWN", { outcomeUnknown: true });
+  return { externalId: body.post_id || session.video_id, metadata: { videoId: session.video_id, format: "REEL" } };
+}
+
 async function publishInstagram(sql: Sql, variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  if (variant.format === "REEL") return publishInstagramReel(variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.format === "CAROUSEL") return publishInstagramCarousel(sql, variant, connection, bundle, env, beforeVisibleWrite);
   if (!variant.image_asset_id) throw new Error("INSTAGRAM_REQUIRES_MEDIA");
   if (variant.format !== "POST" && variant.format !== "STORY") throw new Error("FORMAT_NOT_SUPPORTED");
@@ -1403,6 +1505,7 @@ async function publishInstagram(sql: Sql, variant: VariantRecord, connection: St
 }
 
 async function publishFacebook(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  if (variant.format === "REEL") return publishFacebookReel(variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.format !== "POST") throw new Error("FACEBOOK_FORMAT_REQUIRES_ADDITIONAL_MEDIA_ASSETS");
   const pageId = connection.provider_account_id;
   if (!pageId) throw new Error("FACEBOOK_PAGE_MISSING");
@@ -1474,12 +1577,16 @@ async function publishGoogle(variant: VariantRecord, connection: StoredConnectio
 
 async function loadVariant(sql: Sql, variantId: string, profileId: string): Promise<VariantRecord | null> {
   const rows = await sql`
-    select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id,
+    select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id, v.video_asset_id,
            v.approval_status, v.workflow_status, v.qa_status, v.qa_fingerprint, v.approved_fingerprint, v.approved_by, v.approved_at, v.eligible,
            a.storage_url, a.mime_type, a.width as asset_width, a.height as asset_height,
-           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status
+           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status,
+           va.storage_url as video_storage_url, va.mime_type as video_mime_type,
+           va.width as video_width, va.height as video_height,
+           va.quality_status as video_quality_status, va.identity_status as video_identity_status
     from public.content_variants v
     left join public.assets a on a.id = v.image_asset_id and a.profile_id = v.profile_id
+    left join public.assets va on va.id = v.video_asset_id and va.profile_id = v.profile_id and va.kind = 'VIDEO'
     where v.id=${variantId}::uuid and v.profile_id=${profileId}::uuid
     limit 1
   ` as unknown as VariantRecord[];
