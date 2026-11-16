@@ -72,13 +72,11 @@ async function sha256Hex(value: string) {
 export async function exportProfileConnections(env: KeyExportEnv, profileId: string) {
   if (!keyExportEnabled(env)) return { status: 503, body: { error: "KEY_EXPORT_DISABLED" } };
   const sql = neon(env.DATABASE_URL!);
-  await sql`create table if not exists public.social_token_exports (
-    profile_id uuid not null, provider text not null, provider_account_id text, account_name text,
-    permissions jsonb not null default '[]'::jsonb, expires_at timestamptz, metadata jsonb not null default '{}'::jsonb,
-    token_reference_next text not null, created_at timestamptz not null default now(),
-    primary key (profile_id, provider))`;
-  await sql`revoke all on public.social_token_exports from public`;
-  await sql`do $$ begin if exists (select 1 from pg_roles where rolname='authenticated') then revoke all on public.social_token_exports from authenticated; end if; if exists (select 1 from pg_roles where rolname='anonymous') then revoke all on public.social_token_exports from anonymous; end if; end $$`;
+  // The server-only table is provisioned by the database owner (the app role cannot run DDL):
+  // revoked from public/authenticated/anonymous, granted select/insert/update to the app role.
+  const table = await sql`select to_regclass('public.social_token_exports') as name, has_table_privilege('authenticated', 'public.social_token_exports', 'SELECT') as browser_read` as unknown as Array<{ name: string | null; browser_read: boolean | null }>;
+  if (!table[0]?.name) return { status: 503, body: { error: "KEY_EXPORT_TABLE_MISSING" } };
+  if (table[0].browser_read) return { status: 503, body: { error: "KEY_EXPORT_TABLE_NOT_PRIVATE" } };
   const rows = await sql`
     select provider, provider_account_id, account_name, permissions, expires_at, metadata, token_reference
     from public.social_connections

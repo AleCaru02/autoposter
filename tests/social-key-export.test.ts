@@ -31,7 +31,8 @@ await assert.rejects(reencryptReference(original, keyB, keyA), "a wrong current 
 
 const source = readFileSync(new URL("../api/_lib/social-key-export.ts", import.meta.url), "utf8");
 assert.doesNotMatch(source, /console\.(log|error|info|warn)/, "never logs");
-assert.match(source, /revoke all on public\.social_token_exports from authenticated/, "export table is server-only");
+assert.match(source, /KEY_EXPORT_TABLE_NOT_PRIVATE/, "refuses to write into a browser-readable table");
+assert.doesNotMatch(source, /create table|revoke all/i, "no DDL from the least-privilege app role");
 assert.match(source, /lastVerification'->>'ok'\)='true'/, "only provider-verified connections are exported");
 const social = readFileSync(new URL("../api/_lib/social.ts", import.meta.url), "utf8");
 const handler = social.slice(social.indexOf("async function handleKeyExport"), social.indexOf("async function handleDisconnect"));
