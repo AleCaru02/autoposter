@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { decryptTokenBundle, encryptTokenBundle } from "./social.js";
+import { verifiedCustomerAuthUserId } from "./verified-customer-auth.js";
 
 /**
  * One-shot QA → production transfer of verified social connections WITHOUT plaintext leaving
@@ -15,6 +16,8 @@ export type KeyExportEnv = {
   SOCIAL_TOKEN_KEY?: string;
   SOCIAL_TOKEN_KEY_NEXT?: string;
   SOCIAL_KEY_EXPORT_ENABLED?: string;
+  /** The single profile allowed to export (owner-approved migration). */
+  SOCIAL_KEY_EXPORT_PROFILE_ID?: string;
 };
 
 export function keyExportEnabled(env: KeyExportEnv) {
@@ -22,7 +25,33 @@ export function keyExportEnabled(env: KeyExportEnv) {
     && Boolean(env.DATABASE_URL)
     && (env.SOCIAL_TOKEN_KEY?.length ?? 0) >= 24
     && (env.SOCIAL_TOKEN_KEY_NEXT?.length ?? 0) >= 24
-    && env.SOCIAL_TOKEN_KEY !== env.SOCIAL_TOKEN_KEY_NEXT;
+    && env.SOCIAL_TOKEN_KEY !== env.SOCIAL_TOKEN_KEY_NEXT
+    && /^[0-9a-f-]{36}$/i.test(env.SOCIAL_KEY_EXPORT_PROFILE_ID?.trim() ?? "");
+}
+
+type OwnerDeps = {
+  callerId: (token: string) => Promise<string | null>;
+  ownerId: (profileId: string) => Promise<string | null>;
+};
+
+/**
+ * Only the profile OWNER may export, and only for the configured profile. A member, an
+ * editor or any other authenticated user with read access to the profile is refused.
+ */
+export async function authorizeExport(env: KeyExportEnv, token: string, profileId: string, deps?: OwnerDeps) {
+  if (!keyExportEnabled(env)) return "KEY_EXPORT_DISABLED";
+  if (profileId !== env.SOCIAL_KEY_EXPORT_PROFILE_ID!.trim()) return "KEY_EXPORT_PROFILE_NOT_ALLOWED";
+  const resolved: OwnerDeps = deps ?? {
+    callerId: (value) => verifiedCustomerAuthUserId(value, env.DATABASE_URL!),
+    ownerId: async (id) => {
+      const rows = await neon(env.DATABASE_URL!)`select owner_auth_user_id::text as owner from public.profiles where id=${id}::uuid and archived_at is null limit 1` as unknown as Array<{ owner: string | null }>;
+      return rows[0]?.owner ?? null;
+    },
+  };
+  const [caller, owner] = await Promise.all([resolved.callerId(token), resolved.ownerId(profileId)]);
+  if (!caller) return "SESSION_INVALID";
+  if (!owner || caller !== owner) return "KEY_EXPORT_OWNER_REQUIRED";
+  return null;
 }
 
 /** Re-encrypts one stored reference from the current key to the next key (plaintext stays in memory). */

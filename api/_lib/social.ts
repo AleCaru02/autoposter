@@ -33,6 +33,7 @@ export type SocialEnv = {
   /** QA-only, owner-approved key migration (see api/_lib/social-key-export.ts). */
   SOCIAL_TOKEN_KEY_NEXT?: string;
   SOCIAL_KEY_EXPORT_ENABLED?: string;
+  SOCIAL_KEY_EXPORT_PROFILE_ID?: string;
 };
 
 type OAuthState = {
@@ -1221,14 +1222,15 @@ export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
 
 async function handleKeyExport(request: Request, env: SocialEnv) {
   if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
-  const { keyExportEnabled, exportProfileConnections } = await import("./social-key-export.js");
+  const { keyExportEnabled, authorizeExport, exportProfileConnections } = await import("./social-key-export.js");
   if (!keyExportEnabled(env)) return socialJson({ error: "KEY_EXPORT_DISABLED" }, 404);
   const auth = bearer(request);
   if (!auth) return socialJson({ error: "AUTH_REQUIRED" }, 401);
   const body = await readBody(request);
   const profileId = typeof body.profileId === "string" ? body.profileId : "";
   if (!profileId) return socialJson({ error: "PROFILE_REQUIRED" }, 400);
-  if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  const denied = await authorizeExport(env, auth, profileId);
+  if (denied) return socialJson({ error: denied }, denied === "SESSION_INVALID" ? 401 : 403);
   const outcome = await exportProfileConnections(env, profileId);
   return socialJson(outcome.body, outcome.status);
 }
