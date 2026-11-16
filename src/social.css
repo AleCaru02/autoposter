@@ -2,3 +2,7 @@
 
 .social-summary.empty{border-color:#dce4ee;background:#fbfcfe}.social-status.connecting{background:rgba(217,119,6,.1);color:#b45309}.social-status.reconnect{background:rgba(217,119,6,.1);color:#9a5a08}.social-status.error{background:rgba(185,28,28,.09);color:#a52727}.social-status.unavailable{background:#eef2f6;color:#64748b}.social-status.disconnected{background:#f1f5f9;color:#5f6f82}.social-card.reconnect{box-shadow:inset 3px 0 0 rgba(217,119,6,.5)}.social-card.provider-error{box-shadow:inset 3px 0 0 rgba(185,28,28,.45)}.social-config-info,.social-config-error{display:flex;align-items:flex-start;gap:7px;margin:0;padding:10px 11px;border-radius:10px;font-size:.82rem;line-height:1.4}.social-config-info{background:#f2f6f9;color:#586b80}.social-config-error{background:rgba(185,28,28,.07);color:#991b1b}.social-config-info svg,.social-config-error svg,.social-config-warning svg{flex:0 0 auto;margin-top:1px}.social-status-load-error button{margin-top:12px}
 @media(max-width:520px){.social-summary>div{width:100%;flex-wrap:wrap}.social-summary strong{margin-left:auto}.social-status{white-space:normal}.social-config-info,.social-config-error,.social-config-warning{font-size:.8rem}}
+
+.social-verification{display:grid;gap:4px}
+.social-verification ul{margin:0;padding-left:18px}
+.social-verification small{overflow-wrap:anywhere}
