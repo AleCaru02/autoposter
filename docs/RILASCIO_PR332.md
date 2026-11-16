@@ -31,6 +31,21 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.social_connections TO authenticat
 GRANT INSERT, UPDATE, DELETE ON public.publication_jobs, public.publication_attempts, public.ai_usage_events, public.audit_log TO authenticated;
 ```
 
+## Blocco verificato il 16/11: limite di branch Neon
+Il progetto di produzione `snowy-boat-33879785` ha **10 branch su 10**, il limite del piano gratuito. `create_branch` risponde `422 branches limit exceeded`. Nel progetto ci sono:
+- `production` (default), `auth-recovery-v2` (il DB in uso);
+- il vecchio QA `qa-reel-engine-20261113`, disattivato;
+- 7 branch archiviati di settembre: `qa-force-tenant-rls-20260929`, `canonical-repro-20260922`, `qa-global-ai-budget-20260928`, `canonical-validation-20260922`, `canonical-clean-20260922`, `qa-canonical-bootstrap-20260922`, `backup-pre-global-ai-budget-20260928`.
+
+Senza liberare almeno 2 posti non si possono creare né il branch di backup (passo 0) né la prova delle migrazioni su una copia dei dati di produzione. **Serve la tua autorizzazione per eliminare branch.**
+- **Proposta:** eliminare 2 o più branch archiviati di settembre già superati (per esempio `canonical-repro-20260922` e `canonical-clean-20260922`) oppure il vecchio QA.
+- **Rete di sicurezza alternativa:** il ripristino point-in-time di Neon entro la finestra di storia del piano.
+
+Prove già disponibili senza copia di produzione:
+- la CI applica l'intera catena di migrazioni su un DB vuoto (verde);
+- il DB QA `sparkling-frog-58730535` ha le migrazioni 14–18 applicate e l'app funziona (audit con Playwright);
+- la `20261118` è stata testata con utenti autenticati: 403 su token e scritture, 200 sulle letture.
+
 ## Sequenza
 
 0. **Snapshot o branch Neon di backup** di `auth-recovery-v2`, con nome `pre-pr332-<data>`. Verifica: il branch esiste. Rollback del DB: ripristino da questo branch.
