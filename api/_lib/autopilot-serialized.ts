@@ -3,6 +3,7 @@ import { runContentAutopilot, type AutopilotEnv } from "./autopilot.js";
 import { profileAiEconomicsPolicy } from "./ai-economics.js";
 import { ensureOpenAIStrategyPlannerFresh, strategyPlannerRefreshDecision } from "./openai-strategy-planner-refresh.js";
 import { ActivityBudgetEngine } from "./activity-budget.js";
+import { failureBreakerOpen, FAILURE_BREAKER_THRESHOLD, type AutopilotAttemptRecord } from "./autopilot-spend-guards.js";
 
 type RunOptions = { profileId?: string; maxGenerations?: number };
 type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
@@ -41,6 +42,8 @@ export async function runContentAutopilotSerialized(env: AutopilotEnv, options: 
     await client.query("select pg_advisory_lock(hashtextextended($1::text, 0))",[LOCK_NAME]);locked=true;const ids=await profileIds(client,options.profileId);if(!ids.length)return emptyResult();const aggregate=emptyResult();let remainingRun=Math.min(Math.max(options.maxGenerations??DEFAULT_GENERATIONS_PER_RUN,1),50);
     for(const profileId of ids){
       if(remainingRun<=0)break;let strategy=await platformStrategy(client,profileId);let strategyObject=strategy&&typeof strategy==="object"&&!Array.isArray(strategy)?strategy as Record<string,unknown>:{};if(strategyObject.autopilotEnabled===false){aggregate.profilesChecked+=1;aggregate.skipped+=1;continue;}const policy=profileAiEconomicsPolicy(strategy);let usage=await usageSnapshot(client,profileId);
+      const recentAttempts=await client.query<AutopilotAttemptRecord>("select state, metadata->>'release_reason' as reason, created_at::text as created_at from public.capability_usage_events where profile_id=$1::uuid and capability_key='ai.content.generate_text' and source='AI_TEXT_AUTOPILOT' and state in ('RELEASED','COMMITTED') order by created_at desc limit $2",[profileId,FAILURE_BREAKER_THRESHOLD]);
+      if(failureBreakerOpen(recentAttempts.rows)){aggregate.profilesChecked+=1;aggregate.skipped+=1;aggregate.errors.push(`${profileId}:AUTOPILOT_FAILURE_BREAKER_OPEN`);continue;}
       const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL);const currentBudget=await budgetEngine.snapshot(profileId);
       if(currentBudget.band==="HARD_STOP"){aggregate.profilesChecked+=1;aggregate.skipped+=1;aggregate.errors.push(`${profileId}:AUTOPILOT_AI_LIMIT_REACHED:ACTIVITY_HARD_STOP`);continue;}
       const refresh=strategyPlannerRefreshDecision(strategy,{strategyRefreshDays:policy.strategyRefreshDays,planRefreshDays:policy.planRefreshDays});const reserve=refresh.refreshStrategy?0.20:refresh.refreshPlan?0.12:0;

@@ -2,7 +2,9 @@ import { neon } from "@neondatabase/serverless";
 import { imageDimensions, sha256Hex } from "../api/_lib/personal-brand-reference.js";
 import { bearerValue, verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
 
-type Env = { DATABASE_URL?: string };
+// uploadImage is injected by the Vercel adapter (public Blob); the Worker bundle stays free of
+// @vercel/blob and keeps the legacy data URL.
+type Env = { DATABASE_URL?: string; uploadImage?: (input: { profileId: string; name: string; bytes: Uint8Array; mimeType: string }) => Promise<{ url: string; pathname: string }> };
 
 type AssetRow = {
   id: string;
@@ -200,7 +202,9 @@ export async function handleAssetLibrary(request: Request, env: Env): Promise<Re
         continue;
       }
       const ratio = aspectRatio(dims.width,dims.height);
-      const storageUrl = `data:${file.type};base64,${bytesToBase64(bytes)}`;
+      // Public Blob when configured (keeps multi-MB images out of Postgres); legacy data URL otherwise.
+      const stored = env.uploadImage ? await env.uploadImage({ profileId, name: hash.slice(0, 32), bytes, mimeType: file.type }) : null;
+      const storageUrl = stored?.url ?? `data:${file.type};base64,${bytesToBase64(bytes)}`;
       const inserted = await sql`
         insert into public.assets(
           profile_id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,
@@ -208,7 +212,7 @@ export async function handleAssetLibrary(request: Request, env: Env): Promise<Re
         ) values (
           ${profileId}::uuid,'USER_UPLOAD','IMAGE',${file.name.slice(0,240)},${storageUrl},${file.type},
           '["REAL_ASSET","USER_UPLOAD"]'::jsonb,
-          ${JSON.stringify({aspect_ratio:ratio,storage_mode:"DATABASE_DATA_URL_V1",technical_validation:"PASS"})}::jsonb,
+          ${JSON.stringify({aspect_ratio:ratio,storage_mode:stored?"VERCEL_BLOB_PUBLIC_V1":"DATABASE_DATA_URL_V1",...(stored?{blob_pathname:stored.pathname}:{}),technical_validation:"PASS"})}::jsonb,
           'REAL_ASSET',null,0,${dims.width},${dims.height},${ratio},'PASS','NOT_REQUIRED',${hash},now()
         )
         returning id::text

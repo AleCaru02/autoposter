@@ -148,6 +148,10 @@ jobs:
       - { name: Final personal readiness runner regression, run: "npm run test:final-personal-readiness" }
       - { name: Release candidate migration safety regression, run: "npm run test:release-candidate-migration" }
       - { name: Autopilot route contract, run: "npm run test:autopilot-route" }
+      - { name: Cron autopilot AI kill switch, run: "npm run test:autopilot-guard" }
+      - { name: Autopilot spend guards before paid generation, run: "npm run test:autopilot-spend-guards" }
+      - { name: Read-only historical metrics import, run: "npm run test:historical-metrics" }
+      - { name: Images on Blob with verified migration, run: "npm run test:image-storage" }
       - { name: Fail-closed social and analytics cron contract, run: "npx tsx tests/vercel-social-cron-route.test.ts" }
       - { name: Italian Instagram website post pilot regression, run: "npm run test:instagram-website-pilot" }
       - { name: OpenAI text contract, run: "npm run test:openai" }

@@ -2,6 +2,9 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runLearningRuntime } from "./_lib/learning-runtime.js";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
 import { revalidateSocialConnections } from "./_lib/social.js";
+import { cronAutopilotAiEnabled, pausedAutopilotResult } from "./_lib/autopilot-guard.js";
+import { historicalMetricsEnabled, importHistoricalMetrics } from "./_lib/historical-metrics.js";
+import { migrateDataUrlImages } from "./_lib/image-storage.js";
 
 export const config = { maxDuration: 300 };
 
@@ -50,17 +53,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     }).catch((reason) => ({ checked: 0, verified: 0, failed: 0, error: reason instanceof Error ? reason.message.split(":")[0] : "SOCIAL_REVALIDATION_FAILED" }));
+    // Read-only import of real metrics of posts already on Instagram/Facebook (no AI, no publishing).
+    const historicalMetrics = historicalMetricsEnabled(process.env.HISTORICAL_METRICS_ENABLED)
+      ? await importHistoricalMetrics({
+          DATABASE_URL: process.env.DATABASE_URL,
+          SOCIAL_TOKEN_KEY: process.env.SOCIAL_TOKEN_KEY,
+          META_GRAPH_VERSION: process.env.META_GRAPH_VERSION,
+        }).catch((reason) => ({ ready: false, synced: 0, failed: 0, codes: [reason instanceof Error ? reason.message.split(":")[0] : "HISTORICAL_METRICS_FAILED"] }))
+      : { ready: false, synced: 0, failed: 0, codes: ["DISABLED_CONFIG"] };
+    // Move legacy data-URL images to Blob (verified copy, original kept in asset_storage_backups).
+    const imageMigration = process.env.ASSET_BLOB_MIGRATION_ENABLED?.trim() === "true"
+      ? await migrateDataUrlImages({ DATABASE_URL: process.env.DATABASE_URL, BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN }, { limit: 5 })
+          .catch((reason) => ({ checked: 0, migrated: 0, failed: 1, codes: [reason instanceof Error ? reason.message.split(":")[0] : "IMAGE_MIGRATION_FAILED"] }))
+      : null;
     const learning = await runLearningRuntime(env);
-    const autopilot = await runContentAutopilotSerialized(env, { maxGenerations: 1 });
+    // Paid generation is opt-in (AUTOPILOT_AI_ENABLED=true); the free work above always runs.
+    const autopilot = cronAutopilotAiEnabled(process.env.AUTOPILOT_AI_ENABLED)
+      ? await runContentAutopilotSerialized(env, { maxGenerations: 1 })
+      : pausedAutopilotResult();
     console.log("vercel.cron", {
+      autopilotPaused: "paused" in autopilot ? autopilot.paused : null,
       learningReady: learning.ready,
       profilesChecked: autopilot.profilesChecked,
       generated: autopilot.generated,
       scheduled: autopilot.scheduled,
       errors: autopilot.errors.length,
       socialCheck,
+      historicalMetrics: { synced: historicalMetrics.synced, failed: historicalMetrics.failed, codes: historicalMetrics.codes },
+      imageMigration,
     });
-    return res.status(200).json({ ok: true, socialCheck, learning, autopilot });
+    return res.status(200).json({ ok: true, socialCheck, historicalMetrics, imageMigration, learning, autopilot });
   } catch (reason) {
     const code = reason instanceof Error ? reason.message.split(":")[0] : "CRON_RUN_FAILED";
     console.error("vercel.cron", { code });

@@ -1,3 +1,4 @@
+import { imageStorageUrl } from "./_lib/image-storage.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { imageAspectRatioForFormat, imageSizeForFormat, type ImageSocialFormat, type ImageSocialProvider } from "./_lib/openai-image.js";
 import { generateRoutedImage } from "./_lib/routed-image.js";
@@ -164,10 +165,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Reuse happens before metering and OpenAI: a suitable visual has zero AI cost.
     const aspectRatio = imageAspectRatioForFormat(requestedFormat, requestedProvider);
-    const candidates = await readRows<ReusableAssetCandidate>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&select=id,source,kind,name,storage_url,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token);
+    // Reuse matching needs only metadata: never download every stored image (2-3 MB each) here.
+    const candidates = (await readRows<Omit<ReusableAssetCandidate, "storage_url">>(`assets?profile_id=eq.${encodeURIComponent(profileId)}&kind=eq.IMAGE&storage_url=not.is.null&select=id,source,kind,name,mime_type,tags,metadata,created_at&order=created_at.desc&limit=100`, token))
+      .map((row) => ({ ...row, storage_url: "stored" }) as ReusableAssetCandidate);
     const reusable = forceNewImage ? null : await findReusableAsset({ visualBrief, aspectRatio, candidates });
     if (reusable) {
-      const asset = reusable.asset;
+      const storedRows = await readRows<{ storage_url: string }>(`assets?id=eq.${encodeURIComponent(reusable.asset.id)}&profile_id=eq.${encodeURIComponent(profileId)}&select=storage_url&limit=1`, token);
+      if (!storedRows[0]?.storage_url) throw new Error("REUSED_ASSET_NOT_FOUND");
+      const asset = { ...reusable.asset, storage_url: storedRows[0].storage_url };
       if (savedVariant) {
         const now = new Date().toISOString();
         const assetMetadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata) ? asset.metadata as Record<string, unknown> : {};
@@ -249,7 +254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           source: "AI_IMAGE",
           kind: "IMAGE",
           name: savedSlide ? `${requestedProvider}-CAROUSEL-${savedSlide.id}.png` : `${requestedProvider}-${requestedFormat}-${savedVariant.id}.png`,
-          storage_url: dataUrl,
+          storage_url: (await imageStorageUrl({ profileId, name: savedVariant.id, bytes: new Uint8Array(Buffer.from(result.base64, "base64")), mimeType: result.mimeType })).storageUrl,
           mime_type: result.mimeType,
           tags: [requestedProvider, requestedFormat, "AI_GENERATED"],
           metadata: {

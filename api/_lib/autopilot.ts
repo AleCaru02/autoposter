@@ -25,6 +25,8 @@ import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./brand-visual-assets.js";
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
+import { autopilotQualityBrief, chooseNarrativeIntent, CONTENT_REJECTION_REASON } from "./autopilot-spend-guards.js";
+import { imageStorageUrl } from "./image-storage.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -163,7 +165,7 @@ export function shouldDeferRejectedAutopilotSlot(
   now = new Date(),
 ): boolean {
   if (record.state !== "RELEASED") return false;
-  if (!/^(OPENAI_EDITORIAL_QUALITY_BLOCKED|OPENAI_FACTCHECK_BLOCK|AUTOPILOT_DUPLICATE_CONTENT)(:|$)/.test(record.reason ?? "")) return false;
+  if (!CONTENT_REJECTION_REASON.test(record.reason ?? "")) return false;
   const age = now.getTime() - new Date(record.created_at).getTime();
   return Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
 }
@@ -221,7 +223,12 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     budgetBand:editorialBudget.band,
   });
   const format=formatDecision.selectedFormat;
-  const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;
+  // Free pre-check: the post-generation repetition rule rejects an overused contentType:intent
+  // AFTER paying. Choose a non-overused intent now, or skip the slot without any AI call.
+  const plannedContentType=planItem?.contentType??chooseAutopilotContentType(format);
+  const narrativeIntent=chooseNarrativeIntent(plannedContentType,planItem?.intent??"TIP",(await recentContentForDedupe(sql,profile.id)).map(row=>row.narrativeStructure));
+  if(!narrativeIntent)return {scheduled:false,blocked:false,skipped:true,deferred:true};
+  const effectivePlanItem=planItem?{...planItem,intent:narrativeIntent,contentType:chooseAutopilotContentType(format),format}:null;
   const audienceSignals=stringSignals([context.target,loaded.personalBrand?.audience]);
   const pillarSignals=stringSignals([pillar.pillar?.name,loaded.personalBrand?.pillar]);
   const relevantEvents=planItem&&(planItem.intent==="NEWS"||planItem.intent==="SEASONAL")?[planItem.topicDirection]:[];
@@ -231,8 +238,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     audience:audienceSignals[0]??null,
     pillar:pillarSignals[0]??null,
     funnelStage:planItem?.funnelStage??"AWARENESS",
-    contentType:planItem?.contentType??chooseAutopilotContentType(format),
-    intent:planItem?.intent??"TIP",
+    contentType:plannedContentType,
+    intent:narrativeIntent,
     preferredProvider:provider,
     format,
     localBusinessRelevance:Boolean(context.websiteUrl||context.description||context.serviceArea),
@@ -291,7 +298,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const activityBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
   if(!activityBudget.allowed){await meter.release(logicalEventId,activityBudget.reason??"AI_BUDGET_HARD_STOP");throw new Error("AUTOPILOT_ACTIVITY_BUDGET_STOP");}
   await meter.markProviderStarted(logicalEventId);
-  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
+  const qualityBrief=autopilotQualityBrief({websitePilotBrief:websitePilot?instagramWebsitePilotBrief(count):null,planTopicDirection:effectivePlanItem?.topicDirection??null,pillarInstruction:pillar.instruction??null});
+  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,qualityBrief,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
   const identityRowsForSubject=profile.profile_type==="PERSONAL_BRAND"
     ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
@@ -400,7 +408,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   }
   if(variant.eligible&&allowImageGeneration&&format!=="CAROUSEL"){
     const aspectRatio=imageAspectRatioForFormat(format as ImageSocialFormat,provider as ImageSocialProvider);
-    const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+    const candidates=await sql`select id,source,kind,name,case when storage_url is null then null else 'stored' end as storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
     const visualBudget=await budgetEngine.snapshot(profile.id);
@@ -446,7 +454,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
-        imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        imageAssetId=crypto.randomUUID();const dataUrl=(await imageStorageUrl({profileId:profile.id,name:imageAssetId,bytes:new Uint8Array(Buffer.from(image.base64,"base64")),mimeType:image.mimeType})).storageUrl;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
         const actualEur=Number(actualRows[0]?.actual_eur??visualDecision.estimatedCostEur);
         const sizeMatch=/^(\d+)x(\d+)$/.exec(String(image.size??""));
@@ -484,7 +492,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       let slideCommitted=false;
       let createdAssetId:string|null=null;
       try{
-        const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
+        const candidates=await sql`select id,source,kind,name,case when storage_url is null then null else 'stored' end as storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
           from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
         const reuse=await findReusableAsset({visualBrief:slide.visualBrief,aspectRatio:"1:1",candidates:candidates.filter(item=>!usedAssets.has(item.id))});
         if(reuse){
@@ -529,7 +537,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const size=/^([0-9]+)x([0-9]+)$/.exec(String(image.size));
         const assetId=crypto.randomUUID();
         createdAssetId=assetId;
-        const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        const dataUrl=(await imageStorageUrl({profileId:profile.id,name:assetId,bytes:new Uint8Array(Buffer.from(image.base64,"base64")),mimeType:image.mimeType})).storageUrl;
         const hash=await assetContentHashFromBase64(image.base64);
         await sql`insert into public.assets
           (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at)

@@ -167,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     await meter.markProviderStarted(eventId, requestUpperBoundUsd);
-    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
+    const result = await generateSocialText({ apiKey: process.env.OPENAI_API_KEY, topic: enriched.topic, qualityBrief: topic, objective, providers, formats, brand: context, researchMode, cacheKey: `post-automatici:${profileId}` });
     await meter.persistTechnicalEvents(profileId, eventId, technicalEventsFromTextResult(result, {
       source: "MANUAL",
       requested_topic: topic,

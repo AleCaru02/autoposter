@@ -116,6 +116,12 @@ export type OpenAITextResult = {
 export type GenerateOptions = {
   apiKey: string;
   topic: string;
+  /**
+   * The actual brief the quality checks must enforce. Autopilot topic requests also carry
+   * "avoid these recent topics" lists and memory notes; checking those as if they were the
+   * request made old titles (e.g. "5 differenze principali") impose rules on unrelated posts.
+   */
+  qualityBrief?: string | null;
   objective?: string | null;
   providers: SocialProvider[];
   formats: SocialFormat[];
@@ -215,6 +221,24 @@ export function selectRelevantWebsiteContent(topic: string, pages: BrandContext[
     .map(({ page }) => page);
 }
 
+/**
+ * Bounded website evidence for verification agents: the same relevant pages and per-page cap
+ * used for generation. Sending every scanned page cost 868,904 input tokens ($1.76) for one
+ * content QA on 01/10/2026 and dominated database egress.
+ */
+export function websiteSourcesForVerification(query: string, pages: BrandContext["confirmedWebsiteContent"]) {
+  const selected: BrandContext["confirmedWebsiteContent"] = [];
+  let used = 0;
+  for (const page of selectRelevantWebsiteContent(query, pages)) {
+    const text = page.text.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_CONTEXT_CHARS);
+    if (!text) continue;
+    if (used + text.length > MAX_WEBSITE_CONTEXT_CHARS) break;
+    selected.push({ url: page.url, title: page.title, text });
+    used += text.length;
+  }
+  return selected;
+}
+
 function compactWebsiteContext(topic: string, pages: BrandContext["confirmedWebsiteContent"]) {
   const chunks: string[] = [];
   let used = 0;
@@ -301,6 +325,18 @@ function normalizedCopy(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9à-öø-ÿ]+/gi, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Text the editorial quality rules read: the explicit brief, else the topic minus avoid-lists. */
+export function qualityBriefFor(options: { topic: string; qualityBrief?: string | null }) {
+  const explicit = options.qualityBrief?.trim();
+  if (explicit) return explicit;
+  return stripAvoidLists(options.topic);
+}
+
+/** Removes "Evita ... temi recenti: a | b | c." sentences, which list topics NOT to write about. */
+export function stripAvoidLists(topic: string) {
+  return topic.replace(/Evita[^.:\n]*?temi recenti:[^\n]*?(?:\.(?=\s|$)|$)/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 export function editorialQualityIssues(content: GeneratedSocialContent, topic: string, objective?: string | null) {
   const issues: string[] = [];
   const angle = content.editorialAngle.trim();
@@ -352,7 +388,7 @@ export function editorialQualityIssues(content: GeneratedSocialContent, topic: s
   return [...new Set(issues)];
 }
 
-function validateResult(value: unknown, providers: SocialProvider[], formats: SocialFormat[]): GeneratedSocialContent {
+export function validateResult(value: unknown, providers: SocialProvider[], formats: SocialFormat[]): GeneratedSocialContent {
   if (!value || typeof value !== "object") throw new Error("OPENAI_INVALID_JSON");
   const candidate = value as Partial<GeneratedSocialContent>;
   if (typeof candidate.editorialTopic !== "string" || !candidate.editorialTopic.trim() || typeof candidate.editorialAngle !== "string" || !candidate.editorialAngle.trim() || typeof candidate.strategySummary !== "string" || !Array.isArray(candidate.variants) || candidate.variants.length === 0) throw new Error("OPENAI_INVALID_SCHEMA");
@@ -374,14 +410,14 @@ function validateResult(value: unknown, providers: SocialProvider[], formats: So
           throw new Error("OPENAI_INVALID_CAROUSEL_SLIDES");
         }
       }
-    } else if (slides.length) {
-      throw new Error("OPENAI_UNEXPECTED_CAROUSEL_SLIDES");
     }
+    // Slides on a non-carousel variant are unused output: drop them instead of discarding a
+    // paid generation (this rejected 2 autopilot runs on 16/11/2026 with no content saved).
     const maxHashtags = variant.provider === "INSTAGRAM" ? 8 : variant.provider === "FACEBOOK" ? 3 : variant.provider === "LINKEDIN" ? 3 : 0;
     const hashtags = Array.isArray(variant.hashtags)
       ? [...new Set(variant.hashtags.filter((tag): tag is string => typeof tag === "string" && Boolean(tag.trim())).map((tag) => tag.trim()))].slice(0, maxHashtags)
       : [];
-    return { ...variant, hashtags, carouselSlides: slides };
+    return { ...variant, hashtags, carouselSlides: variant.format === "CAROUSEL" ? slides : [] };
   });
   return {
     ...candidate,
@@ -675,7 +711,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
   if (!outputText) throw new Error("OPENAI_EMPTY_OUTPUT");
   let content = validateResult(JSON.parse(outputText), options.providers, options.formats);
   let editorialRepair: Awaited<ReturnType<typeof repairUnsupportedContent>> | null = null;
-  const initialQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+  const initialQualityIssues = editorialQualityIssues(content, qualityBriefFor(options), options.objective);
   if (initialQualityIssues.length) {
     editorialRepair = await repairUnsupportedContent({
       apiKey: options.apiKey,
@@ -695,7 +731,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
       fetcher,
     });
     content = editorialRepair.content;
-    const remainingQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+    const remainingQualityIssues = editorialQualityIssues(content, qualityBriefFor(options), options.objective);
     if (remainingQualityIssues.length) {
       const repairCostUsd = estimateTerraCostUsd(editorialRepair.usage.inputTokens, editorialRepair.usage.outputTokens);
       throw new OpenAITextPipelineError("OPENAI_EDITORIAL_QUALITY_BLOCKED", [{
@@ -764,7 +800,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
         fetcher,
       });
       content = copyRepair.content;
-      const repairedQualityIssues = editorialQualityIssues(content, options.topic, options.objective);
+      const repairedQualityIssues = editorialQualityIssues(content, qualityBriefFor(options), options.objective);
       if (repairedQualityIssues.length) {
         const repairCostUsd = estimateTerraCostUsd(copyRepair.usage.inputTokens, copyRepair.usage.outputTokens);
         throw new OpenAITextPipelineError("OPENAI_EDITORIAL_QUALITY_BLOCKED", [{

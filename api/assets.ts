@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { handleAssetLibrary } from "../cloudflare/asset-library.js";
+import { uploadImageBlob } from "./_lib/image-storage.js";
 
 // Preserve the same authenticated, profile-scoped implementation as Cloudflare.
 // Vercel has no /api/assets endpoint unless this adapter exists.
@@ -47,7 +48,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers,
       ...(body ? { body: body as BodyInit } : {}),
     });
-    const response = await handleAssetLibrary(request, { DATABASE_URL: process.env.DATABASE_URL });
+    const response = await handleAssetLibrary(request, {
+      DATABASE_URL: process.env.DATABASE_URL,
+      uploadImage: process.env.BLOB_READ_WRITE_TOKEN?.trim()
+        ? (input) => uploadImageBlob({ ...input, token: process.env.BLOB_READ_WRITE_TOKEN!.trim() })
+        : undefined,
+    });
     response.headers.forEach((value, name) => res.setHeader(name, value));
     return res.status(response.status).send(Buffer.from(await response.arrayBuffer()));
   } catch (reason) {
