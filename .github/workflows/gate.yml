@@ -137,6 +137,7 @@ jobs:
       - { name: Scheduling certification runtime, run: "npm run test:scheduling-certification" }
       - { name: CRON 24/7 certification runtime, run: "npm run test:cron-24x7-certification" }
       - { name: Social integration contract, run: "npm run test:social" }
+      - { name: Social read-only verification, run: "npm run test:social-verify" }
       - { name: Social runtime preflight regression, run: "npm run test:social-runtime-preflight" }
       - { name: Global social Safe Mode regression, run: "npm run test:safe-mode" }
       - { name: Social metrics contract, run: "npm run test:social-metrics" }

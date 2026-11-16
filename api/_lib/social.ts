@@ -384,7 +384,8 @@ export function socialReadiness(input: { provider: SocialProvider; configured: b
         ? "Il token Google è scaduto. Ricollega l’account o verifica il rinnovo OAuth prima di pubblicare."
         : "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
     }
-    if (input.lastValidatedAt && (!Number.isFinite(Date.parse(input.lastValidatedAt)) || Date.parse(input.lastValidatedAt) < now - 7 * 24 * 60 * 60 * 1000)) {
+    if (!input.lastValidatedAt) return { state: "USER_ACTION_REQUIRED", detail: "Connessione mai verificata con il provider: premi «Verifica» prima di pubblicare." };
+    if (!Number.isFinite(Date.parse(input.lastValidatedAt)) || Date.parse(input.lastValidatedAt) < now - 7 * 24 * 60 * 60 * 1000) {
       return { state: "USER_ACTION_REQUIRED", detail: "La connessione non viene verificata con il provider da oltre 7 giorni. Riconvalida l’account prima di pubblicare." };
     }
     const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : null;
@@ -1002,6 +1003,98 @@ async function handleSelect(request: Request, env: SocialEnv) {
   }
 }
 
+export type SocialVerification =
+  | { ok: true; accountLabel: string; permissions: string[] | null; bundle: TokenBundle }
+  | { ok: false; code: string; reconnect: boolean };
+
+type VerifiableConnection = Pick<StoredConnection, "provider" | "provider_account_id" | "metadata">;
+
+/**
+ * Read-only check against the provider API (never publishes). A provider becomes "verified"
+ * only after this call succeeds; 401/403 or Meta error 190 mean the user must reconnect.
+ */
+export async function verifySocialConnection(connection: VerifiableConnection, bundle: TokenBundle, env: SocialEnv, fetcher: typeof fetch = fetch): Promise<SocialVerification> {
+  const metadata = connectionMetadata(connection.metadata);
+  const reject = (status: number, providerCode?: unknown): SocialVerification => {
+    const reconnect = status === 401 || status === 403 || providerCode === 190 || providerCode === 102;
+    return { ok: false, code: `${connection.provider}_VERIFY_${reconnect ? "TOKEN_INVALID" : `HTTP_${status}`}`, reconnect };
+  };
+  try {
+    if (connection.provider === "FACEBOOK" || connection.provider === "INSTAGRAM") {
+      const id = connection.provider === "FACEBOOK" ? (typeof metadata.pageId === "string" ? metadata.pageId : connection.provider_account_id) : connection.provider_account_id;
+      if (!id) return { ok: false, code: `${connection.provider}_ACCOUNT_ID_MISSING`, reconnect: true };
+      const url = new URL(`https://graph.facebook.com/${metaVersion(env)}/${encodeURIComponent(id)}`);
+      url.searchParams.set("fields", connection.provider === "FACEBOOK" ? "id,name" : "id,username");
+      url.searchParams.set("access_token", bundle.accessToken);
+      const response = await fetcher(url);
+      const body = await response.json().catch(() => ({})) as { id?: string; name?: string; username?: string; error?: { code?: number } };
+      if (!response.ok || !body.id) return reject(response.status, body.error?.code);
+      const permissions = await metaGrantedPermissions(bundle.accessToken, env, fetcher).catch(() => null);
+      return { ok: true, accountLabel: body.username ? `@${body.username}` : body.name || body.id, permissions, bundle };
+    }
+    if (connection.provider === "LINKEDIN") {
+      const response = await fetcher("https://api.linkedin.com/v2/userinfo", { headers: { authorization: `Bearer ${bundle.accessToken}` } });
+      const body = await response.json().catch(() => ({})) as { sub?: string; name?: string };
+      if (!response.ok || !body.sub) return reject(response.status);
+      return { ok: true, accountLabel: body.name || "Profilo LinkedIn", permissions: null, bundle };
+    }
+    let current = bundle;
+    if (!current.expiresAt || new Date(current.expiresAt).getTime() <= Date.now() + 5 * 60_000) {
+      if (!current.refreshToken) return { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true };
+      const form = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID!, client_secret: env.GOOGLE_CLIENT_SECRET!, refresh_token: current.refreshToken, grant_type: "refresh_token" });
+      const refresh = await fetcher("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
+      const refreshed = await refresh.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error?: string };
+      if (!refresh.ok || !refreshed.access_token) return refreshed.error === "invalid_grant" ? { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true } : reject(refresh.status);
+      current = { ...current, accessToken: refreshed.access_token, expiresAt: refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : current.expiresAt };
+    }
+    const location = typeof metadata.locationName === "string" ? metadata.locationName : connection.provider_account_id;
+    if (!location) return { ok: false, code: "GBP_LOCATION_MISSING", reconnect: true };
+    const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${location.startsWith("locations/") ? location : `locations/${location}`}`);
+    url.searchParams.set("readMask", "name,title");
+    const response = await fetcher(url, { headers: { authorization: `Bearer ${current.accessToken}` } });
+    const body = await response.json().catch(() => ({})) as { name?: string; title?: string };
+    if (!response.ok || !body.name) return reject(response.status);
+    return { ok: true, accountLabel: body.title || body.name, permissions: null, bundle: current };
+  } catch {
+    return { ok: false, code: `${connection.provider}_VERIFY_NETWORK_ERROR`, reconnect: false };
+  }
+}
+
+async function handleVerify(request: Request, env: SocialEnv) {
+  if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const auth = bearer(request);
+  if (!auth) return socialJson({ error: "AUTH_REQUIRED" }, 401);
+  const body = await readBody(request);
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  const provider = body.provider;
+  if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
+  if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  if (!providerConfigured(provider, env)) return socialJson({ error: "PROVIDER_NOT_CONFIGURED", missing: missingProviderConfiguration(provider, env) }, 503);
+  const sql = neon(env.DATABASE_URL!);
+  const row = await storedConnection(sql, profileId, provider);
+  if (!row?.token_reference || row.status !== "ACTIVE") return socialJson({ error: "SOCIAL_NOT_CONNECTED" }, 409);
+  let bundle: TokenBundle;
+  try { bundle = await decryptTokenBundle(row.token_reference, env.SOCIAL_TOKEN_KEY!); }
+  catch {
+    // Wrong SOCIAL_TOKEN_KEY (e.g. tokens encrypted by another runtime): never touch the stored row.
+    return socialJson({ error: "SOCIAL_TOKEN_KEY_MISMATCH", verified: false }, 409);
+  }
+  const result = await verifySocialConnection(row, bundle, env);
+  const checkedAt = new Date().toISOString();
+  if (result.ok) {
+    const tokenReference = result.bundle.accessToken !== bundle.accessToken ? await encryptTokenBundle(result.bundle, env.SOCIAL_TOKEN_KEY!) : row.token_reference;
+    const verification = JSON.stringify({ lastVerification: { ok: true, at: checkedAt, account: result.accountLabel } });
+    const permissions = result.permissions ? JSON.stringify(result.permissions) : null;
+    await sql`update public.social_connections set token_reference=${tokenReference}, expires_at=coalesce(${result.bundle.expiresAt ?? null}::timestamptz, expires_at), permissions=coalesce(${permissions}::jsonb, permissions), metadata=coalesce(metadata,'{}'::jsonb) - 'lastOAuthError' || ${verification}::jsonb, last_validated_at=now(), updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
+    return socialJson({ verified: true, provider, account: result.accountLabel });
+  }
+  const verification = JSON.stringify({ lastVerification: { ok: false, at: checkedAt, code: result.code } });
+  if (result.reconnect) await sql`update public.social_connections set status='RECONNECT_REQUIRED', metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
+  else await sql`update public.social_connections set metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider}`;
+  console.error("social-verify-failed", { profileId, provider, code: result.code });
+  return socialJson({ verified: false, error: result.code, reconnectRequired: result.reconnect }, result.reconnect ? 409 : 502);
+}
+
 async function handleDisconnect(request: Request, env: SocialEnv) {
   if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
   const auth = bearer(request);
@@ -1301,6 +1394,7 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   if (path === "/api/social/connect") return handleConnect(request, env);
   if (path === "/api/social/select") return handleSelect(request, env);
   if (path === "/api/social/disconnect") return handleDisconnect(request, env);
+  if (path === "/api/social/verify") return handleVerify(request, env);
   if (path === "/api/social/publish-now") return socialJson({ error: "PUBLISH_VIA_CALENDAR_REQUIRED" }, 410);
   const callback = /^\/api\/social\/callback\/([a-z]+)$/.exec(path);
   if (callback) return handleCallback(request, env, callback[1]);

@@ -52,7 +52,8 @@ async function run() {
   assert.equal(providerCapabilities("FACEBOOK").note.includes("non vengono simulati"), true);
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: false, status: "NOT_CONNECTED" }).state, "BLOCKED_PROVIDER");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "NOT_CONNECTED" }).state, "USER_ACTION_REQUIRED");
-  assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "PASS_REAL");
+  assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"], lastValidatedAt: new Date().toISOString() }).state, "PASS_REAL");
+  assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "USER_ACTION_REQUIRED", "an ACTIVE row never verified with the provider is not live");
   const referenceNow = Date.UTC(2026, 10, 7);
   assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "expired Google tokens must never be PASS_REAL");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-09-27T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "stale connections must not be treated as freshly validated");
