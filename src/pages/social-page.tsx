@@ -19,6 +19,7 @@ type ProviderStatus = {
   expiresAt: string | null;
   lastValidatedAt: string | null;
   verifiable?: boolean;
+  lastVerification?: { ok?: boolean; at?: string; code?: string; checks?: Record<string, string>; token?: { expiresAt?: string | null; dataAccessExpiresAt?: string | null; refreshable?: boolean; note?: string } } | null;
   candidates: Candidate[];
   accountType: string | null;
   capabilities: { publish: string[]; note: string };
@@ -57,6 +58,31 @@ const PROVIDER_DESCRIPTIONS: Record<Provider, string> = {
 };
 
 const READINESS_LABELS: Record<ProviderStatus["readiness"]["state"], string> = { PASS_REAL: "PASS REAL", USER_ACTION_REQUIRED: "AZIONE RICHIESTA", BLOCKED_PROVIDER: "BLOCCATO PROVIDER", NOT_SUPPORTED_BY_PROVIDER: "NON SUPPORTATO", FAIL: "ERRORE REALE" };
+
+const CHECK_LABELS: Record<string, string> = { posts: "Lettura post", accountMetrics: "Metriche account", insights: "Insights", tokenDebug: "Validità token" };
+function checkLabel(value: string) {
+  if (value === "OK") return "OK";
+  if (value === "NOT_GRANTED") return "permesso non concesso";
+  if (value === "NOT_AVAILABLE") return "non disponibile per questa app";
+  if (value === "INVALID") return "token non valido";
+  return `errore ${value.replace("HTTP_", "HTTP ")}`;
+}
+function shortDate(value: string | null | undefined) {
+  if (!value || !Number.isFinite(Date.parse(value))) return null;
+  return new Date(value).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Read-only verification outcome: what the provider really allowed, and when access expires. */
+function VerificationDetails({ value }: { value: NonNullable<ProviderStatus["lastVerification"]> }) {
+  if (!value.ok) return <p className="social-config-warning">Ultima verifica {shortDate(value.at) ?? ""}: non riuscita ({value.code ?? "errore"}).</p>;
+  const checks = Object.entries(value.checks ?? {});
+  const token = value.token;
+  return <div className="social-config-info social-verification" role="note">
+    <strong>Verificato con il provider {shortDate(value.at) ?? ""}</strong>
+    {checks.length > 0 && <ul>{checks.map(([key, outcome]) => <li key={key}>{CHECK_LABELS[key] ?? key}: {checkLabel(outcome)}</li>)}</ul>}
+    {token && <small>{token.expiresAt ? `Token valido fino al ${shortDate(token.expiresAt)}. ` : ""}{token.dataAccessExpiresAt ? `Accesso ai dati Meta da rinnovare entro il ${shortDate(token.dataAccessExpiresAt)}. ` : ""}{token.note}</small>}
+  </div>;
+}
 
 function readableError(value: string) {
   if (value === "MISSING_PERMISSIONS" || value.startsWith("MISSING_PERMISSIONS:")) return "L’autorizzazione del provider è incompleta. Premi Ricollega e accetta i permessi richiesti per il collegamento.";
@@ -341,6 +367,7 @@ export function SocialPage() {
               {connecting && provider.status !== "PENDING_SELECTION" && <p className="social-config-info"><LoaderCircle className="spin" size={15} /> Connessione in corso. Lo stato si aggiornerà al termine dell’autorizzazione.</p>}
               {analyticsMissing && <p className="social-config-warning"><AlertTriangle size={15} /> Permesso Analytics mancante. Ricollega l’account e autorizza tutti i permessi richiesti.</p>}
               {active && provider.provider === "LINKEDIN" && provider.accountType === "MEMBER" && !provider.permissions.includes("r_member_postAnalytics") && <p className="social-config-info">La pubblicazione è attiva. Le Analytics del profilo personale LinkedIn non sono disponibili per questa app.</p>}
+              {provider.status === "ACTIVE" && provider.lastVerification && <VerificationDetails value={provider.lastVerification} />}
               <p className={provider.readiness.state === "PASS_REAL" ? "social-config-info" : provider.readiness.state === "FAIL" ? "social-config-error" : "social-config-warning"}>{provider.lastError ? readableError(provider.lastError) : provider.readiness.detail}</p>
               {unavailable && provider.configurationIssues.length > 0 && <p className="social-config-error">Configurazione mancante: {provider.configurationIssues.join(", ")}</p>}
               {unavailable && <p className="social-config-info"><Link2 size={15} /> Questo provider deve essere configurato sul server prima di poterlo collegare.</p>}

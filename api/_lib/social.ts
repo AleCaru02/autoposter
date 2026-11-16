@@ -718,7 +718,7 @@ async function linkedinExchange(code: string, callbackUri: string, env: SocialEn
 
 export function linkedinGrantedPermissions(scope: string | undefined, requested: string[]) {
   if (typeof scope !== "string") return [...requested];
-  return scope.split(/\s+/).map((permission) => permission.trim()).filter(Boolean);
+  return scope.split(/[\s,]+/).map((permission) => permission.trim()).filter(Boolean);
 }
 
 async function linkedinUserInfo(accessToken: string) {
@@ -945,6 +945,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         configured,
         configurationIssues,
         verifiable: socialVerifiable(env),
+        lastVerification: metadata.lastVerification && typeof metadata.lastVerification === "object" ? metadata.lastVerification : null,
         status: row?.status ?? "NOT_CONNECTED",
         accountId: row?.provider_account_id ?? null,
         accountName: row?.account_name ?? null,
@@ -1004,9 +1005,21 @@ async function handleSelect(request: Request, env: SocialEnv) {
   }
 }
 
+/** Outcome of one read-only capability probe: "OK", "HTTP_<status>", "NOT_GRANTED" or "NOT_AVAILABLE". */
+export type ProbeOutcome = string;
+export type TokenFacts = { expiresAt: string | null; dataAccessExpiresAt: string | null; refreshable: boolean; note: string };
 export type SocialVerification =
-  | { ok: true; accountLabel: string; permissions: string[] | null; bundle: TokenBundle }
+  | { ok: true; accountLabel: string; permissions: string[] | null; bundle: TokenBundle; checks: Record<string, ProbeOutcome>; token: TokenFacts }
   | { ok: false; code: string; reconnect: boolean };
+
+async function probe(fetcher: typeof fetch, url: URL | string, init?: RequestInit): Promise<ProbeOutcome> {
+  try {
+    const response = await fetcher(url, init);
+    return response.ok ? "OK" : `HTTP_${response.status}`;
+  } catch { return "NETWORK_ERROR"; }
+}
+
+const epochToIso = (value: unknown) => typeof value === "number" && value > 0 ? new Date(value * 1000).toISOString() : null;
 
 type VerifiableConnection = Pick<StoredConnection, "provider" | "provider_account_id" | "metadata">;
 
@@ -1031,13 +1044,51 @@ export async function verifySocialConnection(connection: VerifiableConnection, b
       const body = await response.json().catch(() => ({})) as { id?: string; name?: string; username?: string; error?: { code?: number } };
       if (!response.ok || !body.id) return reject(response.status, body.error?.code);
       const permissions = await metaGrantedPermissions(bundle.accessToken, env, fetcher).catch(() => null);
-      return { ok: true, accountLabel: body.username ? `@${body.username}` : body.name || body.id, permissions, bundle };
+      const graph = (path: string, params: Record<string, string>) => {
+        const probeUrl = new URL(`https://graph.facebook.com/${metaVersion(env)}/${path}`);
+        for (const [key, value] of Object.entries(params)) probeUrl.searchParams.set(key, value);
+        probeUrl.searchParams.set("access_token", bundle.accessToken);
+        return probeUrl;
+      };
+      const checks: Record<string, ProbeOutcome> = connection.provider === "INSTAGRAM"
+        ? {
+            posts: await probe(fetcher, graph(`${encodeURIComponent(id)}/media`, { fields: "id,timestamp", limit: "1" })),
+            accountMetrics: await probe(fetcher, graph(encodeURIComponent(id), { fields: "followers_count,media_count" })),
+            insights: await probe(fetcher, graph(`${encodeURIComponent(id)}/insights`, { metric: "reach", period: "day" })),
+          }
+        : {
+            posts: await probe(fetcher, graph(`${encodeURIComponent(id)}/published_posts`, { fields: "id,created_time", limit: "1" })),
+            accountMetrics: await probe(fetcher, graph(encodeURIComponent(id), { fields: "followers_count,fan_count" })),
+          };
+      let token: TokenFacts = { expiresAt: null, dataAccessExpiresAt: null, refreshable: false, note: "Token di Pagina: nessuna scadenza dichiarata." };
+      if (env.META_APP_ID && env.META_APP_SECRET) {
+        try {
+          const debug = new URL(`https://graph.facebook.com/${metaVersion(env)}/debug_token`);
+          debug.searchParams.set("input_token", bundle.accessToken);
+          debug.searchParams.set("access_token", `${env.META_APP_ID}|${env.META_APP_SECRET}`);
+          const debugResponse = await fetcher(debug);
+          const debugBody = await debugResponse.json().catch(() => ({})) as { data?: { is_valid?: boolean; expires_at?: number; data_access_expires_at?: number } };
+          if (debugResponse.ok && debugBody.data) {
+            checks.tokenDebug = debugBody.data.is_valid === false ? "INVALID" : "OK";
+            token = { expiresAt: epochToIso(debugBody.data.expires_at), dataAccessExpiresAt: epochToIso(debugBody.data.data_access_expires_at), refreshable: false, note: debugBody.data.expires_at ? "Il token ha una scadenza: ricollega prima della data indicata." : "Token di Pagina senza scadenza; l'accesso ai dati va rinnovato con un nuovo consenso entro la data indicata." };
+          } else checks.tokenDebug = `HTTP_${debugResponse.status}`;
+        } catch { checks.tokenDebug = "NETWORK_ERROR"; }
+      }
+      return { ok: true, accountLabel: body.username ? `@${body.username}` : body.name || body.id, permissions, bundle, checks, token };
     }
     if (connection.provider === "LINKEDIN") {
       const response = await fetcher("https://api.linkedin.com/v2/userinfo", { headers: { authorization: `Bearer ${bundle.accessToken}` } });
       const body = await response.json().catch(() => ({})) as { sub?: string; name?: string };
       if (!response.ok || !body.sub) return reject(response.status);
-      return { ok: true, accountLabel: body.name || "Profilo LinkedIn", permissions: null, bundle };
+      return {
+        ok: true,
+        accountLabel: body.name || "Profilo LinkedIn",
+        permissions: null,
+        bundle,
+        // Member post analytics need a restricted LinkedIn scope; Page posting/metrics need Community Management.
+        checks: { posts: "NOT_AVAILABLE", accountMetrics: "NOT_GRANTED" },
+        token: { expiresAt: bundle.expiresAt ?? null, dataAccessExpiresAt: null, refreshable: Boolean(bundle.refreshToken), note: bundle.refreshToken ? "Rinnovo automatico con refresh token." : "LinkedIn non rilascia refresh token a questa app: ricollega prima della scadenza." },
+      };
     }
     let current = bundle;
     if (!current.expiresAt || new Date(current.expiresAt).getTime() <= Date.now() + 5 * 60_000) {
@@ -1057,7 +1108,31 @@ export async function verifySocialConnection(connection: VerifiableConnection, b
     const response = await fetcher(url, { headers: { authorization: `Bearer ${current.accessToken}` } });
     const body = await response.json().catch(() => ({})) as { name?: string; title?: string };
     if (!response.ok || !body.name) return reject(response.status);
-    return { ok: true, accountLabel: body.title || body.name, permissions: null, bundle: current };
+    const auth = { headers: { authorization: `Bearer ${current.accessToken}` } };
+    const locationId = (location.startsWith("locations/") ? location : `locations/${location}`).replace(/^locations\//, "");
+    const accountName = typeof metadata.accountId === "string" ? metadata.accountId : "";
+    const checks: Record<string, ProbeOutcome> = {};
+    checks.posts = accountName
+      ? await probe(fetcher, `https://mybusiness.googleapis.com/v4/${accountName.startsWith("accounts/") ? accountName : `accounts/${accountName}`}/locations/${encodeURIComponent(locationId)}/localPosts?pageSize=1`, auth)
+      : "NOT_AVAILABLE";
+    const end = new Date(Date.now() - 2 * 86_400_000);
+    const start = new Date(end.getTime() - 7 * 86_400_000);
+    const metrics = new URL(`https://businessprofileperformance.googleapis.com/v1/locations/${encodeURIComponent(locationId)}:fetchMultiDailyMetricsTimeSeries`);
+    metrics.searchParams.append("dailyMetrics", "BUSINESS_IMPRESSIONS_MOBILE_MAPS");
+    for (const [prefix, date] of [["dailyRange.startDate", start], ["dailyRange.endDate", end]] as const) {
+      metrics.searchParams.set(`${prefix}.year`, String(date.getUTCFullYear()));
+      metrics.searchParams.set(`${prefix}.month`, String(date.getUTCMonth() + 1));
+      metrics.searchParams.set(`${prefix}.day`, String(date.getUTCDate()));
+    }
+    checks.accountMetrics = await probe(fetcher, metrics, auth);
+    return {
+      ok: true,
+      accountLabel: body.title || body.name,
+      permissions: null,
+      bundle: current,
+      checks,
+      token: { expiresAt: current.expiresAt ?? null, dataAccessExpiresAt: null, refreshable: Boolean(current.refreshToken), note: current.refreshToken ? "Token d'accesso di 1 ora rinnovato automaticamente con il refresh token (in modalità Test di Google il refresh token scade dopo 7 giorni)." : "Nessun refresh token: ricollega." },
+    };
   } catch {
     return { ok: false, code: `${connection.provider}_VERIFY_NETWORK_ERROR`, reconnect: false };
   }
@@ -1091,10 +1166,12 @@ async function handleVerify(request: Request, env: SocialEnv) {
   const checkedAt = new Date().toISOString();
   if (result.ok) {
     const tokenReference = result.bundle.accessToken !== bundle.accessToken ? await encryptTokenBundle(result.bundle, env.SOCIAL_TOKEN_KEY!) : row.token_reference;
-    const verification = JSON.stringify({ lastVerification: { ok: true, at: checkedAt, account: result.accountLabel } });
-    const permissions = result.permissions ? JSON.stringify(result.permissions) : null;
+    const verification = JSON.stringify({ lastVerification: { ok: true, at: checkedAt, account: result.accountLabel, checks: result.checks, token: result.token } });
+    const storedPermissions = Array.isArray(row.permissions) ? row.permissions.filter((item): item is string => typeof item === "string") : [];
+    const normalized = provider === "LINKEDIN" ? linkedinGrantedPermissions(storedPermissions.join(" "), []) : null;
+    const permissions = result.permissions ? JSON.stringify(result.permissions) : normalized ? JSON.stringify(normalized) : null;
     await sql`update public.social_connections set token_reference=${tokenReference}, expires_at=coalesce(${result.bundle.expiresAt ?? null}::timestamptz, expires_at), permissions=coalesce(${permissions}::jsonb, permissions), metadata=coalesce(metadata,'{}'::jsonb) - 'lastOAuthError' || ${verification}::jsonb, last_validated_at=now(), updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
-    return socialJson({ verified: true, provider, account: result.accountLabel });
+    return socialJson({ verified: true, provider, account: result.accountLabel, checks: result.checks, token: result.token });
   }
   const verification = JSON.stringify({ lastVerification: { ok: false, at: checkedAt, code: result.code } });
   if (result.reconnect) await sql`update public.social_connections set status='RECONNECT_REQUIRED', metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;

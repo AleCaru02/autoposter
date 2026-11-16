@@ -23,7 +23,11 @@ const noWrites = (calls: Call[]) => assert.ok(calls.every((c) => c.method === "G
     : { status: 200, body: { id: "1784", username: "iltuopropertymanager" } });
   const result = await verifySocialConnection({ provider: "INSTAGRAM", provider_account_id: "1784", metadata: { pageId: "55" } }, { accessToken: "page-token" }, env, fetcher);
   assert.equal(result.ok, true);
-  if (result.ok) { assert.equal(result.accountLabel, "@iltuopropertymanager"); assert.deepEqual(result.permissions, ["instagram_basic", "instagram_manage_insights"]); }
+  if (result.ok) {
+    assert.equal(result.accountLabel, "@iltuopropertymanager");
+    assert.deepEqual(result.permissions, ["instagram_basic", "instagram_manage_insights"]);
+    assert.deepEqual(Object.keys(result.checks).sort(), ["accountMetrics", "insights", "posts"], "Instagram probes posts, account metrics and insights (read-only)");
+  }
   assert.match(calls[0]!.url, /graph\.facebook\.com\/v26\.0\/1784$/);
   noWrites(calls);
 }
@@ -53,7 +57,9 @@ const noWrites = (calls: Call[]) => assert.ok(calls.every((c) => c.method === "G
   const result = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: { locationName: "locations/42" } }, { accessToken: "old", refreshToken: "r", expiresAt: "2026-09-28T00:00:00Z" }, env, fetcher);
   assert.equal(result.ok, true);
   if (result.ok) { assert.equal(result.bundle.accessToken, "fresh"); assert.equal(result.accountLabel, "Il Tuo Property Manager"); }
-  assert.deepEqual(calls.map((c) => c.url), ["https://oauth2.googleapis.com/token", "https://mybusinessbusinessinformation.googleapis.com/v1/locations/42"]);
+  assert.deepEqual(calls.slice(0, 2).map((c) => c.url), ["https://oauth2.googleapis.com/token", "https://mybusinessbusinessinformation.googleapis.com/v1/locations/42"]);
+  assert.match(calls[2]!.url, /businessprofileperformance\.googleapis\.com\/v1\/locations\/42:fetchMultiDailyMetricsTimeSeries$/, "GBP metrics probe is a read");
+  if (result.ok) { assert.equal(result.checks.posts, "NOT_AVAILABLE", "no account id: Local Post listing is not probed"); assert.equal(result.checks.accountMetrics, "OK"); assert.equal(result.token.refreshable, true); }
   noWrites(calls);
   const revoked = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: {} }, { accessToken: "old", refreshToken: "r", expiresAt: "2026-09-28T00:00:00Z" }, env, fakeFetch(() => ({ status: 400, body: { error: "invalid_grant" } })).fetcher);
   assert.deepEqual(revoked, { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true });
@@ -72,4 +78,20 @@ const noWrites = (calls: Call[]) => assert.ok(calls.every((c) => c.method === "G
 }
 assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: "k".repeat(32) } as SocialEnv), true, "verification needs only DB + token key");
 assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: "short" } as SocialEnv), false);
+{
+  const { linkedinGrantedPermissions } = await import("../api/_lib/social.js");
+  assert.deepEqual(linkedinGrantedPermissions("openid,profile,w_member_social", []), ["openid", "profile", "w_member_social"], "LinkedIn returns comma-separated scopes");
+  assert.deepEqual(linkedinGrantedPermissions("openid profile", []), ["openid", "profile"]);
+}
+{
+  const { fetcher, calls } = fakeFetch((url) => url.pathname.endsWith("/debug_token")
+    ? { status: 200, body: { data: { is_valid: true, expires_at: 0, data_access_expires_at: 1800000000 } } }
+    : url.pathname.endsWith("/me/permissions") ? { status: 200, body: { data: [] } }
+    : url.pathname.endsWith("/published_posts") ? { status: 403, body: { error: { code: 10 } } }
+    : { status: 200, body: { id: "55", name: "Pagina" } });
+  const result = await verifySocialConnection({ provider: "FACEBOOK", provider_account_id: "55", metadata: { pageId: "55" } }, { accessToken: "x" }, { ...env, META_APP_ID: "1", META_APP_SECRET: "s" } as SocialEnv, fetcher);
+  assert.equal(result.ok, true, "a failing capability probe never fails the base verification");
+  if (result.ok) { assert.equal(result.checks.posts, "HTTP_403"); assert.equal(result.checks.tokenDebug, "OK"); assert.equal(result.token.expiresAt, null); assert.equal(result.token.dataAccessExpiresAt, new Date(1800000000 * 1000).toISOString()); }
+  noWrites(calls);
+}
 console.log("PASS social verify: verifica solo in lettura, 190/401/invalid_grant → ricollega, guasti del provider non declassano, chiave diversa senza scritture.");
