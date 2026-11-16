@@ -56,6 +56,8 @@ async function run() {
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"] }).state, "USER_ACTION_REQUIRED", "an ACTIVE row never verified with the provider is not live");
   const referenceNow = Date.UTC(2026, 10, 7);
   assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "expired Google tokens must never be PASS_REAL");
+  assert.equal(socialReadiness({ provider: "GBP", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z", lastValidatedAt: "2026-11-06T12:00:00Z", refreshable: true }, referenceNow).state, "PASS_REAL", "a refreshable Google grant stays ready after the 1-hour access token expires");
+  assert.equal(socialReadiness({ provider: "LINKEDIN", configured: true, status: "ACTIVE", expiresAt: "2026-11-06T00:00:00Z", lastValidatedAt: "2026-11-06T12:00:00Z", refreshable: true }, referenceNow).state, "USER_ACTION_REQUIRED", "only Google access tokens are renewable here");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-09-27T00:00:00Z" }, referenceNow).state, "USER_ACTION_REQUIRED", "stale connections must not be treated as freshly validated");
   assert.equal(socialReadiness({ provider: "FACEBOOK", configured: true, status: "ACTIVE", lastValidatedAt: "2026-11-06T00:00:00Z" }, referenceNow).state, "PASS_REAL", "recently validated providers remain ready");
 

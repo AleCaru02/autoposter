@@ -373,13 +373,23 @@ export function providerCapabilities(provider: SocialProvider) {
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
 
-export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
+function lastVerificationRefreshable(metadata: Record<string, unknown>) {
+  const verification = metadata.lastVerification;
+  if (!verification || typeof verification !== "object") return false;
+  const record = verification as { ok?: unknown; token?: { refreshable?: unknown } };
+  return record.ok === true && record.token?.refreshable === true;
+}
+
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null; refreshable?: boolean }, now = Date.now()): { state: SocialReadiness; detail: string } {
   if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile sul server della versione corrente." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
   if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
-    if (input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) && Date.parse(input.expiresAt) <= now) {
+    // A Google access token lasts 1 hour and is renewed with the refresh token (verified on reel-qa,
+    // 16/11/2026): its expiry alone is not a user action when the last verification proved it refreshable.
+    const renewable = input.provider === "GBP" && input.refreshable === true;
+    if (!renewable && input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) && Date.parse(input.expiresAt) <= now) {
       return { state: "USER_ACTION_REQUIRED", detail: input.provider === "GBP"
         ? "Il token Google è scaduto. Ricollega l’account o verifica il rinnovo OAuth prima di pubblicare."
         : "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
@@ -956,7 +966,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
         lastError,
-        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, lastValidatedAt: row?.last_validated_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
+        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, lastValidatedAt: row?.last_validated_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError, refreshable: lastVerificationRefreshable(metadata) }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),
