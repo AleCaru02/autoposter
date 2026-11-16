@@ -1189,7 +1189,7 @@ export async function verifyStoredConnection(env: SocialEnv, profileId: string, 
   }
   const result = await verifySocialConnection(row, bundle, env);
   const checkedAt = new Date().toISOString();
-  if (result.ok) {
+  if (result.ok === true) {
     const tokenReference = result.bundle.accessToken !== bundle.accessToken ? await encryptTokenBundle(result.bundle, env.SOCIAL_TOKEN_KEY!) : row.token_reference;
     const verification = JSON.stringify({ lastVerification: { ok: true, at: checkedAt, account: result.accountLabel, checks: result.checks, token: result.token } });
     const storedPermissions = Array.isArray(row.permissions) ? row.permissions.filter((item): item is string => typeof item === "string") : [];
@@ -1197,6 +1197,12 @@ export async function verifyStoredConnection(env: SocialEnv, profileId: string, 
     const permissions = result.permissions ? JSON.stringify(result.permissions) : normalized ? JSON.stringify(normalized) : null;
     await sql`update public.social_connections set token_reference=${tokenReference}, expires_at=coalesce(${result.bundle.expiresAt ?? null}::timestamptz, expires_at), permissions=coalesce(${permissions}::jsonb, permissions), metadata=coalesce(metadata,'{}'::jsonb) - 'lastOAuthError' || ${verification}::jsonb, last_validated_at=now(), updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
     return { status: 200, body: { verified: true, provider, account: result.accountLabel, checks: result.checks, token: result.token } };
+  }
+  // Explicit property check is required by Vercel's standalone API TypeScript
+  // build: a truthy discriminant alone is not a valid failure-branch narrowing
+  // under every compiler configuration.
+  if (!("code" in result) || !("reconnect" in result)) {
+    return { status: 502, body: { verified: false, error: "SOCIAL_VERIFICATION_RESULT_INVALID" } };
   }
   const verification = JSON.stringify({ lastVerification: { ok: false, at: checkedAt, code: result.code } });
   if (result.reconnect) await sql`update public.social_connections set status='RECONNECT_REQUIRED', metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
