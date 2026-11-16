@@ -19,4 +19,11 @@ assert.doesNotMatch(login, /existingSession|alreadySignedIn/, "the login page mu
   assert.match(app, /const checking = !timedOut &&/, "the wait is bounded");
   assert.match(app, /function RootRedirect\(\) \{\s+const \{ checking, user \} = useConfirmedSession\(\);/, "root redirect uses the same bounded check");
 }
+{
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // 16/11: after sign-out the session client refetched every ~300 ms and the guard always waited the full timeout.
+  assert.match(app, /fetch\("\/api\/auth\/get-session", \{ credentials: "include", cache: "no-store"/, "an uncached server check confirms the sign-out");
+  assert.match(app, /!\(serverSignedOut && !hasUser\)/, "a confirmed sign-out redirects without waiting for the timeout");
+  assert.match(app, /if \(hasUser\) setServerSignedOut\(false\)/, "a later successful login clears the signed-out flag");
+}
 console.log("PASS auth session race: niente rimbalzo su /login dopo un accesso riuscito; attesa sessione limitata dopo il logout.");

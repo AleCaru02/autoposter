@@ -16,5 +16,12 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anonymous') THEN
     REVOKE ALL ON public.social_connections FROM anonymous;
   END IF;
+  -- Same integrity rule for server-owned ledgers: the browser only reads them. Without this a
+  -- client could delete ai_usage_events to bypass AI budget caps, rewrite publication outcomes
+  -- or tamper with the audit log. All writers are server code using the owner role or
+  -- SECURITY DEFINER functions, which are unaffected.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.publication_jobs, public.publication_attempts, public.ai_usage_events, public.audit_log FROM authenticated;
+  END IF;
 END
 $$;
