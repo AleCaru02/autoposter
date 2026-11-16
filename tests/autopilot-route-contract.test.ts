@@ -85,7 +85,13 @@ async function run() {
     assert.match(canonicalAutopilotSource, /task:"IMAGE_STANDARD"/, "image generation must be budget-preflighted");
     assert.doesNotMatch(canonicalAutopilotSource, /textBudget\(|imageLimit\(/, "legacy split text/image budgets must be retired");
     for (const provider of ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const) {
-      assert.deepEqual(AUTOPILOT_PUBLISH_FORMATS[provider], providerCapabilities(provider).publish, `${provider} autopilot formats must match the real publisher`);
+      for (const format of AUTOPILOT_PUBLISH_FORMATS[provider]) {
+        assert.ok(providerCapabilities(provider).publish.includes(format), `${provider} autopilot format ${format} must have a real publisher`);
+      }
+      if (provider === "INSTAGRAM" || provider === "FACEBOOK") {
+        assert.ok(providerCapabilities(provider).publish.includes("REEL"), `${provider} Reel publishing supported only after MP4, QA and explicit Reel variant`);
+        assert.ok(!AUTOPILOT_PUBLISH_FORMATS[provider].includes("REEL" as never), "Reel must not be selected by the text-only autopilot until video job auto-enqueue is implemented");
+      }
     }
     assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 0, "CAROUSEL"), "CAROUSEL", "Instagram plans may use real multi-image carousel publishing");
     assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 1, "CAROUSEL"), "CAROUSEL", "Instagram keeps carousel intent when the renderer supports per-slide assets");
