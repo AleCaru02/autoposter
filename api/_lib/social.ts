@@ -1153,14 +1153,20 @@ async function handleVerify(request: Request, env: SocialEnv) {
   if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
   if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
   if (!socialVerifiable(env)) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
+  const outcome = await verifyStoredConnection(env, profileId, provider);
+  return socialJson(outcome.body, outcome.status);
+}
+
+/** Shared by the Verifica button and the hourly cron: read-only provider check + state update. */
+export async function verifyStoredConnection(env: SocialEnv, profileId: string, provider: SocialProvider): Promise<{ status: number; body: Record<string, unknown> }> {
   const sql = neon(env.DATABASE_URL!);
   const row = await storedConnection(sql, profileId, provider);
-  if (!row?.token_reference || row.status !== "ACTIVE") return socialJson({ error: "SOCIAL_NOT_CONNECTED" }, 409);
+  if (!row?.token_reference || row.status !== "ACTIVE") return { status: 409, body: { error: "SOCIAL_NOT_CONNECTED" } };
   let bundle: TokenBundle;
   try { bundle = await decryptTokenBundle(row.token_reference, env.SOCIAL_TOKEN_KEY!); }
   catch {
     // Wrong SOCIAL_TOKEN_KEY (e.g. tokens encrypted by another runtime): never touch the stored row.
-    return socialJson({ error: "SOCIAL_TOKEN_KEY_MISMATCH", verified: false }, 409);
+    return { status: 409, body: { error: "SOCIAL_TOKEN_KEY_MISMATCH", verified: false } };
   }
   const result = await verifySocialConnection(row, bundle, env);
   const checkedAt = new Date().toISOString();
@@ -1171,13 +1177,33 @@ async function handleVerify(request: Request, env: SocialEnv) {
     const normalized = provider === "LINKEDIN" ? linkedinGrantedPermissions(storedPermissions.join(" "), []) : null;
     const permissions = result.permissions ? JSON.stringify(result.permissions) : normalized ? JSON.stringify(normalized) : null;
     await sql`update public.social_connections set token_reference=${tokenReference}, expires_at=coalesce(${result.bundle.expiresAt ?? null}::timestamptz, expires_at), permissions=coalesce(${permissions}::jsonb, permissions), metadata=coalesce(metadata,'{}'::jsonb) - 'lastOAuthError' || ${verification}::jsonb, last_validated_at=now(), updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
-    return socialJson({ verified: true, provider, account: result.accountLabel, checks: result.checks, token: result.token });
+    return { status: 200, body: { verified: true, provider, account: result.accountLabel, checks: result.checks, token: result.token } };
   }
   const verification = JSON.stringify({ lastVerification: { ok: false, at: checkedAt, code: result.code } });
   if (result.reconnect) await sql`update public.social_connections set status='RECONNECT_REQUIRED', metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
   else await sql`update public.social_connections set metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider}`;
   console.error("social-verify-failed", { profileId, provider, code: result.code });
-  return socialJson({ verified: false, error: result.code, reconnectRequired: result.reconnect }, result.reconnect ? 409 : 502);
+  return { status: result.reconnect ? 409 : 502, body: { verified: false, error: result.code, reconnectRequired: result.reconnect } };
+}
+
+/**
+ * Hourly cron: re-verify ACTIVE connections not checked for 20 hours (read-only provider calls,
+ * no publishing, no AI). Keeps "Collegato" truthful without a user pressing Verifica.
+ */
+export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
+  if (!socialVerifiable(env)) return { checked: 0, verified: 0, failed: 0, skipped: "SOCIAL_SECURITY_NOT_CONFIGURED" };
+  const sql = neon(env.DATABASE_URL!);
+  const due = await sql`
+    select profile_id::text as profile_id, provider from public.social_connections
+    where status='ACTIVE' and token_reference is not null and (last_validated_at is null or last_validated_at < now() - interval '20 hours')
+    order by last_validated_at asc nulls first limit ${Math.min(Math.max(limit, 1), 50)}
+  ` as unknown as Array<{ profile_id: string; provider: SocialProvider }>;
+  let verified = 0; let failed = 0; const codes: string[] = [];
+  for (const item of due) {
+    const outcome = await verifyStoredConnection(env, item.profile_id, item.provider).catch(() => ({ status: 500, body: { error: "SOCIAL_VERIFY_CRASHED" } }));
+    if (outcome.status === 200) verified += 1; else { failed += 1; codes.push(`${item.provider}:${String(outcome.body.error ?? outcome.status)}`); }
+  }
+  return { checked: due.length, verified, failed, codes };
 }
 
 async function handleDisconnect(request: Request, env: SocialEnv) {
