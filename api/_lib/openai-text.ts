@@ -221,6 +221,24 @@ export function selectRelevantWebsiteContent(topic: string, pages: BrandContext[
     .map(({ page }) => page);
 }
 
+/**
+ * Bounded website evidence for verification agents: the same relevant pages and per-page cap
+ * used for generation. Sending every scanned page cost 868,904 input tokens ($1.76) for one
+ * content QA on 01/10/2026 and dominated database egress.
+ */
+export function websiteSourcesForVerification(query: string, pages: BrandContext["confirmedWebsiteContent"]) {
+  const selected: BrandContext["confirmedWebsiteContent"] = [];
+  let used = 0;
+  for (const page of selectRelevantWebsiteContent(query, pages)) {
+    const text = page.text.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_CONTEXT_CHARS);
+    if (!text) continue;
+    if (used + text.length > MAX_WEBSITE_CONTEXT_CHARS) break;
+    selected.push({ url: page.url, title: page.title, text });
+    used += text.length;
+  }
+  return selected;
+}
+
 function compactWebsiteContext(topic: string, pages: BrandContext["confirmedWebsiteContent"]) {
   const chunks: string[] = [];
   let used = 0;

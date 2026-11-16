@@ -88,3 +88,18 @@ const manual = readFileSync(new URL("../api/generate-text.ts", import.meta.url),
 assert.ok(manual.includes("qualityBrief: topic"), "manual generation checks the user's own brief");
 
 console.log("autopilot-spend-guards: PASS");
+
+// 7. Verification agents get bounded website evidence (content QA once sent 868,904 tokens).
+{
+  const { websiteSourcesForVerification } = await import("../api/_lib/openai-text.js");
+  const pages = Array.from({ length: 153 }, (_, i) => ({ url: `https://example.it/p${i}`, title: i === 7 ? "Gestione affitti brevi Milano" : `Pagina ${i}`, text: "parola ".repeat(2000) + (i === 7 ? " affitti brevi milano" : "") }));
+  const selected = websiteSourcesForVerification("Gestione affitti brevi a Milano", pages);
+  const chars = selected.reduce((sum, page) => sum + page.text.length, 0);
+  assert.ok(selected.length <= 8 && chars <= 40_000, `bounded: ${selected.length} pages, ${chars} chars`);
+  assert.equal(selected[0].url, "https://example.it/p7", "most relevant page first");
+  const qa = readFileSync(new URL("../api/_lib/content-qa.ts", import.meta.url), "utf8");
+  assert.ok(qa.includes("confirmedWebsiteSources:websiteSourcesForVerification("), "content QA uses bounded sources");
+  const loader = readFileSync(new URL("../api/_lib/personal-brand-sources.ts", import.meta.url), "utf8");
+  assert.ok(loader.includes("left(content_text,12000)"), "brand context loads at most 12k chars per page");
+  console.log("bounded website evidence: PASS");
+}

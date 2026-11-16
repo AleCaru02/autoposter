@@ -121,7 +121,9 @@ export async function loadProfileBrandContext(sql: any, profile: EditorialProfil
     limit 1
   ` as unknown as Array<{id:string}>;
   const pages = scans[0] ? await sql`
-    select url,title,content_text
+    -- Consumers read at most the first 12,000 chars (relevance scoring); full pages
+    -- (~1.7 MB per profile) on every generation dominated Neon egress (free plan: 5 GB/month).
+    select url,title,left(content_text,12000) as content_text
     from public.website_pages
     where profile_id=${profile.id}::uuid
       and scan_id=${scans[0].id}::uuid

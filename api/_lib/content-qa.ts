@@ -2,7 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { ActivityBudgetEngine } from "./activity-budget.js";
 import { findNearDuplicate, type ContentDedupeCandidate } from "./content-dedupe.js";
 import { EntitlementUsageService } from "./entitlement-usage.js";
-import { estimateTerraCostUsd, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
+import { estimateTerraCostUsd, websiteSourcesForVerification, type GeneratedSocialContent, type GeneratedVariant, type SocialFormat, type SocialProvider } from "./openai-text.js";
 import { runOpenAIEditorialQA } from "./openai-editorial-qa.js";
 import { runOpenAIFactCheckAgent, type FactCheckAgentResult, type FactCheckClaim } from "./openai-research-factcheck.js";
 import { runOpenAIVisualQa, type OpenAIVisualQaResult } from "./openai-visual-qa.js";
@@ -518,7 +518,7 @@ export async function runContentQa(input: {
           goals:brandContext.brand.goals,
           userProvidedContext:brandContext.brand.userContext??null,
         },
-        confirmedWebsiteSources:brandContext.brand.confirmedWebsiteContent,
+        confirmedWebsiteSources:websiteSourcesForVerification(`${item.topic} ${item.title??""} ${variant.hook??""} ${variant.caption??""}`,brandContext.brand.confirmedWebsiteContent),
         factualBasis:generatedVariant.factualBasis,
         factProvenance:item.fact_provenance,
       },

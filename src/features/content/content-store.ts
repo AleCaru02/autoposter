@@ -271,6 +271,17 @@ export async function saveGeneratedContent(input: {
   };
 }
 
+
+/** Session cache of immutable asset storage URLs by profile:id (bounded, least recently stored evicted). */
+const STORAGE_URL_CACHE_LIMIT = 40;
+const storageUrlCache = new Map<string, string>();
+function rememberStorageUrl(profileId: string, id: string, url: string) {
+  const key = `${profileId}:${id}`;
+  storageUrlCache.delete(key);
+  storageUrlCache.set(key, url);
+  while (storageUrlCache.size > STORAGE_URL_CACHE_LIMIT) storageUrlCache.delete(storageUrlCache.keys().next().value as string);
+}
+
 export async function loadContentWorkflow(profileId: string) {
   const itemsResult = await neonClient.from("content_items")
     .select("id,profile_id,topic,objective,title,status,pillar,source_profile_id,source_profile_ids,source_refs,audience,fact_provenance,editorial_cta,source_mix_approved,decision_record,created_at,updated_at")
@@ -309,12 +320,23 @@ export async function loadContentWorkflow(profileId: string) {
   ].filter((id): id is string => typeof id === "string" && Boolean(id))));
   let assets: AssetRow[] = [];
   if (assetIds.length) {
-    const assetsResult = await neonClient.from("assets")
-      .select("id,profile_id,source,kind,name,storage_url,mime_type,width,height,format,quality_status,identity_status,metadata,created_at")
+    // Images are stored as multi-MB data URLs; re-reading them on every view drained the
+    // database transfer quota. Light metadata (QA status may change) is always re-read; the
+    // heavy, immutable storage_url is fetched only for ids not cached in this session.
+    const light = await neonClient.from("assets")
+      .select("id,profile_id,source,kind,name,mime_type,width,height,format,quality_status,identity_status,metadata,created_at")
       .eq("profile_id", profileId)
       .in("id", assetIds);
-    if (assetsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
-    assets = (assetsResult.data ?? []) as AssetRow[];
+    if (light.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
+    const missing = assetIds.filter((id) => !storageUrlCache.has(`${profileId}:${id}`));
+    if (missing.length) {
+      const heavy = await neonClient.from("assets").select("id,storage_url").eq("profile_id", profileId).in("id", missing);
+      if (heavy.error) throw new Error("Impossibile caricare i contenuti. Riprova.");
+      for (const row of (heavy.data ?? []) as Array<{ id: string; storage_url: string }>) rememberStorageUrl(profileId, row.id, row.storage_url);
+    }
+    assets = ((light.data ?? []) as Array<Omit<AssetRow, "storage_url">>)
+      .map((row) => ({ ...row, storage_url: storageUrlCache.get(`${profileId}:${row.id}`) ?? "" }) as AssetRow)
+      .filter((row) => Boolean(row.storage_url));
   }
 
   const strategyResult = await neonClient.from("content_strategies").select("platform_strategy").eq("profile_id", profileId).maybeSingle();
