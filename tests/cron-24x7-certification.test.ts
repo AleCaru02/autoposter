@@ -7,10 +7,12 @@ const entrySource = readFileSync(new URL("../cloudflare/entry.ts", import.meta.u
 const publicationMigration = readFileSync(new URL("../db/migrations/20260908_fase7f_safe_publication_engine.sql", import.meta.url), "utf8");
 const deployWorkflow = readFileSync(new URL("../.github/workflows/deploy-worker.yml", import.meta.url), "utf8");
 
+// 16/11/2026: the hourly Worker trigger (autopilot + learning, duplicated by the Vercel cron)
+// was removed in the Cloudflare dashboard; the config must not re-add it on the next Worker deploy.
 assert.deepEqual(
-  [...config.triggers.crons].sort(),
-  ["*/5 * * * *", "0 * * * *"].sort(),
-  "production must declare the publication and hourly Cloudflare Cron Triggers",
+  [...config.triggers.crons],
+  ["*/5 * * * *"],
+  "the Worker keeps only the publication trigger; the hourly autopilot runs on Vercel (canonical runtime)",
 );
 assert.equal(config.vars.SAFE_MODE, "true", "production cron must inherit fail-closed SAFE_MODE");
 assert.match(entrySource, /async scheduled\(controller:[\s\S]*controller\.cron === "\*\/5 \* \* \* \*"\)[\s\S]*processDuePublications\(env\)/);
