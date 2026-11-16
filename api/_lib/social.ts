@@ -1400,7 +1400,7 @@ export function validatedReelVideoUrl(variant: Pick<VariantRecord,
   return url.toString();
 }
 
-async function publishInstagramReel(
+export async function publishInstagramReel(
   variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv,
   beforeVisibleWrite?: PublishBoundary,
 ): Promise<PublishResult> {
@@ -1436,7 +1436,7 @@ async function publishInstagramReel(
   throw new Error("INSTAGRAM_REEL_PUBLISH_UNREACHABLE");
 }
 
-async function publishFacebookReel(
+export async function publishFacebookReel(
   variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv,
   beforeVisibleWrite?: PublishBoundary,
 ): Promise<PublishResult> {
