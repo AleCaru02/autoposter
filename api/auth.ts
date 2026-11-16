@@ -11,6 +11,25 @@ import { handleSameOriginAuthProxy } from "../cloudflare/auth-proxy.js";
  */
 export const APP_ORIGIN = "https://post-automatici-canonical.vercel.app";
 
+/**
+ * Only the canonical production host and one explicitly configured preview
+ * origin may use the same-origin Auth gateway. Never trust forwarded-host,
+ * wildcard *.vercel.app hosts, or user-controlled redirect parameters.
+ * Previews must also be allowlisted independently in Neon Auth.
+ */
+export function resolveAuthOrigin(host: string | undefined, environment: { VERCEL_ENV?: string; AUTH_PREVIEW_ORIGIN?: string } = process.env): string | null {
+  if (host === new URL(APP_ORIGIN).host) return APP_ORIGIN;
+  if (environment.VERCEL_ENV !== "preview" || !environment.AUTH_PREVIEW_ORIGIN) return null;
+  try {
+    const parsed = new URL(environment.AUTH_PREVIEW_ORIGIN);
+    if (parsed.protocol !== "https:" || parsed.pathname !== "/" || parsed.search || parsed.hash ||
+      parsed.username || parsed.password || parsed.port || !parsed.hostname.endsWith(".vercel.app")) return null;
+    return host === parsed.host ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -57,9 +76,9 @@ function requestBody(req: VercelRequest): BodyInit | undefined {
   return JSON.stringify(req.body);
 }
 
-function toWebRequest(req: VercelRequest, suffix: string) {
-  const url = new URL(`${APP_ORIGIN}/api/auth/${suffix}`);
-  const inbound = new URL(req.url || "/api/auth", APP_ORIGIN);
+function toWebRequest(req: VercelRequest, suffix: string, appOrigin: string) {
+  const url = new URL(`${appOrigin}/api/auth/${suffix}`);
+  const inbound = new URL(req.url || "/api/auth", appOrigin);
   inbound.searchParams.delete("path");
   url.search = inbound.search;
   return new Request(url.toString(), {
@@ -74,7 +93,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "no-store");
   // Prevent treating arbitrary preview URLs as authorized OAuth origins.
   const publicHost = first(req.headers.host);
-  if (publicHost !== new URL(APP_ORIGIN).host) {
+  const appOrigin = resolveAuthOrigin(publicHost);
+  if (!appOrigin) {
     return res.status(403).json({ error: "AUTH_ORIGIN_NOT_ALLOWED" });
   }
   const suffix = requestedAuthSuffix(req.query.path);
@@ -83,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   }
   try {
-    const upstream = await handleSameOriginAuthProxy(toWebRequest(req, suffix), { APP_BASE_URL: APP_ORIGIN });
+    const upstream = await handleSameOriginAuthProxy(toWebRequest(req, suffix, appOrigin), { APP_BASE_URL: appOrigin });
     if (!upstream) return res.status(404).json({ error: "AUTH_PATH_NOT_ALLOWED" });
     for (const [name, value] of upstream.headers) {
       if (name === "set-cookie" || name === "content-length" || name === "transfer-encoding") continue;

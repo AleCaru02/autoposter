@@ -8,10 +8,12 @@ import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { TextGenerationMetering, technicalEventsFromTextResult } from "./_lib/text-generation-metering.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 import { buildPersonalBrandEditorialContext, loadEditorialProfile, loadProfileBrandContext, resolvePersonalBrandSource } from "./_lib/personal-brand-sources.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
 export const config = { maxDuration: 60 };
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const VALID_PROVIDERS = new Set<SocialProvider>(["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"]);
 const VALID_FORMATS = new Set<SocialFormat>(["POST", "CAROUSEL", "STORY"]);
 
@@ -25,7 +27,7 @@ function bearer(req: VercelRequest) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
+  return dataApiFetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
 }
 
 async function readJsonRows<T>(path: string, token: string): Promise<T[]> {

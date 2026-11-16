@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
+import { neonDataApiUrl } from "./neon-endpoints.js";
+import { dataApiFetch } from "./cold-start-fetch.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 function identityFromRpcPayload(payload: unknown): string | null {
   if (typeof payload === "string") return payload.trim() || null;
@@ -32,7 +34,7 @@ async function activeSessionAuthUserId(token: string, databaseUrl: string) {
 }
 
 async function jwtAuthUserId(token: string, databaseUrl: string) {
-  const response = await fetch(`${DATA_API}/rpc/current_auth_user_id`, {
+  const response = await dataApiFetch(`${DATA_API}/rpc/current_auth_user_id`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" },
     body: "{}",

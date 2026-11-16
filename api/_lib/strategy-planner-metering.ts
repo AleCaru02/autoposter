@@ -15,6 +15,7 @@ export type StrategyPlannerTechnicalResult = {
   model: string;
   inputTokens: number | null;
   outputTokens: number | null;
+  webSearchCalls?: number;
   responseId: string;
   requestId: string | null;
   metadata?: Record<string, unknown>;
@@ -80,8 +81,11 @@ export class StrategyPlannerMetering {
   }
 
   async persistTechnicalUsage(profileId: string, eventId: string, result: StrategyPlannerTechnicalResult) {
+    // Native OpenAI web search is billed at $0.01 per call in addition to
+    // the model tokens; count it toward activity usage, not only in metadata.
+    const searches = Math.max(0, Math.min(10, Math.floor(result.webSearchCalls ?? 0)));
     const costUsd = result.inputTokens !== null && result.outputTokens !== null
-      ? estimateTerraCostUsd(result.inputTokens, result.outputTokens)
+      ? estimateTerraCostUsd(result.inputTokens, result.outputTokens) + searches * 0.01
       : null;
     const event = {
       operation: result.operation,
@@ -91,6 +95,7 @@ export class StrategyPlannerMetering {
       cost_usd: costUsd,
       metadata: {
         ...(result.metadata ?? {}),
+        billable_web_search_calls: searches,
         openai_response_id: result.responseId,
         openai_request_id: result.requestId,
         logical_usage_event_id: eventId,

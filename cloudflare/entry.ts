@@ -30,12 +30,15 @@ import { handleReferenceImages, handleSignedReferenceImage, handleSoulIdCreate, 
 import { handlePersonalBrandSources } from "./personal-brand-sources.js";
 import { handleAssetLibrary } from "./asset-library.js";
 import { handleProfileSmmCertification } from "./profile-smm-certification.js";
+import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
 type Env = AutopilotEnv & SocialEnv & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   ADMIN_BOOTSTRAP_TOKEN?: string;
+  /** Vercel is the canonical scheduler. Only the exact value "true" re-enables Worker cron work (fallback). */
+  WORKER_SCHEDULER_ENABLED?: string;
   PREPUBLISH_QA_TOKEN?: string;
   PROVIDER_ANALYTICS_QA_TOKEN?: string;
   HF_CREDENTIALS?: string;
@@ -112,7 +115,7 @@ function withOAuthProfileRedirect(request: Request, response: Response) {
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+  const response = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
   if (!response.ok) return false;
   const rows = await response.json() as Array<{ id?: string }>;
   return rows.some((row) => row.id === profileId);
@@ -214,6 +217,12 @@ export default {
     return worker.fetch(request, env);
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: WorkerContext) {
+    if (env.WORKER_SCHEDULER_ENABLED?.trim().toLowerCase() !== "true") {
+      // Single canonical runtime: Vercel crons own autopilot, learning, analytics and publishing.
+      // Running both schedulers against the same database would double AI spend.
+      console.log("worker-scheduler-disabled", { cron: controller.cron, canonicalScheduler: "vercel" });
+      return;
+    }
     if (controller.cron === "*/5 * * * *") {
       const cronMeta = {
         cron: controller.cron,

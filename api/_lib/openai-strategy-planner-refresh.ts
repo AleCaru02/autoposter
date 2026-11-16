@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { generateOpenAIPlan, generateOpenAIStrategy, type OpenAIEditorialPlan, type OpenAIStrategy } from "./openai-strategy-planner.js";
 import { StrategyPlannerMetering } from "./strategy-planner-metering.js";
 import type { PersistedLearningInsight } from "./learning-guidance.js";
+import { buildWebsitePlanningEvidence, type ScannedWebsitePage } from "./strategy-website-evidence.js";
 
 export type StrategyPlannerRefreshEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string };
 export type RefreshPolicy = { strategyRefreshDays: number; planRefreshDays: number };
@@ -33,6 +34,8 @@ export async function ensureOpenAIStrategyPlannerFresh(env: StrategyPlannerRefre
   const schedules=await sql`select provider,posts_per_week,preferred_slots,timezone,enabled from public.schedules where profile_id=${profileId}::uuid and enabled=true order by provider` as unknown as ScheduleRow[];
   const recent=await sql`select topic from public.content_items where profile_id=${profileId}::uuid order by created_at desc limit 40` as unknown as TopicRow[];
   const learning=await sql`select profile_id,dimension,dimension_value,sample_size,total_scorable_samples,uplift_pct,confidence,recommendation,metric_basis,observed_from,observed_to,generated_at,active from public.learning_insights where profile_id=${profileId}::uuid and active=true and source_type='PROVIDER_API' and confidence in ('MEDIUM','HIGH') order by confidence desc,uplift_pct desc limit 20` as unknown as PersistedLearningInsight[];
+  const websiteRows=await sql`select url,title,meta_description,left(content_text,450) as content_excerpt,scanned_at from public.website_pages where profile_id=${profileId}::uuid and status='ANALYZED' order by scanned_at desc limit 1200` as unknown as ScannedWebsitePage[];
+  const websiteEvidence=buildWebsitePlanningEvidence(websiteRows);
   const meter=new StrategyPlannerMetering(env.DATABASE_URL);const cycle=decision.refreshStrategy?"STRATEGY_PLAN" as const:"PLAN" as const;const reservation=await meter.reserve({profileId,cycle});
   if(reservation.status==="DENIED")throw new Error(reservation.code);
   if(reservation.status==="COMPLETED")return reservation.cached.response as {strategyRefreshed:boolean;planRefreshed:boolean};
@@ -43,14 +46,14 @@ export async function ensureOpenAIStrategyPlannerFresh(env: StrategyPlannerRefre
     await meter.markProviderStarted(eventId);
     let strategy=validStrategy(existing.aiStrategy)?existing.aiStrategy:null;let strategyResult:Awaited<ReturnType<typeof generateOpenAIStrategy>>|null=null;
     if(decision.refreshStrategy){
-      strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives,learningInsights:learning});
-      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_STRATEGIST",model:"gpt-5.6-terra",inputTokens:strategyResult.usage.inputTokens,outputTokens:strategyResult.usage.outputTokens,responseId:strategyResult.responseId,requestId:strategyResult.requestId,metadata:{agent:"STRATEGIST",refresh:true}});
+      strategyResult=await generateOpenAIStrategy({apiKey:env.OPENAI_API_KEY,profile,brand:brands[0],existingObjectives:current[0]?.objectives,websiteEvidence,enablePublicMarketSearch:existing.researchMode!=="WEBSITE_ONLY",learningInsights:learning});
+      await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_STRATEGIST",model:"gpt-5.6-terra",inputTokens:strategyResult.usage.inputTokens,outputTokens:strategyResult.usage.outputTokens,responseId:strategyResult.responseId,requestId:strategyResult.requestId,webSearchCalls:strategyResult.usage.webSearchCalls??0,metadata:{agent:"STRATEGIST",refresh:true,web_search_calls:strategyResult.usage.webSearchCalls??0,verified_competitors:strategyResult.output.competitorResearch?.competitors.length??0}});
       strategy=strategyResult.output;const total=Object.values(strategy.contentMix).reduce((sum,value)=>sum+value,0);if(total!==100)throw new Error("OPENAI_STRATEGIST_INVALID_MIX");
     }
     if(!strategy)throw new Error("OPENAI_STRATEGY_MISSING");
     let planResult:Awaited<ReturnType<typeof generateOpenAIPlan>>|null=null;
     if(decision.refreshPlan){
-      planResult=await generateOpenAIPlan({apiKey:env.OPENAI_API_KEY,profile,strategy,schedules,recentTopics:recent.map(r=>r.topic).filter(Boolean),learningInsights:learning});
+      planResult=await generateOpenAIPlan({apiKey:env.OPENAI_API_KEY,profile,strategy,schedules,recentTopics:recent.map(r=>r.topic).filter(Boolean),websiteEvidence,learningInsights:learning});
       await meter.persistTechnicalUsage(profileId,eventId,{operation:"AGENT_PLANNER",model:"gpt-5.6-terra",inputTokens:planResult.usage.inputTokens,outputTokens:planResult.usage.outputTokens,responseId:planResult.responseId,requestId:planResult.requestId,metadata:{agent:"PLANNER",refresh:true,horizon_days:planResult.output.horizonDays,items:planResult.output.items.length}});
     }
     const now=new Date().toISOString();const persisted={...existing,aiStrategy:strategy,aiStrategyGeneratedAt:strategyResult?now:existing.aiStrategyGeneratedAt,aiEditorialPlan:planResult?.output??existing.aiEditorialPlan,aiEditorialPlanGeneratedAt:planResult?now:existing.aiEditorialPlanGeneratedAt,aiAgentsVersion:2,aiAgentsModel:"gpt-5.6-terra"};

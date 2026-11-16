@@ -45,4 +45,15 @@ assert.equal(rendered.width, 2048);
 assert.equal(rendered.height, 2048);
 assert.deepEqual([...png.slice(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 assert.ok(png.length > 10_000, "fixture composition must produce a substantive PNG");
+{
+  const { woffToSfnt, isWoff } = await import("../api/_lib/woff-to-sfnt.js");
+  const probeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120"><text x="10" y="80" font-family="Inter" font-size="56" font-weight="700" fill="#000">Perché è così</text></svg>`;
+  const painted = (buffers: Uint8Array[]) => { const px = new Resvg(probeSvg, { font: { fontBuffers: buffers, defaultFontFamily: "Inter", loadSystemFonts: false } }).render().pixels; let n = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 0) n++; return n; };
+  assert.ok(isWoff(bold), "fixture is the bundled WOFF");
+  assert.equal(painted([regular, bold]), 0, "resvg-wasm ignores raw WOFF: this is why fonts must be converted");
+  assert.ok(painted([await woffToSfnt(regular), await woffToSfnt(bold)]) > 2_000, "converted SFNT fonts must paint visible Italian glyphs");
+  const compositorSource = await readFile(new URL("../api/_lib/deterministic-text-compositor.ts", import.meta.url), "utf8");
+  assert.match(compositorSource, /woffToSfnt\(bytes\(interRegular\)\)/, "bundled Inter must be converted before rasterisation");
+  assert.match(compositorSource, /woffToSfnt\(new Uint8Array\(brandFonts\.bold\)\)/, "brand fonts must be converted before rasterisation");
+}
 console.log("PASS deterministic text compositor: formats, Italian glyphs, real metrics, wrapping, fit, overflow, collision, safe area, determinism and PNG composition.");

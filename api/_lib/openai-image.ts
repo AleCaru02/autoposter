@@ -53,7 +53,7 @@ export type OpenAIImageResult = {
   outputFormat: "png";
   promptVersion: typeof IMAGE_PROMPT_VERSION;
   generationTimestamp: string;
-  textCompositor: { renderer: "RESVG_WASM"; font: "Inter"; layout: Record<string, unknown> } | null;
+  textCompositor: { renderer: "RESVG_WASM"; font: "Inter"; layout: Record<string, unknown>; logoApplied?: boolean } | null;
   mediaManager: {
     model: "gpt-5.6-terra";
     responseId: string;
@@ -80,7 +80,7 @@ export type GenerateImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  typography?: { brand: string; headline: string; subheadline?: string | null } | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number } } | null;
   fetcher?: typeof fetch;
 };
 
@@ -161,10 +161,35 @@ function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export function estimateImageCostUsd(_inputTokens: number, _outputTokens: number) {
-  // The Images API response does not provide a reliable Sunburst cost field and
-  // this product must not carry gpt-image-2 pricing into the new final model.
-  return null;
+/**
+ * Published OpenAI rates for the final image model (USD per 1M tokens, standard processing).
+ * Source verified 2026-11-14: https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst
+ */
+export const IMAGE_MODEL_PRICING = Object.freeze({
+  "gpt-image-2.5-sunburst": { textInput: 5, imageInput: 8, imageOutput: 30, verifiedAt: "2026-11-14", source: "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst" },
+});
+export type ImageCostBasis = "OPENAI_USAGE_X_PUBLISHED_RATES" | "CONSERVATIVE_ESTIMATE_UNSPLIT_INPUT" | "RESERVE_FALLBACK_MISSING_USAGE";
+/** Charged when OpenAI returns no usage: the same worst case the entitlement reserves, never zero. */
+export const IMAGE_COST_FALLBACK_USD = 0.25;
+
+/**
+ * Cost from the usage OpenAI returns. When the response splits input into text/image tokens the
+ * exact published rates apply; otherwise every input token is priced at the (higher) image-input
+ * rate: a prudent, explicitly labelled estimate that never under-counts.
+ */
+export function estimateImageCost(usage: { inputTokens: number; outputTokens: number; textInputTokens?: number | null; imageInputTokens?: number | null }, model: keyof typeof IMAGE_MODEL_PRICING = "gpt-image-2.5-sunburst") {
+  const rates = IMAGE_MODEL_PRICING[model];
+  const split = typeof usage.textInputTokens === "number" && typeof usage.imageInputTokens === "number";
+  const inputUsd = split
+    ? usage.textInputTokens! * rates.textInput + usage.imageInputTokens! * rates.imageInput
+    : usage.inputTokens * rates.imageInput;
+  const costUsd = Number(((inputUsd + usage.outputTokens * rates.imageOutput) / 1_000_000).toFixed(6));
+  const basis: ImageCostBasis = split ? "OPENAI_USAGE_X_PUBLISHED_RATES" : "CONSERVATIVE_ESTIMATE_UNSPLIT_INPUT";
+  return { costUsd, basis, ratesVerifiedAt: rates.verifiedAt };
+}
+
+export function estimateImageCostUsd(inputTokens: number, outputTokens: number, details?: { textInputTokens?: number | null; imageInputTokens?: number | null }) {
+  return estimateImageCost({ inputTokens, outputTokens, ...(details ?? {}) }).costUsd;
 }
 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
@@ -248,7 +273,11 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
   const usage = body.usage && typeof body.usage === "object" ? body.usage as Record<string, unknown> : {};
   const imageInputTokens = numberOrNull(usage.input_tokens);
   const imageOutputTokens = numberOrNull(usage.output_tokens);
-  const imageCost = imageInputTokens !== null && imageOutputTokens !== null ? estimateImageCostUsd(imageInputTokens, imageOutputTokens) : null;
+  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === "object" ? usage.input_tokens_details as Record<string, unknown> : {};
+  const pricing = imageInputTokens !== null && imageOutputTokens !== null
+    ? estimateImageCost({ inputTokens: imageInputTokens, outputTokens: imageOutputTokens, textInputTokens: numberOrNull(inputDetails.text_tokens), imageInputTokens: numberOrNull(inputDetails.image_tokens) })
+    : { costUsd: IMAGE_COST_FALLBACK_USD, basis: "RESERVE_FALLBACK_MISSING_USAGE" as const, ratesVerifiedAt: null };
+  const imageCost = pricing.costUsd;
   const totalCost = imageCost === null ? null : imageCost + mediaManager.usage.estimatedCostUsd;
   const imageEvent: OpenAIImageTechnicalEvent = {
     operation: "GENERATE_SOCIAL_IMAGE",
@@ -256,7 +285,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     inputTokens: imageInputTokens,
     outputTokens: imageOutputTokens,
     costUsd: imageCost,
-    metadata: { openai_request_id: requestId, quality: "high", size, output_format: "png", prompt_version: IMAGE_PROMPT_VERSION, retry_attempts: attempts },
+    metadata: { openai_request_id: requestId, quality: "high", size, output_format: "png", prompt_version: IMAGE_PROMPT_VERSION, retry_attempts: attempts, cost_basis: pricing.basis, rates_verified_at: pricing.ratesVerifiedAt },
   };
   return {
     provider: "OPENAI",
@@ -272,7 +301,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     outputFormat: "png",
     promptVersion: IMAGE_PROMPT_VERSION,
     generationTimestamp: typeof body.created === "number" ? new Date(body.created * 1_000).toISOString() : new Date().toISOString(),
-    textCompositor: options.typography ? { renderer: "RESVG_WASM", font: "Inter", layout: typographyLayout ?? {} } : null,
+    textCompositor: options.typography ? { renderer: "RESVG_WASM", font: "Inter", layout: typographyLayout ?? {}, logoApplied: Boolean(options.typography.logoDataUrl) } : null,
     mediaManager: {
       model: mediaManager.model,
       responseId: mediaManager.responseId,

@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
@@ -30,10 +30,55 @@ function PageFallback() {
   return <main className="center-state">Caricamento pagina…</main>;
 }
 
-function RequireAuth({ children }: { children: ReactNode }) {
+/**
+ * Right after sign-in the cached session can still be empty for a moment. Before bouncing to
+ * /login, re-check the session once against the server; only a confirmed absence redirects.
+ */
+/** Longest wait for a session answer: after sign-out the client can stay "pending" and refetch forever. */
+export const SESSION_CHECK_TIMEOUT_MS = 6000;
+
+export function useConfirmedSession() {
   const session = authClient.useSession();
-  if (session.isPending) return <main className="center-state">Verifica sessione…</main>;
-  if (!session.data?.user) return <Navigate to="/login" replace />;
+  const hasUser = Boolean(session.data?.user);
+  const [rechecked, setRechecked] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  // After sign-out the session client keeps refetching (isRefetching flaps), so waiting for it to
+  // settle always ran into the timeout. A direct, uncached server answer of "no session" is
+  // authoritative and lets the guard redirect at once (verified on WebKit/Chromium, 16/11/2026).
+  const [serverSignedOut, setServerSignedOut] = useState(false);
+  useEffect(() => {
+    if (session.isPending || hasUser || rechecked) return;
+    let active = true;
+    void Promise.resolve(session.refetch?.()).catch(() => undefined).finally(() => { if (active) setRechecked(true); });
+    return () => { active = false; };
+  }, [session.isPending, hasUser, rechecked, session]);
+  // Independent of isPending, which also flaps while the client loops after sign-out.
+  useEffect(() => {
+    if (hasUser) return;
+    let active = true;
+    void fetch("/api/auth/get-session", { credentials: "include", cache: "no-store", headers: { accept: "application/json" } })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = await response.json().catch(() => undefined) as { user?: unknown } | null | undefined;
+        if (active && body !== undefined && !body?.user) setServerSignedOut(true);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [hasUser]);
+  useEffect(() => {
+    if (hasUser) { setTimedOut(false); return; }
+    const timer = window.setTimeout(() => setTimedOut(true), SESSION_CHECK_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [hasUser]);
+  useEffect(() => { if (hasUser) setServerSignedOut(false); }, [hasUser]);
+  const checking = !timedOut && !(serverSignedOut && !hasUser) && (session.isPending || session.isRefetching || (!hasUser && !rechecked));
+  return { checking, user: session.data?.user ?? null };
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { checking, user } = useConfirmedSession();
+  if (checking && !user) return <main className="center-state">Verifica sessione…</main>;
+  if (!user) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -46,9 +91,9 @@ function RequireProfile() {
 }
 
 function RootRedirect() {
-  const session = authClient.useSession();
-  if (session.isPending) return <main className="center-state">Caricamento…</main>;
-  return <Navigate to={session.data?.user ? "/app/dashboard" : "/login"} replace />;
+  const { checking, user } = useConfirmedSession();
+  if (checking && !user) return <main className="center-state">Caricamento…</main>;
+  return <Navigate to={user ? "/app/dashboard" : "/login"} replace />;
 }
 
 export default function App() {

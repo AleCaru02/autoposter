@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { buildImagePrompt, estimateImageCostUsd, generateOpenAIImage, imageAspectRatioForFormat, imageSizeForFormat } from "../api/_lib/openai-image.js";
+import { buildImagePrompt, estimateImageCost, estimateImageCostUsd, generateOpenAIImage, imageAspectRatioForFormat, imageSizeForFormat } from "../api/_lib/openai-image.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
 
@@ -150,12 +150,13 @@ assert.match(result.generationPrompt, /Palette del profilo da rispettare/);
 assert.match(result.generationPrompt, /non inventare cartografia/i);
 assert.equal(result.textCompositor, null, "the direct library path remains composable only when a locked text spec is supplied by the product route");
 assert.equal(Buffer.from(result.base64, "base64").toString(), "fake-png");
-assert.equal(imageCost, null);
+assert.ok(typeof imageCost === "number" && imageCost > 0, "image cost is priced from usage");
 assert.equal(result.usage.mediaManagerCostUsd, mediaCost);
 assert.equal(result.usage.inputTokens, 150);
 assert.equal(result.usage.outputTokens, 1280);
 assert.equal(result.usage.totalTokens, 1430);
-assert.equal(result.usage.estimatedCostUsd, null);
+assert.ok(Math.abs((result.usage.estimatedCostUsd ?? 0) - (mediaCost + imageCost)) < 1e-9, "image cost is counted (no more null)");
+assert.ok(Math.abs(imageCost - (50 * 8 + 1200 * 30) / 1_000_000) < 1e-9, "without an input split every input token is priced at the higher image-input rate (prudent)");
 
 const billingCalls: Array<Record<string, any>> = [];
 const billingFetcher = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -185,3 +186,15 @@ assert.match(workerRuntime, /brandFonts:\s*brandVisual\.fonts/, "production Work
 assert.match(workerRuntime, /brandVisualStyle:\s*brandVisual\.visualStyle/, "production Worker must pass profile visual style to OpenAI Images");
 
 console.log("PASS OpenAI image contract: Media Manager OpenAI precede esclusivamente GPT-Image-2.5 Sunburst; qualità high, formato PNG e metadati tracciati.");
+
+{
+  // Exact published rates when OpenAI splits input tokens; real Reel usage (14/11/2026): 1084 in / 1843 out.
+  const exact = estimateImageCost({ inputTokens: 1084, outputTokens: 1843, textInputTokens: 1084, imageInputTokens: 0 });
+  assert.equal(exact.basis, "OPENAI_USAGE_X_PUBLISHED_RATES");
+  assert.ok(Math.abs(exact.costUsd - (1084 * 5 + 1843 * 30) / 1_000_000) < 1e-9);
+  const prudent = estimateImageCost({ inputTokens: 1084, outputTokens: 1843 });
+  assert.equal(prudent.basis, "CONSERVATIVE_ESTIMATE_UNSPLIT_INPUT");
+  assert.ok(prudent.costUsd >= exact.costUsd, "the prudent estimate never under-counts");
+  assert.ok(prudent.costUsd < 0.25, "the 0,25 $ per-image reserve covers the observed worst case");
+  console.log(`PASS image pricing: esatto ${exact.costUsd} $, prudenziale ${prudent.costUsd} $ per immagine 1440x2560 high.`);
+}

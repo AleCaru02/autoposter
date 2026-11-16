@@ -17,7 +17,10 @@ function addResult(target: RunResult, source: RunResult) { target.profilesChecke
 
 async function profileIds(client: Client, requestedProfileId?: string) {
   if (requestedProfileId) { const rows = await client.query<{ id: string }>("select id::text as id from public.profiles where id=$1::uuid and archived_at is null and onboarding_completed=true limit 1", [requestedProfileId]); return rows.rows.map((row) => row.id); }
-  const rows = await client.query<{ id: string }>("select id::text as id from public.profiles where archived_at is null and onboarding_completed=true order by created_at asc limit 100"); return rows.rows.map((row) => row.id);
+  // Give the least recently generated activity the next slot. With the hourly cron
+  // capped at one generation, ordering by profile creation would starve the
+  // remaining profiles whenever the first has eligible schedule gaps.
+  const rows = await client.query<{ id: string }>("select p.id::text as id from public.profiles p left join lateral (select max(ci.created_at) as last_generated from public.content_items ci where ci.profile_id=p.id) activity on true where p.archived_at is null and p.onboarding_completed=true order by activity.last_generated asc nulls first, p.created_at asc limit 100"); return rows.rows.map((row) => row.id);
 }
 async function platformStrategy(client: Client, profileId: string) { const rows = await client.query<{ platform_strategy: unknown }>("select platform_strategy from public.content_strategies where profile_id=$1::uuid limit 1", [profileId]); return rows.rows[0]?.platform_strategy ?? {}; }
 async function usageSnapshot(client: Client, profileId: string): Promise<UsageSnapshot> {

@@ -2,6 +2,7 @@ import { analyzeBrandFromWebsite, type WebsiteVisualHints } from "../api/_lib/br
 import { BrandAnalysisMetering } from "../api/_lib/brand-analysis-metering.js";
 import { completeOnboardingProfile } from "../api/_lib/onboarding-completion.js";
 import { verifiedCustomerAuthUserId } from "../api/_lib/verified-customer-auth.js";
+import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -21,7 +22,7 @@ function bearer(request: Request) {
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
+  return dataApiFetch(`${DATA_API}/${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) } });
 }
 
 async function rows<T>(path: string, token: string): Promise<T[]> {
@@ -144,11 +145,18 @@ export async function handleWorkerOnboardingAnalyze(request: Request, env: Env) 
         : detectedGoals.filter((goal) => existingGoals.includes(goal));
     const activeGoals = [...new Set([...preservedOtherGoals, ...activeDetectedGoals])];
     const now = new Date().toISOString();
+    // An approved Brand Kit is customer-owned: a re-scan may update editorial
+    // evidence, but must never silently replace approved colors, font or logo.
+    const brandKitApproved = existingVisualIdentity.brandKitApproved === true;
     const visualIdentity = {
+      ...existingVisualIdentity,
       source: "website_scan",
-      observedColors: visualHints.colors,
-      observedFonts: visualHints.fontFamilies,
-      logoUrl: visualHints.logoUrl,
+      observedColors: brandKitApproved && Array.isArray(existingVisualIdentity.observedColors) ? existingVisualIdentity.observedColors : visualHints.colors,
+      observedFonts: brandKitApproved && Array.isArray(existingVisualIdentity.observedFonts) ? existingVisualIdentity.observedFonts : visualHints.fontFamilies,
+      logoUrl: brandKitApproved ? (existingVisualIdentity.logoUrl ?? null) : visualHints.logoUrl,
+      logoAssetId: existingVisualIdentity.logoAssetId ?? null,
+      brandKitApproved,
+      brandKitApprovedAt: brandKitApproved ? (existingVisualIdentity.brandKitApprovedAt ?? null) : null,
       logoCandidates: visualHints.logoCandidates,
       observedImages: visualHints.imageUrls,
       stylesheets: visualHints.stylesheetUrls,

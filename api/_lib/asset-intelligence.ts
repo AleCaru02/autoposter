@@ -73,8 +73,8 @@ function isRealAsset(asset: ReusableAssetCandidate) {
 
 function hasCompatibleAspect(asset: ReusableAssetCandidate, requestedAspectRatio: string) {
   const aspect = object(asset.metadata).aspect_ratio;
-  // An unclassified real photo can be used only for square content; Story assets require an explicit compatible crop.
-  return typeof aspect === "string" ? aspect === requestedAspectRatio : requestedAspectRatio === "1:1" && isRealAsset(asset);
+  // An unclassified real photo can be used only for feed content (1:1 or 4:5 crop); vertical Story/Reel assets require an explicit compatible crop.
+  return typeof aspect === "string" ? aspect === requestedAspectRatio : (requestedAspectRatio === "1:1" || requestedAspectRatio === "4:5") && isRealAsset(asset);
 }
 
 /** Chooses only a genuinely suitable asset. It never reserves budget or calls an image provider. */

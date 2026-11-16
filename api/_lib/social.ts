@@ -1,8 +1,12 @@
 import { neon } from "@neondatabase/serverless";
 import { EntitlementUsageService } from "./entitlement-usage.js";
 import type { CapabilityKey } from "./capabilities.js";
+import { assertInstagramCaption, instagramCarouselChildForm, instagramCarouselParentForm, validateInstagramCarousel, validateInstagramPublishImage, type InstagramPublishImage } from "./instagram-media.js";
+import { toInstagramJpeg } from "./instagram-jpeg.js";
+import { neonDataApiUrl } from "./neon-endpoints.js";
+import { dataApiFetch } from "./cold-start-fetch.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 const PROVIDERS = ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const;
 const META_SCOPES = {
   FACEBOOK: ["pages_show_list", "pages_read_engagement", "pages_manage_posts"],
@@ -88,6 +92,10 @@ type VariantRecord = {
   eligible: boolean;
   storage_url: string | null;
   mime_type: string | null;
+  asset_width: number | null;
+  asset_height: number | null;
+  asset_quality_status: string | null;
+  asset_identity_status: string | null;
 };
 type JobRecord = {
   id: string;
@@ -359,19 +367,37 @@ export function providerConfigured(provider: SocialProvider, env: SocialEnv) {
 }
 
 export function providerCapabilities(provider: SocialProvider) {
-  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY"], note: "Il carosello è strutturato e revisionabile, ma la pubblicazione multi-media Instagram resta disabilitata finché il runtime provider non la supporta realmente." };
+  if (provider === "INSTAGRAM") return { publish: ["POST", "STORY", "CAROUSEL"], note: "Pubblicazione di caroselli approvati con immagini JPEG valide; la creazione automatica delle slide e i Reel richiedono ulteriori integrazioni." };
   if (provider === "FACEBOOK") return { publish: ["POST"], note: "Storie e caroselli non vengono simulati finché il contenuto non ha gli asset richiesti dalle API." };
   if (provider === "LINKEDIN") return { publish: ["POST"], note: "I caroselli organici richiedono più immagini; le storie non sono un formato LinkedIn." };
   return { publish: ["POST"], note: "Google Business Profile pubblica Local Posts; storie e caroselli non esistono nell’API GBP." };
 }
 
-export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; accountType?: string | null; lastError?: string | null }, now = Date.now()): { state: SocialReadiness; detail: string } {
-  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile nel Worker." };
+function lastVerificationRefreshable(metadata: Record<string, unknown>) {
+  const verification = metadata.lastVerification;
+  if (!verification || typeof verification !== "object") return false;
+  const record = verification as { ok?: unknown; token?: { refreshable?: unknown } };
+  return record.ok === true && record.token?.refreshable === true;
+}
+
+export function socialReadiness(input: { provider: SocialProvider; configured: boolean; status?: string | null; permissions?: unknown; expiresAt?: string | null; lastValidatedAt?: string | null; accountType?: string | null; lastError?: string | null; refreshable?: boolean }, now = Date.now()): { state: SocialReadiness; detail: string } {
+  if (!input.configured) return { state: "BLOCKED_PROVIDER", detail: "La configurazione OAuth necessaria non è disponibile sul server della versione corrente." };
   const status = input.status?.trim().toUpperCase() || "NOT_CONNECTED";
   if (input.lastError && status !== "ACTIVE") return { state: "FAIL", detail: "L’ultimo tentativo OAuth è fallito: il dettaglio è disponibile nella scheda del canale." };
   const permissions = Array.isArray(input.permissions) ? input.permissions.filter((permission): permission is string => typeof permission === "string") : [];
   if (status === "ACTIVE") {
-    if (input.provider !== "GBP" && input.expiresAt && Date.parse(input.expiresAt) <= now) return { state: "USER_ACTION_REQUIRED", detail: "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    // A Google access token lasts 1 hour and is renewed with the refresh token (verified on reel-qa,
+    // 16/11/2026): its expiry alone is not a user action when the last verification proved it refreshable.
+    const renewable = input.provider === "GBP" && input.refreshable === true;
+    if (!renewable && input.expiresAt && Number.isFinite(Date.parse(input.expiresAt)) && Date.parse(input.expiresAt) <= now) {
+      return { state: "USER_ACTION_REQUIRED", detail: input.provider === "GBP"
+        ? "Il token Google è scaduto. Ricollega l’account o verifica il rinnovo OAuth prima di pubblicare."
+        : "L’autorizzazione è scaduta e richiede un nuovo consenso OAuth." };
+    }
+    if (!input.lastValidatedAt) return { state: "USER_ACTION_REQUIRED", detail: "Connessione mai verificata con il provider: premi «Verifica» prima di pubblicare." };
+    if (!Number.isFinite(Date.parse(input.lastValidatedAt)) || Date.parse(input.lastValidatedAt) < now - 7 * 24 * 60 * 60 * 1000) {
+      return { state: "USER_ACTION_REQUIRED", detail: "La connessione non viene verificata con il provider da oltre 7 giorni. Riconvalida l’account prima di pubblicare." };
+    }
     const analyticsPermission = input.provider === "INSTAGRAM" ? "instagram_manage_insights" : null;
     if (analyticsPermission && !permissions.includes(analyticsPermission)) return { state: "USER_ACTION_REQUIRED", detail: `Manca il consenso ${analyticsPermission} richiesto per Analytics.` };
     return { state: "PASS_REAL", detail: "Account attivo con credenziali cifrate e validazione reale del provider." };
@@ -440,7 +466,7 @@ export async function decryptTokenBundle(value: string, secret: string): Promise
 }
 
 async function dataApi(path: string, token: string, init: RequestInit = {}) {
-  return fetch(`${DATA_API}/${path}`, {
+  return dataApiFetch(`${DATA_API}/${path}`, {
     ...init,
     headers: {
       authorization: `Bearer ${token}`,
@@ -702,7 +728,7 @@ async function linkedinExchange(code: string, callbackUri: string, env: SocialEn
 
 export function linkedinGrantedPermissions(scope: string | undefined, requested: string[]) {
   if (typeof scope !== "string") return [...requested];
-  return scope.split(/\s+/).map((permission) => permission.trim()).filter(Boolean);
+  return scope.split(/[\s,]+/).map((permission) => permission.trim()).filter(Boolean);
 }
 
 async function linkedinUserInfo(accessToken: string) {
@@ -928,6 +954,8 @@ async function handleStatus(request: Request, env: SocialEnv) {
         provider,
         configured,
         configurationIssues,
+        verifiable: socialVerifiable(env),
+        lastVerification: metadata.lastVerification && typeof metadata.lastVerification === "object" ? metadata.lastVerification : null,
         status: row?.status ?? "NOT_CONNECTED",
         accountId: row?.provider_account_id ?? null,
         accountName: row?.account_name ?? null,
@@ -938,7 +966,7 @@ async function handleStatus(request: Request, env: SocialEnv) {
         accountType: typeof metadata.accountType === "string" ? metadata.accountType : null,
         capabilities: providerCapabilities(provider),
         lastError,
-        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError }),
+        readiness: socialReadiness({ provider, configured, status: row?.status, permissions: row?.permissions, expiresAt: row?.expires_at, lastValidatedAt: row?.last_validated_at, accountType: typeof metadata.accountType === "string" ? metadata.accountType : null, lastError, refreshable: lastVerificationRefreshable(metadata) }),
       };
     }),
     linkedinOrganizationMode: linkedinOrganizationMode(env),
@@ -985,6 +1013,207 @@ async function handleSelect(request: Request, env: SocialEnv) {
     console.error("social-selection-failed", { profileId, provider, code: reason instanceof Error ? reason.message : "unknown" });
     return socialJson({ error: "SOCIAL_SELECTION_FAILED" }, 502);
   }
+}
+
+/** Outcome of one read-only capability probe: "OK", "HTTP_<status>", "NOT_GRANTED" or "NOT_AVAILABLE". */
+export type ProbeOutcome = string;
+export type TokenFacts = { expiresAt: string | null; dataAccessExpiresAt: string | null; refreshable: boolean; note: string };
+export type SocialVerification =
+  | { ok: true; accountLabel: string; permissions: string[] | null; bundle: TokenBundle; checks: Record<string, ProbeOutcome>; token: TokenFacts }
+  | { ok: false; code: string; reconnect: boolean };
+
+async function probe(fetcher: typeof fetch, url: URL | string, init?: RequestInit): Promise<ProbeOutcome> {
+  try {
+    const response = await fetcher(url, init);
+    return response.ok ? "OK" : `HTTP_${response.status}`;
+  } catch { return "NETWORK_ERROR"; }
+}
+
+const epochToIso = (value: unknown) => typeof value === "number" && value > 0 ? new Date(value * 1000).toISOString() : null;
+
+type VerifiableConnection = Pick<StoredConnection, "provider" | "provider_account_id" | "metadata">;
+
+/**
+ * Read-only check against the provider API (never publishes). A provider becomes "verified"
+ * only after this call succeeds; 401/403 or Meta error 190 mean the user must reconnect.
+ */
+export async function verifySocialConnection(connection: VerifiableConnection, bundle: TokenBundle, env: SocialEnv, fetcher: typeof fetch = fetch): Promise<SocialVerification> {
+  const metadata = connectionMetadata(connection.metadata);
+  const reject = (status: number, providerCode?: unknown): SocialVerification => {
+    const reconnect = status === 401 || status === 403 || providerCode === 190 || providerCode === 102;
+    return { ok: false, code: `${connection.provider}_VERIFY_${reconnect ? "TOKEN_INVALID" : `HTTP_${status}`}`, reconnect };
+  };
+  try {
+    if (connection.provider === "FACEBOOK" || connection.provider === "INSTAGRAM") {
+      const id = connection.provider === "FACEBOOK" ? (typeof metadata.pageId === "string" ? metadata.pageId : connection.provider_account_id) : connection.provider_account_id;
+      if (!id) return { ok: false, code: `${connection.provider}_ACCOUNT_ID_MISSING`, reconnect: true };
+      const url = new URL(`https://graph.facebook.com/${metaVersion(env)}/${encodeURIComponent(id)}`);
+      url.searchParams.set("fields", connection.provider === "FACEBOOK" ? "id,name" : "id,username");
+      url.searchParams.set("access_token", bundle.accessToken);
+      const response = await fetcher(url);
+      const body = await response.json().catch(() => ({})) as { id?: string; name?: string; username?: string; error?: { code?: number } };
+      if (!response.ok || !body.id) return reject(response.status, body.error?.code);
+      const permissions = await metaGrantedPermissions(bundle.accessToken, env, fetcher).catch(() => null);
+      const graph = (path: string, params: Record<string, string>) => {
+        const probeUrl = new URL(`https://graph.facebook.com/${metaVersion(env)}/${path}`);
+        for (const [key, value] of Object.entries(params)) probeUrl.searchParams.set(key, value);
+        probeUrl.searchParams.set("access_token", bundle.accessToken);
+        return probeUrl;
+      };
+      const checks: Record<string, ProbeOutcome> = connection.provider === "INSTAGRAM"
+        ? {
+            posts: await probe(fetcher, graph(`${encodeURIComponent(id)}/media`, { fields: "id,timestamp", limit: "1" })),
+            accountMetrics: await probe(fetcher, graph(encodeURIComponent(id), { fields: "followers_count,media_count" })),
+            insights: await probe(fetcher, graph(`${encodeURIComponent(id)}/insights`, { metric: "reach", period: "day" })),
+          }
+        : {
+            posts: await probe(fetcher, graph(`${encodeURIComponent(id)}/published_posts`, { fields: "id,created_time", limit: "1" })),
+            accountMetrics: await probe(fetcher, graph(encodeURIComponent(id), { fields: "followers_count,fan_count" })),
+          };
+      let token: TokenFacts = { expiresAt: null, dataAccessExpiresAt: null, refreshable: false, note: "Token di Pagina: nessuna scadenza dichiarata." };
+      if (env.META_APP_ID && env.META_APP_SECRET) {
+        try {
+          const debug = new URL(`https://graph.facebook.com/${metaVersion(env)}/debug_token`);
+          debug.searchParams.set("input_token", bundle.accessToken);
+          debug.searchParams.set("access_token", `${env.META_APP_ID}|${env.META_APP_SECRET}`);
+          const debugResponse = await fetcher(debug);
+          const debugBody = await debugResponse.json().catch(() => ({})) as { data?: { is_valid?: boolean; expires_at?: number; data_access_expires_at?: number } };
+          if (debugResponse.ok && debugBody.data) {
+            checks.tokenDebug = debugBody.data.is_valid === false ? "INVALID" : "OK";
+            token = { expiresAt: epochToIso(debugBody.data.expires_at), dataAccessExpiresAt: epochToIso(debugBody.data.data_access_expires_at), refreshable: false, note: debugBody.data.expires_at ? "Il token ha una scadenza: ricollega prima della data indicata." : "Token di Pagina senza scadenza; l'accesso ai dati va rinnovato con un nuovo consenso entro la data indicata." };
+          } else checks.tokenDebug = `HTTP_${debugResponse.status}`;
+        } catch { checks.tokenDebug = "NETWORK_ERROR"; }
+      }
+      return { ok: true, accountLabel: body.username ? `@${body.username}` : body.name || body.id, permissions, bundle, checks, token };
+    }
+    if (connection.provider === "LINKEDIN") {
+      const response = await fetcher("https://api.linkedin.com/v2/userinfo", { headers: { authorization: `Bearer ${bundle.accessToken}` } });
+      const body = await response.json().catch(() => ({})) as { sub?: string; name?: string };
+      if (!response.ok || !body.sub) return reject(response.status);
+      return {
+        ok: true,
+        accountLabel: body.name || "Profilo LinkedIn",
+        permissions: null,
+        bundle,
+        // Member post analytics need a restricted LinkedIn scope; Page posting/metrics need Community Management.
+        checks: { posts: "NOT_AVAILABLE", accountMetrics: "NOT_GRANTED" },
+        token: { expiresAt: bundle.expiresAt ?? null, dataAccessExpiresAt: null, refreshable: Boolean(bundle.refreshToken), note: bundle.refreshToken ? "Rinnovo automatico con refresh token." : "LinkedIn non rilascia refresh token a questa app: ricollega prima della scadenza." },
+      };
+    }
+    let current = bundle;
+    if (!current.expiresAt || new Date(current.expiresAt).getTime() <= Date.now() + 5 * 60_000) {
+      if (!current.refreshToken) return { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true };
+      // Our own missing OAuth client must never be mistaken for a revoked user grant.
+      if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return { ok: false, code: "GBP_VERIFY_CLIENT_NOT_CONFIGURED", reconnect: false };
+      const form = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID!, client_secret: env.GOOGLE_CLIENT_SECRET!, refresh_token: current.refreshToken, grant_type: "refresh_token" });
+      const refresh = await fetcher("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form });
+      const refreshed = await refresh.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error?: string };
+      if (!refresh.ok || !refreshed.access_token) return refreshed.error === "invalid_grant" ? { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true } : reject(refresh.status);
+      current = { ...current, accessToken: refreshed.access_token, expiresAt: refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString() : current.expiresAt };
+    }
+    const location = typeof metadata.locationName === "string" ? metadata.locationName : connection.provider_account_id;
+    if (!location) return { ok: false, code: "GBP_LOCATION_MISSING", reconnect: true };
+    const url = new URL(`https://mybusinessbusinessinformation.googleapis.com/v1/${location.startsWith("locations/") ? location : `locations/${location}`}`);
+    url.searchParams.set("readMask", "name,title");
+    const response = await fetcher(url, { headers: { authorization: `Bearer ${current.accessToken}` } });
+    const body = await response.json().catch(() => ({})) as { name?: string; title?: string };
+    if (!response.ok || !body.name) return reject(response.status);
+    const auth = { headers: { authorization: `Bearer ${current.accessToken}` } };
+    const locationId = (location.startsWith("locations/") ? location : `locations/${location}`).replace(/^locations\//, "");
+    const accountName = typeof metadata.accountId === "string" ? metadata.accountId : "";
+    const checks: Record<string, ProbeOutcome> = {};
+    checks.posts = accountName
+      ? await probe(fetcher, `https://mybusiness.googleapis.com/v4/${accountName.startsWith("accounts/") ? accountName : `accounts/${accountName}`}/locations/${encodeURIComponent(locationId)}/localPosts?pageSize=1`, auth)
+      : "NOT_AVAILABLE";
+    const end = new Date(Date.now() - 2 * 86_400_000);
+    const start = new Date(end.getTime() - 7 * 86_400_000);
+    const metrics = new URL(`https://businessprofileperformance.googleapis.com/v1/locations/${encodeURIComponent(locationId)}:fetchMultiDailyMetricsTimeSeries`);
+    metrics.searchParams.append("dailyMetrics", "BUSINESS_IMPRESSIONS_MOBILE_MAPS");
+    for (const [prefix, date] of [["dailyRange.startDate", start], ["dailyRange.endDate", end]] as const) {
+      metrics.searchParams.set(`${prefix}.year`, String(date.getUTCFullYear()));
+      metrics.searchParams.set(`${prefix}.month`, String(date.getUTCMonth() + 1));
+      metrics.searchParams.set(`${prefix}.day`, String(date.getUTCDate()));
+    }
+    checks.accountMetrics = await probe(fetcher, metrics, auth);
+    return {
+      ok: true,
+      accountLabel: body.title || body.name,
+      permissions: null,
+      bundle: current,
+      checks,
+      token: { expiresAt: current.expiresAt ?? null, dataAccessExpiresAt: null, refreshable: Boolean(current.refreshToken), note: current.refreshToken ? "Token d'accesso di 1 ora rinnovato automaticamente con il refresh token (in modalità Test di Google il refresh token scade dopo 7 giorni)." : "Nessun refresh token: ricollega." },
+    };
+  } catch {
+    return { ok: false, code: `${connection.provider}_VERIFY_NETWORK_ERROR`, reconnect: false };
+  }
+}
+
+/** Stored connections can be re-verified with the token key alone (no app secret needed for reads). */
+export function socialVerifiable(env: SocialEnv) {
+  return Boolean(env.DATABASE_URL && env.SOCIAL_TOKEN_KEY && env.SOCIAL_TOKEN_KEY.length >= 24);
+}
+
+async function handleVerify(request: Request, env: SocialEnv) {
+  if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const auth = bearer(request);
+  if (!auth) return socialJson({ error: "AUTH_REQUIRED" }, 401);
+  const body = await readBody(request);
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  const provider = body.provider;
+  if (!profileId || !isProvider(provider)) return socialJson({ error: "PROFILE_AND_PROVIDER_REQUIRED" }, 400);
+  if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  if (!socialVerifiable(env)) return socialJson({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" }, 503);
+  const outcome = await verifyStoredConnection(env, profileId, provider);
+  return socialJson(outcome.body, outcome.status);
+}
+
+/** Shared by the Verifica button and the hourly cron: read-only provider check + state update. */
+export async function verifyStoredConnection(env: SocialEnv, profileId: string, provider: SocialProvider): Promise<{ status: number; body: Record<string, unknown> }> {
+  const sql = neon(env.DATABASE_URL!);
+  const row = await storedConnection(sql, profileId, provider);
+  if (!row?.token_reference || row.status !== "ACTIVE") return { status: 409, body: { error: "SOCIAL_NOT_CONNECTED" } };
+  let bundle: TokenBundle;
+  try { bundle = await decryptTokenBundle(row.token_reference, env.SOCIAL_TOKEN_KEY!); }
+  catch {
+    // Wrong SOCIAL_TOKEN_KEY (e.g. tokens encrypted by another runtime): never touch the stored row.
+    return { status: 409, body: { error: "SOCIAL_TOKEN_KEY_MISMATCH", verified: false } };
+  }
+  const result = await verifySocialConnection(row, bundle, env);
+  const checkedAt = new Date().toISOString();
+  if (result.ok) {
+    const tokenReference = result.bundle.accessToken !== bundle.accessToken ? await encryptTokenBundle(result.bundle, env.SOCIAL_TOKEN_KEY!) : row.token_reference;
+    const verification = JSON.stringify({ lastVerification: { ok: true, at: checkedAt, account: result.accountLabel, checks: result.checks, token: result.token } });
+    const storedPermissions = Array.isArray(row.permissions) ? row.permissions.filter((item): item is string => typeof item === "string") : [];
+    const normalized = provider === "LINKEDIN" ? linkedinGrantedPermissions(storedPermissions.join(" "), []) : null;
+    const permissions = result.permissions ? JSON.stringify(result.permissions) : normalized ? JSON.stringify(normalized) : null;
+    await sql`update public.social_connections set token_reference=${tokenReference}, expires_at=coalesce(${result.bundle.expiresAt ?? null}::timestamptz, expires_at), permissions=coalesce(${permissions}::jsonb, permissions), metadata=coalesce(metadata,'{}'::jsonb) - 'lastOAuthError' || ${verification}::jsonb, last_validated_at=now(), updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
+    return { status: 200, body: { verified: true, provider, account: result.accountLabel, checks: result.checks, token: result.token } };
+  }
+  const verification = JSON.stringify({ lastVerification: { ok: false, at: checkedAt, code: result.code } });
+  if (result.reconnect) await sql`update public.social_connections set status='RECONNECT_REQUIRED', metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider} and status='ACTIVE'`;
+  else await sql`update public.social_connections set metadata=coalesce(metadata,'{}'::jsonb) || ${verification}::jsonb, updated_at=now() where profile_id=${profileId}::uuid and provider=${provider}`;
+  console.error("social-verify-failed", { profileId, provider, code: result.code });
+  return { status: result.reconnect ? 409 : 502, body: { verified: false, error: result.code, reconnectRequired: result.reconnect } };
+}
+
+/**
+ * Hourly cron: re-verify ACTIVE connections not checked for 20 hours (read-only provider calls,
+ * no publishing, no AI). Keeps "Collegato" truthful without a user pressing Verifica.
+ */
+export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
+  if (!socialVerifiable(env)) return { checked: 0, verified: 0, failed: 0, skipped: "SOCIAL_SECURITY_NOT_CONFIGURED" };
+  const sql = neon(env.DATABASE_URL!);
+  const due = await sql`
+    select profile_id::text as profile_id, provider from public.social_connections
+    where status='ACTIVE' and token_reference is not null and (last_validated_at is null or last_validated_at < now() - interval '20 hours')
+    order by last_validated_at asc nulls first limit ${Math.min(Math.max(limit, 1), 50)}
+  ` as unknown as Array<{ profile_id: string; provider: SocialProvider }>;
+  let verified = 0; let failed = 0; const codes: string[] = [];
+  for (const item of due) {
+    const outcome = await verifyStoredConnection(env, item.profile_id, item.provider).catch(() => ({ status: 500, body: { error: "SOCIAL_VERIFY_CRASHED" } }));
+    if (outcome.status === 200) verified += 1; else { failed += 1; codes.push(`${item.provider}:${String(outcome.body.error ?? outcome.status)}`); }
+  }
+  return { checked: due.length, verified, failed, codes };
 }
 
 async function handleDisconnect(request: Request, env: SocialEnv) {
@@ -1037,16 +1266,16 @@ function bytesBody(bytes: Uint8Array) {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string) {
-  return hmac(`media:${profileId}:${assetId}:${exp}`, secret);
+async function mediaSignature(profileId: string, assetId: string, exp: number, secret: string, format = "") {
+  return hmac(`media:${profileId}:${assetId}:${exp}${format ? `:${format}` : ""}`, secret);
 }
 
-async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv) {
+async function publicMediaUrl(profileId: string, assetId: string, env: SocialEnv, jpeg = false) {
   const root = baseUrl(env);
   if (!root) throw new Error("APP_BASE_URL_NOT_CONFIGURED");
   const exp = Date.now() + 20 * 60_000;
-  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!);
-  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
+  const sig = await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY!, jpeg ? "jpeg" : "");
+  return `${root}/api/social/media/${encodeURIComponent(assetId)}?profile=${encodeURIComponent(profileId)}&exp=${exp}&sig=${encodeURIComponent(sig)}${jpeg ? "&fmt=jpeg" : ""}`;
 }
 
 async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
@@ -1055,14 +1284,18 @@ async function handleMedia(request: Request, env: SocialEnv, assetId: string) {
   const profileId = url.searchParams.get("profile") || "";
   const exp = Number(url.searchParams.get("exp"));
   const sig = url.searchParams.get("sig") || "";
-  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
+  const requestedFormat = url.searchParams.get("fmt") || "";
+  if (requestedFormat && requestedFormat !== "jpeg") return socialJson({ error: "MEDIA_FORMAT_INVALID" }, 403);
+  if (!/^[0-9a-f-]{36}$/i.test(profileId) || !Number.isFinite(exp) || exp < Date.now() || sig !== await mediaSignature(profileId, assetId, exp, env.SOCIAL_TOKEN_KEY, requestedFormat)) return socialJson({ error: "MEDIA_LINK_INVALID" }, 403);
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`select storage_url, mime_type from public.assets where id=${assetId}::uuid and profile_id=${profileId}::uuid limit 1` as unknown as Array<{ storage_url: string; mime_type: string | null }>;
   const asset = rows[0];
   if (!asset?.storage_url) return socialJson({ error: "ASSET_NOT_FOUND" }, 404);
   try {
     const data = await assetBytes(asset.storage_url, asset.mime_type || "image/png");
-    return new Response(bytesBody(data.bytes), { status: 200, headers: { "content-type": data.mimeType, "cache-control": "public, max-age=600" } });
+    const output = requestedFormat === "jpeg" ? await toInstagramJpeg(data.bytes, data.mimeType) : data.bytes;
+    const outputMime = requestedFormat === "jpeg" ? "image/jpeg" : data.mimeType;
+    return new Response(bytesBody(output), { status: 200, headers: { "content-type": outputMime, "cache-control": "public, max-age=600" } });
   } catch (reason) {
     console.error("social-asset-read-failed", { code: reason instanceof Error ? reason.message : "unknown" });
     return socialJson({ error: "ASSET_READ_FAILED" }, 502);
@@ -1094,13 +1327,70 @@ async function waitForInstagramContainer(containerId: string, accessToken: strin
   throw publishError("INSTAGRAM_MEDIA_PROCESSING_DELAYED", { retryable: true, customerMessage: "Instagram sta ancora elaborando il contenuto. Il sistema riproverà automaticamente." });
 }
 
-async function publishInstagram(variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+
+type InstagramCarouselSlideRow = InstagramPublishImage & { alt_text: string | null };
+
+async function publishInstagramCarousel(sql: Sql, variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  // No remote container is created until all slide and content gates have passed.
+  const slides = await sql`
+    select s.position, s.asset_id::text, s.qa_status, s.alt_text,
+           a.mime_type, a.width, a.height,
+           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status
+    from public.content_carousel_slides s
+    left join public.assets a on a.id=s.asset_id and a.profile_id=s.profile_id
+    where s.profile_id=${variant.profile_id}::uuid and s.content_id=${variant.content_id}::uuid and s.variant_id=${variant.id}::uuid
+    order by s.position
+  ` as unknown as InstagramCarouselSlideRow[];
+  const assetIds = validateInstagramCarousel(slides);
+  const caption = composeCaption(variant);
+  assertInstagramCaption(caption);
+  const base = `https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}`;
+  const children: string[] = [];
+  for (const [index, assetId] of assetIds.entries()) {
+    const url = await publicMediaUrl(variant.profile_id, assetId, env, true);
+    const response = await providerRequest(`${base}/media`, {
+      method: "POST", body: instagramCarouselChildForm(url, bundle.accessToken, slides[index]?.alt_text),
+    }, { provider: "INSTAGRAM", stage: "CAROUSEL_CHILD_CREATE" });
+    const body = await providerJson<{id?:string}>(response, "INSTAGRAM", "CAROUSEL_CHILD_CREATE", false);
+    if (!body.id || !/^[0-9]+$/.test(body.id)) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_CHILD_CREATE", null, false);
+    await waitForInstagramContainer(body.id, bundle.accessToken, env);
+    children.push(body.id);
+  }
+  const response = await providerRequest(`${base}/media`, {
+    method: "POST", body: instagramCarouselParentForm(children, caption, bundle.accessToken),
+  }, { provider: "INSTAGRAM", stage: "CAROUSEL_PARENT_CREATE" });
+  const parent = await providerJson<{id?:string}>(response, "INSTAGRAM", "CAROUSEL_PARENT_CREATE", false);
+  if (!parent.id || !/^[0-9]+$/.test(parent.id)) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_PARENT_CREATE", null, false);
+  await waitForInstagramContainer(parent.id, bundle.accessToken, env);
+  // A single externally visible write; uncertain outcomes require human reconciliation.
+  const published = await providerRequest(`${base}/media_publish`, {
+    method: "POST",
+    body: new URLSearchParams({ creation_id: parent.id, access_token: bundle.accessToken }),
+  }, { provider: "INSTAGRAM", stage: "CAROUSEL_PUBLISH", visibleWrite: true, beforeVisibleWrite });
+  const result = await providerJson<{id?:string}>(published, "INSTAGRAM", "CAROUSEL_PUBLISH", true);
+  if (!result.id) throw classifyProviderFailure("INSTAGRAM", "CAROUSEL_PUBLISH", null, true);
+  return { externalId: result.id, metadata: { containerId: parent.id, childContainerIds: children } };
+}
+
+async function publishInstagram(sql: Sql, variant: VariantRecord, connection: StoredConnection, bundle: TokenBundle, env: SocialEnv, beforeVisibleWrite?: PublishBoundary): Promise<PublishResult> {
+  if (variant.format === "CAROUSEL") return publishInstagramCarousel(sql, variant, connection, bundle, env, beforeVisibleWrite);
   if (!variant.image_asset_id) throw new Error("INSTAGRAM_REQUIRES_MEDIA");
-  if (variant.format === "CAROUSEL") throw new Error("CAROUSEL_REQUIRES_MULTIPLE_MEDIA_ASSETS");
   if (variant.format !== "POST" && variant.format !== "STORY") throw new Error("FORMAT_NOT_SUPPORTED");
-  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env);
+  const issue = validateInstagramPublishImage({
+    position: 1, asset_id: variant.image_asset_id,
+    mime_type: variant.mime_type, width: variant.asset_width, height: variant.asset_height,
+    qa_status: variant.qa_status, asset_quality_status: variant.asset_quality_status,
+    asset_identity_status: variant.asset_identity_status,
+  }, variant.format);
+  if (issue) throw new Error(issue);
+  const caption = composeCaption(variant);
+  if (variant.format === "POST") assertInstagramCaption(caption);
+  const mediaUrl = await publicMediaUrl(variant.profile_id, variant.image_asset_id, env, true);
   const form = new URLSearchParams({ image_url: mediaUrl, access_token: bundle.accessToken });
-  if (variant.format === "POST") form.set("caption", composeCaption(variant));
+  if (variant.format === "POST") {
+    form.set("caption", caption);
+    if (variant.alt_text?.trim()) form.set("alt_text", variant.alt_text.trim().slice(0,100));
+  }
   if (variant.format === "STORY") form.set("media_type", "STORIES");
   const create = await providerRequest(`https://graph.facebook.com/${metaVersion(env)}/${connection.provider_account_id}/media`, { method: "POST", body: form }, { provider: "INSTAGRAM", stage: "MEDIA_CREATE" });
   const createBody = await providerJson<{ id?: string }>(create, "INSTAGRAM", "MEDIA_CREATE", false);
@@ -1186,7 +1476,8 @@ async function loadVariant(sql: Sql, variantId: string, profileId: string): Prom
   const rows = await sql`
     select v.id, v.content_id, v.profile_id, v.provider, v.format, v.caption, v.hook, v.cta, v.hashtags, v.alt_text, v.image_asset_id,
            v.approval_status, v.workflow_status, v.qa_status, v.qa_fingerprint, v.approved_fingerprint, v.approved_by, v.approved_at, v.eligible,
-           a.storage_url, a.mime_type
+           a.storage_url, a.mime_type, a.width as asset_width, a.height as asset_height,
+           a.quality_status as asset_quality_status, a.identity_status as asset_identity_status
     from public.content_variants v
     left join public.assets a on a.id = v.image_asset_id and a.profile_id = v.profile_id
     where v.id=${variantId}::uuid and v.profile_id=${profileId}::uuid
@@ -1212,7 +1503,7 @@ async function publishVariant(sql: Sql, variant: VariantRecord, env: SocialEnv, 
   const connection = await storedConnection(sql, variant.profile_id, variant.provider);
   if (!connection || connection.status !== "ACTIVE" || !connection.token_reference || !connection.provider_account_id) throw new Error("SOCIAL_NOT_CONNECTED");
   const bundle = await decryptTokenBundle(connection.token_reference, env.SOCIAL_TOKEN_KEY!);
-  if (variant.provider === "INSTAGRAM") return publishInstagram(variant, connection, bundle, env, beforeVisibleWrite);
+  if (variant.provider === "INSTAGRAM") return publishInstagram(sql, variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.provider === "FACEBOOK") return publishFacebook(variant, connection, bundle, env, beforeVisibleWrite);
   if (variant.provider === "LINKEDIN") return publishLinkedIn(variant, connection, bundle, env, beforeVisibleWrite);
   return publishGoogle(variant, connection, bundle, env, sql, beforeVisibleWrite);
@@ -1224,6 +1515,7 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   if (path === "/api/social/connect") return handleConnect(request, env);
   if (path === "/api/social/select") return handleSelect(request, env);
   if (path === "/api/social/disconnect") return handleDisconnect(request, env);
+  if (path === "/api/social/verify") return handleVerify(request, env);
   if (path === "/api/social/publish-now") return socialJson({ error: "PUBLISH_VIA_CALENDAR_REQUIRED" }, 410);
   const callback = /^\/api\/social\/callback\/([a-z]+)$/.exec(path);
   if (callback) return handleCallback(request, env, callback[1]);

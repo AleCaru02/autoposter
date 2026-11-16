@@ -107,6 +107,10 @@ export async function handleAssetLibrary(request: Request, env: Env): Promise<Re
       const preview = previews[0];
       if (!preview) return json({ error: "ASSET_NOT_FOUND" }, 404);
       const match = /^data:([^;,]+);base64,(.+)$/.exec(preview.storage_url);
+      // Files kept in object storage: public Reel files are returned as their own URL; private
+      // identity files (avatar Reels) must be signed by /api/avatar/media/url after an owner check.
+      if (!match && preview.storage_url.startsWith("private:")) return json({ privateStorageUrl: preview.storage_url });
+      if (!match && /^https:\/\/[a-z0-9]+\.public\.blob\.vercel-storage\.com\//.test(preview.storage_url)) return json({ previewUrl: preview.storage_url });
       if (!match) return json({ error: "ASSET_PREVIEW_UNAVAILABLE" }, 409);
       const binary = atob(match[2]);
       const bytes = new Uint8Array(binary.length);

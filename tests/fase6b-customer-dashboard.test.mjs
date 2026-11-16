@@ -11,10 +11,13 @@ for (const answer of ["Cosa richiede attenzione oggi", "Prossime pubblicazioni",
 for (const destination of ["/onboarding", "/app/contenuti", "/app/approvazioni", "/app/calendario", "/app/social", "/app/analytics", "/app/apprendimento"]) {
   assert.ok(page.includes(destination), `operational dashboard link missing: ${destination}`);
 }
-for (const table of ["content_items", "content_variants", "publication_jobs", "social_connections", "metric_snapshots", "learning_insights"]) {
+for (const table of ["content_items", "content_variants", "publication_jobs", "metric_snapshots", "learning_insights"]) {
   assert.ok(page.includes(`from(\"${table}\")`), `real dashboard source missing: ${table}`);
 }
-assert.ok((page.match(/\.eq\(\"profile_id\", profileId\)/g) ?? []).length >= 6, "every dashboard read must remain profile-scoped");
+assert.ok((page.match(/\.eq\("profile_id", profileId\)/g) ?? []).length >= 5, "every direct database dashboard read must remain profile-scoped");
+assert.match(page, /verifiedSocialCount\(profileId!\)/, "provider connections must use authenticated provider readiness");
+assert.match(page, /\/api\/social\/status\?profileId=\$\{encodeURIComponent\(profileId\)\}/, "social preflight must remain profile-scoped");
+assert.doesNotMatch(page, /from\("social_connections"\)/, "stored ACTIVE flags cannot count as verified channels");
 assert.match(page, /select\(\"id,insight,confidence,recommended_action,created_at\"\).*\.is\(\"applied_at\", null\)\.order\(\"created_at\"/, "learning insight query must match the production schema");
 for (const removedColumn of ["recommendation", "generated_at", 'eq(\"active\", true)']) {
   assert.equal(page.includes(removedColumn), false, `dashboard queries removed learning_insights column: ${removedColumn}`);

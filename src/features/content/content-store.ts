@@ -310,7 +310,7 @@ export async function loadContentWorkflow(profileId: string) {
   let assets: AssetRow[] = [];
   if (assetIds.length) {
     const assetsResult = await neonClient.from("assets")
-      .select("id,profile_id,source,kind,name,storage_url,mime_type,metadata,created_at")
+      .select("id,profile_id,source,kind,name,storage_url,mime_type,width,height,format,quality_status,identity_status,metadata,created_at")
       .eq("profile_id", profileId)
       .in("id", assetIds);
     if (assetsResult.error) throw new Error("Impossibile caricare i contenuti. Riprova.");

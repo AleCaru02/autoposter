@@ -18,6 +18,7 @@ import {
 import { loadPersonalBrandSources, type PersonalBrandSourceRow } from "../features/profiles/personal-brand-source-store";
 import type { Profile, ProfileType } from "../features/profiles/profile-context";
 import { authenticatedApiToken } from "../lib/auth-token";
+import { applyInstagramRecipe, INSTAGRAM_RECIPES, instagramDraftPreflight } from "../features/content/instagram-creator-toolkit";
 
 type ComposerStatus = "IDLE" | "GENERATING" | "READY" | "SAVING" | "SAVED";
 type PendingOperation = { fingerprint: string; id: string; request: ManualGenerationRequest };
@@ -393,6 +394,20 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
       {props.profileType === "PERSONAL_BRAND" && <label className="full">Dati da usare <span>(opzionale)</span><select disabled={generating} value={sourceKey} onChange={(event) => { setSourceKey(event.target.value); clearGenerated(); }}><option value="">Solo {props.profileName}: sito, brand e informazioni aggiuntive</option>{activeSources.map((row) => { const profile = props.profiles.find((item) => item.id === row.source_profile_id); const key = `${row.source_profile_id}::${row.pillar}`; return <option key={row.id} value={key}>Aggiungi fatti verificati da {profile?.name ?? "attività collegata"}</option>; })}</select></label>}
       <label className="full">Di cosa vuoi parlare?<textarea disabled={generating} rows={3} value={topic} maxLength={1000} placeholder="Es. Tre errori da evitare quando si affitta una casa" onChange={(event) => { setTopic(event.target.value); clearGenerated(); }} /></label>
       <label className="full">Obiettivo o dettagli da rispettare {props.profileType === "PERSONAL_BRAND" ? <span>(richiesto)</span> : <span>(opzionale)</span>}<input disabled={generating} value={objective} maxLength={500} placeholder="Es. Mostra le 5 differenze principali e chiudi con una CTA" onChange={(event) => { setObjective(event.target.value); clearGenerated(); }} /></label>
+      {providers.includes("INSTAGRAM") && <div className="full" aria-label="Modelli editoriali Instagram">
+        <strong>Modelli Instagram</strong>
+        <p className="field-help">Scegli una struttura già pronta. Puoi modificare tema e obiettivo prima di generare; non vengono inventati dati dell’attività.</p>
+        <div className="manual-choice-grid formats">{INSTAGRAM_RECIPES.map((recipe) =>
+          <button key={recipe.id} className="secondary-button" type="button" disabled={generating} title={recipe.description} onClick={() => {
+            const suggestion = applyInstagramRecipe(recipe.id, props.profileName, topic);
+            setTopic(suggestion.topic);
+            setObjective(suggestion.objective);
+            setFormat(suggestion.format);
+            setProviders(["INSTAGRAM"]);
+            clearGenerated();
+          }}>{recipe.label}</button>
+        )}</div>
+      </div>}
       <fieldset className="full" disabled={generating}><legend>Social</legend><div className="manual-choice-grid providers">{PROVIDERS.map((provider) => <label key={provider.value} className={providers.includes(provider.value) ? "selected" : ""}><input type="checkbox" checked={providers.includes(provider.value)} onChange={() => toggleProvider(provider.value)} /><span>{provider.label}</span></label>)}</div></fieldset>
       <fieldset className="full" disabled={generating}><legend>Formato</legend><div className="manual-choice-grid formats"><label className={format === "POST" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "POST"} onChange={() => { setFormat("POST"); clearGenerated(); }} /><span>Post</span></label><label className={format === "STORY" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "STORY"} onChange={() => { setFormat("STORY"); clearGenerated(); }} /><span>Storia</span></label><label className={format === "CAROUSEL" ? "selected" : ""}><input type="radio" name="manual-format" checked={format === "CAROUSEL"} onChange={() => { setFormat("CAROUSEL"); clearGenerated(); }} /><span>Carosello</span></label></div></fieldset>
     </div>
@@ -422,6 +437,15 @@ export function ManualContentComposer(props: { profileId: string; profileName: s
       <div className="manual-variant-list">{content.variants.map((variant, index) => <article key={`${variant.provider}-${variant.format}`} className="manual-variant">
         <header><strong>{PROVIDERS.find((provider) => provider.value === variant.provider)?.label ?? variant.provider}</strong><span>{variant.format === "STORY" ? "Storia" : variant.format === "CAROUSEL" ? "Carosello" : "Post"}</span></header>
         {!variant.eligible && <p className="manual-warning">Questa proposta richiede una revisione particolare per il social scelto.</p>}
+        {variant.provider === "INSTAGRAM" && <details className="manual-source-proof">
+          <summary>Anteprima caption e controllo Instagram</summary>
+          <p>{instagramDraftPreflight(variant).preview || "Anteprima non disponibile"}</p>
+          <p className="field-help">{instagramDraftPreflight(variant).captionLength} / 2200 caratteri complessivi (hook, testo, CTA e hashtag).</p>
+          {instagramDraftPreflight(variant).blockingIssues.map((issue) => <p key={issue} className="manual-warning">Da correggere: {issue}</p>)}
+          {instagramDraftPreflight(variant).warnings.map((warning) => <p key={warning} className="field-help">{warning}</p>)}
+          <p className="field-help">Controllo preliminare del testo: media, autorizzazioni e pubblicabilità effettiva restano soggetti ai controlli server.</p>
+        </details>}
+
         <div className="manual-edit-grid">
           <label>Hook<input value={variant.hook} onChange={(event) => updateVariant(index, { hook: event.target.value })} /></label>
           <label>Invito all’azione<input value={variant.cta ?? ""} onChange={(event) => updateVariant(index, { cta: event.target.value || null })} /></label>

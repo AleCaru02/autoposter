@@ -87,8 +87,8 @@ async function run() {
     for (const provider of ["INSTAGRAM", "FACEBOOK", "LINKEDIN", "GBP"] as const) {
       assert.deepEqual(AUTOPILOT_PUBLISH_FORMATS[provider], providerCapabilities(provider).publish, `${provider} autopilot formats must match the real publisher`);
     }
-    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 0, "CAROUSEL"), "POST", "single-asset Instagram carousel plans must fall back safely");
-    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 1, "CAROUSEL"), "STORY", "Instagram fallback keeps its supported rotation");
+    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 0, "CAROUSEL"), "CAROUSEL", "Instagram plans may use real multi-image carousel publishing");
+    assert.equal(chooseAutopilotPublishFormat("INSTAGRAM", 1, "CAROUSEL"), "CAROUSEL", "Instagram keeps carousel intent when the renderer supports per-slide assets");
     assert.equal(chooseAutopilotPublishFormat("FACEBOOK", 2, "STORY"), "POST");
     assert.equal(chooseAutopilotPublishFormat("LINKEDIN", 3, "CAROUSEL"), "POST");
     assert.equal(chooseAutopilotContentType("POST"), "SINGLE_POST", "normalized single-post publishers must not retain a carousel brief");
@@ -97,7 +97,7 @@ async function run() {
 
     const plannerSource = await readFile(new URL("../api/_lib/openai-strategy-planner.ts", import.meta.url), "utf8");
     assert.match(plannerSource, /Facebook, LinkedIn e GBP usa SINGLE_POST/);
-    assert.match(plannerSource, /Non pianificare caroselli finché non esiste un bundle reale di più asset/);
+    assert.match(plannerSource, /caroselli Instagram soltanto quando ogni slide/);
 
     const vercelAutopilotSource = await readFile(new URL("../api/autopilot.ts", import.meta.url), "utf8");
     assert.match(vercelAutopilotSource, /runContentAutopilotSerialized/, "Vercel manual autopilot must use the serialized runner");
@@ -107,7 +107,7 @@ async function run() {
     const vercelEditorialSource = await readFile(new URL("../api/editorial-agents.ts", import.meta.url), "utf8");
     const vercelBrandSource = await readFile(new URL("../api/onboarding-analyze.ts", import.meta.url), "utf8");
     for (const [name, source] of [["autopilot", vercelAutopilotSource], ["images", vercelImageSource], ["profiles", vercelProfileSource], ["editorial", vercelEditorialSource], ["brand", vercelBrandSource]] as const) {
-      assert.ok(source.includes(liveDataApi), name + " must use the live Neon Data API for auth/RLS");
+      assert.ok(source.includes(liveDataApi) || source.includes("neonDataApiUrl()"), name + " must use the live Neon Data API for auth/RLS");
       assert.doesNotMatch(source, /ep-nameless-truth|aws\\.neondb/, name + " cannot use the retired Neon endpoint");
     }
 

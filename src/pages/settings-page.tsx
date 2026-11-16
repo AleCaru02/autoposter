@@ -1,7 +1,7 @@
 import { CreditCard, Eye, EyeOff, KeyRound, RefreshCw, Settings2, Share2, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { NavLink } from "react-router-dom";
-import { authClient, neonClient, NEON_DATA_API_URL } from "../lib/neon-client";
+import { authClient, dataApiFetch, neonClient, NEON_DATA_API_URL } from "../lib/neon-client";
 import { authenticatedApiToken } from "../lib/auth-token";
 import { useAutoSaveDraft } from "../lib/use-autosave-draft";
 import { useProfiles } from "../features/profiles/profile-context";
@@ -134,7 +134,7 @@ export function SettingsPage() {
     setBudgetError(null);
     try {
       const token = await authenticatedApiToken();
-      const response = await fetch(`${NEON_DATA_API_URL}/rpc/customer_ai_budget_overview`, {
+      const response = await dataApiFetch(`${NEON_DATA_API_URL}/rpc/customer_ai_budget_overview`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
@@ -179,7 +179,7 @@ export function SettingsPage() {
     try {
       const token = await authenticatedApiToken();
       const callRpc = async (name: string, payload: Record<string, unknown>) => {
-        const response = await fetch(`${NEON_DATA_API_URL}/rpc/${name}`, {
+        const response = await dataApiFetch(`${NEON_DATA_API_URL}/rpc/${name}`, {
           method: "POST",
           headers: {
             authorization: `Bearer ${token}`,

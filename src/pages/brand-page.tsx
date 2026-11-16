@@ -41,6 +41,10 @@ type BrandDraft = {
   differentiators: string[];
   valuePropositions: string[];
   colors: string[];
+  fonts: string[];
+  logoUrl: string;
+  logoAssetId: string;
+  brandKitApproved: boolean;
   visualSummary: string;
   userContext: string;
 };
@@ -93,6 +97,7 @@ export function BrandPage() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [logoAssets, setLogoAssets] = useState<Array<{id:string;name:string;mime_type:string|null}>>([]);
 
   const save = useCallback(async (draft: BrandDraft) => {
     const profileId = selectedProfile?.id;
@@ -124,6 +129,11 @@ export function BrandPage() {
         ...existingVisualIdentity,
         detectedGoals: draft.detectedGoals,
         observedColors: concreteColors(draft.colors),
+        observedFonts: draft.fonts.map((font)=>font.trim()).filter(Boolean).slice(0,6),
+        logoUrl: /^https:\/\//i.test(draft.logoUrl.trim()) ? draft.logoUrl.trim() : null,
+        logoAssetId: /^[0-9a-f-]{36}$/i.test(draft.logoAssetId) ? draft.logoAssetId : null,
+        brandKitApproved: draft.brandKitApproved,
+        brandKitApprovedAt: draft.brandKitApproved ? (existingVisualIdentity.brandKitApprovedAt ?? new Date().toISOString()) : null,
         summary: draft.visualSummary,
       },
       updated_at: new Date().toISOString(),
@@ -144,6 +154,8 @@ export function BrandPage() {
     setLoading(false);
     if (result.error) { setPageError("Impossibile caricare il brand. Riprova."); return; }
     const row = result.data as BrandRow | null;
+    const availableAssets = await neonClient.from("assets").select("id,name,mime_type").eq("profile_id",profile.id).eq("kind","IMAGE").in("mime_type",["image/png","image/jpeg"]).order("created_at",{ascending:false}).limit(60);
+    setLogoAssets(availableAssets.error ? [] : (availableAssets.data ?? []) as Array<{id:string;name:string;mime_type:string|null}>);
     const visual = row?.visual_identity && typeof row.visual_identity === "object" ? row.visual_identity as Record<string, unknown> : {};
     const activeGoals = stringList(row?.goals);
     let detectedGoals = stringList(visual.detectedGoals);
@@ -177,6 +189,10 @@ export function BrandPage() {
       differentiators: stringList(row?.differentiators),
       valuePropositions: stringList(row?.value_propositions),
       colors: Array.isArray(visual.observedColors) ? concreteColors(visual.observedColors.filter((item): item is string => typeof item === "string")) : [],
+      fonts: Array.isArray(visual.observedFonts) ? visual.observedFonts.filter((value): value is string => typeof value === "string").slice(0,6) : [],
+      logoUrl: typeof visual.logoUrl === "string" ? visual.logoUrl : "",
+      logoAssetId: typeof visual.logoAssetId === "string" ? visual.logoAssetId : "",
+      brandKitApproved: visual.brandKitApproved === true,
       visualSummary: typeof visual.summary === "string" ? visual.summary : "",
       userContext: row?.user_context ?? "",
     });
@@ -227,13 +243,31 @@ export function BrandPage() {
   if (!selectedProfile) return null;
   if (loading || !draft) return <div className="page-content"><section className="panel">Caricamento…</section></div>;
 
-  const patch = <K extends keyof BrandDraft>(field: K, value: BrandDraft[K]) => autosave.setDraft((current) => ({ ...current, [field]: value }));
+  const patch = <K extends keyof BrandDraft>(field: K, value: BrandDraft[K]) => autosave.setDraft((current) => ({ ...current, [field]: value, brandKitApproved: field === "brandKitApproved" ? Boolean(value) : ["colors","fonts","logoUrl","logoAssetId","visualSummary","name"].includes(field) ? false : current.brandKitApproved }));
   const toggleGoal = (goal: string) => patch("goals", draft.goals.includes(goal) ? draft.goals.filter((item) => item !== goal) : [...draft.goals, goal]);
   const contextSaveLabel = autosave.status === "SAVING" ? "Salvataggio…" : autosave.status === "WAITING" ? "Da salvare" : autosave.status === "ERROR" ? "Errore di salvataggio" : "Salvato";
   const contextSaveClass = autosave.status === "ERROR" ? "error" : autosave.status === "SAVING" ? "saving" : autosave.status === "WAITING" ? "waiting" : "saved";
 
   return <div className="page-content"><header className="page-header"><div><p className="eyebrow">Brand · {draft.name}</p><h1>Identità dell’attività</h1><p>Il sistema usa il sito come base e mantiene i dati associati a questa attività.</p></div><div className="header-actions">{draft.website.trim() && <button className="compact-action" type="button" disabled={analyzing} onClick={() => void analyzeWebsite()}><RefreshCw size={15} className={analyzing ? "spin" : ""} /> {analyzing ? "Aggiornamento in corso…" : "Aggiorna dal sito"}</button>}</div></header>{(pageError || autosave.error) && <p className="form-error">{pageError || autosave.error}</p>}
     <section className="panel brand-intelligence"><div className="panel-heading"><div><h2>Identità rilevata dal sito</h2><p>Dati ricavati dal sito e associati a questa attività.</p></div></div>{draft.colors.length > 0 && <div className="brand-colors">{draft.colors.slice(0, 8).map((color) => <span key={color} title={color} style={{ background: color }} />)}</div>}{visibleBrandSummary && <p className="brand-summary">{visibleBrandSummary}</p>}<div className="insight-groups">{draft.toneTraits.length > 0 && <div><small>Tono</small><div className="insight-chips">{draft.toneTraits.map((item) => <span key={item}>{item}</span>)}</div></div>}{draft.targetSegments.length > 0 && <div><small>Pubblico</small><ul className="brand-insight-list">{draft.targetSegments.map((item) => <li key={item}>{item}</li>)}</ul></div>}{draft.services.length > 0 && <div><small>Servizi</small><ul className="brand-insight-list brand-insight-list-services">{draft.services.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div></section>
+    <section className="panel brand-kit-panel">
+      <div className="panel-heading"><div><h2>Brand Kit per post e caroselli</h2><p>Controlla identità rilevata e scegli il logo originale. Non confermare se i dati sono sbagliati.</p></div></div>
+      <div className="brand-edit-grid">
+        <label className="full">Logo rilevato dal sito (HTTPS)<input type="url" value={draft.logoUrl} placeholder="https://azienda.it/logo.png" onChange={(event) => patch("logoUrl",event.target.value)} /></label>
+        {draft.logoUrl && /^https:\/\//i.test(draft.logoUrl) && <div className="full"><img src={draft.logoUrl} alt="Anteprima logo rilevato dal sito" style={{maxWidth:160,maxHeight:84,objectFit:"contain"}} referrerPolicy="no-referrer" /></div>}
+        <label className="full">Logo ufficiale da Libreria immagini<select value={draft.logoAssetId} onChange={(event)=>patch("logoAssetId",event.target.value)}>
+          <option value="">Nessuno selezionato — solo nome del brand</option>
+          {logoAssets.map(asset=><option key={asset.id} value={asset.id}>{asset.name}</option>)}
+        </select></label>
+        <p className="field-help full">Per applicare il logo esatto ai nuovi visual, carica prima un PNG o JPEG nella Libreria e selezionalo qui. Un URL rilevato non è un logo confermato.</p>
+        <label className="full">Font del brand (uno per riga)<textarea rows={2} value={draft.fonts.join("\n")} onChange={(event)=>patch("fonts",listFromText(event.target.value))}/></label>
+        <label className="full">Colori ufficiali (uno per riga)<textarea rows={3} value={draft.colors.join("\n")} onChange={(event)=>patch("colors",listFromText(event.target.value))}/></label>
+        <div className="full brand-colors">{draft.colors.slice(0,4).map((color,index)=><span key={index} title={color} style={{backgroundColor:color}}/>)}</div>
+        <div className="full"><button className="compact-action" type="button" disabled={autosave.status==="SAVING" || draft.colors.length<2} onClick={()=>{patch("brandKitApproved",true);}}>
+          <Check size={15}/> {draft.brandKitApproved?"Identità confermata":"Conferma Brand Kit"}
+        </button><p className="field-help">{draft.brandKitApproved?"Brand Kit confermato. Le modifiche future richiederanno nuova conferma.":"Conferma almeno due colori verificati. Il font originale sarà usato soltanto quando disponibile per il rendering; altrimenti si utilizza un sostituto."}</p></div>
+      </div>
+    </section>
     <section className="panel brand-context-panel"><div className="panel-heading"><div><h2>Informazioni aggiuntive</h2><p>Aggiungi dettagli non presenti sul sito che vuoi associare a questa attività.</p></div></div>
       <label className="brand-context-field"><span>Dettagli aggiuntivi</span><textarea rows={7} maxLength={5000} aria-describedby="brand-context-helper" value={draft.userContext} placeholder="Es. servizi particolari, aree servite, modalità di lavoro, punti di forza o informazioni che non compaiono sul sito..." onChange={(event) => patch("userContext", event.target.value)} onBlur={() => void autosave.flush().catch(() => undefined)} /></label>
       <div className="brand-context-meta" id="brand-context-helper"><div><p>Non inserire password, chiavi API o dati sensibili.</p><span>{draft.userContext.length}/5000</span></div><div className={`autosave-mini ${contextSaveClass}`} role="status" aria-live="polite"><span>Salvataggio automatico</span><strong>{contextSaveLabel}</strong></div></div>

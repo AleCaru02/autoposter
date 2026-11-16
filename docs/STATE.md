@@ -1,5 +1,20 @@
 # Stato operativo — Post Automatici
 
+## Aggiornamento 13/11/2026 (audit P0, evidenze live)
+
+- Runtime canonico: **Vercel** `post-automatici-canonical` (https://post-automatici-canonical.vercel.app). `/api/health` → 200 `postgres_ready`.
+- Cloudflare Worker `autoposter.*.workers.dev`: fallback. Cron disattivati dal codice tramite `WORKER_SCHEDULER_ENABLED=false` (effettivo al prossimo deploy Worker approvato). Prima di questo cambio Vercel e Worker eseguivano entrambi l'autopilot sullo stesso DB.
+- Database di produzione: Neon `post-automatici-free-recovery`, branch `auth-recovery-v2` (piano free, 1 GB per branch: non adatto a video).
+- Testi OpenAI `gpt-5.6-terra`: PASS in produzione (eventi `ai_usage_events` giornalieri). Immagini `gpt-image-2.5-sunburst`: nessuna generazione negli ultimi 30 giorni.
+- Pubblicazioni: 13 job, tutti `BLOCKED_APPROVAL`; 0 pubblicati; 0 `metric_snapshots`. SAFE_MODE attivo.
+- Reel faceless (branch `feature/reel-engine-20261113`, PR #332): pipeline cloud implementata (script → immagini → voce → render FFmpeg → QA tecnico → variante REEL in Revisioni).
+  - PASS: render reale in CI Linux e locale; self-test nella Vercel Function di preview (9 s, 1080x1920 H.264/AAC, 12,3 s di render); SQL su branch Neon QA (enqueue idempotente, claim/lease, ripresa, guardia approvazione, privilegi).
+  - BLOCKED: run live end-to-end (serve migrazione in prod, Vercel Blob, REEL_ENGINE_ENABLED, ok spesa OpenAI ~1,5 $).
+  - MISSING: avatar fotorealistico e voce clonata (budget test 0 €), publisher IG/FB REELS.
+- Bug corretti 13/11: Content QA rifiutava sempre immagini 4:5/9:16; compositor immagini disegnava pannelli senza testo (WOFF ignorato da resvg).
+- Riserve budget orfane: ~45 `capability_usage_events` in stato `RESERVED` (22/09→06/11), causa chiusa dal hotfix del 07/11; pulizia DB da autorizzare.
+- Le sezioni seguenti (28/08) sono storiche.
+
 Data audit: 2026-08-28
 
 ## Gate

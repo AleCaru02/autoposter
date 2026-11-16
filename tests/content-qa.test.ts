@@ -164,3 +164,15 @@ assert.equal(genericFail.checks.genericTemplate,"FAIL");
 assert.equal(genericFail.checks.editorialQuality,"FAIL");
 
 console.log("Content QA regression: PASS — structured global/slide QA, factual classification, visual inspection, budget and fail-closed approval.");
+
+{
+  const { assetDimensionsFit } = await import("../api/_lib/content-qa.js");
+  assert.equal(assetDimensionsFit({ width: 1536, height: 1920 }, "POST"), true, "Instagram/Facebook 4:5 feed images produced by the generator must reach visual QA");
+  assert.equal(assetDimensionsFit({ width: 2048, height: 2048 }, "POST"), true);
+  assert.equal(assetDimensionsFit({ width: 1440, height: 2560 }, "STORY"), true, "9:16 Story images produced by the generator must reach visual QA");
+  assert.equal(assetDimensionsFit({ width: 1080, height: 1920 }, "REEL"), true, "Reel covers are 9:16");
+  assert.equal(assetDimensionsFit({ width: 1440, height: 2560 }, "POST"), false, "vertical images are not valid feed posts");
+  assert.equal(assetDimensionsFit({ width: 2048, height: 2048 }, "STORY"), false, "square images are not valid Stories");
+  assert.equal(assetDimensionsFit({ width: null as unknown as number, height: 1920 }, "POST"), false);
+  console.log("PASS content QA aspect: 4:5, 1:1, 9:16 accettati coerentemente con il generatore.");
+}

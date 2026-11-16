@@ -1,3 +1,4 @@
+import { signedMediaUrl } from "../lib/private-media";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Images, Link2, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { authenticatedApiToken } from "../lib/auth-token";
@@ -82,6 +83,12 @@ export function AssetsPage() {
             headers:{ authorization:`Bearer ${token}` },
           });
           if (!previewResponse.ok) return null;
+          if ((previewResponse.headers.get("content-type") || "").includes("application/json")) {
+            const remote = await previewResponse.json() as { previewUrl?: string; privateStorageUrl?: string };
+            if (remote.previewUrl) return [asset.id,remote.previewUrl] as const;
+            if (remote.privateStorageUrl) return [asset.id,await signedMediaUrl(selectedProfile.id,remote.privateStorageUrl)] as const;
+            return null;
+          }
           const blob = await previewResponse.blob();
           return [asset.id,URL.createObjectURL(blob)] as const;
         } catch {
@@ -91,7 +98,7 @@ export function AssetsPage() {
         const next: Record<string,string> = {};
         for (const entry of entries) if (entry) next[entry[0]] = entry[1];
         setPreviewUrls((current) => {
-          for (const value of Object.values(current)) URL.revokeObjectURL(value);
+          for (const value of Object.values(current)) if (value.startsWith("blob:")) URL.revokeObjectURL(value);
           return next;
         });
       });

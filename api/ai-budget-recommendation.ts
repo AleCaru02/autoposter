@@ -1,7 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { AiBudgetRecommendationEngine } from "./_lib/ai-budget-recommendation.js";
+import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
+import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
-const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
+const DATA_API = neonDataApiUrl();
 
 function bearer(req: VercelRequest) {
   const value = req.headers.authorization;
@@ -16,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const profileId = typeof req.query.profileId === "string" ? req.query.profileId : "";
   if (!profileId) return res.status(400).json({ error: "PROFILE_REQUIRED" });
 
-  const profile = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
+  const profile = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   });
   if (!profile.ok) return res.status(profile.status === 401 ? 401 : 403).json({ error: "PROFILE_ACCESS_DENIED" });

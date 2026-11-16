@@ -1,4 +1,6 @@
-const AUTH_UPSTREAM = "https://ep-divine-band-arrkz7vq.neonauth.c-4.us-west-2.aws.neon.tech/neondb/auth";
+import { neonAuthUrl } from "../api/_lib/neon-endpoints.js";
+
+const AUTH_UPSTREAM = neonAuthUrl();
 const AUTH_PREFIX = "/api/auth";
 const DEFAULT_APP_ORIGIN = "https://autoposter.02alessandrocaruso.workers.dev";
 const MAX_BODY_BYTES = 64 * 1024;

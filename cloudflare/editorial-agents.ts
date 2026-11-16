@@ -1,4 +1,5 @@
 import { runOpenAIStrategyPlanner, type StrategyPlannerEnv } from "../api/_lib/openai-strategy-planner.js";
+import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
 
@@ -14,7 +15,7 @@ function bearer(request: Request) {
 async function canAccessProfile(request: Request, profileId: string) {
   const token = bearer(request);
   if (!token) return false;
-  const response = await fetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
+  const response = await dataApiFetch(`${DATA_API}/profiles?id=eq.${encodeURIComponent(profileId)}&select=id&limit=1`, { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
   if (!response.ok) return false;
   const rows = await response.json() as Array<{ id?: string }>;
   return rows.some((row) => row.id === profileId);

@@ -7,10 +7,12 @@ const entrySource = readFileSync(new URL("../cloudflare/entry.ts", import.meta.u
 const publicationMigration = readFileSync(new URL("../db/migrations/20260908_fase7f_safe_publication_engine.sql", import.meta.url), "utf8");
 const deployWorkflow = readFileSync(new URL("../.github/workflows/deploy-worker.yml", import.meta.url), "utf8");
 
+// 16/11/2026: the hourly Worker trigger (autopilot + learning, duplicated by the Vercel cron)
+// was removed in the Cloudflare dashboard; the config must not re-add it on the next Worker deploy.
 assert.deepEqual(
-  [...config.triggers.crons].sort(),
-  ["*/5 * * * *", "0 * * * *"].sort(),
-  "production must declare the publication and hourly Cloudflare Cron Triggers",
+  [...config.triggers.crons],
+  ["*/5 * * * *"],
+  "the Worker keeps only the publication trigger; the hourly autopilot runs on Vercel (canonical runtime)",
 );
 assert.equal(config.vars.SAFE_MODE, "true", "production cron must inherit fail-closed SAFE_MODE");
 assert.match(entrySource, /async scheduled\(controller:[\s\S]*controller\.cron === "\*\/5 \* \* \* \*"\)[\s\S]*processDuePublications\(env\)/);
@@ -41,14 +43,23 @@ async function invokeSafeTick(scheduledTime: number) {
   const ctx = { waitUntil(promise: Promise<unknown>) { waited.push(promise); } };
   await worker.scheduled(
     { cron: "*/5 * * * *", scheduledTime },
-    { SAFE_MODE: "true" } as never,
+    { SAFE_MODE: "true", WORKER_SCHEDULER_ENABLED: "true" } as never,
     ctx,
   );
   assert.equal(waited.length, 1, "each cron invocation must register exactly one publication task");
   await Promise.all(waited);
 }
 
+async function invokeDisabledTick(scheduledTime: number) {
+  const waited: Promise<unknown>[] = [];
+  const ctx = { waitUntil(promise: Promise<unknown>) { waited.push(promise); } };
+  await worker.scheduled({ cron: "*/5 * * * *", scheduledTime }, { SAFE_MODE: "true" } as never, ctx);
+  await worker.scheduled({ cron: "0 * * * *", scheduledTime }, { SAFE_MODE: "true", WORKER_SCHEDULER_ENABLED: "false" } as never, ctx);
+  assert.equal(waited.length, 0, "with Vercel as canonical scheduler the Worker fallback must not start any background work");
+}
+
 try {
+  await invokeDisabledTick(Date.parse("2026-10-01T19:35:00.000Z"));
   const firstTime = Date.parse("2026-10-01T19:40:00.000Z");
   await Promise.all([
     invokeSafeTick(firstTime),
