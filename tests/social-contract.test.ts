@@ -47,9 +47,9 @@ async function run() {
   assert.deepEqual(missingProviderConfiguration("FACEBOOK", base), ["META_APP_ID", "META_APP_SECRET"]);
   assert.deepEqual(missingProviderConfiguration("GBP", { ...base, SOCIAL_TOKEN_KEY: "short" }), ["SOCIAL_TOKEN_KEY (minimo 24 caratteri)", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]);
 
-  assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY", "CAROUSEL"]);
+  assert.deepEqual(providerCapabilities("INSTAGRAM").publish, ["POST", "STORY", "CAROUSEL", "REEL"]);
   assert.deepEqual(providerCapabilities("GBP").publish, ["POST"]);
-  assert.equal(providerCapabilities("FACEBOOK").note.includes("non vengono simulati"), true);
+  assert.deepEqual(providerCapabilities("FACEBOOK").publish, ["POST", "REEL"]);
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: false, status: "NOT_CONNECTED" }).state, "BLOCKED_PROVIDER");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "NOT_CONNECTED" }).state, "USER_ACTION_REQUIRED");
   assert.equal(socialReadiness({ provider: "INSTAGRAM", configured: true, status: "ACTIVE", permissions: ["instagram_manage_insights"], lastValidatedAt: new Date().toISOString() }).state, "PASS_REAL");
