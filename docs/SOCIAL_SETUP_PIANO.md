@@ -1,40 +1,36 @@
-# Social: stato verificato e passi per attivarli su Vercel (15/11/2026)
+# Social: stato verificato e configurazione (aggiornato al 16/11/2026)
 
-**Nessun valore segreto è stato letto, stampato o salvato.** Le verifiche sui portali sono state fatte in sola lettura, con la sessione del browser già aperta.
+**Nessun valore segreto è stato stampato o salvato nel repository.** I secret sono stati copiati dai portali negli appunti con il pulsante "copia" e passati direttamente a `vercel env add --sensitive`; poi gli appunti sono stati svuotati.
 
-## Stato reale
+Unica eccezione: il primo secret Google creato il 16/11 è comparso in un'etichetta del browser letta dall'agente. È stato considerato compromesso: prima disattivato, poi eliminato (non era mai stato usato). Al suo posto ne è stato creato un altro, copiato senza visualizzarlo.
 
-| Voce | Stato verificato |
+## Stato al 16/11/2026
+
+| Voce | Stato |
 |---|---|
-| Variabili su Vercel produzione | Presenti: `META_APP_ID`, `META_GRAPH_VERSION`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_API_VERSION`, `LINKEDIN_ORGANIZATION_ACCESS`, `GOOGLE_CLIENT_ID`, `APP_BASE_URL`, `SAFE_MODE`. **Mancano** `SOCIAL_TOKEN_KEY`, `META_APP_SECRET`, `LINKEDIN_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET` |
-| Variabili su reel-qa | `SOCIAL_TOKEN_KEY` presente (chiave solo QA); app ID e secret social assenti |
-| Collegamenti in produzione (DB) | 4 righe ACTIVE del profilo "Il Tuo Property Manager": Instagram e Facebook (27/09, token di Pagina senza scadenza), LinkedIn (28/09, scade il **27/11/2026**), Google Business Profile (28/09, token d'accesso scaduto). Tutti i token sono cifrati (`enc:`) con la `SOCIAL_TOKEN_KEY` del Worker Cloudflare |
-| Interfaccia | Corretta: uno stato ACTIVE "storico" non viene mostrato come collegato senza verifica server |
-| App Meta | "AutoPoster Il Tuo Property Man" (ID 900306149763443), modalità sviluppo: va bene per uso personale, perché sei amministratore. Gli URI di reindirizzamento validi puntano **solo** al Worker (`…workers.dev/api/social/callback/facebook` e `/instagram`) |
-| App LinkedIn | "AutoPoster iltuopropertymanager" (client 77gm5otb0kan9y). Prodotti: **Share on LinkedIn** e **Sign In with OpenID**. Scope: `openid profile email w_member_social`. URI di reindirizzamento: solo Worker e localhost. **Community Management API non approvata**: niente pubblicazione su Pagina aziendale e niente metriche dei post. Esiste anche un'app "AutoPoster Analytics" (client 78rg6t1mlauhno), ancora da collegare a un uso preciso |
-| Google Cloud | La console non si carica nella sessione del browser (errore della console): credenziali OAuth e accesso alla Business Profile API sono **da verificare** |
-| Worker Cloudflare | La versione su `main` ha ancora i cron `*/5` e orario **senza** il blocco `WORKER_SCHEDULER_ENABLED`, che esiste solo nella PR #332. È una doppia pianificazione attiva insieme ai cron Vercel. La pubblicazione doppia è impedita dai claim sul DB, la generazione AI doppia no |
+| Vercel Production | Aggiunte `LINKEDIN_CLIENT_SECRET` e `GOOGLE_CLIENT_SECRET` (Sensitive). Mancano `META_APP_SECRET` (Meta chiede di reinserire la password) e `SOCIAL_TOKEN_KEY` (vedi sotto). Le variabili diventano attive solo al prossimo deploy di produzione |
+| Vercel reel-qa | `SOCIAL_TOKEN_KEY` (chiave solo QA), `LINKEDIN_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET`, `META_APP_ID`, `LINKEDIN_CLIENT_ID`, `GOOGLE_CLIENT_ID`. Manca `META_APP_SECRET` |
+| App Meta 900306149763443 | Facebook Login for Business → URI di reindirizzamento: i 2 del Worker invariati, più `/api/social/callback/facebook` e `/instagram` sul dominio canonico e su reel-qa |
+| App LinkedIn 77gm5otb0kan9y | Redirect: localhost e Worker invariati, più `/api/social/callback/linkedin` sul dominio canonico e su reel-qa. Prodotti: Share on LinkedIn e Sign In with OpenID. Community Management API non approvata: niente Pagina aziendale né metriche |
+| Google, progetto `post-automatici`, client "Post Automatici Web" | Redirect: Worker invariato, più `/api/social/callback/gbp` sul dominio canonico e su reel-qa. Secret: `****RAO3` (Worker) invariato e attivo, più un secret nuovo per Vercel. API abilitate: Account Management, Business Information, **Google My Business API (v4, Local Post)** e **Business Profile Performance API (metriche)**, le ultime due abilitate il 16/11. Quota Account Management: 300 richieste/min, quindi l'accesso alle API GBP è approvato |
+| Schermata di consenso Google | Stato **Test**: i refresh token scadono dopo 7 giorni, per questo il token GBP risulta scaduto. Per token stabili serve pubblicare l'app ("In produzione"), dopo aver completato il Branding. È una decisione del proprietario |
+| Collegamenti in produzione (DB) | 4 righe ACTIVE, cifrate con la `SOCIAL_TOKEN_KEY` del Worker. Nessuna è stata modificata |
+| Worker Cloudflare | Il 16/11 è stato rimosso dal pannello il solo trigger orario (autopilot + learning, già eseguiti dal cron Vercel). Resta `*/5` (pubblicazioni, bloccate da SAFE_MODE; su `main` Vercel non pubblica). Anche `wrangler.jsonc` della PR dichiara solo `*/5`. Ripristino: Settings → Trigger events → Add `0 * * * *` |
 
-## SOCIAL_TOKEN_KEY: tre strade (scegli tu)
-1. **Riusare la chiave originale**, se l'hai salvata, inserendola tu su Vercel. Instagram e Facebook tornano operativi subito, senza ricollegarli. LinkedIn funziona fino al 27/11.
-2. **Migrazione senza che nessuno veda le chiavi:**
-   - genero una chiave nuova e la scrivo direttamente come segreto su Vercel e sul Worker, senza mostrarla;
-   - un endpoint temporaneo del Worker, protetto da `CRON_SECRET`, ricifra i 4 token con la nuova chiave e tiene un backup;
-   - verifico, poi Vercel usa la chiave nuova.
-   - Richiede un deploy del Worker in produzione.
-3. **Chiave nuova e ricollegamento dei 4 account via OAuth.** È la strada più semplice; il ricollegamento serve comunque per LinkedIn a breve e per Google.
+## SOCIAL_TOKEN_KEY: la chiave originale non è recuperabile senza un deploy del Worker
+- **Dove si trova:** solo come secret del Worker Cloudflare, che si può scrivere ma non rileggere. Non è tra i secret di GitHub Actions: il workflow `deploy-worker` la passa solo se presente, e non lo è.
+- **Precauzioni prese:** non è stata sovrascritta e Vercel Production non ha ancora una chiave sua.
 
-## Operazioni che richiedono la tua approvazione o il tuo intervento
-1. **Inserire i secret, solo tu:** i portali mostrano i secret solo dopo aver reinserito la password, e io non inserisco password né leggo segreti.
-   - Percorso: Vercel → progetto `post-automatici-canonical` → Settings → Environment Variables → Add → spunta "Sensitive".
-   - Ambienti: **Production** e **reel-qa**.
-   - Nomi: `META_APP_SECRET`, `LINKEDIN_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET`. Per la strada 1 anche `SOCIAL_TOKEN_KEY`.
-2. **Aggiungere gli URI di reindirizzamento** (lo faccio io dal browser dopo il tuo ok):
-   - Meta: `https://post-automatici-canonical.vercel.app/api/social/callback/facebook`, `…/instagram` e gli stessi due sul dominio reel-qa;
-   - LinkedIn: `…/api/social/callback/linkedin` su entrambi i domini;
-   - Google: `…/api/social/callback/gbp` su entrambi i domini.
-3. **Fermare la doppia pianificazione del Worker:** deploy in produzione del Worker con `WORKER_SCHEDULER_ENABLED=false`, già nel codice della PR, oppure rimozione dei cron dal Worker.
-4. **LinkedIn:** se vuoi pubblicare sulla Pagina aziendale e leggere le metriche, devi chiedere a LinkedIn l'accesso alla Community Management API. Senza, si pubblica solo sul profilo personale.
+Procedura consigliata, senza perdere dati, da eseguire al momento del rilascio autorizzato:
+1. Merge della PR e deploy di produzione. Il Worker con `WORKER_SCHEDULER_ENABLED=false` smette di pubblicare e Vercel diventa l'unico runtime.
+2. Genero una `SOCIAL_TOKEN_KEY` nuova (32 byte casuali, mai visualizzati) e la scrivo solo su Vercel Production.
+3. In Social premi **Verifica** sui 4 account: risponde `SOCIAL_TOKEN_KEY_MISMATCH` e non scrive nulla nel database.
+4. Premi **Ricollega** su ogni account e dai il consenso OAuth. La riga viene sovrascritta con il token nuovo; contenuti, calendario, metriche e altri dati non vengono toccati.
+5. Premi **Verifica** di nuovo. Un social risulta "Collegato" solo se la lettura API riesce.
+
+Alternative:
+- se hai salvato la chiave originale, la inserisci tu come `SOCIAL_TOKEN_KEY` (Sensitive) su Production;
+- oppure autorizzi un deploy una tantum del Worker con un endpoint di migrazione.
 
 ## Verifica dopo la configurazione, senza pubblicare nulla
 In Social, il pulsante **Verifica** chiama `POST /api/social/verify` (commit `266cb44` e successivi), che fa solo letture:
