@@ -71,7 +71,7 @@ export async function listRecentPosts(connection: ConnectionRow, token: string, 
 }
 
 export async function importHistoricalMetrics(env: SocialEnv, options: { profileId?: string; runtime?: FetchRuntime; sql?: Sql; now?: Date } = {}) {
-  const result = { ready: true, connections: 0, posts: 0, synced: 0, skippedFresh: 0, failed: 0, codes: [] as string[] };
+  const result = { ready: true, connections: 0, posts: 0, synced: 0, withoutMetrics: 0, failed: 0, codes: [] as string[] };
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return { ...result, ready: false, codes: ["HISTORICAL_SECURITY_NOT_CONFIGURED"] };
   const sql = options.sql ?? neon(env.DATABASE_URL);
   const connections = await sql`
@@ -104,7 +104,8 @@ export async function importHistoricalMetrics(env: SocialEnv, options: { profile
           job_id: "", profile_id: connection.profile_id, variant_id: "", content_id: "", provider: connection.provider,
           external_post_id: post.id, format: post.format, topic: topicFromCaption(post.caption), published_at: post.publishedAt, claim_token: "", lease_expires_at: "",
         }, connection, env, options.runtime);
-        if (!Object.keys(metrics).length) { result.failed += 1; result.codes.push(`${connection.provider}:EMPTY`); continue; }
+        // The provider returned no counters for this post (e.g. shared or very old Page posts): not an error.
+        if (!Object.keys(metrics).length) { result.withoutMetrics += 1; continue; }
         await sql`
           insert into public.metric_snapshots (id, profile_id, provider, content_id, variant_id, job_id, external_post_id, format, topic, published_at, captured_at, metrics, source, data_origin, created_at)
           values (gen_random_uuid(), ${connection.profile_id}::uuid, ${connection.provider}, null, null, null, ${post.id}, ${post.format}, ${topicFromCaption(post.caption)}, ${post.publishedAt}::timestamptz, clock_timestamp(), ${JSON.stringify(metrics)}::jsonb, 'PROVIDER_API', 'PROVIDER_REAL', now())
