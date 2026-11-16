@@ -37,7 +37,23 @@
 4. **LinkedIn:** se vuoi pubblicare sulla Pagina aziendale e leggere le metriche, devi chiedere a LinkedIn l'accesso alla Community Management API. Senza, si pubblica solo sul profilo personale.
 
 ## Verifica dopo la configurazione, senza pubblicare nulla
-- **Meta:** OAuth, poi `GET /me/accounts` e `GET /{ig-user-id}?fields=username`. Si controllano i permessi concessi, senza pubblicare.
-- **LinkedIn:** OAuth, poi `GET /v2/userinfo`.
-- **Google:** OAuth, poi elenco account e sedi della Business Profile API.
-- Un provider risulta "Collegato" solo dopo queste letture riuscite; la pubblicazione resta bloccata da SAFE_MODE.
+In Social, il pulsante **Verifica** chiama `POST /api/social/verify` (commit `266cb44` e successivi), che fa solo letture:
+- **Meta:** `GET /{page-id}?fields=id,name` per Facebook, `GET /{ig-user-id}?fields=id,username` per Instagram, poi `GET /me/permissions`.
+- **LinkedIn:** `GET /v2/userinfo`.
+- **Google:** se serve, rinnovo del token di accesso; poi `GET locations/{id}?readMask=name,title`.
+
+Come gestisce gli esiti:
+- **Successo:** aggiorna `last_validated_at` e il provider risulta "Collegato".
+- **401, 403, errore Meta 190 o `invalid_grant`:** lo stato diventa `RECONNECT_REQUIRED`. Il token cifrato non viene cancellato.
+- **Guasto del provider o client Google non configurato:** nessun cambio di stato.
+- **Chiave diversa da quella usata per cifrare:** risponde `SOCIAL_TOKEN_KEY_MISMATCH` senza scrivere nel DB. Così una chiave reinserita si può provare senza rischi.
+- **Riga ACTIVE mai verificata:** non risulta più collegata.
+
+Requisiti e limiti:
+- La verifica richiede solo `DATABASE_URL` e `SOCIAL_TOKEN_KEY`. App secret e client secret servono per nuovi OAuth e per il rinnovo dei token Google.
+- La pubblicazione resta bloccata da SAFE_MODE.
+- Per verificare i 4 token di produzione serve una versione con `/api/social/verify` collegata al DB di produzione, cioè questa PR in produzione. `main` non ha ancora l'endpoint.
+
+Test nel cloud (reel-qa, iPhone WebKit, 16/11), su una riga QA fittizia cifrata con un'altra chiave:
+- **Verifica:** 409 `SOCIAL_TOKEN_KEY_MISMATCH`, messaggio visibile all'utente, riga invariata.
+- **Scollega:** 200, riga ripulita.
