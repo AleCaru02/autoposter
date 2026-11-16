@@ -79,6 +79,7 @@
     "test:social-verify": "tsx tests/social-verify.test.ts",
     "test:safe-mode": "tsx tests/safe-mode.test.ts",
     "test:autopilot-guard": "tsx tests/autopilot-guard.test.ts",
+    "test:autopilot-spend-guards": "tsx tests/autopilot-spend-guards.test.ts",
     "test:social-metrics": "tsx tests/social-metrics.test.ts",
     "test:autopilot-route": "tsx tests/autopilot-route-contract.test.ts",
     "test:instagram-website-pilot": "tsx tests/instagram-website-pilot.test.ts",

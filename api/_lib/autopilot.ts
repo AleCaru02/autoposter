@@ -25,6 +25,7 @@ import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./brand-visual-assets.js";
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
+import { autopilotQualityBrief, chooseNarrativeIntent, CONTENT_REJECTION_REASON } from "./autopilot-spend-guards.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -163,7 +164,7 @@ export function shouldDeferRejectedAutopilotSlot(
   now = new Date(),
 ): boolean {
   if (record.state !== "RELEASED") return false;
-  if (!/^(OPENAI_EDITORIAL_QUALITY_BLOCKED|OPENAI_FACTCHECK_BLOCK|AUTOPILOT_DUPLICATE_CONTENT)(:|$)/.test(record.reason ?? "")) return false;
+  if (!CONTENT_REJECTION_REASON.test(record.reason ?? "")) return false;
   const age = now.getTime() - new Date(record.created_at).getTime();
   return Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000;
 }
@@ -221,7 +222,12 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     budgetBand:editorialBudget.band,
   });
   const format=formatDecision.selectedFormat;
-  const effectivePlanItem=planItem?{...planItem,contentType:chooseAutopilotContentType(format),format}:null;
+  // Free pre-check: the post-generation repetition rule rejects an overused contentType:intent
+  // AFTER paying. Choose a non-overused intent now, or skip the slot without any AI call.
+  const plannedContentType=planItem?.contentType??chooseAutopilotContentType(format);
+  const narrativeIntent=chooseNarrativeIntent(plannedContentType,planItem?.intent??"TIP",(await recentContentForDedupe(sql,profile.id)).map(row=>row.narrativeStructure));
+  if(!narrativeIntent)return {scheduled:false,blocked:false,skipped:true,deferred:true};
+  const effectivePlanItem=planItem?{...planItem,intent:narrativeIntent,contentType:chooseAutopilotContentType(format),format}:null;
   const audienceSignals=stringSignals([context.target,loaded.personalBrand?.audience]);
   const pillarSignals=stringSignals([pillar.pillar?.name,loaded.personalBrand?.pillar]);
   const relevantEvents=planItem&&(planItem.intent==="NEWS"||planItem.intent==="SEASONAL")?[planItem.topicDirection]:[];
@@ -231,8 +237,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     audience:audienceSignals[0]??null,
     pillar:pillarSignals[0]??null,
     funnelStage:planItem?.funnelStage??"AWARENESS",
-    contentType:planItem?.contentType??chooseAutopilotContentType(format),
-    intent:planItem?.intent??"TIP",
+    contentType:plannedContentType,
+    intent:narrativeIntent,
     preferredProvider:provider,
     format,
     localBusinessRelevance:Boolean(context.websiteUrl||context.description||context.serviceArea),
@@ -291,7 +297,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const activityBudget=await new ActivityBudgetEngine(env.DATABASE_URL!).preflight({profileId:profile.id,task:"COPY_FINAL",importance:"STANDARD",projectedOperationCostUsd:upper+qaReserve});
   if(!activityBudget.allowed){await meter.release(logicalEventId,activityBudget.reason??"AI_BUDGET_HARD_STOP");throw new Error("AUTOPILOT_ACTIVITY_BUDGET_STOP");}
   await meter.markProviderStarted(logicalEventId);
-  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
+  const qualityBrief=autopilotQualityBrief({websitePilotBrief:websitePilot?instagramWebsitePilotBrief(count):null,planTopicDirection:effectivePlanItem?.topicDirection??null,pillarInstruction:pillar.instruction??null});
+  const generated=await generateSocialText({apiKey:env.OPENAI_API_KEY,topic:topicRequest,qualityBrief,objective,providers:[provider],formats:[format],brand:context,researchMode,cacheKey:`post-automatici:${profile.id}`});
   const variant=generated.content.variants.find(item=>item.provider===provider&&item.format===format);if(!variant)throw new Error("AUTOPILOT_VARIANT_MISSING");
   const identityRowsForSubject=profile.profile_type==="PERSONAL_BRAND"
     ? await sql`select status from public.personal_brand_visual_identities where profile_id=${profile.id}::uuid limit 1` as unknown as Array<{status:"NOT_CONFIGURED"|"REFERENCES_PENDING"|"READY_TO_CREATE"|"CREATING"|"COMPLETED"|"FAILED"}>
