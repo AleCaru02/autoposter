@@ -1,0 +1,46 @@
+name: Autoposter production health monitor
+
+on:
+  schedule:
+    - cron: "13 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: autoposter-health-monitor
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEALTH_URL: https://app.iltuopropertymanager.it/api/health
+      ALERT_TITLE: "[Autoposter] Produzione non disponibile"
+    steps:
+      - name: Check live API and Neon readiness
+        shell: bash
+        run: |
+          set -uo pipefail
+          code="$(curl -sSL --retry 2 --retry-delay 3 --max-time 25 -o /tmp/autoposter-health.json -w '%{http_code}' "$HEALTH_URL" || true)"
+          healthy="false"
+          if [ "$code" = "200" ] && node -e 'const fs=require("node:fs");const j=JSON.parse(fs.readFileSync("/tmp/autoposter-health.json","utf8"));if(j.ready!==true||j.database!=="postgres_ready")process.exit(1)'; then
+            healthy="true"
+          fi
+          existing="$(gh issue list --state open --limit 100 --json number,title --jq '.[] | select(.title == env.ALERT_TITLE) | .number' | head -n 1)"
+          if [ "$healthy" = "false" ]; then
+            if [ -z "$existing" ]; then
+              gh issue create --title "$ALERT_TITLE" --body "Monitor automatico: l'endpoint di produzione non ha confermato HTTP 200 e database postgres_ready. Ultimo controllo: $(date -u '+%Y-%m-%d %H:%M UTC'). Controllare Vercel Functions, Neon e cron. La pubblicazione social non deve essere riattivata senza verifica."
+            else
+              echo "Incidente già aperto: #$existing"
+            fi
+            exit 1
+          fi
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Monitor: servizio e database tornati disponibili alle $(date -u '+%Y-%m-%d %H:%M UTC')."
+          fi
+          echo "Production health PASS"
