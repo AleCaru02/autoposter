@@ -81,6 +81,7 @@
     "test:autopilot-guard": "tsx tests/autopilot-guard.test.ts",
     "test:autopilot-spend-guards": "tsx tests/autopilot-spend-guards.test.ts",
     "test:historical-metrics": "tsx tests/historical-metrics.test.ts",
+    "test:image-storage": "tsx tests/image-storage.test.ts",
     "test:social-metrics": "tsx tests/social-metrics.test.ts",
     "test:autopilot-route": "tsx tests/autopilot-route-contract.test.ts",
     "test:instagram-website-pilot": "tsx tests/instagram-website-pilot.test.ts",

@@ -26,6 +26,7 @@ import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
 import { autopilotQualityBrief, chooseNarrativeIntent, CONTENT_REJECTION_REASON } from "./autopilot-spend-guards.js";
+import { imageStorageUrl } from "./image-storage.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string };
@@ -407,7 +408,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   }
   if(variant.eligible&&allowImageGeneration&&format!=="CAROUSEL"){
     const aspectRatio=imageAspectRatioForFormat(format as ImageSocialFormat,provider as ImageSocialProvider);
-    const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
+    const candidates=await sql`select id,source,kind,name,case when storage_url is null then null else 'stored' end as storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
     const reusable=await findReusableAsset({visualBrief:variant.visualBrief,aspectRatio,candidates});
     const budgetEngine=new ActivityBudgetEngine(env.DATABASE_URL!);
     const visualBudget=await budgetEngine.snapshot(profile.id);
@@ -453,7 +454,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));
-        imageAssetId=crypto.randomUUID();const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        imageAssetId=crypto.randomUUID();const dataUrl=(await imageStorageUrl({profileId:profile.id,name:imageAssetId,bytes:new Uint8Array(Buffer.from(image.base64,"base64")),mimeType:image.mimeType})).storageUrl;
         const actualRows=await sql`select coalesce(actual_usd,reserved_usd)*fx_usd_to_eur_rate as actual_eur from public.provider_cost_attempts where logical_usage_event_id=${imageEventId}::uuid limit 1` as unknown as Array<{actual_eur:number|string}>;
         const actualEur=Number(actualRows[0]?.actual_eur??visualDecision.estimatedCostEur);
         const sizeMatch=/^(\d+)x(\d+)$/.exec(String(image.size??""));
@@ -491,7 +492,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
       let slideCommitted=false;
       let createdAssetId:string|null=null;
       try{
-        const candidates=await sql`select id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
+        const candidates=await sql`select id,source,kind,name,case when storage_url is null then null else 'stored' end as storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,created_at
           from public.assets where profile_id=${profile.id}::uuid and kind='IMAGE' order by created_at desc limit 100` as unknown as ReusableAssetCandidate[];
         const reuse=await findReusableAsset({visualBrief:slide.visualBrief,aspectRatio:"1:1",candidates:candidates.filter(item=>!usedAssets.has(item.id))});
         if(reuse){
@@ -536,7 +537,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
         const size=/^([0-9]+)x([0-9]+)$/.exec(String(image.size));
         const assetId=crypto.randomUUID();
         createdAssetId=assetId;
-        const dataUrl=`data:${image.mimeType};base64,${image.base64}`;
+        const dataUrl=(await imageStorageUrl({profileId:profile.id,name:assetId,bytes:new Uint8Array(Buffer.from(image.base64,"base64")),mimeType:image.mimeType})).storageUrl;
         const hash=await assetContentHashFromBase64(image.base64);
         await sql`insert into public.assets
           (id,profile_id,content_id,source,kind,name,storage_url,mime_type,tags,metadata,provider,model,cost_eur,width,height,format,quality_status,identity_status,content_hash,updated_at)
