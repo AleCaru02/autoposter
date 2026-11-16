@@ -63,6 +63,26 @@ GRANT INSERT, UPDATE, DELETE ON public.publication_jobs, public.publication_atte
   - con «Ricollega» la riga viene sovrascritta con il token nuovo; i vecchi token non vengono cancellati prima.
 - **Rollback:** rimuovere la variabile da Vercel Production. Le righe non ricollegate restano intatte; quelle già ricollegate richiedono una nuova riconnessione.
 
+## Scheduler dopo il rilascio
+| Scheduler | Prima del rilascio | Dopo il rilascio |
+|---|---|---|
+| Vercel `/api/cron` (ogni ora) | Learning + autopilot (`maxGenerations: 1`) | Ricontrollo in sola lettura dei social non verificati da 20 ore + learning + autopilot |
+| Vercel `/api/cron-social` (ogni ora) | Assente su `main` | Presente ma disattivo finché `AUTO_SOCIAL_PUBLISH_ENABLED` / `AUTO_SOCIAL_ANALYTICS_ENABLED` non valgono `true`; la pubblicazione resta comunque bloccata da SAFE_MODE |
+| Worker `*/5` | Attivo, bloccato da SAFE_MODE | Inattivo (`WORKER_SCHEDULER_ENABLED=false`) |
+| Worker orario | Rimosso il 16/11 | Assente (anche in `wrangler.jsonc`) |
+
+## Verifiche obbligatorie dopo ogni passo
+- `/api/health` di Vercel e del Worker: 200.
+- `get_runtime_errors` di Vercel: nessun errore nuovo.
+- Cron delle :00: log `vercel.cron` con `socialCheck`. Gli eventi `GENERATE_SOCIAL_TEXT` cadono solo dentro la finestra di esecuzione del cron Vercel.
+- `publication_attempts`: nessuna riga nuova finché SAFE_MODE è attivo.
+- Data API con un utente autenticato: 403 su `token_reference`, sulle scritture di `social_connections` e sui registri; 200 sulle letture consentite e su `customer_ai_budget_overview`.
+- Audit dell'app con Playwright: 12 sezioni su iPhone/WebKit, Chromium mobile e desktop; logout → /login.
+
+## Costi
+- Gratuito: migrazioni, deploy, store Blob privato (credito incluso nel piano Pro), chiave, verifiche social e audit.
+- A pagamento, solo con autorizzazione: generazioni AI dell'autopilot (già attive in produzione con i limiti esistenti), Reel reali, avatar.
+
 ## Scadenze da pianificare dopo il rilascio
 - LinkedIn: il token dura 60 giorni senza refresh. Il collegamento QA scade il 15/01/2027.
 - Meta: accesso ai dati da rinnovare entro 90 giorni. Il collegamento QA scade il 14/02/2027.
