@@ -30,6 +30,9 @@ export type SocialEnv = {
   LINKEDIN_ORGANIZATION_ACCESS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** QA-only, owner-approved key migration (see api/_lib/social-key-export.ts). */
+  SOCIAL_TOKEN_KEY_NEXT?: string;
+  SOCIAL_KEY_EXPORT_ENABLED?: string;
 };
 
 type OAuthState = {
@@ -1216,6 +1219,20 @@ export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
   return { checked: due.length, verified, failed, codes };
 }
 
+async function handleKeyExport(request: Request, env: SocialEnv) {
+  if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
+  const { keyExportEnabled, exportProfileConnections } = await import("./social-key-export.js");
+  if (!keyExportEnabled(env)) return socialJson({ error: "KEY_EXPORT_DISABLED" }, 404);
+  const auth = bearer(request);
+  if (!auth) return socialJson({ error: "AUTH_REQUIRED" }, 401);
+  const body = await readBody(request);
+  const profileId = typeof body.profileId === "string" ? body.profileId : "";
+  if (!profileId) return socialJson({ error: "PROFILE_REQUIRED" }, 400);
+  if (!await canAccessProfile(profileId, auth)) return socialJson({ error: "PROFILE_NOT_FOUND" }, 404);
+  const outcome = await exportProfileConnections(env, profileId);
+  return socialJson(outcome.body, outcome.status);
+}
+
 async function handleDisconnect(request: Request, env: SocialEnv) {
   if (request.method !== "POST") return socialJson({ error: "METHOD_NOT_ALLOWED" }, 405);
   const auth = bearer(request);
@@ -1516,6 +1533,7 @@ export async function handleSocialApi(request: Request, env: SocialEnv): Promise
   if (path === "/api/social/select") return handleSelect(request, env);
   if (path === "/api/social/disconnect") return handleDisconnect(request, env);
   if (path === "/api/social/verify") return handleVerify(request, env);
+  if (path === "/api/social/key-export") return handleKeyExport(request, env);
   if (path === "/api/social/publish-now") return socialJson({ error: "PUBLISH_VIA_CALENDAR_REQUIRED" }, 410);
   const callback = /^\/api\/social\/callback\/([a-z]+)$/.exec(path);
   if (callback) return handleCallback(request, env, callback[1]);
