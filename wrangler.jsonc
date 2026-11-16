@@ -26,9 +26,7 @@
     "WORKER_SCHEDULER_ENABLED": "false"
   },
   "triggers": {
-    "crons": [
-      "*/5 * * * *"
-    ]
+    "crons": []
   },
   "assets": {
     "directory": "./dist",
