@@ -50,6 +50,12 @@ export function useConfirmedSession() {
     if (session.isPending || hasUser || rechecked) return;
     let active = true;
     void Promise.resolve(session.refetch?.()).catch(() => undefined).finally(() => { if (active) setRechecked(true); });
+    return () => { active = false; };
+  }, [session.isPending, hasUser, rechecked, session]);
+  // Independent of isPending, which also flaps while the client loops after sign-out.
+  useEffect(() => {
+    if (hasUser) return;
+    let active = true;
     void fetch("/api/auth/get-session", { credentials: "include", cache: "no-store", headers: { accept: "application/json" } })
       .then(async (response) => {
         if (!response.ok) return;
@@ -58,7 +64,7 @@ export function useConfirmedSession() {
       })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [session.isPending, hasUser, rechecked, session]);
+  }, [hasUser]);
   useEffect(() => {
     if (hasUser) { setTimedOut(false); return; }
     const timer = window.setTimeout(() => setTimedOut(true), SESSION_CHECK_TIMEOUT_MS);
