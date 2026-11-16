@@ -41,7 +41,7 @@ export function planContinuation(env: ContinuationEnv, jobId: string, hop: numbe
 /** Fires the continuation and returns as soon as the target accepted it (202). */
 export async function dispatchContinuation(env: ContinuationEnv, jobId: string, hop: number, delaySeconds = 0, fetcher: typeof fetch = fetch) {
   const plan = planContinuation(env, jobId, hop, delaySeconds);
-  if (!plan.dispatch) return { dispatched: false as const, reason: plan.reason };
+  if ("reason" in plan) return { dispatched: false as const, reason: plan.reason };
   try {
     const response = await fetcher(plan.url, { method: "GET", headers: plan.headers, cache: "no-store", redirect: "manual", signal: AbortSignal.timeout(15_000) });
     return response.status === 202
