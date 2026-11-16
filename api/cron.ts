@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runLearningRuntime } from "./_lib/learning-runtime.js";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
 import { revalidateSocialConnections } from "./_lib/social.js";
+import { cronAutopilotAiEnabled, pausedAutopilotResult } from "./_lib/autopilot-guard.js";
 
 export const config = { maxDuration: 300 };
 
@@ -51,8 +52,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     }).catch((reason) => ({ checked: 0, verified: 0, failed: 0, error: reason instanceof Error ? reason.message.split(":")[0] : "SOCIAL_REVALIDATION_FAILED" }));
     const learning = await runLearningRuntime(env);
-    const autopilot = await runContentAutopilotSerialized(env, { maxGenerations: 1 });
+    // Paid generation is opt-in (AUTOPILOT_AI_ENABLED=true); the free work above always runs.
+    const autopilot = cronAutopilotAiEnabled(process.env.AUTOPILOT_AI_ENABLED)
+      ? await runContentAutopilotSerialized(env, { maxGenerations: 1 })
+      : pausedAutopilotResult();
     console.log("vercel.cron", {
+      autopilotPaused: "paused" in autopilot ? autopilot.paused : null,
       learningReady: learning.ready,
       profilesChecked: autopilot.profilesChecked,
       generated: autopilot.generated,
