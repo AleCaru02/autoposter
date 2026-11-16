@@ -258,8 +258,9 @@ export function SocialPage() {
       await load();
     } catch (reason) {
       const code = reason instanceof Error ? reason.message : "SOCIAL_VERIFY_FAILED";
-      setError(code.endsWith("_VERIFY_TOKEN_INVALID") ? `${PROVIDER_LABELS[provider]} ha rifiutato l’autorizzazione salvata: premi Ricollega.` : readableError(code));
+      // Reload first: load() clears the error banner, the verification outcome must stay visible.
       await load();
+      setError(code.endsWith("_VERIFY_TOKEN_INVALID") ? `${PROVIDER_LABELS[provider]} ha rifiutato l’autorizzazione salvata: premi Ricollega.` : readableError(code));
     } finally {
       setBusyProvider(null);
     }
@@ -351,6 +352,7 @@ export function SocialPage() {
                 {active ? <><button type="button" className={analyticsMissing ? "primary-button" : "secondary-button"} disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button><button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button></>
                   : reconnect || providerError ? <><button type="button" className={provider.status === "ACTIVE" ? "secondary-button" : "primary-button"} disabled={busy || demo || unavailable} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Ricollega</button>{accountPresent && <button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button>}</>
                     : disconnected ? <button type="button" className="primary-button" disabled={busy || demo} onClick={() => void connect(provider.provider)}>{busy ? <LoaderCircle className="spin" size={16} /> : <Link2 size={16} />} Collega account</button>
+                      : unavailable && accountPresent ? <button type="button" className="secondary-button" disabled={busy || demo} onClick={() => void disconnect(provider.provider)}><Unplug size={16} /> Scollega</button>
                       : null}
               </div>
             </article>;
