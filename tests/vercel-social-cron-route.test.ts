@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import handler from "../api/cron-social.js";
 
 const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
-assert.ok(config.crons.some((item: {path?:string;schedule?:string}) => item.path === "/api/cron-social" && item.schedule === "0 * * * *"), "A separate schedule must exist");
+assert.ok(config.crons.some((item: {path?:string;schedule?:string}) => item.path === "/api/cron-social" && item.schedule === "*/5 * * * *"), "A separate schedule must exist");
 const source = readFileSync(new URL("../api/cron-social.ts", import.meta.url), "utf8");
 for (const requirement of ["CRON_SECRET", "AUTO_SOCIAL_PUBLISH_ENABLED", "AUTO_SOCIAL_ANALYTICS_ENABLED", "SAFE_MODE", "SOCIAL_TOKEN_KEY", "processDuePublications", "processDueAnalytics"]) {
   assert.ok(source.includes(requirement), "Missing social cron safety requirement " + requirement);
