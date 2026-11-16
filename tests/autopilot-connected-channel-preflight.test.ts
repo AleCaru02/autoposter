@@ -11,6 +11,6 @@ assert.match(runner, /connected\.last_validated_at >= now\(\)-interval '48 hours
 assert.match(runner, /connected\.provider=public\.schedules\.provider/, "only the connected provider can receive generated content");
 assert.match(runner, /Boolean\(options\.profileId\)/, "explicit authenticated manual profile runs must retain draft creation");
 assert.match(runner, /result\.generated>=maxGenerations/, "existing maxGenerations must still bound AI spends");
-assert.match(runner, /runContentQa\(/, "autopilot must keep final QA before auto approval");
-assert.match(runner, /finalQa\.overallStatus==="PASS"/, "only passing QA can auto-approve");
+assert.match(source, /runContentQa\(/, "autopilot must keep final QA before auto approval");
+assert.match(source, /finalQa\.overallStatus==="PASS"/, "only passing QA can auto-approve");
 console.log("autopilot connected-channel preflight: PASS");
