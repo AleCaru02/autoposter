@@ -4,16 +4,14 @@ import worker from "../cloudflare/entry.js";
 
 const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
 const entrySource = readFileSync(new URL("../cloudflare/entry.ts", import.meta.url), "utf8");
+const vercelConfig = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
 const publicationMigration = readFileSync(new URL("../db/migrations/20260908_fase7f_safe_publication_engine.sql", import.meta.url), "utf8");
 const deployWorkflow = readFileSync(new URL("../.github/workflows/deploy-worker.yml", import.meta.url), "utf8");
 
-// 16/11/2026: the hourly Worker trigger (autopilot + learning, duplicated by the Vercel cron)
-// was removed in the Cloudflare dashboard; the config must not re-add it on the next Worker deploy.
-assert.deepEqual(
-  [...config.triggers.crons],
-  ["*/5 * * * *"],
-  "the Worker keeps only the publication trigger; the hourly autopilot runs on Vercel (canonical runtime)",
-);
+// 17/11/2026: Vercel is the sole scheduler for AI, analytics and publication.
+// Cloudflare's old scheduler remains testable as an inert fallback but must have no triggers.
+assert.deepEqual([...config.triggers.crons], [], "Cloudflare must not schedule duplicate jobs");
+assert.ok(vercelConfig.crons.some((cron: { path: string; schedule: string }) => cron.path === "/api/cron-social" && cron.schedule === "*/5 * * * *"), "Vercel alone schedules social publication every five minutes");
 assert.equal(config.vars.SAFE_MODE, "true", "production cron must inherit fail-closed SAFE_MODE");
 assert.match(entrySource, /async scheduled\(controller:[\s\S]*controller\.cron === "\*\/5 \* \* \* \*"\)[\s\S]*processDuePublications\(env\)/);
 assert.doesNotMatch(entrySource, /path === ["']\/api\/(?:internal\/)?cron/i, "publication cron must not be exposed as a public HTTP endpoint");
@@ -102,4 +100,4 @@ for (const name of [
 ]) {
   originalLog(`${name} = PASS`);
 }
-originalLog("CRON 24/7 CERTIFICATION runtime: PASS — Cloudflare trigger boundary, fail-closed execution, overlap/recovery and structured observability verified.");
+originalLog("CRON 24/7 CERTIFICATION runtime: PASS — Vercel scheduler canonical, Cloudflare fallback inert, overlap/recovery and structured observability verified.");
