@@ -24,6 +24,8 @@ const SettingsPage = lazy(() => import("./pages/settings-page").then((module) =>
 const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
 const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
 const AssetsPage = lazy(() => import("./pages/assets-page").then((module) => ({ default: module.AssetsPage })));
+const PrivacyPage = lazy(() => import("./pages/legal-pages").then((module) => ({ default: module.PrivacyPage })));
+const TermsPage = lazy(() => import("./pages/legal-pages").then((module) => ({ default: module.TermsPage })));
 const AdminBackoffice = lazy(() => import("./pages/admin-pages").then((module) => ({ default: module.AdminBackoffice })));
 
 function PageFallback() {
@@ -104,6 +106,8 @@ export default function App() {
     <Route path="/collega-google" element={<RequireAuth><GoogleAccountLinkPage /></RequireAuth>} />
     <Route path="/password-dimenticata" element={<ForgotPasswordPage />} />
     <Route path="/reimposta-password" element={<ResetPasswordPage />} />
+    <Route path="/privacy" element={<PrivacyPage />} />
+    <Route path="/termini" element={<TermsPage />} />
     <Route path="/onboarding" element={<RequireAuth><ProfileProvider><OnboardingPage /></ProfileProvider></RequireAuth>} />
     <Route path="/admin/*" element={<RequireAuth><AdminBackoffice /></RequireAuth>} />
     <Route path="/app" element={<RequireAuth><ProfileProvider><RequireProfile /></ProfileProvider></RequireAuth>}>
