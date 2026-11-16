@@ -94,4 +94,15 @@ assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: 
   if (result.ok) { assert.equal(result.checks.posts, "HTTP_403"); assert.equal(result.checks.tokenDebug, "OK"); assert.equal(result.token.expiresAt, null); assert.equal(result.token.dataAccessExpiresAt, new Date(1800000000 * 1000).toISOString()); }
   noWrites(calls);
 }
+{
+  const migration = readFileSync(new URL("../db/migrations/20261118_social_connections_server_owned.sql", import.meta.url), "utf8");
+  assert.match(migration, /REVOKE INSERT, UPDATE, DELETE[^;]*ON public\.social_connections FROM authenticated/, "browsers cannot forge connection rows");
+  assert.match(migration, /REVOKE SELECT ON public\.social_connections FROM authenticated/);
+  const grant = migration.match(/GRANT SELECT \(([^)]+)\)\s+ON public\.social_connections TO authenticated/);
+  assert.ok(grant, "column-level read grant");
+  assert.doesNotMatch(grant![1]!, /token_reference/, "encrypted tokens are never readable from the browser");
+  const page = readFileSync(new URL("../src/pages/social-page.tsx", import.meta.url), "utf8");
+  const select = page.match(/from\("social_connections"\)\s*\.select\("([^"]+)"\)/);
+  assert.ok(select && select[1]!.split(",").every((column) => grant![1]!.includes(column.trim())), "the social page only reads granted columns");
+}
 console.log("PASS social verify: verifica solo in lettura, 190/401/invalid_grant → ricollega, guasti del provider non declassano, chiave diversa senza scritture.");
