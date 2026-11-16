@@ -105,4 +105,10 @@ assert.equal(socialVerifiable({ DATABASE_URL: "postgres://x", SOCIAL_TOKEN_KEY: 
   const select = page.match(/from\("social_connections"\)\s*\.select\("([^"]+)"\)/);
   assert.ok(select && select[1]!.split(",").every((column) => grant![1]!.includes(column.trim())), "the social page only reads granted columns");
 }
+{
+  const limited = await verifySocialConnection({ provider: "INSTAGRAM", provider_account_id: "1784", metadata: {} }, { accessToken: "x" }, env, fakeFetch(() => ({ status: 429, body: { error: { code: 4 } } })).fetcher);
+  assert.deepEqual(limited, { ok: false, code: "INSTAGRAM_VERIFY_HTTP_429", reconnect: false }, "rate limits never downgrade a connection");
+  const forbidden = await verifySocialConnection({ provider: "GBP", provider_account_id: "locations/42", metadata: {} }, { accessToken: "a", expiresAt: "2099-01-01T00:00:00Z" }, env, fakeFetch(() => ({ status: 403, body: {} })).fetcher);
+  assert.deepEqual(forbidden, { ok: false, code: "GBP_VERIFY_TOKEN_INVALID", reconnect: true }, "403 from the provider requires reconnecting");
+}
 console.log("PASS social verify: verifica solo in lettura, 190/401/invalid_grant → ricollega, guasti del provider non declassano, chiave diversa senza scritture.");
