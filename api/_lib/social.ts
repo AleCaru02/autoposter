@@ -1222,7 +1222,11 @@ export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
   const sql = neon(env.DATABASE_URL!);
   const due = await sql`
     select profile_id::text as profile_id, provider from public.social_connections
-    where status='ACTIVE' and token_reference is not null and (last_validated_at is null or last_validated_at < now() - interval '20 hours')
+    where status='ACTIVE' and token_reference is not null and (
+      last_validated_at is null or last_validated_at < now() - interval '20 hours'
+      or (provider='GBP' and expires_at is not null and expires_at < now() + interval '30 minutes'
+          and last_validated_at < now() - interval '30 minutes')
+    )
     order by last_validated_at asc nulls first limit ${Math.min(Math.max(limit, 1), 50)}
   ` as unknown as Array<{ profile_id: string; provider: SocialProvider }>;
   let verified = 0; let failed = 0; const codes: string[] = [];
