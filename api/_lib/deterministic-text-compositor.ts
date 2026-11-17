@@ -79,5 +79,9 @@ export async function composeDeterministicTypography(input: { backgroundPngBase6
 export async function preflightDeterministicTypography(input: { width: number; height: number; brand: string; headline: string; subheadline?: string | null; brandFonts?: BrandFonts }) {
   const font = await effectiveFonts(input.brandFonts);
   const layout = createTypographyLayout({ canvas: { width: input.width, height: input.height }, fontRegular: font.regular, fontBold: font.bold, brand: input.brand, headline: input.headline, subheadline: input.subheadline });
+  // Render dependency must be verified BEFORE an OpenAI image is ordered.
+  // A missing/unsupported WASM bundle otherwise burns the paid image call
+  // and rejects the generated asset only at the final overlay stage.
+  await ready();
   return { ...layout, font: { family: font.family, source: font.source } };
 }
