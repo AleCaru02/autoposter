@@ -48,6 +48,12 @@ assert.match(runtime,/brandVisualStyle:brandVisual\.visualStyle/);
 
 assert.match(endpoint,/verifiedCustomerAuthUserId/);
 assert.match(endpoint,/actorType: "MANUAL"/);
+assert.match(endpoint,/OPENAI_API_CREDITS_EXHAUSTED/);
+assert.match(endpoint,/CREDIT_BALANCE_EXHAUSTED/);
+assert.match(endpoint,/CONTENT_QA_PROVIDER_RATE_LIMITED/);
+assert.match(store,/body\.error === "OPENAI_API_CREDITS_EXHAUSTED"/);
+assert.match(store,/Credito API OpenAI esaurito/);
+assert.match(page,/force: true/);
 assert.match(prepublish,/PREPUBLISH_QA_TOKEN/);
 assert.match(prepublish,/socialSafeModeState\(env\)!=="ON"/);
 assert.match(prepublish,/j\.state='BLOCKED_APPROVAL'/);
