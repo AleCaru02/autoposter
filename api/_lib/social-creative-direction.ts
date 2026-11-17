@@ -1,0 +1,72 @@
+/**
+ * Post Automatici social creative direction, adapted from publicly available
+ * image-prompt, design-and-templates, brand-profile and hook/caption-writing
+ * skills. Guidance is expressed as application rules, not an external provider.
+ *
+ * Source skills (MIT where noted): https://github.com/social-media-skills/skills
+ * Image generation remains exclusively OpenAI Images 2 via existing router.
+ */
+
+export type CreativeTemplate = "ECONOMICS_CONTRAST" | "PROCESS_PROOF" | "CAROUSEL_STEP" | "STORY_HERO" | "EDITORIAL_HERO";
+
+export function selectCreativeTemplate(input: { format: string; visualBrief: string; caption?: string | null }): CreativeTemplate {
+  if (input.format === "STORY") return "STORY_HERO";
+  if (input.format === "CAROUSEL") return "CAROUSEL_STEP";
+  const text = `${input.visualBrief} ${input.caption ?? ""}`.toLocaleLowerCase("it-IT");
+  if (/tariff|prezz|cost[oi]|margine|ricav|guadagn|redditivit|fatturat|investiment|budget/.test(text)) return "ECONOMICS_CONTRAST";
+  if (/gestione|processo|procedura|check.in|organizza|prenotazion|pulizi|lavoro|metodo|servizio/.test(text)) return "PROCESS_PROOF";
+  return "EDITORIAL_HERO";
+}
+
+const templateDirections: Record<CreativeTemplate, string> = {
+  ECONOMICS_CONTRAST:
+    "Una composizione editoriale fotografica unitaria che mostri la tensione concreta tra prezzo visibile e lavoro/costi dietro il risultato. Il contrasto emerge dalla scena, dalla profondità e dalla scelta del soggetto; non creare grafici, cifre, etichette o due foto affiancate. La scena deve essere pertinente al settore descritto nel brief.",
+  PROCESS_PROOF:
+    "Rendi visibile un passaggio operativo concreto e pertinente, con un soggetto principale e un dettaglio che spieghi il processo. Evita la solita scrivania con laptop, quaderno e chiavi se non sono davvero necessari all'idea.",
+  CAROUSEL_STEP:
+    "Questa è una singola slide di una sequenza: un solo passaggio visivo chiaro, continuità di palette e stile con le altre slide, niente collage o mini-punti elenco disegnati dall'AI.",
+  STORY_HERO:
+    "Scena verticale immersiva e immediata con soggetto forte nel centro, attenzione alle aree sicure superiori/inferiori dell'interfaccia social. Visualizza una sola idea senza decorazioni superflue.",
+  EDITORIAL_HERO:
+    "Hero editorial-fotografico, un soggetto memorabile che materializzi l'idea e una precisa relazione con il contesto. Usa prospettiva, luce e texture reali per creare un messaggio non intercambiabile tra attività.",
+};
+
+export function socialCreativeDirection(input: {
+  profileName: string;
+  industry?: string | null;
+  provider: string;
+  format: string;
+  visualBrief: string;
+  caption?: string | null;
+}): string {
+  const template = selectCreativeTemplate(input);
+  return [
+    "CREATIVE DIRECTION / POST AUTOMATICI — regole esecutive obbligatorie:",
+    `Deliverable: un'immagine social ${input.format} per ${input.provider}; brand ${input.profileName}; settore ${input.industry || "dal profilo"}.`,
+    `Template visuale: ${template}. ${templateDirections[template]}`,
+    `Idea da visualizzare, non da riscrivere: ${input.visualBrief.trim().slice(0, 1200)}.`,
+    "Il brief è un messaggio, NON una richiesta di una fotografia generica del settore. Il soggetto deve rendere visibile il motivo per cui il post merita attenzione.",
+    "Un'unica scena coerente, un punto focale riconoscibile, un soggetto principale e non più di due dettagli narrativi; gerarchia da copertina editoriale leggibile a 320px su smartphone.",
+    "L'immagine deve essere piena di contenuto visivo significativo: vietate aree enormi sfocate, vuote, monocolore o oggetti di riempimento. La parte inferiore deve contenere un soggetto riconoscibile, non solamente texture o arredo stock.",
+    "La zona superiore per la tipografia aggiunta dal renderer deve essere naturale e COMPATTA: circa il 25-35% dell'altezza per un titolo breve, non metà della fotografia. Non disegnare riquadri, card bianche, strisce lattiginose, gradienti grafici o falsi placeholder nell'immagine generata.",
+    "Il renderer applicherà il testo reale separatamente: nessuna lettera, cifra, parola, logo, watermark, fake UI, badge o call to action generata nei pixel di sfondo.",
+    "Coerenza brand: usare le informazioni già confermate, senza inventare luoghi, persone, prodotti, risultati e altri fatti aziendali.",
+    "L'immagine non deve poter essere riciclata identica per un concorrente con un altro titolo. Se il soggetto è una chiave, un laptop, un caffè o un'agenda senza un significato essenziale, cambia concept prima di generare.",
+    "Priorità: idea comprensibile > scena pertinente > inquadratura di livello editoriale > leggibilità mobile > estetica decorativa.",
+  ].join("\n");
+}
+
+export function socialCopySkillPrompt(): string {
+  return [
+    "SKILL SOCIAL COPY — Brand profile / Hook Writer / Caption Writer:",
+    "Prima di scrivere, usa esclusivamente il brand e il pubblico del profilo attivo; non mescolare attività diverse.",
+    "Individua un'unica idea utile e una promessa che il corpo del post mantenga. Evita titoli clickbait o generici, numeri inventati e claim senza prove.",
+    "Scrivi mentalmente 3 aperture con meccanismi diversi (domanda concreta, contrasto fondato, errore riconoscibile) e seleziona quella più naturale, specifica e verificabile. Non restituire le bozze scartate.",
+    "Il hook della caption deve avere senso da solo e creare interesse; deve completare il visual, non ripetere semplicemente il testo stampato sull'immagine.",
+    "Il titolo richiesto nella grafica, se indicato nel visualBrief con headline tra virgolette, deve essere autonomo, italiano naturale, coerente con l'idea, preferibilmente 3-8 parole e massimo 62 caratteri; evita periodi eccessivamente lunghi.",
+    "Per post/carousel/story, genera copy con una sola CTA pertinente all'obiettivo, tono umano, niente riempitivi tipici AI, frasi tronche o struttura da brochure generica.",
+    "Il visualBrief deve dire quale idea mostrare con soggetto, scena, prospettiva e relazione narrativa; vietato 'ambiente elegante/luminoso + scrivania/chiavi/laptop' come unico concept.",
+    "Cambia struttura e lunghezza secondo Instagram, Facebook, LinkedIn e Google Business Profile; non copiare il medesimo testo su tutti i canali.",
+    "Un contenuto che fallisce i controlli deve restare in revisione: l'AI non approva né pubblica.",
+  ].join("\n");
+}
