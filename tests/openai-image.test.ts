@@ -40,6 +40,8 @@ assert.equal(imageAspectRatioForFormat("STORY", "INSTAGRAM"), "9:16");
 
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"ECONOMICS_CONTRAST");
 assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"EDITORIAL_SPLIT");
+assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Nuovo prodotto a prezzo promozionale"}),"EDITORIAL_HERO","retail promotion must not be classified as a gross-vs-net tradeoff");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Nuovo prodotto a prezzo promozionale"}),"TOP_GRADIENT","no arbitrary financial split for unrelated retail businesses");
 assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Organizzare check-in e pulizie"}),"TOP_GRADIENT");
 assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"BOTTOM_GRADIENT");
 const onImageBrief = 'Titolo in grafica: «Non guardare solo la tariffa». Scena editoriale sul confronto fra ricavo lordo e costi operativi reali di una locazione breve.';
