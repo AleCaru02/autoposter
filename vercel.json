@@ -65,6 +65,15 @@
     "api/avatar.ts": {
       "maxDuration": 60,
       "includeFiles": "node_modules/@ffprobe-installer/linux-x64/**"
+    },
+    "api/cron.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
+    },
+    "api/cron-canary.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
+    },
+    "api/generate-image.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
     }
   }
 }

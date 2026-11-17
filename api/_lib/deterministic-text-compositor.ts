@@ -11,11 +11,18 @@ export type TypographyStyle = { panelColor?: string; textColor?: string; brandCo
 
 let rendererReady: Promise<void> | null = null;
 let fontsReady: Promise<{ regular: Uint8Array; bold: Uint8Array }> | null = null;
-let workerAssetsReady: Promise<typeof import("./deterministic-text-worker-assets.js")> | null = null;
+type TypographyBinaryAssets = { resvgWasm: ArrayBuffer | WebAssembly.Module; interRegular: ArrayBuffer; interBold: ArrayBuffer };
+let workerAssetsReady: Promise<TypographyBinaryAssets> | null = null;
 
-function workerAssets() {
-  workerAssetsReady ??= import("./deterministic-text-worker-assets.js");
-  return workerAssetsReady;
+function workerAssets(): Promise<TypographyBinaryAssets> {
+  // Vercel uses actual Node. Workers have WebSocketPair and a binary asset
+  // bundler; do not change their existing .wasm / WOFF loading contract.
+  const nodeRuntime = typeof process !== "undefined" && Boolean(process.versions?.node)
+    && typeof (globalThis as { WebSocketPair?: unknown }).WebSocketPair === "undefined";
+  workerAssetsReady ??= nodeRuntime
+    ? import("./deterministic-text-node-assets.js").then(({ loadNodeTypographyAssets }) => loadNodeTypographyAssets())
+    : import("./deterministic-text-worker-assets.js");
+  return workerAssetsReady!;
 }
 
 function bytes(asset: ArrayBuffer) {
