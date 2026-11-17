@@ -81,6 +81,12 @@ const autopilotSrc=readFileSync(new URL("../api/_lib/autopilot.ts",import.meta.u
 assert.equal(settingsFromStrategy({approvalMode:"AUTOMATIC",autopilotEnabled:true}).approvalMode,"MANUAL_REVIEW");
 assert.equal(settingsFromStrategy({approvalMode:"MANUAL_REVIEW"}).approvalMode,"MANUAL_REVIEW");
 assert.match(autopilotSrc,/REQUIRE_OWNER_REVIEW = true/);
+const autopilotStoreSrc=readFileSync(new URL("../src/features/content/autopilot-store.ts",import.meta.url),"utf8");
+assert.doesNotMatch(autopilotStoreSrc,/approvalMode: settings\.approvalMode/);
+assert.doesNotMatch(autopilotStoreSrc,/approvalMode: row\.approvalMode === "AUTOMATIC"/);
+const contentPageSrc=readFileSync(new URL("../src/pages/content-generator-page.tsx",import.meta.url),"utf8");
+assert.match(contentPageSrc,/disabled aria-disabled="true"/);
+assert.doesNotMatch(contentPageSrc,/changeSettings\(\{ approvalMode: "AUTOMATIC" \}\)/);
 assert.match(autopilotSrc,/headline:visualHeadlineForBrief\(variant\.visualBrief,variant\.hook\)/);
 assert.match(src,/runContentAutopilotSerialized\(/);
 assert.match(src,/profileId:scope\.profileId,maxGenerations:1/);
