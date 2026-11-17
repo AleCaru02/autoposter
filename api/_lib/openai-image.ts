@@ -81,7 +81,7 @@ export type GenerateImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number } } | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number; layout?: "TOP_GRADIENT" | "BOTTOM_GRADIENT" } } | null;
   fetcher?: typeof fetch;
 };
 
