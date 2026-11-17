@@ -13,6 +13,8 @@ type CronEnv = {
   OPENAI_API_KEY?: string;
   OPENAI_TEXT_MONTHLY_BUDGET_USD?: string;
   OPENAI_IMAGE_MONTHLY_LIMIT?: string;
+  AUTOPILOT_RETEST_PROFILE_ID?: string;
+  AUTOPILOT_RETEST_CUTOFF_UTC?: string;
   CRON_SECRET?: string;
 };
 
@@ -33,6 +35,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_TEXT_MONTHLY_BUDGET_USD: process.env.OPENAI_TEXT_MONTHLY_BUDGET_USD,
     OPENAI_IMAGE_MONTHLY_LIMIT: process.env.OPENAI_IMAGE_MONTHLY_LIMIT,
+    AUTOPILOT_RETEST_PROFILE_ID: process.env.AUTOPILOT_RETEST_PROFILE_ID,
+    AUTOPILOT_RETEST_CUTOFF_UTC: process.env.AUTOPILOT_RETEST_CUTOFF_UTC,
     CRON_SECRET: process.env.CRON_SECRET,
   };
   if (!env.CRON_SECRET) return res.status(503).json({ error: "CRON_NOT_CONFIGURED" });
@@ -78,6 +82,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generated: autopilot.generated,
       scheduled: autopilot.scheduled,
       errors: autopilot.errors.length,
+      // Allowlisted diagnostic codes only: never write profile IDs, tokens or provider bodies to logs.
+      errorCodes: [...new Set(autopilot.errors.map(error => {
+        const match = /:(AUTOPILOT_[A-Z0-9_]+|OPENAI_[A-Z0-9_]+|METERING_FAILED)/.exec(error);
+        return match?.[1] ?? "AUTOPILOT_OTHER_ERROR";
+      }))].slice(0,5),
       socialCheck,
       historicalMetrics: { synced: historicalMetrics.synced, failed: historicalMetrics.failed, codes: historicalMetrics.codes },
       imageMigration,
