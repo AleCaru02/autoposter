@@ -397,6 +397,38 @@ async function loadInputs(sql: Sql, profileId: string, contentId: string, varian
   return { item: items[0], variant: variants[0], slides, assets };
 }
 
+/**
+ * Free deterministic visual preflight. No AI token or provider quota is reserved
+ * when the source media can never pass final visual QA.
+ * An asset with PENDING quality still proceeds: the actual visual QA decides PASS.
+ */
+export function contentQaMediaPreflight(
+  variant: Pick<VariantRow, "format" | "image_asset_id">,
+  slides: Array<Pick<SlideRow, "position" | "asset_id">>,
+  assets: Array<Pick<AssetRow, "id" | "width" | "height">>,
+): string | null {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  if (variant.format === "CAROUSEL") {
+    if (slides.length < 4 || slides.length > 10) return "CONTENT_QA_CAROUSEL_INCOMPLETE";
+    for (const [index, slide] of slides.entries()) {
+      if (slide.position !== index + 1 || !slide.asset_id || !byId.has(slide.asset_id)) {
+        return "CONTENT_QA_CAROUSEL_ASSET_REQUIRED";
+      }
+      if (!assetDimensionsFit(byId.get(slide.asset_id)!, "CAROUSEL")) {
+        return "CONTENT_QA_MEDIA_DIMENSIONS_INVALID";
+      }
+    }
+    return null;
+  }
+  if (!variant.image_asset_id || !byId.has(variant.image_asset_id)) {
+    return "CONTENT_QA_IMAGE_REQUIRED";
+  }
+  if (!assetDimensionsFit(byId.get(variant.image_asset_id)!, variant.format)) {
+    return "CONTENT_QA_MEDIA_DIMENSIONS_INVALID";
+  }
+  return null;
+}
+
 export async function runContentQa(input: {
   databaseUrl: string;
   apiKey: string;
@@ -434,6 +466,11 @@ export async function runContentQa(input: {
     const cached = object(variant.qa_result) as unknown as ContentQaRunResult;
     if (cached?.contentFingerprint===fingerprint && cached.variantId===variant.id) return {...cached,reused:true};
   }
+
+  // Do not pay for fact-check/editorial QA when media will deterministically fail.
+  // The user can generate or attach valid media and retry without a charge.
+  const mediaProblem = contentQaMediaPreflight(variant, slides, assets);
+  if (mediaProblem) throw new Error(mediaProblem);
 
   const usage = new EntitlementUsageService(input.databaseUrl);
   const idempotencyKey = input.force
