@@ -598,6 +598,8 @@ export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}
     and exists (select 1 from public.social_connections connected
       where connected.profile_id=public.profiles.id and connected.status='ACTIVE'
         and connected.token_reference is not null
+        and connected.provider_account_id is not null and length(trim(connected.provider_account_id))>0
+        and (connected.provider='GBP' or connected.expires_at is null or connected.expires_at>now())
         and connected.last_validated_at >= now()-interval '48 hours')
     order by created_at asc limit ${MAX_PROFILES_PER_RUN}` as unknown as ProfileRow[];
   const result:RunResult={profilesChecked:0,generated:0,scheduled:0,blockedForReview:0,skipped:0,errors:[]};const now=new Date();const horizon=new Date(now.getTime()+8*DAY_MS).toISOString();
@@ -607,6 +609,8 @@ export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}
         select 1 from public.social_connections connected
         where connected.profile_id=public.schedules.profile_id and connected.provider=public.schedules.provider
           and connected.status='ACTIVE' and connected.token_reference is not null
+          and connected.provider_account_id is not null and length(trim(connected.provider_account_id))>0
+          and (connected.provider='GBP' or connected.expires_at is null or connected.expires_at>now())
           and connected.last_validated_at >= now()-interval '48 hours'
       ))
     order by provider asc` as unknown as ScheduleRow[];
