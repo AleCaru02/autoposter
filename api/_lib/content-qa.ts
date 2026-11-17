@@ -526,6 +526,7 @@ export async function runContentQa(input: {
   }
 
   let committed=false;
+  let qaStage = "BUDGET_PREFLIGHT";
   try {
     const budget = await new ActivityBudgetEngine(input.databaseUrl).preflight({
       profileId:input.profileId,
@@ -558,6 +559,7 @@ export async function runContentQa(input: {
 
     await usage.markProviderStarted(usageEventId);
 
+    qaStage = "DUPLICATE_CHECK";
     const duplicate=findNearDuplicate(
       {id:item.id,topic:item.topic,angle:item.title,hook:variant.hook,caption:variant.caption},
       await recentContent(sql,input.profileId,input.contentId),
@@ -565,6 +567,7 @@ export async function runContentQa(input: {
     const duplicateStatus:ContentQaDimensionStatus=duplicate?"FAIL":"PASS";
 
     const existingSources=urlsFrom(item.source_refs);
+    qaStage = "FACT_CHECK";
     const factCheck=await runOpenAIFactCheckAgent({
       apiKey:input.apiKey,
       topic:item.topic,
@@ -593,6 +596,7 @@ export async function runContentQa(input: {
       fetcher:input.fetcher,
     });
 
+    qaStage = "EDITORIAL_QA";
     const editorialQa=await runOpenAIEditorialQA({
       apiKey:input.apiKey,
       profileName:profile.name,
@@ -617,6 +621,7 @@ export async function runContentQa(input: {
       const asset=variant.image_asset_id?assetMap.get(variant.image_asset_id):null;
       if (asset && assetDimensionsFit(asset,variant.format)) {
         variantIdentityStatus=identityStatus(profile.profile_type,item.subject_strategy,asset);
+        qaStage = "VISUAL_QA";
         variantVisualResult=await runOpenAIVisualQa({
           apiKey:input.apiKey,
           imageUrl:asset.storage_url,
@@ -658,6 +663,7 @@ export async function runContentQa(input: {
 
         if (asset && assetDimensionsFit(asset,"CAROUSEL")) {
           const identity=identityStatus(profile.profile_type,item.subject_strategy,asset);
+          qaStage = "CAROUSEL_VISUAL_QA";
           const visualQa=await runOpenAIVisualQa({
             apiKey:input.apiKey,
             imageUrl:asset.storage_url,
@@ -711,6 +717,7 @@ export async function runContentQa(input: {
       globalVisualStatus=structurallyComplete&&slideResults.every((slide)=>slide.visualStatus==="PASS")?"PASS":"FAIL";
     }
 
+    qaStage = "FEED_COHERENCE";
     const memoryRows=await sql`
       select snapshot
       from public.profile_editorial_memory
@@ -774,10 +781,12 @@ export async function runContentQa(input: {
       reused:false,
     };
 
+    qaStage = "PERSIST_RESULT";
     await persistResult(sql,result,input.actorType);
     if (input.actorType === "MANUAL") await sql`select public.mark_content_variant_in_review(${input.profileId}::uuid,${input.variantId}::uuid)`;
 
     const factCost=estimateTerraCostUsd(factCheck.usage.inputTokens,factCheck.usage.outputTokens)+factCheck.usage.webSearchCalls*WEB_SEARCH_COST_USD;
+    qaStage = "PERSIST_USAGE";
     await persistTechnicalUsage(sql,input.profileId,usageEventId,[
       {
         operation:"CONTENT_QA_FACT",
@@ -802,6 +811,17 @@ export async function runContentQa(input: {
     committed=true;
     return result;
   } catch (reason) {
+    // Preserve a safe error classification for every failed paid QA operation.
+    // No raw OpenAI body, profile text, credential, URL or sensitive payload is logged.
+    const message = reason instanceof Error ? reason.message : "";
+    const knownCode = /^(OPENAI_[A-Z0-9_]+|CONTENT_QA_[A-Z0-9_]+|AI_BUDGET_[A-Z0-9_]+|VISUAL_QA_[A-Z0-9_]+)/.exec(message)?.[1] ?? null;
+    const sqlState = reason && typeof reason === "object" && "code" in reason && typeof reason.code === "string"
+      && /^[A-Z0-9]{5}$/.test(reason.code) ? reason.code : null;
+    const code = knownCode ?? (sqlState ? "POSTGRES_" + sqlState : reason instanceof SyntaxError ? "QA_JSON_PARSE_ERROR" : "QA_UNCLASSIFIED_RUNTIME_ERROR");
+    await usage.mergeUsageEventMetadata(usageEventId, {
+      qa_failure_stage: qaStage, qa_failure_code: code, qa_failed_at: new Date().toISOString(),
+    }).catch(()=>undefined);
+    console.error("content.qa.runtime_failed", {stage: qaStage, code});
     if (!committed) await usage.releaseUsage(usageEventId).catch(()=>undefined);
     throw reason;
   }

@@ -58,7 +58,9 @@ export default async function handler(req:VercelRequest,res:VercelResponse) {
         AUTOPILOT_RETEST_PROFILE_ID: scope.profileId,
         AUTOPILOT_RETEST_CUTOFF_UTC: scope.cutoffUtc,
       }).catch(() => ({state:"RECOVERY_RUNTIME_FAILED"}));
-      console.log("vercel.autopilot-image-recovery",{state:imageRecovery.state});
+      const code = "code" in imageRecovery && typeof imageRecovery.code === "string"
+        ? /^(?:OPENAI_[A-Z0-9_]+|CONTENT_QA_[A-Z0-9_]+|AI_BUDGET_[A-Z0-9_]+|VISUAL_QA_[A-Z0-9_]+|POSTGRES_[A-Z0-9_]+|QA_[A-Z0-9_]+)$/.test(imageRecovery.code) ? imageRecovery.code : "QA_ERROR" : null;
+      console.log("vercel.autopilot-image-recovery",{state:imageRecovery.state,code});
       return res.status(200).json({ok:true,canary:"CONSUMED",imageRecovery:{state:imageRecovery.state}});
     }
     const result=await runContentAutopilotSerialized({

@@ -16,10 +16,10 @@ import { visualHeadlineForBrief } from "./visual-headline.js";
  */
 
 /**
- * A previously-paid image is immutable on QA errors: allow at most one bounded
- * follow-up QA attempt with fresh entitlement idempotency. Never regenerate.
- * Eligibility is proven from the exact committed recovery asset and sole prior
- * RELEASED QA attempt, not from a generic PENDING visual.
+ * A previously-paid image is immutable on QA errors: allow one final bounded
+ * diagnostic follow-up QA attempt with fresh entitlement idempotency. Never regenerate.
+ * Eligibility is proven from the exact committed recovery asset and two prior
+ * RELEASED QA attempts, not from a generic PENDING visual.
  */
 async function resumeRecoveredCanaryQaOnce(
   sql: ReturnType<typeof neon>, env: { DATABASE_URL: string; OPENAI_API_KEY: string },
@@ -60,7 +60,7 @@ async function resumeRecoveredCanaryQaOnce(
   ` as unknown as Array<{variant_id:string;content_id:string;qa_attempts:number;qa_released:number}>;
   const v=rows[0];
   if (!v) return null;
-  if (Number(v.qa_attempts)!==1 || Number(v.qa_released)!==1)
+  if (Number(v.qa_attempts)!==2 || Number(v.qa_released)!==2)
     return {state:"SAVED_IMAGE_QA_RETRY_ALREADY_CONSUMED"};
   try {
     const qa=await runContentQa({
