@@ -9,6 +9,7 @@ import { reelStorageConfigured } from "./_lib/reel/reel-storage.js";
 import { renderSelfTest } from "./_lib/reel/reel-selftest.js";
 import { createDryRunReelRuntime, dryRunAllowed } from "./_lib/reel/reel-dry-run.js";
 import { checkOpenAiModelAccess } from "./_lib/reel/openai-access.js";
+import { enqueueAutoReelPilot, reviewAutoReelPilot } from "./_lib/reel/auto-reel.js";
 import { dispatchContinuation, parseContinuationQuery } from "./_lib/reel/render-continuation.js";
 import type { RenderJob } from "./_lib/reel/reel-pipeline.js";
 import { authorizedUser } from "./_lib/profile-access.js";
@@ -175,8 +176,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })().catch((reason) => console.error("reel-render-continuation-failed", { jobId, hop, detail: reason instanceof Error ? reason.message.split(":")[0] : "UNKNOWN" })));
       return res.status(202).json({ ok: true, accepted: jobId, hop });
     }
+    // First finalize QA for completed renders from an earlier tick, then enqueue
+    // at most one new weekly Reel. Both gates are opt-in, owner scoped and budgeted.
+    const autoQa = await reviewAutoReelPilot(process.env).catch((reason) => {
+      console.error("auto-reel-qa", { code: reason instanceof Error ? reason.message.split(":")[0] : "AUTO_REEL_QA_ERROR" });
+      return { reviewed: 0, reason: "AUTO_REEL_QA_FAILED" };
+    });
+    const autoEnqueue = await enqueueAutoReelPilot(process.env).catch((reason) => {
+      console.error("auto-reel-enqueue", { code: reason instanceof Error ? reason.message.split(":")[0] : "AUTO_REEL_ENQUEUE_ERROR" });
+      return { queued: false, reason: "AUTO_REEL_ENQUEUE_FAILED" };
+    });
     const states = await driveRenderJob(null, deadlineAt, 0);
-    return res.status(200).json({ ok: true, processed: states.length, states });
+    return res.status(200).json({ ok: true, processed: states.length, states, autoQa, autoEnqueue });
   }
 
   if (path === "selftest") {
