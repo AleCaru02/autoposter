@@ -128,6 +128,7 @@ jobs:
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
       - { name: Autopilot AI plan runtime regression, run: "npm run test:autopilot-ai-plan" }
       - { name: Avoid AI cost on disconnected/unverified social channels, run: "npx tsx tests/autopilot-connected-channel-preflight.test.ts" }
+      - { name: Verified-only Autopilot and one-retry circuit breaker, run: "npx tsx tests/autopilot-release-canary.test.ts" }
       - { name: Autopilot released QA metering regression, run: "npx tsx tests/autopilot-released-metering.test.ts" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
       - { name: Vercel authenticated learning route regression, run: "npm run test:vercel-learning-route" }
