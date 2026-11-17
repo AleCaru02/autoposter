@@ -13,7 +13,11 @@ export function selectCreativeTemplate(input: { format: string; visualBrief: str
   if (input.format === "STORY") return "STORY_HERO";
   if (input.format === "CAROUSEL") return "CAROUSEL_STEP";
   const text = `${input.visualBrief} ${input.caption ?? ""}`.toLocaleLowerCase("it-IT");
-  if (/tariff|prezz|cost[oi]|margine|ricav|guadagn|redditivit|fatturat|investiment|budget/.test(text)) return "ECONOMICS_CONTRAST";
+  const economicTopic = /tariff|prezz|cost[oi]|margine|ricav|guadagn|redditivit|fatturat|investiment|budget/.test(text);
+  const materialComparison = /margine|redditivit|guadagn|netto|commission|spes[ae]|costi?|confront|contrasto|differenz|non è|non basta|solo la tariffa/.test(text);
+  // A plain retail price is NOT a trade-off cover. This must remain useful
+  // for unrelated brands such as e-commerce, beauty and local retail.
+  if (economicTopic && materialComparison) return "ECONOMICS_CONTRAST";
   if (/gestione|processo|procedura|check.in|organizza|prenotazion|pulizi|lavoro|metodo|servizio/.test(text)) return "PROCESS_PROOF";
   return "EDITORIAL_HERO";
 }
