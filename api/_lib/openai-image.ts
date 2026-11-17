@@ -127,7 +127,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
     options.typography?.style?.layout === "BOTTOM_GRADIENT"
       ? "Il renderer applica headline e brand sul TERZO INFERIORE con un leggero gradiente scuro: soggetto e azione devono restare riconoscibili nei 60% SUPERIORI. Non creare già pannelli, gradienti o testo nel render AI."
-      : "Il renderer applica headline e brand sul TERZO SUPERIORE con un leggero gradiente scuro: soggetto e azione devono stare nella metà inferiore e restare riconoscibili. Non creare già pannelli, gradienti o testo nel render AI.",
+      : "Riserva una zona editoriale pulita nel TERZO SUPERIORE, dove il renderer applicherà headline e brand con un leggero gradiente scuro: soggetto e azione devono stare nella metà inferiore. Non creare già pannelli, gradienti o testo nel render AI.",
     storySafety,
     socialCreativeDirection({...options,placement:options.typography?.style?.layout}),
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
