@@ -50,6 +50,8 @@ const recoverySrc=readFileSync(new URL("../api/_lib/autopilot-image-recovery.ts"
 assert.match(recoverySrc,/wasm-canary-image-repair-v1/);
 assert.match(recoverySrc,/e\.metadata->>'release_reason' like 'Cannot find package/);
 assert.match(recoverySrc,/cost\.provider_started_at is null/);
+// capability_usage_events.reference_id is text, content_variants.id is uuid.
+assert.match(recoverySrc,/e\.reference_id=v\.id::text/);
 assert.match(recoverySrc,/await preflightDeterministicTypography\(/);
 assert.match(recoverySrc,/await meter\.markProviderStarted\(/);
 assert.match(recoverySrc,/await runContentQa\(/);

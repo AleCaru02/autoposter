@@ -44,7 +44,7 @@ export async function recoverWasmCanaryImage(env: {
       and exists (
         select 1 from public.capability_usage_events e
         left join public.provider_cost_attempts cost on cost.logical_usage_event_id=e.id
-        where e.profile_id=v.profile_id and e.reference_id=v.id and e.capability_key='ai.image.generate'
+        where e.profile_id=v.profile_id and e.reference_id=v.id::text and e.capability_key='ai.image.generate'
           and e.source='AI_IMAGE_AUTOPILOT' and e.state='RELEASED'
           and e.metadata->>'release_reason' like 'Cannot find package ''wbg''%'
           and (cost.id is null or (cost.provider_started_at is null and cost.actual_usd is null))
