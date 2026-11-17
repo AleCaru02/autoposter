@@ -24,8 +24,9 @@ export function canaryWindow(env: {
 function authorized(req:VercelRequest,secret:string|undefined) {
   const raw=req.headers.authorization;
   const token=raw?.startsWith("Bearer ")?raw.slice(7).trim():"";
-  if (!secret||!token||secret.length!==token.length) return false;
-  return timingSafeEqual(Buffer.from(secret),Buffer.from(token));
+  if (!secret||!token) return false;
+  const expected=Buffer.from(secret,"utf8"),provided=Buffer.from(token,"utf8");
+  return expected.length===provided.length&&timingSafeEqual(expected,provided);
 }
 export default async function handler(req:VercelRequest,res:VercelResponse) {
   res.setHeader("cache-control","no-store");
