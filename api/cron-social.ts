@@ -44,6 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     APP_BASE_URL: process.env.APP_BASE_URL,
+    SOCIAL_PILOT_PROFILE_ID: process.env.SOCIAL_PILOT_PROFILE_ID,
+    SOCIAL_PILOT_MAX_DAILY: process.env.SOCIAL_PILOT_MAX_DAILY,
   };
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY || env.SOCIAL_TOKEN_KEY.length < 24) {
     return res.status(503).json({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" });
