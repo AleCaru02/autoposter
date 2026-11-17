@@ -4,6 +4,7 @@ import type { VercelRequest,VercelResponse } from "@vercel/node";
 import handler,{canaryWindow} from "../api/cron-canary.js";
 import { visualHeadlineForBrief } from "../api/_lib/visual-headline.js";
 import { settingsFromStrategy } from "../api/_lib/autopilot.js";
+import { runOneImageOwnerPreview } from "../api/_lib/one-image-owner-preview.js";
 assert.equal(visualHeadlineForBrief("Grafica pulita con headline: “Gestione completa: 5 aree operative”.", "Gestione completa di un affitto breve a Milano: cosa include?"),"Gestione completa: 5 aree operative");
 assert.equal(visualHeadlineForBrief("Sovraimpressione essenziale: “Non guardare solo la tariffa”.", "La domanda utile non è quanto puoi chiedere a notte."),"Non guardare solo la tariffa");
 assert.equal(visualHeadlineForBrief("Scrivania operativa con laptop, senza parole.", "Un titolo naturale"),"Un titolo naturale");
@@ -42,7 +43,21 @@ try{
 }finally{
   if(oldSecret===undefined)delete process.env.CRON_SECRET; else process.env.CRON_SECRET=oldSecret;
 }
+// Owner explicitly authorized ONE real image with no automatic approval.
+assert.deepEqual(await runOneImageOwnerPreview({},new Date("2026-11-19T00:00:00Z")),{state:"INERT"});
+assert.deepEqual(await runOneImageOwnerPreview({},new Date("2026-11-17T06:00:00Z")),{state:"BLOCKED",code:"OWNER_REVIEW_GUARDS_NOT_ACTIVE"});
+const previewSrc=readFileSync(new URL("../api/_lib/one-image-owner-preview.ts",import.meta.url),"utf8");
+for (const guard of ["SECOND_IMAGE_PROVIDER_CALL_FORBIDDEN","SECOND_MEDIA_MANAGER_CALL_FORBIDDEN","OWNER_REVIEW_GUARDS_NOT_ACTIVE","PREVIEW_PHOTO_LAYOUT_INVALID","ALREADY_CONSUMED","ActivityBudgetEngine","ImageGenerationMetering","owner_approval:\"PENDING\"","publisher_enabled:false"]) {
+  assert.match(previewSrc,new RegExp(guard));
+}
+assert.doesNotMatch(previewSrc,/auto_approve_content_variant/);
+assert.doesNotMatch(previewSrc,/publication_jobs/);
+assert.match(previewSrc,/one-image-creative-preview.completed/);
+assert.match(previewSrc,/await preflightDeterministicTypography/);
+assert.ok(previewSrc.indexOf("await preflightDeterministicTypography")<previewSrc.indexOf("await meter.reserve"),"typography preflight must happen before image reservation");
 const src=readFileSync(new URL("../api/cron-canary.ts",import.meta.url),"utf8");
+assert.match(src,/runOneImageOwnerPreview\(process.env\)/);
+assert.ok(src.indexOf("UNAUTHORIZED_CRON")<src.indexOf("runOneImageOwnerPreview\(process.env\)"),"never trigger paid preview without secret verification");
 assert.match(src,/created_at>=\$\{scope\.cutoffUtc\}::timestamptz/);
 assert.match(src,/if \(Number\(rows\[0\]\?\.n\)>0\) \{/);
 assert.match(src,/recoverWasmCanaryImage\(/);
