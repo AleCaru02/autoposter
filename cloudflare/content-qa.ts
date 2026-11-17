@@ -16,7 +16,8 @@ function statusFor(detail: string) {
   if (detail.includes("CONTENT_QA_DISABLED") || detail.includes("CONTENT_QA_LIMIT_REACHED")) return 429;
   if (detail.includes("CONTENT_QA_IN_PROGRESS") || detail.includes("CONTENT_QA_RETRY_REQUIRED")) return 409;
   if (detail === "CONTENT_QA_IMAGE_REQUIRED" || detail === "CONTENT_QA_CAROUSEL_INCOMPLETE" ||
-      detail === "CONTENT_QA_CAROUSEL_ASSET_REQUIRED" || detail === "CONTENT_QA_MEDIA_DIMENSIONS_INVALID") return 409;
+      detail === "CONTENT_QA_CAROUSEL_ASSET_REQUIRED" || detail === "CONTENT_QA_MEDIA_DIMENSIONS_INVALID" ||
+      detail === "CONTENT_QA_REEL_VIDEO_NOT_VERIFIED" || detail === "CONTENT_QA_REEL_VIDEO_URL_INVALID") return 409;
   if (detail.includes("OPENAI_NOT_CONFIGURED")) return 503;
   if (/^OPENAI_(?:AGENT|EDITORIAL_QA|VISUAL_QA)_HTTP_429/.test(detail)) return 503;
   return 500;
