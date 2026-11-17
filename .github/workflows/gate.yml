@@ -129,6 +129,7 @@ jobs:
       - { name: Autopilot released QA metering regression, run: "npx tsx tests/autopilot-released-metering.test.ts" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
       - { name: Vercel authenticated learning route regression, run: "npm run test:vercel-learning-route" }
+      - { name: Vercel native QA and generation status route regression, run: "npx tsx tests/vercel-native-qa-status-routes.test.ts" }
       - { name: Vercel assets route regression, run: "npm run test:vercel-assets-route" }
       - { name: Feedback loop regression, run: "npm run test:feedback-loop" }
       - { name: Content workflow regression, run: "npm run test:content-workflow" }

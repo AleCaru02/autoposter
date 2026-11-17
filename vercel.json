@@ -17,6 +17,14 @@
   ],
   "rewrites": [
     {
+      "source": "/api/editorial-agents/strategy-plan",
+      "destination": "/api/editorial-agents"
+    },
+    {
+      "source": "/api/generate-text/status",
+      "destination": "/api/generate-text-status"
+    },
+    {
       "source": "/api/auth/:path*",
       "destination": "/api/auth?path=:path*"
     },
