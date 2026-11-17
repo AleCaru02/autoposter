@@ -125,7 +125,7 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
     "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
     "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
-    "Riserva solo una zona editoriale compatta nella parte superiore per il testo deterministico. Il soggetto rimane grande e riconoscibile nel resto del canvas; niente zona vuota di mezza immagine.",
+    "Riserva una zona editoriale pulita e compatta nella parte superiore per il testo deterministico. Il soggetto rimane grande e riconoscibile nel resto del canvas; niente zona vuota di mezza immagine.",
     storySafety,
     socialCreativeDirection(options),
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
@@ -198,6 +198,13 @@ export function estimateImageCostUsd(inputTokens: number, outputTokens: number, 
 export async function generateOpenAIImage(options: GenerateImageOptions): Promise<OpenAIImageResult> {
   const fetcher: typeof fetch = options.fetcher ?? ((input, init) => globalThis.fetch(input, init));
   const size = imageSizeForFormat(options.format, options.provider);
+  // Defense in depth: a malformed headline/layout must never start a billable
+  // Media Manager or Images 2 request, even from direct or future API routes.
+  if (options.typography) {
+    const { preflightDeterministicTypography } = await import("./deterministic-text-compositor.js");
+    const [width, height] = size.split("x").map(Number);
+    await preflightDeterministicTypography({ width, height, ...options.typography });
+  }
   const mediaManager = await runOpenAIMediaManager({
     apiKey: options.apiKey,
     profileName: options.profileName,
