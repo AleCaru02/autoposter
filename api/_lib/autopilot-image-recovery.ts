@@ -18,7 +18,7 @@ import { visualHeadlineForBrief } from "./visual-headline.js";
 /**
  * A previously-paid image is immutable on QA errors: allow one final bounded
  * diagnostic follow-up QA attempt with fresh entitlement idempotency. Never regenerate.
- * Eligibility is proven from the exact committed recovery asset and two prior
+ * Eligibility is proven from the exact committed recovery asset and three prior
  * RELEASED QA attempts, not from a generic PENDING visual.
  */
 async function resumeRecoveredCanaryQaOnce(
@@ -44,7 +44,7 @@ async function resumeRecoveredCanaryQaOnce(
       and asset.kind='IMAGE' and asset.source='AI_IMAGE'
       and asset.storage_url like 'https://%.public.blob.vercel-storage.com/%'
     where v.profile_id=${profileId}::uuid and v.created_at>=${cutoffIso}::timestamptz
-      and v.eligible=true and v.approval_mode='AUTO' and v.approval_status='PENDING'
+      and v.eligible=true and v.approval_mode='MANUAL' and v.approval_status='PENDING'
       and v.qa_status='PENDING' and v.format='POST'
       and v.visual_provider='OPENAI' and v.visual_generation_status='PASS'
       and exists (select 1 from public.capability_usage_events prior
@@ -60,7 +60,7 @@ async function resumeRecoveredCanaryQaOnce(
   ` as unknown as Array<{variant_id:string;content_id:string;qa_attempts:number;qa_released:number}>;
   const v=rows[0];
   if (!v) return null;
-  if (Number(v.qa_attempts)!==2 || Number(v.qa_released)!==2)
+  if (Number(v.qa_attempts)!==3 || Number(v.qa_released)!==3)
     return {state:"SAVED_IMAGE_QA_RETRY_ALREADY_CONSUMED"};
   try {
     const qa=await runContentQa({
@@ -69,17 +69,9 @@ async function resumeRecoveredCanaryQaOnce(
       force:true,
     });
     if (qa.overallStatus!=="PASS") return {state:"SAVED_IMAGE_QA_VERDICT_FAIL"};
-    const approved=await sql`select public.auto_approve_content_variant(
-      ${profileId}::uuid,${v.variant_id}::uuid,'SYSTEM_AUTOPILOT') as approved
-    ` as unknown as Array<{approved:boolean}>;
-    if (!approved[0]?.approved) return {state:"QA_PASS_APPROVAL_BLOCKED"};
-    const scheduled=await sql`update public.publication_jobs
-      set state='SCHEDULED',updated_at=now()
-      where variant_id=${v.variant_id}::uuid and profile_id=${profileId}::uuid
-        and state='BLOCKED_APPROVAL' and scheduled_at>now()+interval '10 minutes'
-      returning id
-    ` as unknown as Array<{id:string}>;
-    return {state:scheduled.length?"SAVED_IMAGE_QA_PASS_SCHEDULED":"SAVED_IMAGE_QA_PASS_NOT_SCHEDULED"};
+    // QA is automatic, but publication approval is strictly manual.
+    // Keep the existing job BLOCKED_APPROVAL and present the result to its owner.
+    return {state:"SAVED_IMAGE_QA_PASS_AWAITING_USER_REVIEW"};
   } catch (error) {
     const message=error instanceof Error?error.message:"";
     const code=/(CONTENT_QA_[A-Z0-9_]+|OPENAI_[A-Z0-9_]+|AI_BUDGET_[A-Z0-9_]+|FACT_CHECK_[A-Z0-9_]+)/.exec(message)?.[1]??"QA_PROVIDER_OR_RUNTIME_ERROR";
@@ -115,7 +107,7 @@ export async function recoverWasmCanaryImage(env: {
       and sc.status='ACTIVE' and sc.token_reference is not null
       and sc.provider_account_id is not null and sc.last_validated_at > now()-interval '48 hours'
     where v.profile_id=${id}::uuid and v.created_at>=${new Date(cutoff).toISOString()}::timestamptz
-      and v.eligible=true and v.approval_mode='AUTO' and v.approval_status='PENDING'
+      and v.eligible=true and v.approval_mode='MANUAL' and v.approval_status='PENDING'
       and v.format='POST' and v.image_asset_id is null and v.visual_provider='OPENAI'
       and v.visual_brief is not null and v.hook is not null
       and exists (
@@ -204,15 +196,8 @@ export async function recoverWasmCanaryImage(env: {
       profileId:id,contentId:variant.content_id,variantId:variant.variant_id,actorType:"AUTOPILOT",
     }).catch(() => null);
     if (!qa || qa.overallStatus !== "PASS") return {state:"IMAGE_SAVED_QA_NOT_PASS"};
-    const approved = await sql`select public.auto_approve_content_variant(
-      ${id}::uuid,${variant.variant_id}::uuid,'SYSTEM_AUTOPILOT') as approved` as unknown as Array<{approved:boolean}>;
-    if (!approved[0]?.approved) return {state:"QA_PASS_APPROVAL_BLOCKED"};
-    const scheduled = await sql`update public.publication_jobs
-      set state='SCHEDULED',updated_at=now()
-      where variant_id=${variant.variant_id}::uuid and profile_id=${id}::uuid
-        and state='BLOCKED_APPROVAL' and scheduled_at>now()+interval '10 minutes'
-      returning id` as unknown as Array<{id:string}>;
-    return {state:scheduled.length ? "IMAGE_QA_PASS_SCHEDULED" : "IMAGE_QA_PASS_NOT_SCHEDULED"};
+    // Even a PASS from OpenAI must never publish without the owner's review.
+    return {state:"IMAGE_QA_PASS_AWAITING_USER_REVIEW"};
   } catch (error) {
     if (!committed) await meter.release(eventId,error instanceof Error?error.message:"RECOVERY_FAILED").catch(() => undefined);
     return {state:"RECOVERY_FAILED",code:error instanceof Error?error.message.split(":")[0].slice(0,70):"UNKNOWN"};
