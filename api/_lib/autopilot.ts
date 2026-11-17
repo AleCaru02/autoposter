@@ -52,6 +52,8 @@ type RunResult = { profilesChecked: number; generated: number; scheduled: number
 type PlannedContentOutcome = { scheduled: boolean; blocked: boolean; skipped?: boolean; deferred?: boolean };
 
 const AUTO_QA_RESERVE_USD = 0.03;
+// Explicit product policy for personal use: AI may prepare, never approve on the owner's behalf.
+const REQUIRE_OWNER_REVIEW = true;
 const MAX_PROFILES_PER_RUN = 100;
 const DEFAULT_GENERATIONS_PER_RUN = 12;
 const HOUR_MS = 60 * 60 * 1000;
@@ -118,7 +120,8 @@ export function candidateSlots(schedule:AutopilotSchedule,now=new Date(),learned
   if(!candidates.length){for(const date of dates.slice(0,target)){add(date,"12:00","DEFAULT");}}
   return candidates.sort((a,b)=>a.scheduledAt.localeCompare(b.scheduledAt)).slice(0,target);
 }
-function settingsFromStrategy(value:unknown){const strategy=asObject(value);return{enabled:strategy.autopilotEnabled!==false,approvalMode:strategy.approvalMode==="AUTOMATIC"?"AUTOMATIC" as ApprovalMode:"MANUAL_REVIEW" as ApprovalMode,websitePilot:instagramWebsitePilotEnabled(value)};}
+// Mandatory owner review: stored AUTOMATIC preferences must not autoapprove new content.
+export function settingsFromStrategy(value:unknown){const strategy=asObject(value);return{enabled:strategy.autopilotEnabled!==false,approvalMode:"MANUAL_REVIEW" as ApprovalMode,websitePilot:instagramWebsitePilotEnabled(value)};}
 async function ensureStrategy(sql:Sql,profileId:string){const defaults=JSON.stringify({autopilotEnabled:true,approvalMode:"MANUAL_REVIEW",researchMode:"BALANCED"});await sql`insert into public.content_strategies (profile_id,platform_strategy,updated_at) values (${profileId}::uuid,${defaults}::jsonb,now()) on conflict (profile_id) do nothing`;}
 async function ensureSchedules(sql:Sql,profile:ProfileRow){for(const item of DEFAULT_SCHEDULES){await sql`insert into public.schedules (profile_id,provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled,updated_at) select ${profile.id}::uuid,${item.provider},${profile.timezone||"Europe/Rome"},${item.posts},'[]'::jsonb,true,true,now() where not exists (select 1 from public.schedules where profile_id=${profile.id}::uuid and provider=${item.provider})`;}}
 type PersonalBrandEditorialContext = {
@@ -335,7 +338,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   if(duplicate&&(!linkedSeriesContinuation||duplicate.bodyScore>=0.78))throw new Error(`AUTOPILOT_DUPLICATE_CONTENT:${duplicate.score.toFixed(3)}`);
   const repetition=findEditorialRepetition({topic:generated.content.editorialTopic,angle:generated.content.editorialAngle,hook:variant.hook,caption:variant.caption,cta:variant.cta,pillar:generated.content.pillar??null,visualArchetype:subjectDecision.visualArchetype,subjectStrategy:subjectDecision.subject,narrativeStructure:`${master.contentType}:${master.intent}`},recentDedupe);
   if(repetition.blocked)throw new Error(`AUTOPILOT_REPETITION_BLOCKED:${repetition.reasons.join(",")}`);
-  if(approvalMode==="AUTOMATIC"&&variant.eligible){const qa=await runOpenAIEditorialQA({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider,format,objective,content:generated.content,variant,verification:generated.verification,externalSources:generated.externalSources});const qaEvent:TechnicalAiEvent={operation:"AGENT_EDITORIAL_QA",model:qa.model,inputTokens:qa.usage.inputTokens,outputTokens:qa.usage.outputTokens,costUsd:qa.usage.estimatedCostUsd,metadata:{openai_response_id:qa.responseId,openai_request_id:qa.requestId,source:"AUTOPILOT",provider,format,verdict:qa.verdict,reasons:qa.reasons,checks:qa.checks}};await meter.persistTechnicalEvents(profile.id,logicalEventId,[qaEvent]);if(qa.verdict!=="PASS")throw new Error(`AUTOPILOT_EDITORIAL_QA_BLOCKED:${qa.reasons.slice(0,2).join(" | ")||"material issue"}`);}
+  if(approvalMode==="AUTOMATIC"&&variant.eligible && !REQUIRE_OWNER_REVIEW){const qa=await runOpenAIEditorialQA({apiKey:env.OPENAI_API_KEY,profileName:profile.name,industry:profile.industry,tone:context.tone,provider,format,objective,content:generated.content,variant,verification:generated.verification,externalSources:generated.externalSources});const qaEvent:TechnicalAiEvent={operation:"AGENT_EDITORIAL_QA",model:qa.model,inputTokens:qa.usage.inputTokens,outputTokens:qa.usage.outputTokens,costUsd:qa.usage.estimatedCostUsd,metadata:{openai_response_id:qa.responseId,openai_request_id:qa.requestId,source:"AUTOPILOT",provider,format,verdict:qa.verdict,reasons:qa.reasons,checks:qa.checks}};await meter.persistTechnicalEvents(profile.id,logicalEventId,[qaEvent]);if(qa.verdict!=="PASS")throw new Error(`AUTOPILOT_EDITORIAL_QA_BLOCKED:${qa.reasons.slice(0,2).join(" | ")||"material issue"}`);}
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
@@ -569,7 +572,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     carouselVisualReady=Number(readyRows[0]?.total)===slidePlans.length&&Number(readyRows[0]?.ready)===slidePlans.length;
   }
   let canAutoApprove=false;
-  if(approvalMode==="AUTOMATIC"&&variant.eligible){
+  if(approvalMode==="AUTOMATIC"&&variant.eligible && !REQUIRE_OWNER_REVIEW){
     const visualReady=format==="CAROUSEL"?carouselVisualReady:Boolean(imageAssetId);
     if(!visualReady)console.log("AUTOPILOT_IMAGE_REQUIRED_FOR_AUTO_APPROVAL",{profileId:profile.id,variantId,format});
     if(visualReady){

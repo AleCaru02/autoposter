@@ -40,7 +40,7 @@ function parseSettings(value: unknown): AutopilotSettings {
   const row = object(value);
   return {
     enabled: row.autopilotEnabled !== false,
-    approvalMode: row.approvalMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL_REVIEW",
+    approvalMode: "MANUAL_REVIEW",
     researchMode: normalizeEditorialResearchMode(row.researchMode),
     websitePilotEnabled: row.instagramWebsitePilot === true,
   };
@@ -107,7 +107,7 @@ export async function saveAutopilotSettings(profileId: string, settings: Autopil
   const platformStrategy = {
     ...object(currentData?.platform_strategy),
     autopilotEnabled: settings.enabled,
-    approvalMode: settings.approvalMode,
+    approvalMode: "MANUAL_REVIEW",
     researchMode: normalizeEditorialResearchMode(settings.researchMode),
     instagramWebsitePilot: settings.websitePilotEnabled,
   };

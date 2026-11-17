@@ -331,13 +331,13 @@ export function ContentGeneratorPage() {
       <summary><span><Settings2 size={21}/><span><strong>Preferenze dell'automazione</strong><small>Approvazione, ricerca e regole per questa attività</small></span></span><ChevronDown size={19}/></summary>
       <div className="editorial-preferences-body">
         <h3>Prima della pubblicazione</h3>
-        <p>Scegli se controllare tu i contenuti o lasciare che il sistema li approvi e programmi. La pubblicazione esterna rimane bloccata senza un social realmente collegato.</p>
+        <p>Ogni testo, immagine, carosello, storia o Reel resta nelle Revisioni. Il sistema non approva né pubblica al posto tuo.</p>
         <div className="approval-mode-grid">
           <button type="button" className={`approval-mode-card ${!automaticApproval ? "selected" : ""}`} aria-pressed={!automaticApproval} disabled={settingsSaving} onClick={() => void changeSettings({ approvalMode: "MANUAL_REVIEW" })}>
             <span className="approval-mode-icon"><Eye size={19}/></span><strong>Approvo io</strong><p>I contenuti arrivano nelle Revisioni prima della pubblicazione.</p><span className="mode-check">{!automaticApproval ? "Attivo" : "Seleziona"}</span>
           </button>
-          <button type="button" className={`approval-mode-card ${automaticApproval ? "selected" : ""}`} aria-pressed={automaticApproval} disabled={settingsSaving} onClick={() => void changeSettings({ approvalMode: "AUTOMATIC" })}>
-            <span className="approval-mode-icon"><Sparkles size={19}/></span><strong>Gestisci automaticamente</strong><p>Approvazione e programmazione automatiche, solo sui canali autorizzati.</p><span className="mode-check">{automaticApproval ? "Attivo" : "Seleziona"}</span>
+          <button type="button" className="approval-mode-card" aria-pressed={false} disabled aria-disabled="true">
+            <span className="approval-mode-icon"><Sparkles size={19}/></span><strong>Approvazione automatica</strong><p>Disattivata: nessuna pubblicazione senza il tuo controllo.</p><span className="mode-check">Non disponibile</span>
           </button>
         </div>
         <h3>Strategia dei contenuti</h3>
