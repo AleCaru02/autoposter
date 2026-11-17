@@ -125,17 +125,21 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
     "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
     "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
-    "Riserva una zona editoriale pulita e compatta nella parte superiore per il testo deterministico. Il soggetto rimane grande e riconoscibile nel resto del canvas; niente zona vuota di mezza immagine.",
+    options.typography?.style?.layout === "BOTTOM_GRADIENT"
+      ? "Il renderer applica headline e brand sul TERZO INFERIORE con un leggero gradiente scuro: soggetto e azione devono restare riconoscibili nei 60% SUPERIORI. Non creare già pannelli, gradienti o testo nel render AI."
+      : "Il renderer applica headline e brand sul TERZO SUPERIORE con un leggero gradiente scuro: soggetto e azione devono stare nella metà inferiore e restare riconoscibili. Non creare già pannelli, gradienti o testo nel render AI.",
     storySafety,
-    socialCreativeDirection(options),
+    socialCreativeDirection({...options,placement:options.typography?.style?.layout}),
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
   ].filter(Boolean).join("\n");
 }
 
 function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" | "fetcher">) {
   const sizeInstruction = options.format === "STORY"
-    ? "Composizione verticale 2:3 progettata per restare leggibile dopo un ritaglio 9:16."
-    : "Composizione quadrata 1:1, soggetto principale ben leggibile anche su smartphone.";
+    ? "Composizione verticale 9:16 per la storia, elementi essenziali lontani dalle barre UI."
+    : options.provider === "FACEBOOK" || options.provider === "INSTAGRAM"
+      ? "Composizione verticale 4:5 per feed, leggibile su smartphone."
+      : "Composizione quadrata 1:1, leggibile su smartphone.";
   return [
     "Crea un'immagine social originale e professionale per il brand indicato.",
     `Brand: ${clean(options.profileName, 160)}.`,
@@ -219,6 +223,7 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     visualBrief: options.visualBrief,
     caption: options.caption,
     additionalDirection: options.additionalDirection,
+    placement: options.typography?.style?.layout ?? "TOP_GRADIENT",
     fetcher,
   });
   const mediaManagerEvent: OpenAIImageTechnicalEvent = {
