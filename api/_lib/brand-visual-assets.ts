@@ -32,5 +32,9 @@ export function brandTextStyle(palette:{primary:string;secondary:string;accent:s
   const bright=(luminance(panel)??1)>0.45;
   const base=bright?"#172430":"#FFFFFF";
   const brand=[palette.primary,palette.secondary,palette.accent].find(c=>contrast(c,panel)>=4.5)??base;
-  return {panelColor:panel,textColor:base,brandColor:brand,panelOpacity:0.95};
+  const canvasColor = /^#[a-f0-9]{6}$/i.test(palette.primary) && (luminance(palette.primary)??1)<0.30
+    ? palette.primary : "#14283A";
+  const accentColor = /^#[a-f0-9]{6}$/i.test(palette.accent) && contrast(palette.accent,canvasColor)>=2.8
+    ? palette.accent : "#D8B57C";
+  return {panelColor:panel,textColor:base,brandColor:brand,panelOpacity:0.95,canvasColor,accentColor};
 }
