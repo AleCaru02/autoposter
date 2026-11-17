@@ -1,6 +1,7 @@
 import { estimateTerraCostUsd } from "./openai-text.js";
 import type { ImageSocialFormat, ImageSocialProvider } from "./openai-image.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
+import { socialCreativeDirection } from "./social-creative-direction.js";
 import { platformVisualStrategyPrompt, socialPlatformStrategy } from "./social-platform-strategy.js";
 
 export type MediaManagerResult = {
@@ -91,10 +92,11 @@ export async function runOpenAIMediaManager(input: {
         "VISUAL = sintesi; CAPTION = approfondimento. Il visual deve anticipare il valore e la caption deve svilupparlo, senza duplicare lunghi paragrafi nell'immagine.",
         "Non generare testo nell'immagine: AutoPoster applica brand, headline, copy e CTA dopo la generazione con compositing PNG deterministico.",
         "Evita il pattern debole 'titolo enorme + molto spazio vuoto + icone decorative'. Ogni elemento secondario deve avere una funzione informativa o narrativa.",
+        socialCreativeDirection(input),
         "Evita props stock-like e stereotipi di settore se non aggiungono significato: chiavi, laptop, tazze, skyline, stretta di mano, fogli o scrivanie generiche non sono un sostituto dell'art direction.",
         "Per luoghi reali, quartieri, mappe, metropolitane, strade, landmark o percorsi: NON inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o etichette fattuali. Se non sono forniti dati geografici verificati o un asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale senza pretendere accuratezza geografica.",
         "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se fosse realmente appartenente al brand, salvo che il brief lo confermi esplicitamente. Una scena sintetica deve restare illustrativa, non una falsa prova dell'attività.",
-        "Riserva una zona editoriale pulita ad alto contrasto nella parte superiore sinistra/centrale per il compositing del testo; nessuna lettera, numero, logo, watermark, label, badge o UI fittizia in qualunque parte dell'immagine.",
+        "Riserva una zona editoriale COMPATTA nella parte superiore per il testo del renderer, evitando oltre un terzo di canvas vuoto; il soggetto significativo deve essere visibile nel resto dell'immagine. Nessuna lettera, numero, logo, watermark, label, badge o UI fittizia.",
         "Per STORY costruisci una gerarchia verticale forte e lascia ampie zone sicure sopra e sotto per l'interfaccia social; concentra testo e soggetto nella parte centrale e mantieni gli elementi essenziali nella zona centrale anche in caso di ritaglio 9:16.",
         "Adatta composizione e densità alla piattaforma e al formato; la strategia visuale della piattaforma è un vincolo, non un suggerimento.",
         platformVisualStrategyPrompt(input.provider),

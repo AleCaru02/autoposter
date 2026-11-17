@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { buildImagePrompt, estimateImageCost, estimateImageCostUsd, generateOpenAIImage, imageAspectRatioForFormat, imageSizeForFormat } from "../api/_lib/openai-image.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
+import { selectCreativeTemplate, socialCreativeDirection, socialCopySkillPrompt } from "../api/_lib/social-creative-direction.js";
 
 const calls: Array<{ url: string; body: Record<string, any>; headers: Record<string, string> }> = [];
 const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -35,6 +36,20 @@ assert.equal(imageSizeForFormat("CAROUSEL", "FACEBOOK"), "1536x1920");
 assert.equal(imageSizeForFormat("STORY", "INSTAGRAM"), "1440x2560");
 assert.equal(imageAspectRatioForFormat("POST", "INSTAGRAM"), "4:5");
 assert.equal(imageAspectRatioForFormat("STORY", "INSTAGRAM"), "9:16");
+
+assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"ECONOMICS_CONTRAST");
+assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Gestione check-in e pulizia"}),"PROCESS_PROOF");
+assert.equal(selectCreativeTemplate({format:"CAROUSEL",visualBrief:"Tariffe e costi"}),"CAROUSEL_STEP");
+assert.equal(selectCreativeTemplate({format:"STORY",visualBrief:"Tariffe"}),"STORY_HERO");
+assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",industry:"Affitti brevi",provider:"FACEBOOK",format:"POST",visualBrief:"Non guardare solo la tariffa"}),/vietate aree enormi/i);
+assert.match(socialCopySkillPrompt(),/3 aperture con meccanismi diversi/);
+const mediaDirectorSource = fs.readFileSync("api/_lib/openai-media-manager.ts","utf8");
+const textDirectorSource = fs.readFileSync("api/_lib/openai-text.ts","utf8");
+assert.match(mediaDirectorSource,/socialCreativeDirection\(input\)/);
+assert.match(textDirectorSource,/socialCopySkillPrompt\(\)/);
+const imageDirectorSource = fs.readFileSync("api/_lib/openai-image.ts","utf8");
+assert.match(imageDirectorSource,/await preflightDeterministicTypography/);
+assert.ok(imageDirectorSource.indexOf("await preflightDeterministicTypography") < imageDirectorSource.indexOf("await runOpenAIMediaManager"),"no billable media agent before typography geometry passes");
 
 const normalizedBrand = normalizeBrandVisualIdentity({
   observedColors: ["#112233", "#F5F1E8", "var(--accent)", "#112233"],

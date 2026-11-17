@@ -23,6 +23,19 @@ for (const [label, width, height] of [["1:1", 2048, 2048], ["4:5", 1600, 2000], 
   assert.deepEqual(layoutFor(width, height), layout, `${label} identical input must produce identical layout`);
 }
 
+// Regression: the rejected Nov 17 graphic had a 60%-height blank white panel.
+// Compact headlines must not cover the image with an oversized empty card.
+const compact = createTypographyLayout({
+  canvas: { width: 1536, height: 1920 }, fontRegular: regular, fontBold: bold,
+  brand: "Il Tuo Property Manager", headline: "Non guardare solo la tariffa", subheadline: null,
+});
+const cardBottom = compact.textZone.y + compact.textZone.height + 34;
+const cardTop = compact.textZone.y - 34;
+assert.ok((cardBottom-cardTop)/1920 < 0.36, "short headline card must use under 36% of 4:5 image, not a 60% blank overlay");
+const lastTextPixel = Math.max(...compact.blocks.map(block => block.box.y + block.measuredHeight));
+assert.ok(cardBottom-lastTextPixel < 130, "blank bottom inside card must stay compact");
+assert.ok(compact.visualZone.height/1920 > 0.45, "main visual occupies a meaningful portion of feed graphic");
+
 const square = layoutFor(2048, 2048);
 const brand = square.blocks.find((block) => block.role === "BRAND")!;
 const headline = square.blocks.find((block) => block.role === "HEADLINE")!;
