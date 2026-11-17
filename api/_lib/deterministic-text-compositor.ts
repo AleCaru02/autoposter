@@ -63,6 +63,24 @@ function textSvg(layout: TypographyLayout, fontFamily: string, style: Required<T
 export function photoLedBackdropSvg(layout: TypographyLayout, backgroundPngBase64: string): string {
   const { width, height } = layout.canvas;
   const image = `<image href="data:image/png;base64,${backgroundPngBase64}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+  if (layout.placement === "EDITORIAL_SPLIT") {
+    const split = layout.visualZone.x;
+    // Photo fills a continuous right-hand editorial column. An opaque, dark
+    // brand canvas is intentional here: it is a genuine magazine text column,
+    // not the semi-transparent empty card that was rejected in production.
+    return `<defs>
+      <clipPath id="pa-photo-column"><rect x="${split}" y="0" width="${width-split}" height="${height}"/></clipPath>
+      <linearGradient id="pa-photo-depth" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#071723" stop-opacity="0.34"/>
+        <stop offset="65%" stop-color="#071723" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#071723" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="#112839"/>
+    <image href="data:image/png;base64,${backgroundPngBase64}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" clip-path="url(#pa-photo-column)"/>
+    <rect x="${split}" y="0" width="${width-split}" height="${height}" fill="url(#pa-photo-depth)"/>
+    <rect x="${layout.protectedMargins}" y="${Math.round(height*0.87)}" width="${Math.round(split-layout.protectedMargins*2.3)}" height="2" fill="#EDF1EF" opacity="0.27"/>`;
+  }
   if (layout.placement === "BOTTOM_GRADIENT") {
     const from = Math.round(height * 0.41);
     return `<defs><linearGradient id="pa-contrast" x1="0" y1="0" x2="0" y2="1">
@@ -91,8 +109,11 @@ export async function composeDeterministicTypography(input: { backgroundPngBase6
   // White type and a restrained brand accent keep contrast stable on arbitrary photos.
   const textStyle = { ...style, textColor: "#FFFFFF", brandColor: "#FFFFFF" };
   const accentBar = `<rect x="${layout.blocks[0].box.x}" y="${layout.blocks[0].box.y + layout.blocks[0].box.height + 9}" width="${Math.round(input.width*0.075)}" height="7" rx="3" fill="${accent}"/>`;
+  const splitRule = layout.placement === "EDITORIAL_SPLIT"
+    ? `<rect x="${layout.visualZone.x-5}" y="0" width="5" height="${input.height}" fill="${accent}"/>`
+    : "";
   const logoMarkup = logoSvgOverlay({logoDataUrl:input.logoDataUrl,width:input.width,height:input.height,panelColor:"#0d1b26"});
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${input.width}" height="${input.height}" viewBox="0 0 ${input.width} ${input.height}">${imageAndBackdrop}${accentBar}${textSvg(layout, font.family, textStyle)}${logoMarkup}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${input.width}" height="${input.height}" viewBox="0 0 ${input.width} ${input.height}">${imageAndBackdrop}${splitRule}${accentBar}${textSvg(layout, font.family, textStyle)}${logoMarkup}</svg>`;
   const image = new Resvg(svg, { font: { fontBuffers: [font.regular, font.bold], defaultFontFamily: font.family }, textRendering: 2, imageRendering: 0, shapeRendering: 2 }).render();
   const png = image.asPng();
   const base64 = typeof Buffer !== "undefined" ? Buffer.from(png).toString("base64") : btoa(String.fromCharCode(...png));
