@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { VercelRequest,VercelResponse } from "@vercel/node";
 import handler,{canaryWindow} from "../api/cron-canary.js";
+import { visualHeadlineForBrief } from "../api/_lib/visual-headline.js";
+assert.equal(visualHeadlineForBrief("Grafica pulita con headline: “Gestione completa: 5 aree operative”.", "Gestione completa di un affitto breve a Milano: cosa include?"),"Gestione completa: 5 aree operative");
+assert.equal(visualHeadlineForBrief("Sovraimpressione essenziale: “Non guardare solo la tariffa”.", "La domanda utile non è quanto puoi chiedere a notte."),"Non guardare solo la tariffa");
+assert.equal(visualHeadlineForBrief("Scrivania operativa con laptop, senza parole.", "Un titolo naturale"),"Un titolo naturale");
+
 
 const id="73486d3c-dca0-4aaa-a69e-d4b08cc6430f";
 const cutoff="2026-11-17T00:00:00.000Z";
@@ -50,6 +55,9 @@ assert.match(recoverySrc,/await meter\.markProviderStarted\(/);
 assert.match(recoverySrc,/await runContentQa\(/);
 assert.match(recoverySrc,/qa\.overallStatus !== "PASS"/);
 assert.match(recoverySrc,/auto_approve_content_variant/);
+assert.match(recoverySrc,/visualHeadlineForBrief\(variant\.visual_brief,variant\.hook\)/);
+const autopilotSrc=readFileSync(new URL("../api/_lib/autopilot.ts",import.meta.url),"utf8");
+assert.match(autopilotSrc,/headline:visualHeadlineForBrief\(variant\.visualBrief,variant\.hook\)/);
 assert.match(src,/runContentAutopilotSerialized\(/);
 assert.match(src,/profileId:scope\.profileId,maxGenerations:1/);
 assert.match(src,/CANARY_WINDOW_MS=24\*60\*60\*1000/);

@@ -7,6 +7,7 @@ import { imageSizeForFormat } from "./openai-image.js";
 import { generateRoutedImage } from "./routed-image.js";
 import { assetContentHashFromBase64, visualFingerprint } from "./asset-intelligence.js";
 import { runContentQa } from "./content-qa.js";
+import { visualHeadlineForBrief } from "./visual-headline.js";
 
 /**
  * One-image-only recovery for the previously failed, zero-provider-cost WASM canary.
@@ -73,7 +74,7 @@ export async function recoverWasmCanaryImage(env: {
     });
     if (!budget.allowed) throw new Error("RECOVERY_BUDGET_BLOCKED");
     const [width,height] = imageSizeForFormat("POST",variant.provider).split("x").map(Number);
-    const typography = { brand:variant.name, headline:variant.hook };
+    const typography = { brand:variant.name, headline:visualHeadlineForBrief(variant.visual_brief,variant.hook) };
     await preflightDeterministicTypography({width,height,...typography});
     await meter.markProviderStarted(eventId);
     const image = await generateRoutedImage({
