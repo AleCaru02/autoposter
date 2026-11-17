@@ -83,7 +83,7 @@ export function createTypographyLayout(input: {
   const bottom = placement === "BOTTOM_GRADIENT";
   // Text on image must be a micro-headline, not a caption paragraph.
   // Reject long sentences before paid image generation. The caption stays outside.
-  const normalized = input.headline.replace(/\\s+/g, " ").trim();
+  const normalized = input.headline.replace(/\s+/g, " ").trim();
   if (!normalized || normalized.length > 72 || normalized.split(" ").length > 12)
     throw new TypographyPreflightError("TEXT_FIT_FAIL");
   if (bottom && input.subheadline?.trim())
