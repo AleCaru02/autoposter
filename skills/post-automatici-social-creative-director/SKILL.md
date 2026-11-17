@@ -11,6 +11,7 @@ version: 1.0.0
 - [hook-writer](https://github.com/social-media-skills/skills/blob/main/skills/hook-writer/SKILL.md): one truthful, specific promise supported by the full post, rather than clickbait.
 - [caption-writer](https://github.com/social-media-skills/skills/blob/main/skills/caption-writer/SKILL.md): platform-native hook, useful body, one CTA; don't repeat the graphic.
 - [image-prompt](https://github.com/social-media-skills/skills/blob/main/skills/image-prompt/SKILL.md): purpose -> meaning -> subject -> composition -> lighting -> palette -> constraints; don't use unrelated stock scenes.
+- [social-post-designer](https://github.com/kmcdotninja/social-post-designer) (MIT): brand kit first, measured text fit, grid, mobile contrast, photo-led creative layout, collision checks, no giant blank bands; these principles are adapted to Post Automatici's existing SVG/Resvg renderer rather than bundling a separate frontend/editor.
 - [design-and-templates](https://github.com/social-media-skills/skills/blob/main/skills/design-and-templates/SKILL.md): reusable brand kit, repeatable templates, one visual focus, mobile legibility and safe zones.
 - [OpenAI Codex image prompting](https://github.com/openai/codex/blob/main/codex-rs/skills/src/assets/samples/imagegen/references/prompting.md): scene-first creative brief with concrete framing, no generic prompt-token spam and strict legible overlay constraints.
 
@@ -22,8 +23,8 @@ These sources provide guidance only; prompts are implemented in Post Automatici 
 2. Choose a truthful **single central idea**. Write a specific hook; the caption must deliver on it and close with one CTA.
 3. Select a visual role based on content: `ECONOMICS_CONTRAST`, `PROCESS_PROOF`, `EDITORIAL_HERO`, `CAROUSEL_STEP`, or `STORY_HERO`. These are layouts, not fixed generic objects.
 4. Build a concrete subject-led prompt for OpenAI Images 2. Avoid keys, notebooks, computers, coffee, doors and generic apartments unless intrinsically necessary for the claim. No invented brand premises or employees.
-5. Keep the image's upper text-safe area compact (typically ~25–35%); meaningful imagery must occupy the remainder.
-6. Typography is overlaid **deterministically** after OpenAI image generation. Its card must fit measured text, not an arbitrary 60% of the canvas. `preflightDeterministicTypography` must reject overflow before spending.
+5. Choose a **photo-led editorial composition**: TOP_GRADIENT for process/story/carousel or BOTTOM_GRADIENT for economics-related POST. Apply the exact same placement to the OpenAI brief and the deterministic renderer. No opaque white card: use one gradient integrated with the photographic image and text verified for contrast.
+6. Typography is overlaid **deterministically** after OpenAI image generation. The gradient, safe area and baseline must fit measured text; never place a large milky card across the photo. `assertAutopilotGraphicBrief` requires a quoted headline (up to 62 characters) and detailed concept; `preflightDeterministicTypography` rejects long copy and geometry collisions before any provider spends.
 7. Run visual/factual/editorial QA. Save draft for user inspection; **never** self-approve or publish.
 
 ## Negative reference — the November 17 failed Facebook graphic
