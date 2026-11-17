@@ -27,7 +27,7 @@ import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
 import { autopilotQualityBrief, chooseNarrativeIntent, CONTENT_REJECTION_REASON } from "./autopilot-spend-guards.js";
 import { imageStorageUrl } from "./image-storage.js";
-import { visualHeadlineForBrief } from "./visual-headline.js";
+import { visualHeadlineForBrief, assertAutopilotGraphicBrief } from "./visual-headline.js";
 import { editorialPlacementForContent } from "./social-creative-direction.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
@@ -449,6 +449,8 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     }
 
     if(!imageAssetId&&visualDecision.provider==="OPENAI")try{
+      // Validate content and layout before entitlement reservation or any paid provider call.
+      assertAutopilotGraphicBrief(variant.visualBrief);
       const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption,visualProvider:visualDecision.provider,visualDecisionReason:visualDecision.reasonCode}});
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
