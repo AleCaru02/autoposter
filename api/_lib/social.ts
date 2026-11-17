@@ -1791,7 +1791,7 @@ export async function processDuePublications(env: SocialEnv, limit = 20) {
     dueProfileIds: pilotRows.map(row=>row.profile_id),
     publishedToday: Number(dailyRows[0]?.n ?? 0),
   });
-  if (!pilot.ok) return {ready:true, blocked:true, reason:pilot.reason,checked:0,published:0,failed:0,retryScheduled:0,reviewRequired:0};
+  if ("reason" in pilot) return {ready:true, blocked:true, reason:pilot.reason,checked:0,published:0,failed:0,retryScheduled:0,reviewRequired:0};
   const jobs = await sql`
     select job_id::text id, profile_id::text, variant_id::text, provider, scheduled_at::text,
       attempt_no attempt_count, claim_token::text, lease_expires_at::text
