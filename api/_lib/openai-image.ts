@@ -1,6 +1,6 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
-import { socialCreativeDirection } from "./social-creative-direction.js";
+import { socialCreativeDirection, creativeConceptIssues } from "./social-creative-direction.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
@@ -236,6 +236,15 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     costUsd: mediaManager.usage.estimatedCostUsd,
     metadata: { openai_response_id: mediaManager.responseId, openai_request_id: mediaManager.requestId },
   };
+  const critique = creativeConceptIssues({
+    placement:options.typography?.style?.layout??"TOP_GRADIENT",
+    visualIntent:mediaManager.visualIntent,composition:mediaManager.composition,
+    subject:mediaManager.subject,imagePrompt:mediaManager.imagePrompt
+  });
+  if(critique.length) throw new OpenAIImagePipelineError(
+    "OPENAI_CREATIVE_CONCEPT_REJECTED:"+critique.join(","),
+    [mediaManagerEvent],
+  );
   const mediaPrompt = mediaManager.imagePrompt.trim();
   const promptBase = mediaPrompt.length >= 600
     ? mediaPrompt
