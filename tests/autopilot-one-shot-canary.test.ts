@@ -38,7 +38,18 @@ try{
 }
 const src=readFileSync(new URL("../api/cron-canary.ts",import.meta.url),"utf8");
 assert.match(src,/created_at>=\$\{scope\.cutoffUtc\}::timestamptz/);
-assert.match(src,/if \(Number\(rows\[0\]\?\.n\)>0\) return res\.status\(200\)/);
+assert.match(src,/if \(Number\(rows\[0\]\?\.n\)>0\) \{/);
+assert.match(src,/recoverWasmCanaryImage\(/);
+assert.match(src,/canary:"CONSUMED"/);
+const recoverySrc=readFileSync(new URL("../api/_lib/autopilot-image-recovery.ts",import.meta.url),"utf8");
+assert.match(recoverySrc,/wasm-canary-image-repair-v1/);
+assert.match(recoverySrc,/e\.metadata->>'release_reason' like 'Cannot find package/);
+assert.match(recoverySrc,/cost\.provider_started_at is null/);
+assert.match(recoverySrc,/await preflightDeterministicTypography\(/);
+assert.match(recoverySrc,/await meter\.markProviderStarted\(/);
+assert.match(recoverySrc,/await runContentQa\(/);
+assert.match(recoverySrc,/qa\.overallStatus !== "PASS"/);
+assert.match(recoverySrc,/auto_approve_content_variant/);
 assert.match(src,/runContentAutopilotSerialized\(/);
 assert.match(src,/profileId:scope\.profileId,maxGenerations:1/);
 assert.match(src,/CANARY_WINDOW_MS=24\*60\*60\*1000/);

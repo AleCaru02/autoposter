@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { timingSafeEqual } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
+import { recoverWasmCanaryImage } from "./_lib/autopilot-image-recovery.js";
 
 export const config = { maxDuration: 300 };
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -48,7 +49,18 @@ export default async function handler(req:VercelRequest,res:VercelResponse) {
         and source='AI_TEXT_AUTOPILOT' and capability_key='ai.content.generate_text'
         and created_at>=${scope.cutoffUtc}::timestamptz
     ` as unknown as Array<{n:number}>;
-    if (Number(rows[0]?.n)>0) return res.status(200).json({ok:true,canary:"CONSUMED"});
+    if (Number(rows[0]?.n)>0) {
+      // Do not generate new copy. Recover only the image blocked before any provider charge.
+      // Same 24-hour canary, one idempotent image attempt, bounded spend and full QA.
+      const imageRecovery = await recoverWasmCanaryImage({
+        DATABASE_URL: databaseUrl, OPENAI_API_KEY: apiKey,
+        BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN,
+        AUTOPILOT_RETEST_PROFILE_ID: scope.profileId,
+        AUTOPILOT_RETEST_CUTOFF_UTC: scope.cutoffUtc,
+      }).catch(() => ({state:"RECOVERY_RUNTIME_FAILED"}));
+      console.log("vercel.autopilot-image-recovery",{state:imageRecovery.state});
+      return res.status(200).json({ok:true,canary:"CONSUMED",imageRecovery:{state:imageRecovery.state}});
+    }
     const result=await runContentAutopilotSerialized({
       DATABASE_URL:databaseUrl,OPENAI_API_KEY:apiKey,
       OPENAI_TEXT_MONTHLY_BUDGET_USD:process.env.OPENAI_TEXT_MONTHLY_BUDGET_USD,
