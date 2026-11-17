@@ -91,6 +91,7 @@ type VariantRow = {
   hashtags: unknown;
   visual_brief: string | null;
   image_asset_id: string | null;
+  video_asset_id: string | null;
   alt_text: string | null;
   factual_basis: unknown;
   qa_status: ContentQaOverallStatus | "PENDING";
@@ -119,6 +120,7 @@ type SlideRow = {
 type AssetRow = {
   id: string;
   profile_id: string;
+  kind: string | null;
   provider: "REAL_ASSET" | "OPENAI" | "HIGGSFIELD" | null;
   model: string | null;
   storage_url: string;
@@ -369,7 +371,7 @@ async function loadInputs(sql: Sql, profileId: string, contentId: string, varian
   ` as unknown as ItemRow[];
   const variants = await sql`
     select id::text,content_id::text,profile_id::text,provider,format,eligible,hook,caption,cta,hashtags,
-           visual_brief,image_asset_id::text,alt_text,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at::text
+           visual_brief,image_asset_id::text,video_asset_id::text,alt_text,factual_basis,qa_status,qa_fingerprint,qa_result,qa_checked_at::text
     from public.content_variants
     where id=${variantId}::uuid and content_id=${contentId}::uuid and profile_id=${profileId}::uuid
     limit 1
@@ -386,10 +388,11 @@ async function loadInputs(sql: Sql, profileId: string, contentId: string, varian
 
   const assetIds = [...new Set([
     variants[0].image_asset_id,
+    variants[0].video_asset_id,
     ...slides.map((slide) => slide.asset_id),
   ].filter((id): id is string => Boolean(id)))];
   const assets = assetIds.length ? await sql`
-    select id::text,profile_id::text,provider,model,storage_url,mime_type,width,height,format,quality_status,identity_status
+    select id::text,profile_id::text,kind,provider,model,storage_url,mime_type,width,height,format,quality_status,identity_status
     from public.assets
     where profile_id=${profileId}::uuid and id = any(${assetIds}::uuid[])
   ` as unknown as AssetRow[] : [];
@@ -403,9 +406,9 @@ async function loadInputs(sql: Sql, profileId: string, contentId: string, varian
  * An asset with PENDING quality still proceeds: the actual visual QA decides PASS.
  */
 export function contentQaMediaPreflight(
-  variant: Pick<VariantRow, "format" | "image_asset_id">,
+  variant: Pick<VariantRow, "format" | "image_asset_id"> & { video_asset_id?: string | null },
   slides: Array<Pick<SlideRow, "position" | "asset_id">>,
-  assets: Array<Pick<AssetRow, "id" | "width" | "height">>,
+  assets: Array<Pick<AssetRow, "id" | "width" | "height"> & Partial<Pick<AssetRow, "kind" | "mime_type" | "quality_status" | "identity_status" | "storage_url">>>,
 ): string | null {
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   if (variant.format === "CAROUSEL") {
@@ -425,6 +428,22 @@ export function contentQaMediaPreflight(
   }
   if (!assetDimensionsFit(byId.get(variant.image_asset_id)!, variant.format)) {
     return "CONTENT_QA_MEDIA_DIMENSIONS_INVALID";
+  }
+  if (String(variant.format) === "REEL") {
+    const video = variant.video_asset_id ? byId.get(variant.video_asset_id) : null;
+    if (!video || video.kind !== "VIDEO" || video.mime_type !== "video/mp4" ||
+        video.quality_status !== "PASS" ||
+        !["NOT_REQUIRED", "PASS"].includes(video.identity_status ?? "") ||
+        video.width !== 1080 || video.height !== 1920) {
+      return "CONTENT_QA_REEL_VIDEO_NOT_VERIFIED";
+    }
+    let url: URL;
+    try { url = new URL(video.storage_url || ""); }
+    catch { return "CONTENT_QA_REEL_VIDEO_URL_INVALID"; }
+    if (url.protocol !== "https:" || !/^[a-z0-9]+\.public\.blob\.vercel-storage\.com$/i.test(url.hostname) ||
+        !url.pathname.toLowerCase().endsWith(".mp4") || url.username || url.password || url.port) {
+      return "CONTENT_QA_REEL_VIDEO_URL_INVALID";
+    }
   }
   return null;
 }
@@ -456,6 +475,15 @@ export async function runContentQa(input: {
     item:{topic:item.topic,objective:item.objective,title:item.title,pillar:item.pillar,sourceRefs:item.source_refs,factProvenance:item.fact_provenance},
     variant:generatedVariant,
     imageAssetId:variant.image_asset_id,
+    // Video identity, immutable Blob URL and technical QA are bound to the approval.
+    // Cover image quality changes during visual QA, so it is intentionally not
+    // included here; a video is technically validated before running this QA.
+    reelVideo:variant.video_asset_id ? (() => {
+      const asset=assetMap.get(variant.video_asset_id);
+      return asset ? {id:asset.id,url:asset.storage_url,kind:asset.kind,mimeType:asset.mime_type,
+        width:asset.width,height:asset.height,qualityStatus:asset.quality_status,
+        identityStatus:asset.identity_status} : {id:variant.video_asset_id,missing:true};
+    })() : null,
     slides,
     assets:assets.map((asset)=>({id:asset.id,provider:asset.provider,model:asset.model,width:asset.width,height:asset.height,format:asset.format,identityStatus:asset.identity_status})),
     brandVisual,
