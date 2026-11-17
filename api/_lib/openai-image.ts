@@ -1,5 +1,6 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
+import { socialCreativeDirection } from "./social-creative-direction.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
@@ -124,8 +125,9 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
     "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
     "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
-    "Riserva una zona editoriale pulita, ad alto contrasto e senza soggetti nell'area superiore sinistra/centrale per il testo deterministico successivo. Mantieni separata questa safe zone dal soggetto e da elementi decorativi.",
+    "Riserva solo una zona editoriale compatta nella parte superiore per il testo deterministico. Il soggetto rimane grande e riconoscibile nel resto del canvas; niente zona vuota di mezza immagine.",
     storySafety,
+    socialCreativeDirection(options),
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
   ].filter(Boolean).join("\n");
 }
@@ -147,6 +149,7 @@ function buildFallbackArtDirection(options: Omit<GenerateImageOptions, "apiKey" 
     options.additionalDirection ? `Indicazione aggiuntiva: ${clean(options.additionalDirection, 700)}.` : "",
     "Costruisci una vera art direction: punto focale, gerarchia visiva, primo piano, piano intermedio, sfondo, profondità, prospettiva, illuminazione, ombre, atmosfera, materiali e texture.",
     "Il risultato deve avere qualità editoriale premium e impatto da social feed, evitando look da stock, template vuoti, composizioni piatte o elementi decorativi casuali.",
+    "VIETATO il concept banale: appartamento generico + scrivania + chiavi/quaderno + pannello bianco vuoto. Scegli un soggetto che rappresenti la tesi esatta del post, non il settore.",
     "Quando il concetto è astratto o informativo, trasformalo in una scena o metafora visuale concreta e pertinente.",
     "La tipografia e qualunque label saranno aggiunte dal renderer AutoPoster: costruisci soltanto immagine, scena, luce, palette e aree sicure.",
     "Evita props generici o stock-like (chiavi, laptop, tazze, fogli, skyline, strette di mano) se non spiegano davvero il messaggio.",
