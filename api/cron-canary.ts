@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import { runContentAutopilotSerialized } from "./_lib/autopilot-serialized.js";
 import { recoverWasmCanaryImage } from "./_lib/autopilot-image-recovery.js";
+import { runOneImageOwnerPreview } from "./_lib/one-image-owner-preview.js";
 
 export const config = { maxDuration: 300 };
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,6 +35,15 @@ export default async function handler(req:VercelRequest,res:VercelResponse) {
   if (req.method!=="GET") return res.status(405).json({error:"METHOD_NOT_ALLOWED"});
   if (!process.env.CRON_SECRET) return res.status(503).json({error:"CRON_NOT_CONFIGURED"});
   if (!authorized(req,process.env.CRON_SECRET)) return res.status(401).json({error:"UNAUTHORIZED_CRON"});
+  // One owner-authorized image: uses the same protected cron; never changes the
+  // paused autopilot or social publisher. Fixed entitlement key consumes once.
+  const creativePreview = await runOneImageOwnerPreview(process.env).catch(() => ({
+    state:"FAILED" as const,code:"ONE_IMAGE_PREVIEW_RUNTIME_ERROR",
+  }));
+  if (creativePreview.state !== "INERT") {
+    console.log("vercel.one-image-creative-preview",creativePreview);
+    return res.status(200).json({ok:true,preview:creativePreview});
+  }
   const scope=canaryWindow(process.env);
   if (!scope.ready) return res.status(200).json({ok:true,canary:"INERT",reason:scope.reason});
   const databaseUrl=process.env.DATABASE_URL;
