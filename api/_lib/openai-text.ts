@@ -3,6 +3,7 @@ import { brainDecision, independentSourceCount } from "./ai-brain-policy.js";
 import { contentNeedsFactCheck, runOpenAIFactCheckAgent, runOpenAIResearchAgent, shouldRunResearchAgent, trustedVerificationSources, type ResearchAgentResult } from "./openai-research-factcheck.js";
 import { platformDiversityIssues, platformStrategyPrompt, selectedPlatformStrategies } from "./social-platform-strategy.js";
 import { languageQualityIssues, languageQualityPrompt } from "./language-quality.js";
+import { socialCopySkillPrompt } from "./social-creative-direction.js";
 import { buildSourceIntelligence, hasCriticalUnsupportedClaim, type SourceIntelligenceSummary } from "./source-intelligence.js";
 
 export type SocialProvider = "INSTAGRAM" | "FACEBOOK" | "LINKEDIN" | "GBP";
@@ -622,6 +623,7 @@ export async function generateSocialText(options: GenerateOptions): Promise<Open
     "Sei il motore editoriale di Post Automatici.",
     languageQualityPrompt(),
     "Genera contenuti social distinti per piattaforma e formato, mantenendo il tono del brand e una qualità professionale pronta per revisione umana.",
+    socialCopySkillPrompt(),
     "Esegui sempre un controllo linguistico finale nello stesso passaggio prima di restituire il JSON: non considerare pronto un testo che è corretto solo grammaticalmente ma suona poco naturale nella lingua del profilo.",
     research.instruction,
     dedicatedResearch?.status === "READY"
