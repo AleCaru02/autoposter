@@ -57,6 +57,14 @@ assert.match(recoverySrc,/await meter\.markProviderStarted\(/);
 assert.match(recoverySrc,/await runContentQa\(/);
 assert.match(recoverySrc,/qa\.overallStatus !== "PASS"/);
 assert.match(recoverySrc,/auto_approve_content_variant/);
+assert.match(recoverySrc,/async function resumeRecoveredCanaryQaOnce/);
+assert.match(recoverySrc,/Number\(v\.qa_attempts\)!==1 \|\| Number\(v\.qa_released\)!==1/);
+assert.match(recoverySrc,/recovered\.metadata->'cached_result'->>'assetId'=v\.image_asset_id::text/);
+assert.match(recoverySrc,/force:true/);
+assert.match(recoverySrc,/SAVED_IMAGE_QA_RETRY_ALREADY_CONSUMED/);
+assert.match(recoverySrc,/SAVED_IMAGE_QA_RETRY_FAILED/);
+assert.match(recoverySrc,/qaContinuation=await resumeRecoveredCanaryQaOnce/);
+
 assert.match(recoverySrc,/visualHeadlineForBrief\(variant\.visual_brief,variant\.hook\)/);
 const autopilotSrc=readFileSync(new URL("../api/_lib/autopilot.ts",import.meta.url),"utf8");
 assert.match(autopilotSrc,/headline:visualHeadlineForBrief\(variant\.visualBrief,variant\.hook\)/);
