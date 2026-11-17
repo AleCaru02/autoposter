@@ -182,13 +182,7 @@ export async function finalizeRenderJob(sql: Sql, job: RenderJob, context: ReelC
         select ${variantId}::uuid,${context.contentId}::uuid,${job.profile_id}::uuid,${context.provider},'REEL',${!job.dry_run},${script.hook},${script.caption},${script.cta},
                 ${JSON.stringify(script.hashtags)}::jsonb,${script.scenes.map((scene) => scene.visualBrief).join(" | ").slice(0, 2000)},${coverAssetId}::uuid,${videoAssetId}::uuid,
                 ${`Reel: ${script.coverText}`.slice(0, 300)},'PENDING','REVIEW_REQUIRED','PENDING',
-                case when ${!job.dry_run && !avatar} and exists (
-                  select 1 from public.content_variants source
-                  where source.id=${job.source_variant_id}::uuid and source.profile_id=${job.profile_id}::uuid
-                    and source.approval_mode='AUTO' and source.qa_status='PASS'
-                    and source.approval_status='APPROVED' and source.workflow_status='APPROVED'
-                    and source.qa_fingerprint is not null and source.approved_fingerprint=source.qa_fingerprint
-                ) then 'AUTO' else 'MANUAL' end
+                'MANUAL'
         where exists (select 1 from public.render_jobs where id=${job.id}::uuid and claim_token=${job.claim_token}::uuid and state='RUNNING')`,
     sql`update public.render_jobs
         set state='READY_FOR_REVIEW', step='DONE', steps_completed=steps_total, output_variant_id=${variantId}::uuid, video_asset_id=${videoAssetId}::uuid,

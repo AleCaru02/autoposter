@@ -16,8 +16,8 @@ export function autoReelPilotAllowed(env: AutoReelEnv) {
 }
 
 /**
- * At most one (including FAILED) AI Reel within seven days for the owner-approved
- * profile. Source must have full QA PASS, an approval fingerprint and an ACTIVE
+ * At most one (including FAILED) AI Reel within seven days for the owner-reviewed
+ * source content. Source must have full QA PASS, an approval fingerprint and an ACTIVE
  * verified Instagram connection. Queuing is idempotent when crons overlap.
  */
 export async function enqueueAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) {
@@ -30,7 +30,7 @@ export async function enqueueAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) 
     sql`select v.id::text as id from public.content_variants v
       join public.social_connections c on c.profile_id=v.profile_id and c.provider=v.provider
       where v.profile_id=${profileId}::uuid and v.provider='INSTAGRAM' and v.format='POST'
-        and v.approval_mode='AUTO' and v.approval_status='APPROVED' and v.workflow_status='APPROVED'
+        and v.approval_mode='MANUAL' and v.approval_status='APPROVED' and v.workflow_status='APPROVED'
         and v.qa_status='PASS' and v.qa_fingerprint is not null and v.qa_fingerprint=v.approved_fingerprint
         and v.eligible=true and length(coalesce(v.caption,''))>=40
         and v.created_at>now()-interval '14 days'
@@ -51,8 +51,8 @@ export async function enqueueAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) 
   return { queued: true, jobId: result.id, created: result.created };
 }
 
-/** Auto-review a completed technical Reel only if its generated variant inherits
- * a QA-authorized AUTO policy. Manual and avatar Reels remain manual. */
+/** QA-check a completed Reel draft without ever approving or scheduling it.
+ * The owner must review all generated video, captions and covers first. */
 export async function reviewAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) {
   if (!autoReelPilotAllowed(env)) return { reviewed: 0, reason: "AUTO_REEL_PILOT_DISABLED" };
   const sql = sqlOverride ?? neon(env.DATABASE_URL!);
@@ -64,7 +64,7 @@ export async function reviewAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) {
     join public.assets video on video.id=v.video_asset_id and video.profile_id=v.profile_id and video.kind='VIDEO'
     where r.profile_id=${profileId}::uuid and r.kind='REEL_FACELESS' and r.state='READY_FOR_REVIEW'
       and r.completed_at > now()-interval '7 days'
-      and v.provider='INSTAGRAM' and v.format='REEL' and v.approval_mode='AUTO'
+      and v.provider='INSTAGRAM' and v.format='REEL' and v.approval_mode='MANUAL'
       and v.approval_status='PENDING' and v.qa_status='PENDING'
       and video.mime_type='video/mp4' and video.quality_status='PASS'
       and video.identity_status='NOT_REQUIRED' and video.width>0 and video.height>0
@@ -80,17 +80,7 @@ export async function reviewAutoReelPilot(env: AutoReelEnv, sqlOverride?: Sql) {
     profileId, contentId: v.content_id, variantId: v.variant_id, actorType: "AUTOPILOT",
   });
   if (qa.overallStatus !== "PASS") return { reviewed: 1, approved: false, reason: "AUTO_REEL_CONTENT_QA_BLOCKED" };
-  const approved = await sql`
-    select public.auto_approve_content_variant(${profileId}::uuid,${v.variant_id}::uuid,'SYSTEM_AUTOPILOT') as approved
-  ` as unknown as Array<{ approved: boolean }>;
-  if (approved[0]?.approved !== true) return { reviewed: 1, approved: false, reason: "AUTO_REEL_APPROVAL_BLOCKED" };
-  const jobId = crypto.randomUUID();
-  await sql`
-    insert into public.publication_jobs
-      (id,profile_id,variant_id,provider,state,scheduled_at,idempotency_key,attempt_count,updated_at)
-    values (${jobId}::uuid,${profileId}::uuid,${v.variant_id}::uuid,'INSTAGRAM','SCHEDULED',
-      now()+interval '12 hours',${"autoreel:v1:" + v.render_id},0,now())
-    on conflict (idempotency_key) do nothing
-  `;
-  return { reviewed: 1, approved: true, scheduled: true };
+  // The QA may pass automatically. Only the owner may approve the Reel.
+  // Do not create SCHEDULED publication jobs in this background pipeline.
+  return { reviewed: 1, approved: false, scheduled: false, reason: "REEL_QA_PASS_AWAITING_USER_REVIEW" };
 }

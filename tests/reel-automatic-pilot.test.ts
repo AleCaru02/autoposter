@@ -11,7 +11,7 @@ assert.deepEqual(await enqueueAutoReelPilot({}), { queued:false,reason:"AUTO_REE
 assert.deepEqual(await reviewAutoReelPilot({}), { reviewed:0,reason:"AUTO_REEL_PILOT_DISABLED" });
 
 const auto = readFileSync(new URL("../api/_lib/reel/auto-reel.ts", import.meta.url), "utf8");
-assert.match(auto, /v\.approval_mode='AUTO'/);
+assert.match(auto, /v\.approval_mode='MANUAL'/);
 assert.match(auto, /v\.qa_status='PASS'/);
 assert.match(auto, /v\.qa_fingerprint=v\.approved_fingerprint/);
 assert.match(auto, /c\.status='ACTIVE'/);
@@ -22,16 +22,18 @@ assert.match(auto, /and video\.identity_status='NOT_REQUIRED'/);
 assert.match(auto, /and v\.qa_status='PENDING'/);
 assert.match(auto, /actorType: "AUTOPILOT"/);
 assert.match(auto, /if \(qa\.overallStatus !== "PASS"\)/);
-assert.match(auto, /auto_approve_content_variant/);
-assert.match(auto, /on conflict \(idempotency_key\) do nothing/);
+assert.doesNotMatch(auto, /auto_approve_content_variant/);
+assert.doesNotMatch(auto, /insert into public\.publication_jobs/);
+assert.match(auto, /REEL_QA_PASS_AWAITING_USER_REVIEW/);
+assert.match(auto, /AUTO_REEL_PILOT_DISABLED/);
 
 const jobs = readFileSync(new URL("../api/_lib/reel/render-jobs.ts", import.meta.url), "utf8");
-assert.match(jobs, /when \$\{!job\.dry_run && !avatar\} and exists/);
-assert.match(jobs, /source\.approval_mode='AUTO'/);
-assert.match(jobs, /source\.approved_fingerprint=source\.qa_fingerprint/);
-assert.match(jobs, /then 'AUTO' else 'MANUAL' end/);
+assert.match(jobs, /'PENDING','REVIEW_REQUIRED','PENDING',\s*'MANUAL'/);
+assert.doesNotMatch(jobs, /source\.approval_mode='AUTO'/);
+assert.doesNotMatch(jobs, /then 'AUTO' else 'MANUAL' end/);
+assert.match(jobs, /'MANUAL'/);
 const route = readFileSync(new URL("../api/render.ts", import.meta.url), "utf8");
 assert.match(route, /if \(!cronAuthorized\(req\)\) return res\.status\(401\)/);
 assert.match(route, /const autoQa = await reviewAutoReelPilot\(process\.env\)/);
 assert.match(route, /const autoEnqueue = await enqueueAutoReelPilot\(process\.env\)/);
-console.log("Bounded autonomous weekly reel and QA-only approval: PASS");
+console.log("Bounded weekly Reel generation and mandatory owner review: PASS");

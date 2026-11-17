@@ -7,6 +7,16 @@ import { advanceRenderJob, ReelPipelineError, sceneDurations, type ReelDeps, typ
 import { unsupportedScriptClaims, validateReelScript, type ReelScript, type ReelSource } from "../api/_lib/reel/reel-script.js";
 import { classifyRenderError } from "../api/_lib/reel/render-jobs.js";
 
+// Every generated Reel is a draft: passing technical or editorial QA never grants
+// an autonomous publishing permission, even when the original post was approved.
+const finalizerSource = readFileSync(new URL("../api/_lib/reel/render-jobs.ts", import.meta.url), "utf8");
+const autoReelSource = readFileSync(new URL("../api/_lib/reel/auto-reel.ts", import.meta.url), "utf8");
+assert.doesNotMatch(finalizerSource, /then 'AUTO' else 'MANUAL'/);
+assert.match(finalizerSource, /'PENDING','REVIEW_REQUIRED','PENDING',\s*'MANUAL'/);
+assert.match(autoReelSource, /REEL_QA_PASS_AWAITING_USER_REVIEW/);
+assert.doesNotMatch(autoReelSource, /auto_approve_content_variant/);
+assert.doesNotMatch(autoReelSource, /insert into public\.publication_jobs/);
+
 const source: ReelSource = {
   profileName: "Il Tuo Property Manager",
   industry: "Property management affitti brevi",
