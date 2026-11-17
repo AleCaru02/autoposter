@@ -75,5 +75,8 @@ export async function composeDeterministicTypography(input: { backgroundPngBase6
 export async function preflightDeterministicTypography(input: { width: number; height: number; brand: string; headline: string; subheadline?: string | null; brandFonts?: BrandFonts }) {
   const font = await effectiveFonts(input.brandFonts);
   const layout = createTypographyLayout({ canvas: { width: input.width, height: input.height }, fontRegular: font.regular, fontBold: font.bold, brand: input.brand, headline: input.headline, subheadline: input.subheadline });
+  // Fail before OpenAI image generation is billed if WASM/assets are missing.
+  // Layout checking alone does not initialize the renderer.
+  await ready();
   return { ...layout, font: { family: font.family, source: font.source } };
 }
