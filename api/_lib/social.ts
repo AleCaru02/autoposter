@@ -30,6 +30,8 @@ export type SocialEnv = {
   LINKEDIN_ORGANIZATION_ACCESS?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  SOCIAL_PILOT_PROFILE_ID?: string;
+  SOCIAL_PILOT_MAX_DAILY?: string;
 };
 
 type OAuthState = {
@@ -1220,7 +1222,11 @@ export async function revalidateSocialConnections(env: SocialEnv, limit = 12) {
   const sql = neon(env.DATABASE_URL!);
   const due = await sql`
     select profile_id::text as profile_id, provider from public.social_connections
-    where status='ACTIVE' and token_reference is not null and (last_validated_at is null or last_validated_at < now() - interval '20 hours')
+    where status='ACTIVE' and token_reference is not null and (
+      last_validated_at is null or last_validated_at < now() - interval '20 hours'
+      or (provider='GBP' and expires_at is not null and expires_at < now() + interval '30 minutes'
+          and last_validated_at < now() - interval '30 minutes')
+    )
     order by last_validated_at asc nulls first limit ${Math.min(Math.max(limit, 1), 50)}
   ` as unknown as Array<{ profile_id: string; provider: SocialProvider }>;
   let verified = 0; let failed = 0; const codes: string[] = [];
@@ -1669,6 +1675,9 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
     const demoResult = await completeDemoPublication(sql, job);
     if (demoResult) return demoResult;
     assertSocialPublishingAllowed(env);
+    if (job.profile_id !== env.SOCIAL_PILOT_PROFILE_ID) throw terminalPublishError("PILOT_PROFILE_NOT_ALLOWED");
+    // Never turn an approval of an old draft into a surprise post weeks later.
+    if (!publicationDateIsFresh(job.scheduled_at)) throw terminalPublishError("PUBLICATION_SCHEDULE_TOO_OLD");
     const meter = new EntitlementUsageService(env.DATABASE_URL!);
     const scheduled = await meter.canUseCapability(job.profile_id, "social.publish.scheduled");
     if (!scheduled.allowed) throw terminalPublishError("CAPABILITY_SCHEDULED_DISABLED");
@@ -1724,6 +1733,30 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
   }
 }
 
+/** A scheduled post is obsolete after 24h, even if it was approved later. */
+export function publicationDateIsFresh(scheduledAt: string, now = Date.now()) {
+  const scheduled = Date.parse(scheduledAt);
+  return Number.isFinite(scheduled) && scheduled <= now + 60_000 && scheduled >= now - 24 * 60 * 60_000;
+}
+
+/** Profile-scoped, rate-limited production pilot; fail closed on bad config. */
+export function pilotPublicationDecision(input: {
+  profileId: string | undefined; maxDaily: number | undefined;
+  dueProfileIds: string[]; publishedToday: number;
+}): { ok: true; limit: number } | { ok: false; reason: string } {
+  const id = input.profileId?.trim() || "";
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id)) return { ok: false, reason: "PILOT_PROFILE_NOT_CONFIGURED" };
+  const requested = Number(input.maxDaily);
+  if (!Number.isInteger(requested) || requested < 1 || requested > 3) {
+    return { ok: false, reason: "PILOT_DAILY_LIMIT_INVALID" };
+  }
+  if (input.dueProfileIds.some(candidate => candidate !== id)) return { ok: false, reason: "PILOT_OUT_OF_SCOPE_DUE_JOB" };
+  const alreadyPublished = Number(input.publishedToday);
+  if (!Number.isInteger(alreadyPublished) || alreadyPublished < 0) return { ok: false, reason: "PILOT_COUNT_INVALID" };
+  if (alreadyPublished >= requested) return { ok: false, reason: "PILOT_DAILY_LIMIT_REACHED" };
+  return { ok: true, limit: Math.min(1,requested-alreadyPublished) };
+}
+
 export async function processDuePublications(env: SocialEnv, limit = 20) {
   const safeMode = socialSafeModeState(env);
   if (safeMode !== "OFF") return {
@@ -1739,10 +1772,30 @@ export async function processDuePublications(env: SocialEnv, limit = 20) {
   };
   if (!env.DATABASE_URL || !env.SOCIAL_TOKEN_KEY) return { ready: false, reason: "SOCIAL_SECURITY_NOT_CONFIGURED", checked: 0, published: 0, failed: 0 };
   const sql = neon(env.DATABASE_URL);
+  // Read-only preflight before the DB claim: never claim posts belonging to another
+  // profile or publish more than one per invocation during the controlled pilot.
+  const pilotRows = await sql`
+    select distinct profile_id::text as profile_id from public.publication_jobs
+    where state='SCHEDULED' and attempt_count<3 and scheduled_at<=now()
+    limit 20
+  ` as unknown as Array<{ profile_id: string }>;
+  const dailyRows = await sql`
+    select count(*)::int as n from public.publication_jobs
+    where profile_id=${env.SOCIAL_PILOT_PROFILE_ID ?? null}::uuid
+      and state='PUBLISHED'
+      and published_at >= date_trunc('day', now() at time zone 'Europe/Rome') at time zone 'Europe/Rome'
+  ` as unknown as Array<{ n: number }>;
+  const pilot = pilotPublicationDecision({
+    profileId: env.SOCIAL_PILOT_PROFILE_ID,
+    maxDaily: Number(env.SOCIAL_PILOT_MAX_DAILY),
+    dueProfileIds: pilotRows.map(row=>row.profile_id),
+    publishedToday: Number(dailyRows[0]?.n ?? 0),
+  });
+  if ("reason" in pilot) return {ready:true, blocked:true, reason:pilot.reason,checked:0,published:0,failed:0,retryScheduled:0,reviewRequired:0};
   const jobs = await sql`
     select job_id::text id, profile_id::text, variant_id::text, provider, scheduled_at::text,
       attempt_no attempt_count, claim_token::text, lease_expires_at::text
-    from public.claim_due_publication_jobs(${Math.min(Math.max(limit, 1), 50)},600)
+    from public.claim_due_publication_jobs(${pilot.limit},600)
   ` as unknown as JobRecord[];
   let published = 0;
   let failed = 0;
