@@ -124,6 +124,7 @@ jobs:
       - { name: OpenAI QA retry regression, run: "npm run test:openai-qa-retry" }
       - { name: Structured Content QA regression, run: "npm run test:content-qa" }
       - { name: No paid QA for missing visual media, run: "npx tsx tests/content-qa-media-preflight.test.ts" }
+      - { name: Reel MP4 QA fingerprint and video invalidation, run: "npx tsx tests/reel-qa-video-binding.test.ts" }
       - { name: Profile Autonomous SMM certification simulation, run: "npm run test:profile-smm-certification" }
       - { name: Approval workflow v2 regression, run: "npm run test:approval-workflow-v2" }
       - { name: Autopilot AI plan runtime regression, run: "npm run test:autopilot-ai-plan" }
