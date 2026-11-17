@@ -4,7 +4,8 @@ export type TextRole = "BRAND" | "HEADLINE" | "SUBHEADLINE" | "BODY" | "CTA";
 export type TextBlockInput = { role: TextRole; text: string; weight: 400 | 700; preferredSize: number; minimumSize: number; maxLines: number; box: Box };
 export type Box = { x: number; y: number; width: number; height: number };
 export type LaidOutTextBlock = TextBlockInput & { fontSize: number; lineHeight: number; lines: string[]; measuredWidth: number; measuredHeight: number };
-export type TypographyLayout = { canvas: { width: number; height: number }; blocks: LaidOutTextBlock[]; protectedMargins: number; visualZone: Box; textZone: Box };
+export type TypographyPlacement = "TOP_GRADIENT" | "BOTTOM_GRADIENT";
+export type TypographyLayout = { canvas: { width: number; height: number }; placement: TypographyPlacement; blocks: LaidOutTextBlock[]; protectedMargins: number; visualZone: Box; textZone: Box };
 
 export class TypographyPreflightError extends Error {
   constructor(readonly code: "TEXT_EMPTY" | "TEXT_FIT_FAIL" | "TEXT_COLLISION" | "TEXT_EDGE_COLLISION" | "BRAND_HEADLINE_CLEARSPACE") { super(code); }
@@ -64,35 +65,64 @@ export function assertTypographySafety(blocks: Array<{ box: Box }>, canvas: { wi
   }
 }
 
-export function createTypographyLayout(input: { canvas: { width: number; height: number }; fontRegular: Uint8Array; fontBold: Uint8Array; brand: string; headline: string; subheadline?: string | null }) {
+/**
+ * Brand-kit-first, photo-led layout geometry inspired by the MIT-licensed
+ * kmcdotninja/social-post-designer rules: real typographic measurement,
+ * a single alignment grid and a visual area larger than the caption overlay.
+ * No AI or network calls occur here. Preflight runs before paid image generation.
+ */
+export function createTypographyLayout(input: {
+  canvas: { width: number; height: number };
+  fontRegular: Uint8Array; fontBold: Uint8Array; brand: string; headline: string;
+  subheadline?: string | null; placement?: TypographyPlacement;
+}) {
   const { width, height } = input.canvas;
+  const placement: TypographyPlacement = input.placement === "BOTTOM_GRADIENT" ? "BOTTOM_GRADIENT" : "TOP_GRADIENT";
   const margin = Math.round(Math.min(width, height) * 0.08);
   const textWidth = width - margin * 2;
-  const brandBox: Box = { x: margin, y: margin, width: textWidth, height: 74 };
-  const headlineBox: Box = { x: margin, y: margin + 138, width: textWidth, height: Math.round(height * 0.25) };
+  const bottom = placement === "BOTTOM_GRADIENT";
+  // Text on image must be a micro-headline, not a caption paragraph.
+  // Reject long sentences before paid image generation. The caption stays outside.
+  const normalized = input.headline.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length > 72 || normalized.split(" ").length > 12)
+    throw new TypographyPreflightError("TEXT_FIT_FAIL");
+  if (bottom && input.subheadline?.trim())
+    throw new TypographyPreflightError("TEXT_FIT_FAIL");
+
+  const brandY = bottom ? Math.round(height * 0.615) : margin;
+  const brandBox: Box = { x: margin, y: brandY, width: textWidth, height: 74 };
+  const headlineY = brandY + (bottom ? 105 : 138);
+  const headlineBox: Box = { x: margin, y: headlineY, width: textWidth, height: Math.round(height * (bottom ? 0.23 : 0.25)) };
   const subheadlineBox: Box = { x: margin, y: headlineBox.y + headlineBox.height + 34, width: textWidth, height: Math.round(height * 0.11) };
   const inputs: TextBlockInput[] = [
     { role: "BRAND", text: input.brand, weight: 700, preferredSize: 38, minimumSize: 30, maxLines: 1, box: brandBox },
-    { role: "HEADLINE", text: input.headline, weight: 700, preferredSize: 116, minimumSize: 78, maxLines: 3, box: headlineBox },
+    { role: "HEADLINE", text: normalized, weight: 700, preferredSize: bottom ? 108 : 116, minimumSize: 76, maxLines: 3, box: headlineBox },
     ...(input.subheadline?.trim() ? [{ role: "SUBHEADLINE" as const, text: input.subheadline.trim(), weight: 400 as const, preferredSize: 44, minimumSize: 32, maxLines: 2, box: subheadlineBox }] : []),
   ];
   const blocks = inputs.map((block) => layoutBlock(block.weight === 700 ? input.fontBold : input.fontRegular, block));
   assertTypographySafety(blocks, { width, height }, margin);
-  const brand = blocks.find((block) => block.role === "BRAND")!;
-  const headline = blocks.find((block) => block.role === "HEADLINE")!;
-  if (headline.box.y - (brand.box.y + brand.box.height) < 60) throw new TypographyPreflightError("BRAND_HEADLINE_CLEARSPACE");
-  // A panel sized to the entire upper 60% leaves a giant empty white card.
-  // Size the panel to the actual measured glyphs, not the invisible input boxes.
-  // This is computed before any paid image request in the typography preflight.
-  const bottomOfPaintedText = Math.max(...blocks.map((block) => block.box.y + block.measuredHeight));
+  if (headlineBox.y - (brandBox.y + brandBox.height) < 24)
+    throw new TypographyPreflightError("BRAND_HEADLINE_CLEARSPACE");
+  const measuredBottom = Math.max(...blocks.map((block) => block.box.y + block.measuredHeight));
   const lowerPadding = Math.round(Math.min(width, height) * 0.045);
-  const panelBottom = bottomOfPaintedText + lowerPadding;
+  const panelBottom = measuredBottom + lowerPadding;
+  if (panelBottom > height - margin) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+
+  if (bottom) {
+    const panelTop = brandY - Math.round(Math.min(width, height) * 0.045);
+    const textZone: Box = { x: margin, y: panelTop, width: textWidth, height: panelBottom - panelTop };
+    const visualZone: Box = { x: margin, y: margin, width: textWidth, height: panelTop - margin - 52 };
+    if (visualZone.height < height * 0.42 || textZone.height > height * 0.37)
+      throw new TypographyPreflightError("TEXT_FIT_FAIL");
+    return { canvas: { width, height }, placement, blocks, protectedMargins: margin, textZone, visualZone } satisfies TypographyLayout;
+  }
+
   if (panelBottom > height * 0.56) throw new TypographyPreflightError("TEXT_FIT_FAIL");
   const textZone: Box = { x: margin, y: margin, width: textWidth, height: panelBottom - margin };
   const visualY = Math.max(Math.round(height * 0.40), panelBottom + 68);
   const visualZone: Box = { x: margin, y: visualY, width: textWidth, height: height - visualY - margin };
   if (visualZone.height < height * 0.25) throw new TypographyPreflightError("TEXT_FIT_FAIL");
-  return { canvas: { width, height }, blocks, protectedMargins: margin, textZone, visualZone } satisfies TypographyLayout;
+  return { canvas: { width, height }, placement, blocks, protectedMargins: margin, textZone, visualZone } satisfies TypographyLayout;
 }
 
 export function escapeXml(value: string) {

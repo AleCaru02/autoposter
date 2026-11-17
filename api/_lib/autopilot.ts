@@ -27,7 +27,8 @@ import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
 import { autopilotQualityBrief, chooseNarrativeIntent, CONTENT_REJECTION_REASON } from "./autopilot-spend-guards.js";
 import { imageStorageUrl } from "./image-storage.js";
-import { visualHeadlineForBrief } from "./visual-headline.js";
+import { visualHeadlineForBrief, assertAutopilotGraphicBrief } from "./visual-headline.js";
+import { editorialPlacementForContent } from "./social-creative-direction.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
 export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string; AUTOPILOT_RETEST_PROFILE_ID?: string; AUTOPILOT_RETEST_CUTOFF_UTC?: string };
@@ -448,13 +449,15 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
     }
 
     if(!imageAssetId&&visualDecision.provider==="OPENAI")try{
+      // Validate content and layout before entitlement reservation or any paid provider call.
+      assertAutopilotGraphicBrief(variant.visualBrief);
       const imageReservation=await imageMeter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity:`autopilot:${profile.id}:${provider}:${scheduledAt}:${variantId}`,referenceId:variantId,requestFingerprint:{provider,format,scheduledAt,variantId,visualBrief:variant.visualBrief,caption:variant.caption,visualProvider:visualDecision.provider,visualDecisionReason:visualDecision.reasonCode}});
       if(imageReservation.status==="COMPLETED"){imageAssetId=imageReservation.cached.assetId??null;}
       else if(imageReservation.status==="RESERVED"){
         imageEventId=imageReservation.eventId;
         const imageBudget=await budgetEngine.preflight({profileId:profile.id,task:"IMAGE_STANDARD",importance:"STANDARD",projectedOperationCostUsd:0.25,costBucket:"OTHER_AI"});
         if(!imageBudget.allowed){await imageMeter.release(imageEventId,imageBudget.reason??"AI_BUDGET_HARD_STOP");imageEventId=null;throw new Error("AUTOPILOT_IMAGE_BUDGET_STOP");}
-        const typography={brand:profile.name,headline:visualHeadlineForBrief(variant.visualBrief,variant.hook),subheadline:null,logoDataUrl,style:brandTextStyle(brandVisual.activeSocialPalette)};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
+        const typography={brand:profile.name,headline:visualHeadlineForBrief(variant.visualBrief,variant.hook),subheadline:null,logoDataUrl,style:{...brandTextStyle(brandVisual.activeSocialPalette),layout:editorialPlacementForContent({format,visualBrief:variant.visualBrief,caption:variant.caption})}};const [width,height]=imageSizeForFormat(format as ImageSocialFormat,provider as ImageSocialProvider).split("x").map(Number);await preflightDeterministicTypography({width,height,...typography});
         await imageMeter.markProviderStarted(imageEventId);
         const image=await generateRoutedImage({env:{OPENAI_API_KEY:env.OPENAI_API_KEY},budget:imageBudget,importance:"STANDARD",profileName:profile.name,profileType:profile.profile_type,industry:profile.industry,tone:context.tone,brandColors:[brandVisual.activeSocialPalette.primary,brandVisual.activeSocialPalette.secondary,brandVisual.activeSocialPalette.accent,brandVisual.activeSocialPalette.neutral],brandFonts:brandVisual.fonts,brandVisualStyle:brandVisual.visualStyle,provider:provider as ImageSocialProvider,format:format as ImageSocialFormat,visualBrief:variant.visualBrief,caption:variant.caption,additionalDirection:(visualDecision.mustAvoidSyntheticPerson||subjectDecision.prohibitSyntheticPerson)?"Do not depict or invent a synthetic replacement person. Use the chosen non-person subject, objects, environment, composition and non-identifying elements only.":null,typography});
         await imageMeter.persistTechnicalEvents(profile.id,imageEventId,technicalEventsFromImageResult(image,{source:"AUTOPILOT",provider,format,visual_provider:visualDecision.provider,visual_decision_reason:visualDecision.reasonCode}));

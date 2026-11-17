@@ -18,6 +18,16 @@ export function selectCreativeTemplate(input: { format: string; visualBrief: str
   return "EDITORIAL_HERO";
 }
 
+/**
+ * Select one of two deterministic photographic cover layouts. The exact same
+ * placement is passed into the paid image prompt and into the SVG text renderer,
+ * so background focal points and typography no longer fight each other.
+ */
+export function editorialPlacementForContent(input: {format: string; visualBrief: string; caption?: string | null}): "TOP_GRADIENT" | "BOTTOM_GRADIENT" {
+  const template = selectCreativeTemplate(input);
+  return input.format === "POST" && template === "ECONOMICS_CONTRAST" ? "BOTTOM_GRADIENT" : "TOP_GRADIENT";
+}
+
 const templateDirections: Record<CreativeTemplate, string> = {
   ECONOMICS_CONTRAST:
     "Una composizione editoriale fotografica unitaria che mostri la tensione concreta tra prezzo visibile e lavoro/costi dietro il risultato. Il contrasto emerge dalla scena, dalla profondità e dalla scelta del soggetto; non creare grafici, cifre, etichette o due foto affiancate. La scena deve essere pertinente al settore descritto nel brief.",
@@ -38,6 +48,7 @@ export function socialCreativeDirection(input: {
   format: string;
   visualBrief: string;
   caption?: string | null;
+  placement?: "TOP_GRADIENT" | "BOTTOM_GRADIENT";
 }): string {
   const template = selectCreativeTemplate(input);
   return [
@@ -48,7 +59,9 @@ export function socialCreativeDirection(input: {
     "Il brief è un messaggio, NON una richiesta di una fotografia generica del settore. Il soggetto deve rendere visibile il motivo per cui il post merita attenzione.",
     "Un'unica scena coerente, un punto focale riconoscibile, un soggetto principale e non più di due dettagli narrativi; gerarchia da copertina editoriale leggibile a 320px su smartphone.",
     "L'immagine deve essere piena di contenuto visivo significativo: vietate aree enormi sfocate, vuote, monocolore o oggetti di riempimento. La parte inferiore deve contenere un soggetto riconoscibile, non solamente texture o arredo stock.",
-    "La zona superiore per la tipografia aggiunta dal renderer deve essere naturale e COMPATTA: circa il 25-35% dell'altezza per un titolo breve, non metà della fotografia. Non disegnare riquadri, card bianche, strisce lattiginose, gradienti grafici o falsi placeholder nell'immagine generata.",
+    input.placement === "BOTTOM_GRADIENT"
+      ? "Il copy deterministico sarà nella fascia INFERIORE: inquadra il soggetto nei primi 60% superiori, lascia la fascia inferiore sufficientemente pulita e priva di elementi essenziali. Non generare tu un pannello, un gradiente, testo o falsi placeholder."
+      : "Il copy deterministico sarà nella fascia SUPERIORE compatta: inquadra il soggetto principale sotto la prima porzione di immagine. Non lasciare metà foto vuota; non generare tu un pannello, un gradiente, testo o falsi placeholder.",
     "Il renderer applicherà il testo reale separatamente: nessuna lettera, cifra, parola, logo, watermark, fake UI, badge o call to action generata nei pixel di sfondo.",
     "Coerenza brand: usare le informazioni già confermate, senza inventare luoghi, persone, prodotti, risultati e altri fatti aziendali.",
     "L'immagine non deve poter essere riciclata identica per un concorrente con un altro titolo. Se il soggetto è una chiave, un laptop, un caffè o un'agenda senza un significato essenziale, cambia concept prima di generare.",
@@ -63,7 +76,7 @@ export function socialCopySkillPrompt(): string {
     "Individua un'unica idea utile e una promessa che il corpo del post mantenga. Evita titoli clickbait o generici, numeri inventati e claim senza prove.",
     "Scrivi mentalmente 3 aperture con meccanismi diversi (domanda concreta, contrasto fondato, errore riconoscibile) e seleziona quella più naturale, specifica e verificabile. Non restituire le bozze scartate.",
     "Il hook della caption deve avere senso da solo e creare interesse; deve completare il visual, non ripetere semplicemente il testo stampato sull'immagine.",
-    "Il titolo richiesto nella grafica, se indicato nel visualBrief con headline tra virgolette, deve essere autonomo, italiano naturale, coerente con l'idea, preferibilmente 3-8 parole e massimo 62 caratteri; evita periodi eccessivamente lunghi.",
+    "Per ogni variante POST o STORY, il campo visualBrief DEVE iniziare con Titolo in grafica: «testo...» (massimo 62 caratteri e 12 parole, frase naturale e autonoma). Dopo il titolo descrivi soggetto, scena, prospettiva e rapporto visivo con il messaggio. Il titolo non deve essere la caption né un paragrafo.",
     "Per post/carousel/story, genera copy con una sola CTA pertinente all'obiettivo, tono umano, niente riempitivi tipici AI, frasi tronche o struttura da brochure generica.",
     "Il visualBrief deve dire quale idea mostrare con soggetto, scena, prospettiva e relazione narrativa; vietato 'ambiente elegante/luminoso + scrivania/chiavi/laptop' come unico concept.",
     "Cambia struttura e lunghezza secondo Instagram, Facebook, LinkedIn e Google Business Profile; non copiare il medesimo testo su tutti i canali.",

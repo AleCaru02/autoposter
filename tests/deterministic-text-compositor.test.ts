@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Resvg, initWasm } from "@resvg/resvg-wasm";
 import { assertTypographySafety, createTypographyLayout, TypographyPreflightError } from "../api/_lib/deterministic-text-layout.js";
+import { photoLedBackdropSvg } from "../api/_lib/deterministic-text-compositor.js";
 
 const regular = new Uint8Array(await readFile(new URL("../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff", import.meta.url)));
 const bold = new Uint8Array(await readFile(new URL("../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff", import.meta.url)));
@@ -35,6 +36,27 @@ assert.ok((cardBottom-cardTop)/1920 < 0.36, "short headline card must use under 
 const lastTextPixel = Math.max(...compact.blocks.map(block => block.box.y + block.measuredHeight));
 assert.ok(cardBottom-lastTextPixel < 130, "blank bottom inside card must stay compact");
 assert.ok(compact.visualZone.height/1920 > 0.45, "main visual occupies a meaningful portion of feed graphic");
+
+// Photo-led layouts are deterministic and survive mobile image previews.
+const photolead = createTypographyLayout({
+  canvas:{width:1536,height:1920}, fontRegular:regular, fontBold:bold,
+  brand:"Il Tuo Property Manager", headline:"Non guardare solo la tariffa", placement:"BOTTOM_GRADIENT",
+});
+assert.equal(photolead.placement,"BOTTOM_GRADIENT");
+assert.ok(photolead.visualZone.height/1920 > 0.42, "the full-bleed photo has the majority of the frame");
+assert.ok(photolead.textZone.height/1920 < 0.37, "bottom caption never occupies half of the frame");
+assert.ok(photolead.blocks.every(b=>b.box.y >= 1920*0.60), "bottom caption is not pasted over the hero subject");
+const photographicSvg = photoLedBackdropSvg(photolead,"mockbase64");
+assert.match(photographicSvg,/linearGradient/);
+assert.match(photographicSvg,/pa-contrast/);
+assert.doesNotMatch(photographicSvg,/fill="#fffdf8"/);
+const topGradient = photoLedBackdropSvg(compact,"mockbase64");
+assert.match(topGradient,/linearGradient/);
+assert.ok(!topGradient.includes('rx="36"'),"no giant rounded white card in either layout");
+assert.throws(() => createTypographyLayout({
+  canvas:{width:1536,height:1920},fontRegular:regular,fontBold:bold,
+  brand:"Il Tuo Property Manager",headline:"Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?"
+}), (error:unknown)=> error instanceof TypographyPreflightError && error.code==="TEXT_FIT_FAIL","old 85-character GBP headline must be blocked BEFORE billing");
 
 const square = layoutFor(2048, 2048);
 const brand = square.blocks.find((block) => block.role === "BRAND")!;
