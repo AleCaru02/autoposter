@@ -394,6 +394,7 @@ export async function runVariantQa(input: { profileId: string; contentId: string
   if (!response.ok || !body.runId || !body.overallStatus) {
     if (response.status === 409) throw new Error("Il QA è già in corso o deve essere riavviato.");
     if (response.status === 429) throw new Error("Budget o limite QA raggiunto per questa attività.");
+    if (body.error === "OPENAI_API_CREDITS_EXHAUSTED") throw new Error("Credito API OpenAI esaurito. Aggiungi credito su platform.openai.com, poi ripeti il QA. L’immagine già generata non va rifatta.");
     if (body.error === "CONTENT_QA_PROVIDER_RATE_LIMITED") throw new Error("OpenAI è momentaneamente saturo: il QA non è fallito. Riprova tra pochi minuti.");
     if (response.status === 404) throw new Error("Contenuto non trovato.");
     throw new Error("Content QA non completato. Riprova.");

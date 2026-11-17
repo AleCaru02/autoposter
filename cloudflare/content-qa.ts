@@ -56,6 +56,13 @@ export async function handleContentQa(request: Request, env: Env) {
     const status = statusFor(detail);
     console.error("content-qa", { profileId, contentId, variantId, status, code: detail.split(":")[0] });
     const providerLimited = /^OPENAI_(?:AGENT|EDITORIAL_QA|VISUAL_QA)_HTTP_429/.test(detail);
-    return json({ error: providerLimited ? "CONTENT_QA_PROVIDER_RATE_LIMITED" : status === 500 ? "CONTENT_QA_FAILED" : detail.split(":")[0] }, status);
+    // A prepaid-credit 429 is not temporary throttling: retrying cannot help until
+    // the OpenAI API organization is funded. Preserve the distinct actionable state.
+    const creditsExhausted = /^OPENAI_(?:AGENT|EDITORIAL_QA|VISUAL_QA)_HTTP_429_(?:CREDIT_BALANCE_EXHAUSTED|INSUFFICIENT_QUOTA|BILLING_HARD_LIMIT_REACHED|BILLING_NOT_ACTIVE)/.test(detail);
+    return json({
+      error: creditsExhausted ? "OPENAI_API_CREDITS_EXHAUSTED"
+        : providerLimited ? "CONTENT_QA_PROVIDER_RATE_LIMITED"
+        : status === 500 ? "CONTENT_QA_FAILED" : detail.split(":")[0],
+    }, status);
   }
 }
