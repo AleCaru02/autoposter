@@ -58,12 +58,19 @@ assert.match(recoverySrc,/await runContentQa\(/);
 assert.match(recoverySrc,/qa\.overallStatus !== "PASS"/);
 assert.match(recoverySrc,/auto_approve_content_variant/);
 assert.match(recoverySrc,/async function resumeRecoveredCanaryQaOnce/);
-assert.match(recoverySrc,/Number\(v\.qa_attempts\)!==1 \|\| Number\(v\.qa_released\)!==1/);
+assert.match(recoverySrc,/Number\(v\.qa_attempts\)!==2 \|\| Number\(v\.qa_released\)!==2/);
 assert.match(recoverySrc,/recovered\.metadata->'cached_result'->>'assetId'=v\.image_asset_id::text/);
 assert.match(recoverySrc,/force:true/);
 assert.match(recoverySrc,/SAVED_IMAGE_QA_RETRY_ALREADY_CONSUMED/);
 assert.match(recoverySrc,/SAVED_IMAGE_QA_RETRY_FAILED/);
 assert.match(recoverySrc,/qaContinuation=await resumeRecoveredCanaryQaOnce/);
+const qaSrc=readFileSync(new URL("../api/_lib/content-qa.ts",import.meta.url),"utf8");
+for (const stage of ["BUDGET_PREFLIGHT","DUPLICATE_CHECK","FACT_CHECK","EDITORIAL_QA","VISUAL_QA","FEED_COHERENCE","PERSIST_RESULT","PERSIST_USAGE"]) {
+  assert.match(qaSrc,new RegExp(stage));
+}
+assert.match(qaSrc,/qa_failure_stage: qaStage, qa_failure_code: code/);
+assert.match(qaSrc,/console\.error\("content\.qa\.runtime_failed", \{stage: qaStage, code\}\)/);
+
 
 assert.match(recoverySrc,/visualHeadlineForBrief\(variant\.visual_brief,variant\.hook\)/);
 const autopilotSrc=readFileSync(new URL("../api/_lib/autopilot.ts",import.meta.url),"utf8");
