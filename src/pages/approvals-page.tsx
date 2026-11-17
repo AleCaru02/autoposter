@@ -306,6 +306,9 @@ export function ApprovalsPage() {
         profileId: selectedProfile.id,
         contentId: variant.content_id,
         variantId: variant.id,
+        // This is an explicit owner click. Permit fresh idempotency after a
+        // previous RELEASED provider error, while QA/budget gates still apply.
+        force: true,
       });
       await reload();
     });
