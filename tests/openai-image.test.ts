@@ -39,9 +39,9 @@ assert.equal(imageAspectRatioForFormat("POST", "INSTAGRAM"), "4:5");
 assert.equal(imageAspectRatioForFormat("STORY", "INSTAGRAM"), "9:16");
 
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"ECONOMICS_CONTRAST");
-assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"BOTTOM_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"EDITORIAL_SPLIT");
 assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Organizzare check-in e pulizie"}),"TOP_GRADIENT");
-assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"TOP_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"BOTTOM_GRADIENT");
 const onImageBrief = 'Titolo in grafica: «Non guardare solo la tariffa». Scena editoriale sul confronto fra ricavo lordo e costi operativi reali di una locazione breve.';
 assert.equal(explicitGraphicHeadline(onImageBrief),"Non guardare solo la tariffa");
 assert.equal(assertAutopilotGraphicBrief(onImageBrief),"Non guardare solo la tariffa");
@@ -49,6 +49,8 @@ assert.equal(visualHeadlineForBrief(onImageBrief,"Caption molto più lunga"),"No
 assert.throws(()=>assertAutopilotGraphicBrief("Un elegante appartamento luminoso con chiavi, agenda e laptop"),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.throws(()=>assertAutopilotGraphicBrief('Titolo in grafica: «Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?» Scena realistica che mostra gestore e check-in.'),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Gestione check-in e pulizia"}),"PROCESS_PROOF");
+assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",provider:"FACEBOOK",format:"POST",visualBrief:"Tariffa contro margine",placement:"EDITORIAL_SPLIT"}),/55% SINISTRO/);
+assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",provider:"FACEBOOK",format:"POST",visualBrief:"Tariffa contro margine",placement:"EDITORIAL_SPLIT"}),/45% DESTRO/);
 assert.equal(selectCreativeTemplate({format:"CAROUSEL",visualBrief:"Tariffe e costi"}),"CAROUSEL_STEP");
 assert.equal(selectCreativeTemplate({format:"STORY",visualBrief:"Tariffe"}),"STORY_HERO");
 assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",industry:"Affitti brevi",provider:"FACEBOOK",format:"POST",visualBrief:"Non guardare solo la tariffa"}),/vietate aree enormi/i);
