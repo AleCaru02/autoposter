@@ -14,6 +14,79 @@ import { visualHeadlineForBrief } from "./visual-headline.js";
  * It never generates new copy, bypasses QA, or recovers unrelated profiles/jobs.
  * An idempotent released reservation prevents repeats after any failure.
  */
+
+/**
+ * A previously-paid image is immutable on QA errors: allow at most one bounded
+ * follow-up QA attempt with fresh entitlement idempotency. Never regenerate.
+ * Eligibility is proven from the exact committed recovery asset and sole prior
+ * RELEASED QA attempt, not from a generic PENDING visual.
+ */
+async function resumeRecoveredCanaryQaOnce(
+  sql: ReturnType<typeof neon>, env: { DATABASE_URL: string; OPENAI_API_KEY: string },
+  profileId: string, cutoffIso: string,
+): Promise<{state:string;code?:string}|null> {
+  const rows = await sql`
+    select v.id::text as variant_id,v.content_id::text as content_id,
+      (select count(*)::int from public.capability_usage_events q
+        where q.profile_id=v.profile_id and q.reference_id=v.id::text
+          and q.capability_key='content.qa.run') as qa_attempts,
+      (select count(*)::int from public.capability_usage_events q
+        where q.profile_id=v.profile_id and q.reference_id=v.id::text
+          and q.capability_key='content.qa.run' and q.state='RELEASED') as qa_released
+    from public.content_variants v
+    join public.profiles p on p.id=v.profile_id and p.archived_at is null
+    join public.publication_jobs j on j.variant_id=v.id and j.profile_id=v.profile_id
+      and j.state='BLOCKED_APPROVAL'
+    join public.social_connections sc on sc.profile_id=v.profile_id and sc.provider=v.provider
+      and sc.status='ACTIVE' and sc.token_reference is not null
+      and sc.provider_account_id is not null and sc.last_validated_at>now()-interval '48 hours'
+    join public.assets asset on asset.id=v.image_asset_id and asset.profile_id=v.profile_id
+      and asset.kind='IMAGE' and asset.source='AI_IMAGE'
+      and asset.storage_url like 'https://%.public.blob.vercel-storage.com/%'
+    where v.profile_id=${profileId}::uuid and v.created_at>=${cutoffIso}::timestamptz
+      and v.eligible=true and v.approval_mode='AUTO' and v.approval_status='PENDING'
+      and v.qa_status='PENDING' and v.format='POST'
+      and v.visual_provider='OPENAI' and v.visual_generation_status='PASS'
+      and exists (select 1 from public.capability_usage_events prior
+        where prior.profile_id=v.profile_id and prior.reference_id=v.id::text
+          and prior.capability_key='ai.image.generate' and prior.source='AI_IMAGE_AUTOPILOT'
+          and prior.state='RELEASED' and prior.metadata->>'release_reason' like 'Cannot find package ''wbg''%')
+      and exists (select 1 from public.capability_usage_events recovered
+        where recovered.profile_id=v.profile_id and recovered.reference_id=v.id::text
+          and recovered.capability_key='ai.image.generate' and recovered.source='AI_IMAGE_AUTOPILOT'
+          and recovered.state='COMMITTED'
+          and recovered.metadata->'cached_result'->>'assetId'=v.image_asset_id::text)
+    order by v.created_at desc limit 1
+  ` as unknown as Array<{variant_id:string;content_id:string;qa_attempts:number;qa_released:number}>;
+  const v=rows[0];
+  if (!v) return null;
+  if (Number(v.qa_attempts)!==1 || Number(v.qa_released)!==1)
+    return {state:"SAVED_IMAGE_QA_RETRY_ALREADY_CONSUMED"};
+  try {
+    const qa=await runContentQa({
+      databaseUrl:env.DATABASE_URL,apiKey:env.OPENAI_API_KEY,
+      profileId,contentId:v.content_id,variantId:v.variant_id,actorType:"AUTOPILOT",
+      force:true,
+    });
+    if (qa.overallStatus!=="PASS") return {state:"SAVED_IMAGE_QA_VERDICT_FAIL"};
+    const approved=await sql`select public.auto_approve_content_variant(
+      ${profileId}::uuid,${v.variant_id}::uuid,'SYSTEM_AUTOPILOT') as approved
+    ` as unknown as Array<{approved:boolean}>;
+    if (!approved[0]?.approved) return {state:"QA_PASS_APPROVAL_BLOCKED"};
+    const scheduled=await sql`update public.publication_jobs
+      set state='SCHEDULED',updated_at=now()
+      where variant_id=${v.variant_id}::uuid and profile_id=${profileId}::uuid
+        and state='BLOCKED_APPROVAL' and scheduled_at>now()+interval '10 minutes'
+      returning id
+    ` as unknown as Array<{id:string}>;
+    return {state:scheduled.length?"SAVED_IMAGE_QA_PASS_SCHEDULED":"SAVED_IMAGE_QA_PASS_NOT_SCHEDULED"};
+  } catch (error) {
+    const message=error instanceof Error?error.message:"";
+    const code=/(CONTENT_QA_[A-Z0-9_]+|OPENAI_[A-Z0-9_]+|AI_BUDGET_[A-Z0-9_]+|FACT_CHECK_[A-Z0-9_]+)/.exec(message)?.[1]??"QA_PROVIDER_OR_RUNTIME_ERROR";
+    return {state:"SAVED_IMAGE_QA_RETRY_FAILED",code};
+  }
+}
+
 export async function recoverWasmCanaryImage(env: {
   DATABASE_URL?: string; OPENAI_API_KEY?: string; BLOB_READ_WRITE_TOKEN?: string;
   AUTOPILOT_RETEST_PROFILE_ID?: string; AUTOPILOT_RETEST_CUTOFF_UTC?: string;
@@ -27,6 +100,10 @@ export async function recoverWasmCanaryImage(env: {
     return { state: "PROVIDER_OR_STORAGE_NOT_CONFIGURED" };
 
   const sql = neon(env.DATABASE_URL);
+  const qaContinuation=await resumeRecoveredCanaryQaOnce(sql,{
+    DATABASE_URL:env.DATABASE_URL,OPENAI_API_KEY:env.OPENAI_API_KEY,
+  },id,new Date(cutoff).toISOString());
+  if (qaContinuation) return qaContinuation;
   const rows = await sql`
     select v.id::text as variant_id, v.content_id::text as content_id,
       v.provider, v.visual_brief, v.caption, v.hook,
