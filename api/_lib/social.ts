@@ -1671,6 +1671,7 @@ async function processJob(sql: Sql, job: JobRecord, env: SocialEnv) {
     const demoResult = await completeDemoPublication(sql, job);
     if (demoResult) return demoResult;
     assertSocialPublishingAllowed(env);
+    if (job.profile_id !== env.SOCIAL_PILOT_PROFILE_ID) throw terminalPublishError("PILOT_PROFILE_NOT_ALLOWED");
     // Never turn an approval of an old draft into a surprise post weeks later.
     if (!publicationDateIsFresh(job.scheduled_at)) throw terminalPublishError("PUBLICATION_SCHEDULE_TOO_OLD");
     const meter = new EntitlementUsageService(env.DATABASE_URL!);
