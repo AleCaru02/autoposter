@@ -60,11 +60,20 @@
   "functions": {
     "api/render.ts": {
       "maxDuration": 800,
-      "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm}"
+      "includeFiles": "{node_modules/@ff*-installer/linux-x64/**,node_modules/@fontsource/inter/files/inter-latin-[47]00-normal.woff,node_modules/@resvg/resvg-wasm/*.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
     },
     "api/avatar.ts": {
       "maxDuration": 60,
       "includeFiles": "node_modules/@ffprobe-installer/linux-x64/**"
+    },
+    "api/cron.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
+    },
+    "api/cron-canary.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
+    },
+    "api/generate-image.ts": {
+      "includeFiles": "{node_modules/@resvg/resvg-wasm/index_bg.wasm,node_modules/@fontsource/inter/files/inter-latin-400-normal.woff,node_modules/@fontsource/inter/files/inter-latin-700-normal.woff}"
     }
   }
 }
