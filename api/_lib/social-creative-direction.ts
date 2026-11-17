@@ -76,7 +76,7 @@ export function socialCopySkillPrompt(): string {
     "Individua un'unica idea utile e una promessa che il corpo del post mantenga. Evita titoli clickbait o generici, numeri inventati e claim senza prove.",
     "Scrivi mentalmente 3 aperture con meccanismi diversi (domanda concreta, contrasto fondato, errore riconoscibile) e seleziona quella più naturale, specifica e verificabile. Non restituire le bozze scartate.",
     "Il hook della caption deve avere senso da solo e creare interesse; deve completare il visual, non ripetere semplicemente il testo stampato sull'immagine.",
-    "Il titolo richiesto nella grafica, se indicato nel visualBrief con headline tra virgolette, deve essere autonomo, italiano naturale, coerente con l'idea, preferibilmente 3-8 parole e massimo 62 caratteri; evita periodi eccessivamente lunghi.",
+    "Per ogni variante POST o STORY, il campo visualBrief DEVE iniziare con Titolo in grafica: «testo...» (massimo 62 caratteri e 12 parole, frase naturale e autonoma). Dopo il titolo descrivi soggetto, scena, prospettiva e rapporto visivo con il messaggio. Il titolo non deve essere la caption né un paragrafo.",
     "Per post/carousel/story, genera copy con una sola CTA pertinente all'obiettivo, tono umano, niente riempitivi tipici AI, frasi tronche o struttura da brochure generica.",
     "Il visualBrief deve dire quale idea mostrare con soggetto, scena, prospettiva e relazione narrativa; vietato 'ambiente elegante/luminoso + scrivania/chiavi/laptop' come unico concept.",
     "Cambia struttura e lunghezza secondo Instagram, Facebook, LinkedIn e Google Business Profile; non copiare il medesimo testo su tutti i canali.",
