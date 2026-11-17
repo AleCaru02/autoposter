@@ -81,8 +81,18 @@ export function createTypographyLayout(input: { canvas: { width: number; height:
   const brand = blocks.find((block) => block.role === "BRAND")!;
   const headline = blocks.find((block) => block.role === "HEADLINE")!;
   if (headline.box.y - (brand.box.y + brand.box.height) < 60) throw new TypographyPreflightError("BRAND_HEADLINE_CLEARSPACE");
-  const visualZone: Box = { x: margin, y: Math.round(height * 0.60), width: textWidth, height: height - Math.round(height * 0.60) - margin };
-  return { canvas: { width, height }, blocks, protectedMargins: margin, textZone: { x: margin, y: margin, width: textWidth, height: visualZone.y - margin - 32 }, visualZone } satisfies TypographyLayout;
+  // A panel sized to the entire upper 60% leaves a giant empty white card.
+  // Size the panel to the actual measured glyphs, not the invisible input boxes.
+  // This is computed before any paid image request in the typography preflight.
+  const bottomOfPaintedText = Math.max(...blocks.map((block) => block.box.y + block.measuredHeight));
+  const lowerPadding = Math.round(Math.min(width, height) * 0.045);
+  const panelBottom = bottomOfPaintedText + lowerPadding;
+  if (panelBottom > height * 0.56) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+  const textZone: Box = { x: margin, y: margin, width: textWidth, height: panelBottom - margin };
+  const visualY = Math.max(Math.round(height * 0.40), panelBottom + 68);
+  const visualZone: Box = { x: margin, y: visualY, width: textWidth, height: height - visualY - margin };
+  if (visualZone.height < height * 0.25) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+  return { canvas: { width, height }, blocks, protectedMargins: margin, textZone, visualZone } satisfies TypographyLayout;
 }
 
 export function escapeXml(value: string) {
