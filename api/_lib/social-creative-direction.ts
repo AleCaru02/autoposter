@@ -23,9 +23,12 @@ export function selectCreativeTemplate(input: { format: string; visualBrief: str
  * placement is passed into the paid image prompt and into the SVG text renderer,
  * so background focal points and typography no longer fight each other.
  */
-export function editorialPlacementForContent(input: {format: string; visualBrief: string; caption?: string | null}): "TOP_GRADIENT" | "BOTTOM_GRADIENT" {
+export function editorialPlacementForContent(input: {format: string; visualBrief: string; caption?: string | null}): "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT" {
   const template = selectCreativeTemplate(input);
-  return input.format === "POST" && template === "ECONOMICS_CONTRAST" ? "BOTTOM_GRADIENT" : "TOP_GRADIENT";
+  // Economic trade-offs need a visual argument, not merely a photograph
+  // with its caption beneath it. Never apply the split to carousel/stories.
+  if (input.format === "POST" && template === "ECONOMICS_CONTRAST") return "EDITORIAL_SPLIT";
+  return input.format === "STORY" ? "BOTTOM_GRADIENT" : "TOP_GRADIENT";
 }
 
 const templateDirections: Record<CreativeTemplate, string> = {
@@ -48,7 +51,7 @@ export function socialCreativeDirection(input: {
   format: string;
   visualBrief: string;
   caption?: string | null;
-  placement?: "TOP_GRADIENT" | "BOTTOM_GRADIENT";
+  placement?: "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT";
 }): string {
   const template = selectCreativeTemplate(input);
   return [
@@ -59,9 +62,11 @@ export function socialCreativeDirection(input: {
     "Il brief è un messaggio, NON una richiesta di una fotografia generica del settore. Il soggetto deve rendere visibile il motivo per cui il post merita attenzione.",
     "Un'unica scena coerente, un punto focale riconoscibile, un soggetto principale e non più di due dettagli narrativi; gerarchia da copertina editoriale leggibile a 320px su smartphone.",
     "L'immagine deve essere piena di contenuto visivo significativo: vietate aree enormi sfocate, vuote, monocolore o oggetti di riempimento. La parte inferiore deve contenere un soggetto riconoscibile, non solamente texture o arredo stock.",
-    input.placement === "BOTTOM_GRADIENT"
-      ? "Il copy deterministico sarà nella fascia INFERIORE: inquadra il soggetto nei primi 60% superiori, lascia la fascia inferiore sufficientemente pulita e priva di elementi essenziali. Non generare tu un pannello, un gradiente, testo o falsi placeholder."
-      : "Il copy deterministico sarà nella fascia SUPERIORE compatta: inquadra il soggetto principale sotto la prima porzione di immagine. Non lasciare metà foto vuota; non generare tu un pannello, un gradiente, testo o falsi placeholder.",
+    input.placement === "EDITORIAL_SPLIT"
+      ? "COPERTINA MAGAZINE A DUE COLONNE: il renderer riserva il 55% SINISTRO a titolazione e identità del brand su fondo pieno scuro, e mostra solo il 45% DESTRO della fotografia. Crea il soggetto principale grande nella colonna DESTRA, completamente visibile e focalizzato tra il 58% e il 95% della larghezza originale. Deve esserci un gesto/contrasto materiale che giustifichi il messaggio, non una stanza generica. Non aggiungere testo, pannelli o griglie alla fotografia: saranno composti deterministicamente."
+      : input.placement === "BOTTOM_GRADIENT"
+        ? "Il copy deterministico sarà nella fascia INFERIORE: inquadra il soggetto nei primi 60% superiori, lascia la fascia inferiore sufficientemente pulita e priva di elementi essenziali. Non generare tu un pannello, un gradiente, testo o falsi placeholder."
+        : "Il copy deterministico sarà nella fascia SUPERIORE compatta: inquadra il soggetto principale sotto la prima porzione di immagine. Non lasciare metà foto vuota; non generare tu un pannello, un gradiente, testo o falsi placeholder.",
     "Il renderer applicherà il testo reale separatamente: nessuna lettera, cifra, parola, logo, watermark, fake UI, badge o call to action generata nei pixel di sfondo.",
     "Coerenza brand: usare le informazioni già confermate, senza inventare luoghi, persone, prodotti, risultati e altri fatti aziendali.",
     "L'immagine non deve poter essere riciclata identica per un concorrente con un altro titolo. Se il soggetto è una chiave, un laptop, un caffè o un'agenda senza un significato essenziale, cambia concept prima di generare.",
