@@ -7,7 +7,7 @@ import { woffToSfnt } from "./woff-to-sfnt.js";
  * incomplete or unavailable pair deliberately falls back to bundled Inter and
  * reports that fallback rather than claiming the original brand typeface. */
 export type BrandFonts = { family?: string; regular?: ArrayBuffer; bold?: ArrayBuffer };
-export type TypographyStyle = { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number; layout?: TypographyPlacement };
+export type TypographyStyle = { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number; accentColor?: string; canvasColor?: string; layout?: TypographyPlacement };
 
 let rendererReady: Promise<void> | null = null;
 let fontsReady: Promise<{ regular: Uint8Array; bold: Uint8Array }> | null = null;
@@ -60,8 +60,9 @@ function textSvg(layout: TypographyLayout, fontFamily: string, style: Required<T
 }
 
 /** Photo-led cover based on social-post-designer's contrast and no-filler grid rules. */
-export function photoLedBackdropSvg(layout: TypographyLayout, backgroundPngBase64: string): string {
+export function photoLedBackdropSvg(layout: TypographyLayout, backgroundPngBase64: string, options: {canvasColor?:string} = {}): string {
   const { width, height } = layout.canvas;
+  const canvasColor = /^#[0-9a-f]{6}$/i.test(options.canvasColor??"") ? options.canvasColor : "#112839";
   const image = `<image href="data:image/png;base64,${backgroundPngBase64}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
   if (layout.placement === "EDITORIAL_SPLIT") {
     const split = layout.visualZone.x;
@@ -76,7 +77,7 @@ export function photoLedBackdropSvg(layout: TypographyLayout, backgroundPngBase6
         <stop offset="100%" stop-color="#071723" stop-opacity="0"/>
       </linearGradient>
     </defs>
-    <rect width="${width}" height="${height}" fill="#112839"/>
+    <rect width="${width}" height="${height}" fill="${canvasColor}"/>
     <image href="data:image/png;base64,${backgroundPngBase64}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" clip-path="url(#pa-photo-column)"/>
     <rect x="${split}" y="0" width="${width-split}" height="${height}" fill="url(#pa-photo-depth)"/>
     <rect x="${layout.protectedMargins}" y="${Math.round(height*0.87)}" width="${Math.round(split-layout.protectedMargins*2.3)}" height="2" fill="#EDF1EF" opacity="0.27"/>`;
@@ -102,9 +103,9 @@ export async function composeDeterministicTypography(input: { backgroundPngBase6
   const font = await effectiveFonts(input.brandFonts);
   const layout = createTypographyLayout({ canvas: { width: input.width, height: input.height }, fontRegular: font.regular, fontBold: font.bold, brand: input.brand, headline: input.headline, subheadline: input.subheadline, placement: input.style?.layout });
   await ready();
-  const style: Required<TypographyStyle> = { panelColor: input.style?.panelColor || "#fffdf8", textColor: input.style?.textColor || "#172430", brandColor: input.style?.brandColor || "#0e5973", panelOpacity: input.style?.panelOpacity ?? 0.94, layout: layout.placement };
-  const accent = /^#[0-9a-fA-F]{6}$/.test(style.brandColor) ? style.brandColor : "#c9923d";
-  const imageAndBackdrop = photoLedBackdropSvg(layout, input.backgroundPngBase64);
+  const style: Required<TypographyStyle> = { panelColor: input.style?.panelColor || "#fffdf8", textColor: input.style?.textColor || "#172430", brandColor: input.style?.brandColor || "#0e5973", panelOpacity: input.style?.panelOpacity ?? 0.94, accentColor: input.style?.accentColor || input.style?.brandColor || "#D8B57C", canvasColor: input.style?.canvasColor || "#112839", layout: layout.placement };
+  const accent = /^#[0-9a-fA-F]{6}$/.test(style.accentColor) ? style.accentColor : "#D8B57C";
+  const imageAndBackdrop = photoLedBackdropSvg(layout, input.backgroundPngBase64, {canvasColor:style.canvasColor});
   // Dark photograph-integrated gradients replace the 60%-height cream rectangle.
   // White type and a restrained brand accent keep contrast stable on arbitrary photos.
   const textStyle = { ...style, textColor: "#FFFFFF", brandColor: "#FFFFFF" };
