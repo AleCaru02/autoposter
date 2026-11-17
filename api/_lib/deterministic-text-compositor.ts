@@ -11,7 +11,7 @@ export type TypographyStyle = { panelColor?: string; textColor?: string; brandCo
 
 let rendererReady: Promise<void> | null = null;
 let fontsReady: Promise<{ regular: Uint8Array; bold: Uint8Array }> | null = null;
-type TypographyBinaryAssets = { resvgWasm: ArrayBuffer; interRegular: ArrayBuffer; interBold: ArrayBuffer };
+type TypographyBinaryAssets = { resvgWasm: ArrayBuffer | WebAssembly.Module; interRegular: ArrayBuffer; interBold: ArrayBuffer };
 let workerAssetsReady: Promise<TypographyBinaryAssets> | null = null;
 
 function workerAssets(): Promise<TypographyBinaryAssets> {
@@ -22,7 +22,7 @@ function workerAssets(): Promise<TypographyBinaryAssets> {
   workerAssetsReady ??= nodeRuntime
     ? import("./deterministic-text-node-assets.js").then(({ loadNodeTypographyAssets }) => loadNodeTypographyAssets())
     : import("./deterministic-text-worker-assets.js");
-  return workerAssetsReady;
+  return workerAssetsReady!;
 }
 
 function bytes(asset: ArrayBuffer) {
