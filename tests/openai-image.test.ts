@@ -3,7 +3,8 @@ import fs from "node:fs";
 import { buildImagePrompt, estimateImageCost, estimateImageCostUsd, generateOpenAIImage, imageAspectRatioForFormat, imageSizeForFormat } from "../api/_lib/openai-image.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
-import { selectCreativeTemplate, socialCreativeDirection, socialCopySkillPrompt } from "../api/_lib/social-creative-direction.js";
+import { selectCreativeTemplate, editorialPlacementForContent, socialCreativeDirection, socialCopySkillPrompt } from "../api/_lib/social-creative-direction.js";
+import { assertAutopilotGraphicBrief, explicitGraphicHeadline, visualHeadlineForBrief } from "../api/_lib/visual-headline.js";
 
 const calls: Array<{ url: string; body: Record<string, any>; headers: Record<string, string> }> = [];
 const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -38,6 +39,15 @@ assert.equal(imageAspectRatioForFormat("POST", "INSTAGRAM"), "4:5");
 assert.equal(imageAspectRatioForFormat("STORY", "INSTAGRAM"), "9:16");
 
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"ECONOMICS_CONTRAST");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"BOTTOM_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Organizzare check-in e pulizie"}),"TOP_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"TOP_GRADIENT");
+const onImageBrief = 'Titolo in grafica: «Non guardare solo la tariffa». Scena editoriale sul confronto fra ricavo lordo e costi operativi reali di una locazione breve.';
+assert.equal(explicitGraphicHeadline(onImageBrief),"Non guardare solo la tariffa");
+assert.equal(assertAutopilotGraphicBrief(onImageBrief),"Non guardare solo la tariffa");
+assert.equal(visualHeadlineForBrief(onImageBrief,"Caption molto più lunga"),"Non guardare solo la tariffa");
+assert.throws(()=>assertAutopilotGraphicBrief("Un elegante appartamento luminoso con chiavi, agenda e laptop"),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
+assert.throws(()=>assertAutopilotGraphicBrief('Titolo in grafica: «Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?» Scena realistica che mostra gestore e check-in.'),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Gestione check-in e pulizia"}),"PROCESS_PROOF");
 assert.equal(selectCreativeTemplate({format:"CAROUSEL",visualBrief:"Tariffe e costi"}),"CAROUSEL_STEP");
 assert.equal(selectCreativeTemplate({format:"STORY",visualBrief:"Tariffe"}),"STORY_HERO");
@@ -75,6 +85,16 @@ const prompt = buildImagePrompt({
   additionalDirection: null,
 });
 assert.ok(prompt.includes("Appartamento luminoso"));
+const photoLedPrompt = buildImagePrompt({
+  profileName:"Il Tuo Property Manager",profileType:"BUSINESS",industry:"Property management",tone:"Professional",
+  brandColors:["#17324d","#c9923d"],brandFonts:["Inter"],provider:"FACEBOOK",format:"POST",
+  visualBrief:onImageBrief,caption:"Costi di gestione e margine reale",
+  typography:{brand:"Il Tuo Property Manager",headline:"Non guardare solo la tariffa",style:{layout:"BOTTOM_GRADIENT"}},
+});
+assert.match(photoLedPrompt,/TERZO INFERIORE/);
+assert.match(photoLedPrompt,/primi 60% superiori/);
+assert.doesNotMatch(photoLedPrompt,/Riserva una zona editoriale pulita nel TERZO SUPERIORE/);
+
 assert.match(prompt, /SISTEMA VISIVO PERSONAL BRAND/);
 assert.match(prompt, /feed editoriale coerente/i);
 assert.match(prompt, /Non inventare il volto del titolare/i);
