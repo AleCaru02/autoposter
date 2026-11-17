@@ -114,7 +114,7 @@ export async function recoverWasmCanaryImage(env: {
       )`;
     const linked = await sql`update public.content_variants
       set image_asset_id=${assetId}::uuid,visual_model=${image.model},
-        visual_actual_cost_eur=${Number(cost)},visual_generation_status='COMPLETE',updated_at=now()
+        visual_actual_cost_eur=${Number(cost)},visual_generation_status='PASS',updated_at=now()
       where id=${variant.variant_id}::uuid and profile_id=${id}::uuid and image_asset_id is null
       returning id` as unknown as Array<{id:string}>;
     if (!linked.length) throw new Error("RECOVERY_VARIANT_CONFLICT");
