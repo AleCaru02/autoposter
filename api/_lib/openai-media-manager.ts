@@ -68,7 +68,7 @@ export async function runOpenAIMediaManager(input: {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  placement?: "TOP_GRADIENT" | "BOTTOM_GRADIENT";
+  placement?: "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT";
   fetcher?: typeof fetch;
 }): Promise<MediaManagerResult> {
   const fetcher: typeof fetch = input.fetcher ?? ((request, init) => globalThis.fetch(request, init));
@@ -85,6 +85,7 @@ export async function runOpenAIMediaManager(input: {
         "Ogni imagePrompt deve descrivere una scena ricca, intenzionale e visivamente memorabile, evitando immagini corporate generiche, piatte, vuote o da stock.",
         "Definisci sempre: soggetto principale e dettagli secondari utili; primo piano, piano intermedio e sfondo; punto focale e gerarchia visiva; prospettiva o inquadratura; profondità; illuminazione, ombre e atmosfera; palette, materiali e texture; livello di realismo; uso intenzionale dello spazio negativo.",
         "Il visual deve comunicare prima di tutto l'IDEA CENTRALE del contenuto. Non limitarti a mostrare il luogo o il settore come decorazione: scegli una scena o metafora che renda visibile il messaggio.",
+        "Per contenuti di confronto economico (costi, ricavi, margine, prezzo), una foto di lavoratori o di una stanza DA SOLA è insufficiente: il concept deve rendere leggibile la relazione fra almeno due elementi concreti. Vietati cifre false e prove inventate. La composizione deve avere una funzione argomentativa, non essere stock.",
         "Mantieni una sola gerarchia principale e al massimo tre elementi secondari. Evita sovraccarico, infografiche improvvisate, collage, mappe affollate e troppi punti focali.",
         "La brand identity fornita nel campo brand è un vincolo reale del profilo: usa i colori osservati/confermati come palette dominante e di accento, scegliendo 2-4 colori coerenti invece di usarli tutti. Non sostituirli con una palette arbitraria; bianco, nero e neutri sono ammessi per contrasto.",
         personalBrandVisualSystem(input.profileType),
@@ -97,9 +98,11 @@ export async function runOpenAIMediaManager(input: {
         "Evita props stock-like e stereotipi di settore se non aggiungono significato: chiavi, laptop, tazze, skyline, stretta di mano, fogli o scrivanie generiche non sono un sostituto dell'art direction.",
         "Per luoghi reali, quartieri, mappe, metropolitane, strade, landmark o percorsi: NON inventare cartografia, posizioni, linee, fermate, collegamenti, distanze, edifici o etichette fattuali. Se non sono forniti dati geografici verificati o un asset reale, usa una rappresentazione editoriale non cartografica o uno schema chiaramente concettuale senza pretendere accuratezza geografica.",
         "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se fosse realmente appartenente al brand, salvo che il brief lo confermi esplicitamente. Una scena sintetica deve restare illustrativa, non una falsa prova dell'attività.",
-        input.placement === "BOTTOM_GRADIENT"
-          ? "Il testo sarà aggiunto nel TERZO INFERIORE tramite un gradiente scuro: il soggetto va inquadrato sopra, senza tagli importanti o finti pannelli nella foto."
-          : "Il testo sarà aggiunto nel TERZO SUPERIORE tramite un gradiente scuro: il soggetto va inquadrato principalmente sotto, senza generare pannelli o grandi aree vuote.",
+        input.placement === "EDITORIAL_SPLIT"
+          ? "L'immagine farà parte di una copertina editoriale asimmetrica, con il 55% SINISTRO interamente coperto dal tipografico del brand: la fotografia sarà VISIBILE SOLTANTO NEL 45% DESTRO. Sposta il gesto narrativo essenziale e il punto focale nella fascia da x=58% a x=95%, con dettagli concreti e profondità. Non generare testo o finti pannelli."
+          : input.placement === "BOTTOM_GRADIENT"
+            ? "Il testo sarà aggiunto nel TERZO INFERIORE tramite un gradiente scuro: il soggetto va inquadrato sopra, senza tagli importanti o finti pannelli nella foto."
+            : "Il testo sarà aggiunto nel TERZO SUPERIORE tramite un gradiente scuro: il soggetto va inquadrato principalmente sotto, senza generare pannelli o grandi aree vuote.",
         "Per STORY costruisci una gerarchia verticale forte e lascia ampie zone sicure sopra e sotto per l'interfaccia social; concentra testo e soggetto nella parte centrale e mantieni gli elementi essenziali nella zona centrale anche in caso di ritaglio 9:16.",
         "Adatta composizione e densità alla piattaforma e al formato; la strategia visuale della piattaforma è un vincolo, non un suggerimento.",
         platformVisualStrategyPrompt(input.provider),

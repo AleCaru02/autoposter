@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { buildImagePrompt, estimateImageCost, estimateImageCostUsd, generateOpenAIImage, imageAspectRatioForFormat, imageSizeForFormat } from "../api/_lib/openai-image.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { estimateTerraCostUsd } from "../api/_lib/openai-text.js";
-import { selectCreativeTemplate, editorialPlacementForContent, socialCreativeDirection, socialCopySkillPrompt } from "../api/_lib/social-creative-direction.js";
+import { selectCreativeTemplate, editorialPlacementForContent, socialCreativeDirection, socialCopySkillPrompt, creativeConceptIssues } from "../api/_lib/social-creative-direction.js";
 import { assertAutopilotGraphicBrief, explicitGraphicHeadline, visualHeadlineForBrief } from "../api/_lib/visual-headline.js";
 
 const calls: Array<{ url: string; body: Record<string, any>; headers: Record<string, string> }> = [];
@@ -39,9 +39,11 @@ assert.equal(imageAspectRatioForFormat("POST", "INSTAGRAM"), "4:5");
 assert.equal(imageAspectRatioForFormat("STORY", "INSTAGRAM"), "9:16");
 
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"ECONOMICS_CONTRAST");
-assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"BOTTOM_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Non guardare solo la tariffa: redditività reale"}),"EDITORIAL_SPLIT");
+assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Nuovo prodotto a prezzo promozionale"}),"EDITORIAL_HERO","retail promotion must not be classified as a gross-vs-net tradeoff");
+assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Nuovo prodotto a prezzo promozionale"}),"TOP_GRADIENT","no arbitrary financial split for unrelated retail businesses");
 assert.equal(editorialPlacementForContent({format:"POST",visualBrief:"Organizzare check-in e pulizie"}),"TOP_GRADIENT");
-assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"TOP_GRADIENT");
+assert.equal(editorialPlacementForContent({format:"STORY",visualBrief:"Tariffe"}),"BOTTOM_GRADIENT");
 const onImageBrief = 'Titolo in grafica: «Non guardare solo la tariffa». Scena editoriale sul confronto fra ricavo lordo e costi operativi reali di una locazione breve.';
 assert.equal(explicitGraphicHeadline(onImageBrief),"Non guardare solo la tariffa");
 assert.equal(assertAutopilotGraphicBrief(onImageBrief),"Non guardare solo la tariffa");
@@ -49,6 +51,8 @@ assert.equal(visualHeadlineForBrief(onImageBrief,"Caption molto più lunga"),"No
 assert.throws(()=>assertAutopilotGraphicBrief("Un elegante appartamento luminoso con chiavi, agenda e laptop"),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.throws(()=>assertAutopilotGraphicBrief('Titolo in grafica: «Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?» Scena realistica che mostra gestore e check-in.'),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Gestione check-in e pulizia"}),"PROCESS_PROOF");
+assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",provider:"FACEBOOK",format:"POST",visualBrief:"Tariffa contro margine",placement:"EDITORIAL_SPLIT"}),/55% SINISTRO/);
+assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",provider:"FACEBOOK",format:"POST",visualBrief:"Tariffa contro margine",placement:"EDITORIAL_SPLIT"}),/45% DESTRO/);
 assert.equal(selectCreativeTemplate({format:"CAROUSEL",visualBrief:"Tariffe e costi"}),"CAROUSEL_STEP");
 assert.equal(selectCreativeTemplate({format:"STORY",visualBrief:"Tariffe"}),"STORY_HERO");
 assert.match(socialCreativeDirection({profileName:"Il Tuo Property Manager",industry:"Affitti brevi",provider:"FACEBOOK",format:"POST",visualBrief:"Non guardare solo la tariffa"}),/vietate aree enormi/i);
@@ -231,6 +235,46 @@ assert.match(workerRuntime, /profileType:\s*profile\.profile_type/, "production 
 assert.match(workerRuntime, /brandColors:\s*\[brandVisual\.activeSocialPalette\.primary/, "production Worker must pass the active profile palette to OpenAI Images");
 assert.match(workerRuntime, /brandFonts:\s*brandVisual\.fonts/, "production Worker must pass profile fonts to OpenAI Images");
 assert.match(workerRuntime, /brandVisualStyle:\s*brandVisual\.visualStyle/, "production Worker must pass profile visual style to OpenAI Images");
+
+// An editorial concept must demonstrate the point and protect the only
+// visible 45% of the photo. A generic stock interior may never trigger Images 2.
+const rejected = creativeConceptIssues({
+  placement:"EDITORIAL_SPLIT",visualIntent:"Ambiente elegante e ordinato",
+  subject:"Una camera luminosa con laptop e chiavi",composition:"Soggetto centrale",
+  imagePrompt:"Foto corporate di un appartamento luminoso",
+});
+assert.deepEqual(rejected,[
+  "EDITORIAL_CONCEPT_NOT_PROVEN",
+  "EDITORIAL_SUBJECT_CROP_UNSAFE",
+  "EDITORIAL_PROMPT_TOO_GENERIC",
+]);
+assert.deepEqual(creativeConceptIssues({
+  placement:"EDITORIAL_SPLIT",
+  visualIntent:"Il contrasto tra tariffa e costi di una gestione operativa",
+  subject:"Un servizio reale dietro l'incasso illustrato senza cifre",
+  composition:"Colonna destra con soggetto fra il 60% e il 95%; spazio tipografico sinistro",
+  imagePrompt:"Fotografia editoriale narrativa che rende visibile il contrasto fra tariffa visibile e costi e lavoro operativo di preparazione. ".repeat(6),
+}),[],"intent, visual mechanism, right crop and substantive prompt clear the gate");
+
+let paidImagesAttempted = 0;
+let cheapMediaCalls = 0;
+const poorDirectorFetcher:typeof fetch = async (input,init) => {
+  const url=String(input);
+  if(url.endsWith("/responses")) {cheapMediaCalls++;return fetcher(input,init);}
+  if(url.endsWith("/images/generations")) paidImagesAttempted++;
+  throw Error("EXPENSIVE_IMAGE_PROVIDER_MUST_NOT_RUN");
+};
+await assert.rejects(
+  ()=>generateOpenAIImage({
+    apiKey:"sk-fake-not-real",profileName:"Il Tuo Property Manager",
+    industry:"Affitti brevi",tone:"Professionale",provider:"FACEBOOK",format:"POST",
+    visualBrief:"Titolo in grafica: «La tariffa non è il guadagno». Foto editoriale che dimostra il lavoro e costi operativi dietro l'incasso lordo.",
+    typography:{brand:"Il Tuo Property Manager",headline:"La tariffa non è il guadagno",style:{layout:"EDITORIAL_SPLIT"}},
+    fetcher:poorDirectorFetcher,
+  }),/OPENAI_CREATIVE_CONCEPT_REJECTED/,
+);
+assert.equal(cheapMediaCalls,1);
+assert.equal(paidImagesAttempted,0,"a weak creative director output cannot spend on Images 2");
 
 console.log("PASS OpenAI image contract: Media Manager OpenAI precede esclusivamente GPT-Image-2.5 Sunburst; qualità high, formato PNG e metadati tracciati.");
 

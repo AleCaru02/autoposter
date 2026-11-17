@@ -4,7 +4,7 @@ export type TextRole = "BRAND" | "HEADLINE" | "SUBHEADLINE" | "BODY" | "CTA";
 export type TextBlockInput = { role: TextRole; text: string; weight: 400 | 700; preferredSize: number; minimumSize: number; maxLines: number; box: Box };
 export type Box = { x: number; y: number; width: number; height: number };
 export type LaidOutTextBlock = TextBlockInput & { fontSize: number; lineHeight: number; lines: string[]; measuredWidth: number; measuredHeight: number };
-export type TypographyPlacement = "TOP_GRADIENT" | "BOTTOM_GRADIENT";
+export type TypographyPlacement = "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT";
 export type TypographyLayout = { canvas: { width: number; height: number }; placement: TypographyPlacement; blocks: LaidOutTextBlock[]; protectedMargins: number; visualZone: Box; textZone: Box };
 
 export class TypographyPreflightError extends Error {
@@ -77,7 +77,7 @@ export function createTypographyLayout(input: {
   subheadline?: string | null; placement?: TypographyPlacement;
 }) {
   const { width, height } = input.canvas;
-  const placement: TypographyPlacement = input.placement === "BOTTOM_GRADIENT" ? "BOTTOM_GRADIENT" : "TOP_GRADIENT";
+  const placement: TypographyPlacement = input.placement === "BOTTOM_GRADIENT" || input.placement === "EDITORIAL_SPLIT" ? input.placement : "TOP_GRADIENT";
   const margin = Math.round(Math.min(width, height) * 0.08);
   const textWidth = width - margin * 2;
   const bottom = placement === "BOTTOM_GRADIENT";
@@ -88,6 +88,34 @@ export function createTypographyLayout(input: {
     throw new TypographyPreflightError("TEXT_FIT_FAIL");
   if (bottom && input.subheadline?.trim())
     throw new TypographyPreflightError("TEXT_FIT_FAIL");
+
+  // A third, distinct magazine layout: meaningful photographic subject on
+  // the right, deliberate editorial hierarchy on the left. Neither a generic
+  // photo+text overlay nor a transparent white card.
+  if (placement === "EDITORIAL_SPLIT") {
+    if (input.subheadline?.trim()) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+    const splitX = Math.round(width * 0.55);
+    const leftTextWidth = splitX - margin - Math.round(width * 0.055);
+    if (leftTextWidth < width * 0.30) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+    const brandBox: Box = { x: margin, y: Math.round(height * 0.12), width: leftTextWidth, height: 78 };
+    const headlineBox: Box = {
+      x: margin, y: Math.round(height * 0.30), width: leftTextWidth,
+      height: Math.round(height * 0.40),
+    };
+    const blocks = [
+      layoutBlock(input.fontBold, { role:"BRAND",text:input.brand,weight:700,preferredSize:33,minimumSize:24,maxLines:2,box:brandBox }),
+      layoutBlock(input.fontBold, { role:"HEADLINE",text:normalized,weight:700,preferredSize:96,minimumSize:58,maxLines:5,box:headlineBox }),
+    ];
+    assertTypographySafety(blocks, { width, height }, margin);
+    if (brandBox.y + blocks[0].measuredHeight + 60 > headlineBox.y)
+      throw new TypographyPreflightError("BRAND_HEADLINE_CLEARSPACE");
+    const xLimit = Math.max(...blocks.map(b=>b.box.x+b.measuredWidth));
+    if (xLimit > splitX - margin*0.25) throw new TypographyPreflightError("TEXT_COLLISION");
+    const textZone: Box = {x:margin,y:margin,width:leftTextWidth,height:height-margin*2};
+    const visualZone: Box = {x:splitX,y:0,width:width-splitX,height};
+    if (visualZone.width < width*0.38) throw new TypographyPreflightError("TEXT_FIT_FAIL");
+    return { canvas:{width,height},placement,blocks,protectedMargins:margin,textZone,visualZone } satisfies TypographyLayout;
+  }
 
   const brandY = bottom ? Math.round(height * 0.615) : margin;
   const brandBox: Box = { x: margin, y: brandY, width: textWidth, height: 74 };

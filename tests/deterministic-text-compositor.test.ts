@@ -58,6 +58,31 @@ assert.throws(() => createTypographyLayout({
   brand:"Il Tuo Property Manager",headline:"Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?"
 }), (error:unknown)=> error instanceof TypographyPreflightError && error.code==="TEXT_FIT_FAIL","old 85-character GBP headline must be blocked BEFORE billing");
 
+// Brand-aware premium editorial cover is not a third variant of the photo+title overlay.
+for (const [label,width,height] of [["square",2048,2048],["feed",1536,1920],["vertical",1440,2560]] as const) {
+  const split = createTypographyLayout({
+    canvas:{width,height},fontRegular:regular,fontBold:bold,
+    brand:"Il Tuo Property Manager",headline:"La tariffa non è il guadagno",
+    placement:"EDITORIAL_SPLIT"
+  });
+  assert.equal(split.placement,"EDITORIAL_SPLIT",label);
+  assert.ok(split.visualZone.x >= width*0.54,label);
+  assert.ok(split.visualZone.width >= width*0.38,label);
+  assert.ok(split.blocks.every(b=>b.box.x+b.measuredWidth < split.visualZone.x),label);
+  assert.ok(split.blocks.every(b=>b.measuredHeight <= b.box.height),label);
+  const markup=photoLedBackdropSvg(split,"mockbase64",{canvasColor:"#17324d"});
+  assert.match(markup,/pa-photo-column/);
+  assert.match(markup,/clip-path="url\(#pa-photo-column\)"/);
+  assert.match(markup,/fill="#17324d"/);
+  assert.doesNotMatch(markup,/fill="#fffdf8"/);
+  assert.deepEqual(split,createTypographyLayout({canvas:{width,height},fontRegular:regular,fontBold:bold,brand:"Il Tuo Property Manager",headline:"La tariffa non è il guadagno",placement:"EDITORIAL_SPLIT"}),"deterministic grid");
+}
+assert.throws(()=>createTypographyLayout({
+  canvas:{width:1536,height:1920},fontRegular:regular,fontBold:bold,
+  brand:"Il Tuo Property Manager",headline:"La tariffa non è il guadagno",
+  subheadline:"Un paragrafo aggiuntivo troppo lungo",placement:"EDITORIAL_SPLIT"
+}),error=>error instanceof TypographyPreflightError&&error.code==="TEXT_FIT_FAIL");
+
 const square = layoutFor(2048, 2048);
 const brand = square.blocks.find((block) => block.role === "BRAND")!;
 const headline = square.blocks.find((block) => block.role === "HEADLINE")!;

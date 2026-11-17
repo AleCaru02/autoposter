@@ -1,6 +1,6 @@
 import { runOpenAIMediaManager } from "./openai-media-manager.js";
 import { platformVisualStrategyPrompt } from "./social-platform-strategy.js";
-import { socialCreativeDirection } from "./social-creative-direction.js";
+import { socialCreativeDirection, creativeConceptIssues } from "./social-creative-direction.js";
 import { personalBrandVisualSystem } from "./personal-brand-visual-system.js";
 import { fetchOpenAiQaWithRetry, openAiQaFailureCode } from "./openai-qa-retry.js";
 
@@ -81,7 +81,7 @@ export type GenerateImageOptions = {
   visualBrief: string;
   caption?: string | null;
   additionalDirection?: string | null;
-  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number; layout?: "TOP_GRADIENT" | "BOTTOM_GRADIENT" } } | null;
+  typography?: { brand: string; headline: string; subheadline?: string | null; logoDataUrl?: string | null; style?: { panelColor?: string; textColor?: string; brandColor?: string; panelOpacity?: number; accentColor?: string; canvasColor?: string; layout?: "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT" } } | null;
   fetcher?: typeof fetch;
 };
 
@@ -125,9 +125,11 @@ export function buildImageGuardrails(options: Omit<GenerateImageOptions, "apiKey
     "Non mostrare un appartamento, ufficio, vista panoramica, prodotto, persona o risultato sintetico come se appartenesse davvero al brand, salvo conferma esplicita nel brief.",
     "VISUAL = sintesi; CAPTION = approfondimento. La grafica non deve provare a contenere tutta la caption, ma deve rendere immediatamente comprensibile il nucleo del contenuto.",
     "NON renderizzare testo, lettere, numeri, loghi, watermark, badge, etichette o UI fittizia. AutoPoster applicherà copy e brand dopo la generazione con un renderer deterministico.",
-    options.typography?.style?.layout === "BOTTOM_GRADIENT"
-      ? "Il renderer applica headline e brand sul TERZO INFERIORE con un leggero gradiente scuro: soggetto e azione devono restare riconoscibili nei 60% SUPERIORI. Non creare già pannelli, gradienti o testo nel render AI."
-      : "Riserva una zona editoriale pulita nel TERZO SUPERIORE, dove il renderer applicherà headline e brand con un leggero gradiente scuro: soggetto e azione devono stare nella metà inferiore. Non creare già pannelli, gradienti o testo nel render AI.",
+    options.typography?.style?.layout === "EDITORIAL_SPLIT"
+      ? "IMPAGINAZIONE MAGAZINE: SOLO IL 45% DESTRO della fotografia sarà visibile. Il 55% SINISTRO è una colonna di tipografia scura disegnata successivamente. Inquadra tutta la scena decisiva a DESTRA (dal 58% al 95% della larghezza), senza tagliare il soggetto. Non generare layout grafici, pannelli o testi nei pixel."
+      : options.typography?.style?.layout === "BOTTOM_GRADIENT"
+        ? "Il renderer applica headline e brand sul TERZO INFERIORE con un leggero gradiente scuro: soggetto e azione devono restare riconoscibili nei 60% SUPERIORI. Non creare già pannelli, gradienti o testo nel render AI."
+        : "Riserva una zona editoriale pulita nel TERZO SUPERIORE, dove il renderer applicherà headline e brand con un leggero gradiente scuro: soggetto e azione devono stare nella metà inferiore. Non creare già pannelli, gradienti o testo nel render AI.",
     storySafety,
     socialCreativeDirection({...options,placement:options.typography?.style?.layout}),
     "Non inventare loghi, marchi, prezzi, recensioni, certificazioni, risultati o claim fattuali.",
@@ -234,6 +236,15 @@ export async function generateOpenAIImage(options: GenerateImageOptions): Promis
     costUsd: mediaManager.usage.estimatedCostUsd,
     metadata: { openai_response_id: mediaManager.responseId, openai_request_id: mediaManager.requestId },
   };
+  const critique = creativeConceptIssues({
+    placement:options.typography?.style?.layout??"TOP_GRADIENT",
+    visualIntent:mediaManager.visualIntent,composition:mediaManager.composition,
+    subject:mediaManager.subject,imagePrompt:mediaManager.imagePrompt
+  });
+  if(critique.length) throw new OpenAIImagePipelineError(
+    "OPENAI_CREATIVE_CONCEPT_REJECTED:"+critique.join(","),
+    [mediaManagerEvent],
+  );
   const mediaPrompt = mediaManager.imagePrompt.trim();
   const promptBase = mediaPrompt.length >= 600
     ? mediaPrompt

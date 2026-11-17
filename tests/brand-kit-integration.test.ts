@@ -15,9 +15,14 @@ const light=brandTextStyle({primary:"#112233",secondary:"#445566",accent:"#AA882
 assert.equal(light.panelColor,"#FFFFFF");
 assert.equal(light.brandColor,"#112233");
 assert.equal(light.textColor,"#172430");
+assert.equal(light.canvasColor,"#112233","premium editorial canvas honors the individual brand dark primary");
+assert.equal(light.accentColor,"#AA8822","premium editorial accent honors the individual brand");
+
 const dark=brandTextStyle({primary:"#FFFFFF",secondary:"#777777",accent:"#111111",neutral:"#000000"});
 assert.equal(dark.panelColor,"#000000");
 assert.equal(dark.textColor,"#FFFFFF");
+assert.equal(dark.canvasColor,"#14283A","a pale brand primary receives a contrast-safe editorial canvas");
+assert.equal(dark.accentColor,"#D8B57C","a dark accent on dark canvas is replaced to remain visible");
 const all=["api/generate-image.ts","cloudflare/worker.ts","api/_lib/autopilot.ts"];
 for(const path of all) {
   const source=readFileSync(new URL("../"+path,import.meta.url),"utf8");
