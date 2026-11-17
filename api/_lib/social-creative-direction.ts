@@ -74,6 +74,29 @@ export function socialCreativeDirection(input: {
   ].join("\n");
 }
 
+/**
+ * Free deterministic review after the Media Manager but before the expensive
+ * Images 2 request. A polished sentence about tariffs is not an art direction:
+ * the composition must visually express the trade-off and protect the crop.
+ */
+export function creativeConceptIssues(input: {
+  placement: "TOP_GRADIENT" | "BOTTOM_GRADIENT" | "EDITORIAL_SPLIT";
+  visualIntent: string; composition: string; subject: string; imagePrompt: string;
+}): string[] {
+  if (input.placement !== "EDITORIAL_SPLIT") return [];
+  const mechanism = [input.visualIntent,input.composition,input.subject].join(" ").toLocaleLowerCase("it-IT");
+  const composition = input.composition.toLocaleLowerCase("it-IT");
+  const issues:string[] = [];
+  if (!/(tariff|prezz|costi?|ricav|margine|guadagn|profitt|fatturat|spes[ae])/.test(mechanism)
+     || !/(confront|contrasto|differenz|scarto|dietro|relazion|rispetto|bilanci|due (?:piani|elementi|lati)|vs\.?\b)/.test(mechanism))
+    issues.push("EDITORIAL_CONCEPT_NOT_PROVEN");
+  if (!/(destr|right|colonna|45%|58%|60%|x\s*=\s*0[.,]6)/.test(composition))
+    issues.push("EDITORIAL_SUBJECT_CROP_UNSAFE");
+  if (input.imagePrompt.trim().length < 450)
+    issues.push("EDITORIAL_PROMPT_TOO_GENERIC");
+  return issues;
+}
+
 export function socialCopySkillPrompt(): string {
   return [
     "SKILL SOCIAL COPY — Brand profile / Hook Writer / Caption Writer:",
