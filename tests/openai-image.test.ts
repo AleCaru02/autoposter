@@ -125,6 +125,18 @@ const result = await generateOpenAIImage({
   fetcher,
 });
 
+let providerCallsOnInvalidLayout = 0;
+await assert.rejects(
+  () => generateOpenAIImage({
+    apiKey:"sk-test-only",profileName:"Il Tuo Property Manager",profileType:"BUSINESS",
+    industry:"Property management",tone:"Professionale",provider:"FACEBOOK",format:"POST",
+    visualBrief:"Foto appartamento con agenda",caption:"Descrizione",
+    typography:{brand:"Il Tuo Property Manager",headline:"Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?",style:{layout:"TOP_GRADIENT"}},
+    fetcher: (async () => {providerCallsOnInvalidLayout+=1; throw Error("PAID_PROVIDER_MUST_NOT_BE_CALLED");}) as typeof fetch,
+  }), /TEXT_FIT_FAIL/,
+);
+assert.equal(providerCallsOnInvalidLayout,0,"no billable OpenAI Media Manager/Images call for malformed social cover");
+
 assert.equal(calls.length, 2, "ogni immagine effettiva deve passare prima dal Media Manager e poi da Sunburst");
 assert.equal(calls[0].url, "https://api.openai.com/v1/responses");
 assert.equal(calls[0].body.model, "gpt-5.6-terra");
