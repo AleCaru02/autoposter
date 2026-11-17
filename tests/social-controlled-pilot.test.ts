@@ -27,6 +27,8 @@ assert.ok(source.indexOf("if (!publicationDateIsFresh(job.scheduled_at))") < sou
   "Reject stale jobs before reserving any provider publication entitlement");
 assert.match(source, /where state='SCHEDULED' and attempt_count<3 and scheduled_at<=now\(\)/);
 assert.match(source, /state='PUBLISHED'/);
+assert.match(source, /provider='GBP' and expires_at is not null and expires_at < now\(\) \+ interval '30 minutes'/, 'proactive GBP refresh preflight');
+assert.match(source, /last_validated_at < now\(\) - interval '30 minutes'/, 'throttle OAuth refresh revalidation');
 const cron = readFileSync(new URL("../api/cron-social.ts", import.meta.url), "utf8");
 assert.match(cron, /SOCIAL_PILOT_PROFILE_ID: process\.env\.SOCIAL_PILOT_PROFILE_ID/);
 assert.match(cron, /SOCIAL_PILOT_MAX_DAILY: process\.env\.SOCIAL_PILOT_MAX_DAILY/);
