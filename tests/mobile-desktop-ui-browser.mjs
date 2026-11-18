@@ -279,12 +279,27 @@ async function installFixtureRoutes(page, { authenticated = true, socialFailure 
       return;
     }
 
+    if (url.origin === base && method === "GET" && url.pathname === "/api/render/status") {
+      await route.fulfill({ json: { engine: { ready: false, missing: ["REEL_ENGINE_ENABLED"], dryRunAvailable: false }, jobs: [] } });
+      return;
+    }
+
+    if (url.origin === base && method === "GET" && url.pathname === "/api/avatar/status") {
+      await route.fulfill({ json: {
+        storage: { configured: false, private: true, readUrlTtlSeconds: 300 },
+        consent: null, assets: [], providers: [],
+        setup: { provider: "HEYGEN", face_status: "NOT_STARTED", voice_status: "NOT_STARTED", missing: ["CONSENT", "VIDEO"], cost_usd: 0, live: { live: false, missing: [] } },
+      } });
+      return;
+    }
+
     if (url.origin === base && process.env.UI_SMOKE_START_LOCAL === "1" && url.pathname.startsWith("/api/_lib/") && ["GET", "HEAD"].includes(method)) {
       await route.continue();
       return;
     }
 
     if (url.origin === base && url.pathname.startsWith("/api/")) {
+      console.error("UI_QA_UNEXPECTED_API", method, url.pathname);
       if (!["GET", "HEAD"].includes(method)) blockedWrites.push(method + " " + url.pathname);
       await route.fulfill({
         status: 418,
