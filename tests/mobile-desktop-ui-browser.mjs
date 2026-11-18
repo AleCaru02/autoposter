@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { chromium } from "playwright";
+import { chromium, webkit, devices } from "playwright";
 import { spawn } from "node:child_process";
 
 const base = (process.env.UI_SMOKE_BASE || "http://127.0.0.1:4173").replace(/\/$/, "");
+const engineName = process.env.UI_QA_BROWSER || "chromium";
+if (!["chromium", "webkit"].includes(engineName)) throw new Error("UI_QA_BROWSER_UNSUPPORTED");
+function contextOptions(viewport) {
+  const { defaultBrowserType: _, ...iphone } = devices["iPhone 13"];
+  return { ...(engineName === "webkit" && viewport.width <= 760 ? iphone : {}), viewport };
+}
 
 let localServer = null;
 async function startLocalServer() {
@@ -324,6 +330,11 @@ async function layout(page) {
 
 async function assertNoDocumentOverflow(page, label) {
   const value = await layout(page);
+  if (value.scrollWidth > value.clientWidth + 2) {
+    const overflow = await page.evaluate(() => [...document.querySelectorAll("body *")].map((node) => ({ tag: node.tagName, className: typeof node.className === "string" ? node.className : "", right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width), scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, overflowX: getComputedStyle(node).overflowX })).filter((node) => node.right > document.documentElement.clientWidth + 2 || (node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 2 && !["auto", "scroll"].includes(node.overflowX))).slice(0, 12));
+    console.log("UI_OVERFLOW_ELEMENTS", JSON.stringify({ label, elements: overflow }));
+    console.log("UI_REEL_FORM_LAYOUT", JSON.stringify(await page.locator(".reel-create-row label,.reel-create-row select").evaluateAll((nodes) => nodes.map((node) => { const css = getComputedStyle(node); return { tag: node.tagName, width: node.getBoundingClientRect().width, minWidth: css.minWidth, maxWidth: css.maxWidth, overflow: css.overflowX, columns: css.gridTemplateColumns }; }))));
+  }
   assert.ok(value.scrollWidth <= value.clientWidth + 2, label + " document overflow " + value.scrollWidth + " > " + value.clientWidth);
 }
 
@@ -339,7 +350,7 @@ async function open(page, path, heading) {
 }
 
 async function verifyAuthenticatedViewport(browser, viewport, label) {
-  const context = await browser.newContext({ viewport });
+  const context = await browser.newContext(contextOptions(viewport));
   const page = await context.newPage();
   const blockedWrites = await installFixtureRoutes(page);
   const critical = [];
@@ -451,7 +462,7 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
 }
 
 async function verifySocialErrorState(browser) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext(contextOptions({ width: 390, height: 844 }));
   const page = await context.newPage();
   const blockedWrites = await installFixtureRoutes(page, { socialFailure: true });
   try {
@@ -466,7 +477,7 @@ async function verifySocialErrorState(browser) {
 }
 
 async function verifyLoginValidation(browser) {
-  const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  const context = await browser.newContext(contextOptions({ width: 360, height: 800 }));
   const page = await context.newPage();
   const blockedWrites = await installFixtureRoutes(page, { authenticated: false });
   try {
@@ -485,7 +496,7 @@ async function verifyLoginValidation(browser) {
 
 async function verifyGoogleAccountLink(browser) {
   for (const scenario of ["success", "rejected", "unconfirmed", "sdk-retry"]) {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const context = await browser.newContext(contextOptions({ width: 390, height: 844 }));
     const page = await context.newPage();
     const blockedWrites = await installFixtureRoutes(page);
     let linked = false;
@@ -527,7 +538,7 @@ async function verifyGoogleAccountLink(browser) {
 
 await startLocalServer();
 
-const browser = await chromium.launch({ headless: true });
+const browser = await ({ chromium, webkit })[engineName].launch({ headless: true });
 try {
   if (process.env.UI_QA_GOOGLE_ONLY === "1") {
     await verifyGoogleAccountLink(browser);
@@ -541,6 +552,7 @@ try {
   await verifySocialErrorState(browser);
   await verifyLoginValidation(browser);
   console.log("MOBILE_DESKTOP_UI_BROWSER_QA = PASS");
+  console.log("UI_QA_BROWSER_PASS", engineName);
   }
 } finally {
   await browser.close();

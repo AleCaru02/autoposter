@@ -7,6 +7,24 @@ on:
     branches: [main]
 
 jobs:
+  webkit-mobile-desktop-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm install --no-save --package-lock=false --no-audit --no-fund playwright@1.62.1
+      - run: npx playwright install --with-deps webkit
+      - name: WebKit mobile and desktop browser regressions with isolated fixtures
+        env:
+          UI_SMOKE_BASE: http://127.0.0.1:4173
+          UI_SMOKE_START_LOCAL: "1"
+          UI_SMOKE_PREVIEW: "1"
+          UI_QA_BROWSER: webkit
+        run: node tests/mobile-desktop-ui-browser.mjs
   google-account-link-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 6

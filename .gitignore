@@ -8,4 +8,5 @@ dist/
 *.log
 coverage/
 .qa/
+qa-artifacts/
 *.tsbuildinfo
