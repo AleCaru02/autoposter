@@ -32,12 +32,15 @@ try {
   const authPage = readFileSync(new URL("../src/pages/auth-pages.tsx", import.meta.url), "utf8");
   assert.match(authPage, /callbackURL:\s*\x60\$\{window\.location\.origin\}\/api\/oauth\/complete\x60/);
   const linkPage = readFileSync(new URL("../src/pages/google-account-link-page.tsx", import.meta.url), "utf8");
-  assert.match(linkPage, /authClient\.linkSocial/);
+  const linkButton = readFileSync(new URL("../src/components/google-account-link-button.tsx", import.meta.url), "utf8");
+  assert.match(linkButton, /authClient\.linkSocial/);
+  assert.match(linkButton, /idToken: \{ token: response\.credential!, nonce \}/);
+  assert.match(linkButton, /https:\/\/accounts\.google\.com\/gsi\/client/);
+  assert.match(linkButton, /auto_select: false/);
   assert.match(linkPage, /authClient\.listAccounts/);
   assert.match(linkPage, /providerId === "google"/);
-  assert.match(linkPage, /\/api\/oauth\/complete\?after=link/);
   assert.match(authPage, /errorCallbackURL:.*\/api\/oauth\/complete/);
-  assert.match(linkPage, /errorCallbackURL:.*\/api\/oauth\/complete\?after=link/);
+  assert.doesNotMatch(linkButton, /callbackURL:|localStorage|sessionStorage/);
   assert.doesNotMatch(linkPage, /trustedProviders|allowDifferentEmails|disableImplicitLinking/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /path="\/collega-google" element=\{<RequireAuth>/);
