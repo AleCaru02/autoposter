@@ -53,7 +53,7 @@ export function CreativeHub({ profileName, publishedCount, reviewCount, schedule
     </nav>
 
     <div className="studio-command-foot">
-      <p>Le statistiche compaiono solo quando le piattaforme restituiscono dati reali. I Reel AI non sono ancora attivi.</p>
+      <p>Le statistiche compaiono solo quando le piattaforme restituiscono dati reali. <NavLink to="/app/contenuti">Verifica i Reel nella sezione Contenuti.</NavLink></p>
       <NavLink to="/app/impostazioni"><Settings2 size={15}/> Apri budget AI <ArrowRight size={14}/></NavLink>
     </div>
   </div>;

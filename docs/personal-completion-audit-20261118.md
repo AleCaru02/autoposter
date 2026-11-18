@@ -1,6 +1,6 @@
 # Personal completion audit — 2026-11-18
 
-Candidate: `effde1f55f194ade3ff88654050418883d8baad5` (production Vercel).
+Production inspected: `f1ee2f9db2476ff6b24b29101ab57b797502dc86` (Vercel READY).
 Overall completion: **NOT CERTIFIED**. Test results below do not replace live workflow verification.
 
 ## Reproducible regression evidence
@@ -33,13 +33,21 @@ Checks cover navigation, dashboard, editorial plan, approvals, calendar, social,
 analytics, profiles, contained overflow, social error recovery and login validation.
 This is Chromium viewport coverage, not a physical iPhone/Safari certification.
 
+## Additional observed evidence
+
+- Google linking now uses Google Identity Services plus Neon `linkSocial` with a verified ID token. The canonical JavaScript origin was saved in the matching Google OAuth client. The owner completed consent; `listAccounts` confirmed the Google provider, including after a full page reload. A separate subsequent Google sign-in has not been exercised.
+- A clearly labeled QA activity was created through the authenticated UI without a website. Its dashboard showed zero reviews, scheduled posts and connected channels. Editing its name in Settings persisted across a full reload. Cleanup used the same reversible `archived_at` update as the archive API, constrained to the exact QA profile and owner after confirming zero contents, connections and publication jobs; a second database read confirmed it stayed archived. The browser confirmation part of the archive flow remains unverified because Computer Use stopped at the native dialog.
+- The canonical health endpoint returned HTTP 200, `ready=true` and `database=postgres_ready`. PR #370 corrected the monitor's unreachable legacy target and manual image generation's use of the caption hook instead of the confirmed graphic headline. The full CI passed; the release was deployed READY. The previously failed images still need actual regeneration and QA.
+- Production configuration confirms `REEL_ENGINE_ENABLED=true` and `AUTO_REEL_PILOT_ENABLED=false`. There are no render jobs. This proves configuration only, not generation, playback or provider success.
+- Authenticated live dashboard inspection showed overdue jobs in the attention section and only future jobs in upcoming releases. Live review inspection showed the saved detailed visual rejection reason and a disabled Approva button for failed QA.
+
 ## Remaining live evidence
 
 | Requirement | Evidence still required |
 | --- | --- |
-| Google account access | Successful owner linking and subsequent Google login; prior attempt returned `state_mismatch`. Explicit error callbacks deployed; root cause not proven resolved. |
+| Google account access | Owner linking and persistence verified; subsequent Google login remains unverified. |
 | Password recovery | Actual delivered message and completed reset. |
-| Independent profiles | Authenticated create/edit/switch flows and data isolation checks against real persisted state. |
+| Independent profiles | Authenticated create/edit/reload and an empty isolated dashboard verified; switching back and the browser archive confirmation still need runtime verification. |
 | Brand and site | Persisted edits and page-by-page scan results verified in UI. |
 | Text and OpenAI Images | Owner-reviewed generated result, persisted quota/cost and asset record. |
 | Review and calendar | Edit, review, approval, schedule/reschedule and reload persistence in authenticated UI. |

@@ -13,7 +13,8 @@ assert.match(source, /reviewCount > 0[\s\S]*connectedCount === 0/, "The primary 
 assert.match(source, /\{publishedCount\}/, "Real published-job counts must remain visible");
 assert.match(source, /\{scheduledCount\}/, "Real upcoming-job counts must remain visible");
 assert.match(source, /Apri budget AI/, "Budget actions must open the real settings");
-assert.match(source, /I Reel AI non sono ancora attivi/, "Reels must be explicitly unavailable until configured");
+assert.doesNotMatch(source, /I Reel AI non sono ancora attivi/, "The dashboard must not invent an unavailable status when the engine is configured");
+assert.match(source, /NavLink to="\/app\/contenuti">Verifica i Reel/, "Reel availability must lead to the actual profile-scoped studio");
 assert.ok(!source.includes("Simulatore di costo"), "Unverified price estimates must not be shown");
 const dashboard = readFileSync(new URL("../src/pages/dashboard-page.tsx", import.meta.url), "utf8");
 assert.match(dashboard, /verifiedSocialCount\(profileId!?\)/, "Dashboard must verify social provider availability");
