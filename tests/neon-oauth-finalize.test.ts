@@ -36,6 +36,8 @@ try {
   assert.match(linkPage, /authClient\.listAccounts/);
   assert.match(linkPage, /providerId === "google"/);
   assert.match(linkPage, /\/api\/oauth\/complete\?after=link/);
+  assert.match(authPage, /errorCallbackURL:.*\/api\/oauth\/complete/);
+  assert.match(linkPage, /errorCallbackURL:.*\/api\/oauth\/complete\?after=link/);
   assert.doesNotMatch(linkPage, /trustedProviders|allowDifferentEmails|disableImplicitLinking/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /path="\/collega-google" element=\{<RequireAuth>/);

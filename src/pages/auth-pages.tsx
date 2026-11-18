@@ -54,6 +54,7 @@ async function startGoogleAccess(setError: (message: string | null) => void, set
     const result = await withAuthTimeout(authClient.signIn.social({
       provider: "google",
       callbackURL: `${window.location.origin}/api/oauth/complete`,
+      errorCallbackURL: `${window.location.origin}/api/oauth/complete`,
     }));
     if (result?.error) {
       setError("Accesso con Google non riuscito. Riprova.");

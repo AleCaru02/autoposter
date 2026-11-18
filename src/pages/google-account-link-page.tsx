@@ -42,6 +42,7 @@ export function GoogleAccountLinkPage() {
       const result = await authClient.linkSocial({
         provider: "google",
         callbackURL: `${window.location.origin}/api/oauth/complete?after=link`,
+        errorCallbackURL: `${window.location.origin}/api/oauth/complete?after=link`,
       });
       if (result.error) {
         setError("Il provider non ha consentito il collegamento. L'account originale rimane invariato.");
