@@ -123,7 +123,7 @@ const variant = {
   factual_basis: [],
   qa_status: "FAIL",
   qa_fingerprint: null,
-  qa_result: { copyStatus: "PASS", visualStatus: "FAIL", reasons: ["Visuale non disponibile"] },
+  qa_result: { copyStatus: "PASS", visualStatus: "FAIL", reasons: ["Visuale non disponibile"], visual: { result: { verdict: "FAIL", reason: "Il titolo occupa troppo spazio e non rispetta il brief." } } },
   qa_checked_at: updatedAt,
   created_at: updatedAt,
   updated_at: updatedAt,
@@ -408,6 +408,9 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
     assert.ok(approvalBody.includes("credito o la fatturazione OpenAI non sono disponibili"), label + " blocked billing explanation missing");
     assert.equal(approvalBody.includes("OPENAI_IMAGE_HTTP_429_CREDIT_BALANCE_EXHAUSTED"), false, label + " raw provider error exposed");
     assert.equal(await page.getByRole("button", { name: "Approva", exact: true }).isDisabled(), true, label + " approval should be disabled while QA FAIL");
+    await page.locator("summary").filter({ hasText: "Content QA · FAIL" }).click();
+    await page.getByText("Il titolo occupa troppo spazio e non rispetta il brief.", { exact: false }).waitFor();
+    assert.equal(await page.locator("dt").getByText("Immagine", { exact: true }).count(), 1, label + " QA labels must be readable");
     await assertNoDocumentOverflow(page, label + " approvals");
 
     await open(page, "/app/calendario", "Calendario contenuti");
