@@ -7,7 +7,11 @@ const guard = app.slice(app.indexOf("export function useConfirmedSession"), app.
 assert.match(guard, /session\.refetch\?\.\(\)/, "an empty cached session is re-checked against the server before redirecting");
 assert.match(guard, /session\.isRefetching/, "a refetch in progress must not trigger a redirect");
 assert.match(guard, /if \(checking && !user\) return <main className="center-state">Verifica sessione…<\/main>;/);
-assert.ok(guard.indexOf("Verifica sessione") < guard.indexOf('<Navigate to="/login" replace />'), "redirect to /login only after the check");
+const redirectIndex = guard.indexOf("if (!user) return <Navigate");
+assert.ok(redirectIndex > guard.indexOf("Verifica sessione"), "redirect to /login only after the check");
+assert.match(guard, /location\.pathname === "\/collega-google" \? "\/login\?oauth=provider_account_not_linked" : "\/login"/, "Google linking survives an expired session");
+assert.match(login, /redirectTo:.*reimposta-password.*linkingGoogle/, "password recovery preserves Google linking");
+assert.match(login, /navigate\(searchParams\.get\("oauth"\) === "provider_account_not_linked"/, "password reset returns to the linking login");
 // Regression (preview iPhone, 14/11): a LoginPage redirect based on the cached session bounced
 // users back into the app right after sign-out and caused a get-session polling loop.
 assert.doesNotMatch(login, /existingSession|alreadySignedIn/, "the login page must not auto-redirect from a possibly stale cached session");
