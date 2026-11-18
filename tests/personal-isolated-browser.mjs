@@ -14,10 +14,11 @@ export async function verifyIsolatedBrowser({ app, cookies }) {
       try {
         await context.addCookies([...cookies].map(([name, value]) => ({ name, value, url: app, secure: true, httpOnly: true, sameSite: "Lax" })));
         const page = await context.newPage();
-        page.on("response", async (response) => {
+        const requestFailures = [];
+        page.on("response", (response) => {
           const url = new URL(response.url());
           if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/neondb/rest/v1/")) {
-            console.log("QA_BROWSER_REQUEST", JSON.stringify({ path: url.pathname, status: response.status(), isolatedData: !url.pathname.startsWith("/neondb/rest/v1/") || url.hostname.startsWith("ep-damp-credit-") }));
+            if (response.status() >= 400 || (url.pathname.startsWith("/neondb/rest/v1/") && !url.hostname.startsWith("ep-damp-credit-"))) requestFailures.push({ path: url.pathname, status: response.status() });
           }
         });
         stage = "DASHBOARD";
@@ -34,15 +35,26 @@ export async function verifyIsolatedBrowser({ app, cookies }) {
         await contextField.fill(text);
         stage = "SAVE";
         await contextField.blur();
-        await page.locator(".autosave-mini strong").getByText("Salvato", { exact: true }).waitFor({ timeout: 30000 });
+        await page.locator(".autosave-mini strong").filter({ hasText: /^Salvato$/ }).waitFor({ timeout: 30000 });
         await page.reload({ waitUntil: "domcontentloaded" });
         stage = "RELOAD";
         await contextField.waitFor({ timeout: 30000 });
         await page.waitForFunction((expected) => document.querySelector(".brand-context-field textarea")?.value === expected, text);
+        if (requestFailures.length) {
+          console.log("QA_BROWSER_FAILED_REQUESTS", JSON.stringify(requestFailures));
+          throw new Error("QA_BROWSER_API_REQUEST_FAILED");
+        }
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), "QA_BROWSER_HORIZONTAL_OVERFLOW");
         mkdirSync(new URL("../qa-artifacts/", import.meta.url), { recursive: true });
         await page.screenshot({ path: fileURLToPath(new URL("../qa-artifacts/isolated-brand-" + (mobile ? "mobile" : "desktop") + ".png", import.meta.url)), fullPage: true });
         console.log("ISOLATED_QA_BROWSER_BRAND_RELOAD = PASS", mobile ? "mobile-webkit" : "desktop-webkit");
+      } catch (error) {
+        const page = context.pages()[0];
+        if (page && stage === "SAVE") {
+          const labels = await page.locator(".autosave-mini strong").allTextContents().catch(() => []);
+          console.log("QA_BROWSER_SAVE_STATE", JSON.stringify({ labels: labels.filter((label) => /^(Salvato|Salvataggio…|Da salvare|Errore di salvataggio)$/.test(label)), matchingElements: labels.length, formError: await page.locator(".form-error").count().catch(() => 0) }));
+        }
+        throw error;
       } finally { await context.close(); }
     }
   } catch (error) {

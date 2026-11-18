@@ -330,6 +330,10 @@ async function layout(page) {
 
 async function assertNoDocumentOverflow(page, label) {
   const value = await layout(page);
+  if (value.scrollWidth > value.clientWidth + 2) {
+    const overflow = await page.evaluate(() => [...document.querySelectorAll("main *")].map((node) => ({ tag: node.tagName, className: typeof node.className === "string" ? node.className : "", right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width) })).filter((node) => node.right > document.documentElement.clientWidth + 2).slice(0, 8));
+    console.log("UI_OVERFLOW_ELEMENTS", JSON.stringify({ label, elements: overflow }));
+  }
   assert.ok(value.scrollWidth <= value.clientWidth + 2, label + " document overflow " + value.scrollWidth + " > " + value.clientWidth);
 }
 
