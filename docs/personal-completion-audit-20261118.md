@@ -34,6 +34,11 @@ analytics, profiles, contained overflow, social error recovery and login validat
 The same suite also passed with `UI_QA_BROWSER=webkit`; mobile contexts use the
 Playwright iPhone 13 device settings. The gate now runs WebKit with fixtures on
 every PR. This is browser/device emulation, not physical iPhone certification.
+The first Linux WebKit gate exposed native Reel-select overflow at mobile sizes.
+The select and its label now constrain their intrinsic width and contain native
+text overflow. The unchanged page-overflow assertion passed locally in the
+gate's Playwright 1.62.1 / WebKit 26.5 suite at all four viewport sizes after
+the fix. Playwright 1.65.1 / WebKit 27.2 had passed before this compatibility fix.
 ## Isolated live API workflow evidence
 The opt-in runner `tests/personal-isolated-api.mjs` targets only the existing
 `reel-qa` deployment and its separate Neon project. It first requires health to
@@ -75,6 +80,14 @@ provisioning function. Its SQL regression covers a fresh account, an explicit
 package default, idempotent replay, operation conflict and server-only execution.
 The migration was applied to QA and production; the live QA repro now passes.
 
+The opt-in browser path also passed against the actual protected QA frontend:
+`PERSONAL_QA_BROWSER=true` with the same test-write opt-in. The authenticated
+Vercel CLI supplies a temporary protection cookie in memory. WebKit opened the
+dashboard, edited the brand context and verified it after a full reload at
+1440x900 and with the iPhone 13 device settings. No fixture API routes are used
+in this path. The disposable profile was archived and the process exited 0.
+This covers a synthetic QA identity, not a subsequent owner Google sign-in.
+
 ## Additional observed evidence
 
 - Google linking now uses Google Identity Services plus Neon `linkSocial` with a verified ID token. The canonical JavaScript origin was saved in the matching Google OAuth client. The owner completed consent; `listAccounts` confirmed the Google provider, including after a full page reload. A separate subsequent Google sign-in has not been exercised.
@@ -90,7 +103,7 @@ The migration was applied to QA and production; the live QA repro now passes.
 | Google account access | Owner linking and persistence verified; subsequent Google login remains unverified. |
 | Password recovery | Actual delivered message and completed reset. |
 | Independent profiles | Authenticated create/edit/reload and an empty isolated dashboard verified; switching back and the browser archive confirmation still need runtime verification. |
-| Brand and site | Brand API persistence verified; authenticated owner UI edits and page-by-page scan results still need completion. |
+| Brand and site | Brand API and actual QA browser edit/reload persistence verified; owner workflow and page-by-page scan UI checks still need completion. |
 | Text and OpenAI Images | Owner-reviewed generated result, persisted quota/cost and asset record. |
 | Review and calendar | Edit, review, approval, schedule/reschedule and reload persistence in authenticated UI. |
 | Social channels | Per-profile current credentials, permissions and provider readiness; presence of environment variables alone is insufficient. |

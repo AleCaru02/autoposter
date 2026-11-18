@@ -30,14 +30,14 @@ export async function verifyIsolatedBrowser({ app, cookies }) {
         stage = "BRAND";
         await page.goto(app + "/app/brand", { waitUntil: "domcontentloaded" });
         await page.getByRole("heading", { name: "Identità dell’attività", exact: true }).waitFor({ timeout: 30000 });
-        const contextField = page.getByLabel("Dettagli aggiuntivi", { exact: true });
+        const contextField = page.locator(".brand-context-field textarea");
         const text = "Contesto tecnico salvato dal browser QA " + (mobile ? "mobile" : "desktop");
         await contextField.fill(text);
         stage = "SAVE";
         await contextField.blur();
         await page.locator(".autosave-mini strong").filter({ hasText: /^Salvato$/ }).waitFor({ timeout: 30000 });
-        await page.reload({ waitUntil: "domcontentloaded" });
         stage = "RELOAD";
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
         await contextField.waitFor({ timeout: 30000 });
         await page.waitForFunction((expected) => document.querySelector(".brand-context-field textarea")?.value === expected, text);
         if (requestFailures.length) {
@@ -49,6 +49,7 @@ export async function verifyIsolatedBrowser({ app, cookies }) {
         await page.screenshot({ path: fileURLToPath(new URL("../qa-artifacts/isolated-brand-" + (mobile ? "mobile" : "desktop") + ".png", import.meta.url)), fullPage: true });
         console.log("ISOLATED_QA_BROWSER_BRAND_RELOAD = PASS", mobile ? "mobile-webkit" : "desktop-webkit");
       } catch (error) {
+        console.log("QA_BROWSER_OPERATION_FAILURE", JSON.stringify({ stage, name: error?.name, reason: String(error?.message ?? "").split("\n")[0].replace(/https?:\/\/\S+/g, "[url]").slice(0, 200) }));
         const page = context.pages()[0];
         if (page && stage === "SAVE") {
           const labels = await page.locator(".autosave-mini strong").allTextContents().catch(() => []);

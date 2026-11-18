@@ -331,8 +331,9 @@ async function layout(page) {
 async function assertNoDocumentOverflow(page, label) {
   const value = await layout(page);
   if (value.scrollWidth > value.clientWidth + 2) {
-    const overflow = await page.evaluate(() => [...document.querySelectorAll("main *")].map((node) => ({ tag: node.tagName, className: typeof node.className === "string" ? node.className : "", right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width) })).filter((node) => node.right > document.documentElement.clientWidth + 2).slice(0, 8));
+    const overflow = await page.evaluate(() => [...document.querySelectorAll("body *")].map((node) => ({ tag: node.tagName, className: typeof node.className === "string" ? node.className : "", right: Math.round(node.getBoundingClientRect().right), width: Math.round(node.getBoundingClientRect().width), scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, overflowX: getComputedStyle(node).overflowX })).filter((node) => node.right > document.documentElement.clientWidth + 2 || (node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 2 && !["auto", "scroll"].includes(node.overflowX))).slice(0, 12));
     console.log("UI_OVERFLOW_ELEMENTS", JSON.stringify({ label, elements: overflow }));
+    console.log("UI_REEL_FORM_LAYOUT", JSON.stringify(await page.locator(".reel-create-row label,.reel-create-row select").evaluateAll((nodes) => nodes.map((node) => { const css = getComputedStyle(node); return { tag: node.tagName, width: node.getBoundingClientRect().width, minWidth: css.minWidth, maxWidth: css.maxWidth, overflow: css.overflowX, columns: css.gridTemplateColumns }; }))));
   }
   assert.ok(value.scrollWidth <= value.clientWidth + 2, label + " document overflow " + value.scrollWidth + " > " + value.clientWidth);
 }
