@@ -195,7 +195,7 @@ function cors(origin) {
 function rowsForTable(table, url) {
   if (table === "content_items") return [contentItem];
   if (table === "content_variants") return [variant];
-  if (table === "publication_jobs") return [calendarJob];
+  if (table === "publication_jobs") return [calendarJob, { ...calendarJob, id: "10000000-0000-4000-8000-000000000009", provider: "LINKEDIN", scheduled_at: "2020-01-01T12:00:00Z" }];
   if (table === "metric_snapshots") return [metric];
   if (table === "learning_insights") return [];
   if (table === "social_connections") return [{ id: "10000000-0000-4000-8000-000000000006", profile_id: profileId, status: "ACTIVE" }];
@@ -348,6 +348,10 @@ async function verifyAuthenticatedViewport(browser, viewport, label) {
 
   try {
     await open(page, "/app/dashboard", "I tuoi social, sotto controllo.");
+    await page.locator(".dashboard-issues").getByText("1 uscita oltre la data prevista").waitFor();
+    assert.equal(await page.locator(".dashboard-schedule .dashboard-list article").count(), 1, label + " upcoming list excludes overdue jobs");
+    assert.equal(await page.locator(".dashboard-schedule").getByText("LinkedIn", { exact: true }).count(), 0, label + " overdue channel is not shown as upcoming");
+    assert.equal(await page.locator(".dashboard-clear").count(), 0, label + " overdue jobs require attention");
     assert.equal(await page.locator(".creator-ig-frame").count(), 0, label + " must not render a fictional Instagram preview");
     if (process.env.UI_QA_SCREENSHOTS === "1" && [390, 1440].includes(viewport.width)) {
       mkdirSync("qa-artifacts", {recursive:true});
