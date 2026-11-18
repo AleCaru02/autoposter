@@ -243,5 +243,7 @@ jobs:
         run: bash scripts/ci-fresh-db.sh
       - name: Scheduling certification database behavior
         run: psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f tests/scheduling-certification.sql
+      - name: First profile package fallback database regression
+        run: psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f tests/onboarding-package-fallback.sql
       - name: Render job claim concurrency (no double execution)
         run: bash tests/render-claim-concurrency.sh
