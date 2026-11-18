@@ -48,6 +48,12 @@ const onImageBrief = 'Titolo in grafica: «Non guardare solo la tariffa». Scena
 assert.equal(explicitGraphicHeadline(onImageBrief),"Non guardare solo la tariffa");
 assert.equal(assertAutopilotGraphicBrief(onImageBrief),"Non guardare solo la tariffa");
 assert.equal(visualHeadlineForBrief(onImageBrief,"Caption molto più lunga"),"Non guardare solo la tariffa");
+assert.equal(visualHeadlineForBrief('Grafica pulita con headline: “Gestione completa: 5 aree operative”. Nessun prezzo in grafica.', 'Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?'), "Gestione completa: 5 aree operative");
+for (const route of ["api/generate-image.ts", "cloudflare/worker.ts"]) {
+  const source = fs.readFileSync(route, "utf8");
+  assert.match(source, /savedSlide\?\.headline \|\| visualHeadlineForBrief\(visualBrief, savedVariant\.hook \|\| visualBrief\)/, `${route}: manual images must honor the confirmed on-image headline`);
+  assert.match(source, /layout: editorialPlacementForContent\(\{ format: requestedFormat, visualBrief, caption \}\)/, `${route}: manual regeneration must preserve the content-aware composition`);
+}
 assert.throws(()=>assertAutopilotGraphicBrief("Un elegante appartamento luminoso con chiavi, agenda e laptop"),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.throws(()=>assertAutopilotGraphicBrief('Titolo in grafica: «Gestione completa di un affitto breve a Milano: cosa può includere, in concreto?» Scena realistica che mostra gestore e check-in.'),/AUTOPILOT_GRAPHIC_BRIEF_INCOMPLETE/);
 assert.equal(selectCreativeTemplate({format:"POST",visualBrief:"Gestione check-in e pulizia"}),"PROCESS_PROOF");
