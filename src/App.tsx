@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { authClient } from "./lib/neon-client";
 import { AppShell } from "./components/app-shell";
 import { OAuthReturnGate } from "./components/oauth-return-gate";
@@ -78,9 +78,10 @@ export function useConfirmedSession() {
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const { checking, user } = useConfirmedSession();
   if (checking && !user) return <main className="center-state">Verifica sessione…</main>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={location.pathname === "/collega-google" ? "/login?oauth=provider_account_not_linked" : "/login"} replace />;
   return children;
 }
 
