@@ -37,7 +37,7 @@ export const PHASES = [
   { id: "15", key: "SECURITY_CLEANUP", mode: "verifier-170", checks: ["TENANT_ISOLATION", "SENSITIVE_FINDINGS", "P0_P1_OPEN"] },
 ];
 
-const DEFAULT_APP_BASE = "https://autoposter.02alessandrocaruso.workers.dev";
+const DEFAULT_APP_BASE = "https://post-automatici-canonical.vercel.app";
 const DEFAULT_STATE = ".qa/final-personal-readiness.json";
 const SECRET_PATTERN = /(authorization\s*:|bearer\s+[a-z0-9._-]{12,}|password\s*[=:]|cookie\s*[=:]|session[_ -]?secret|api[_ -]?key|sk-[a-z0-9_-]{12,})/i;
 
