@@ -23,7 +23,7 @@ async function startLocalServer() {
       callback(value);
     };
     const onData = (chunk) => {
-      const output = String(chunk);
+      const output = String(chunk).replace(/\x1b\[[0-9;]*m/g, "");
       if (/Local:|ready in/i.test(output)) finish(resolve);
     };
     localServer.stdout?.on("data", onData);
