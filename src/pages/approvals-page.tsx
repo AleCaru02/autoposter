@@ -30,6 +30,17 @@ type DraftFields = {
 };
 type DraftSaveStatus = "SAVED" | "WAITING" | "SAVING" | "ERROR";
 
+const qaDimensionLabels: Record<string, string> = {
+  brandStatus: "Coerenza del brand", copyStatus: "Testo", visualStatus: "Immagine",
+  factStatus: "Fonti e affermazioni", platformStatus: "Formato social",
+  duplicateStatus: "Originalità", budgetStatus: "Budget",
+};
+
+function visualQaReason(result: Record<string, unknown>) {
+  const reason = (result as { visual?: { result?: { reason?: unknown } } })?.visual?.result?.reason;
+  return typeof reason === "string" && reason.trim() ? reason.trim() : null;
+}
+
 type ImageResponse = {
   image?: { dataUrl: string; model: string; size: string; quality: string };
   asset?: { id: string };
@@ -474,9 +485,10 @@ export function ApprovalsPage() {
                 </details>
                 <details className="decision-record"><summary>Content QA · {variant.qa_status}</summary>
                   <dl>
-                    {Object.entries(variant.qa_result ?? {}).filter(([key]) => ["brandStatus","copyStatus","visualStatus","factStatus","platformStatus","duplicateStatus","budgetStatus"].includes(key)).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
+                    {Object.entries(variant.qa_result ?? {}).filter(([key]) => Object.hasOwn(qaDimensionLabels, key)).map(([key, value]) => <div key={key}><dt>{qaDimensionLabels[key]}</dt><dd>{String(value)}</dd></div>)}
                   </dl>
                   {Array.isArray((variant.qa_result as { reasons?: unknown[] })?.reasons) && <p>{((variant.qa_result as { reasons?: unknown[] }).reasons ?? []).map(String).join(" · ")}</p>}
+                  {visualQaReason(variant.qa_result) && <p><strong>Dettaglio immagine:</strong> {visualQaReason(variant.qa_result)}</p>}
                 </details>
                 <details className="decision-record"><summary>Perché questa scelta</summary><p>{decision.summary}</p><dl>{decision.entries.map((entry) => <div key={entry.label}><dt>{entry.label}</dt><dd className={`decision-${entry.state.toLowerCase()}`}>{entry.detail}</dd></div>)}</dl></details>
                 <div className="approval-actions">
