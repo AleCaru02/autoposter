@@ -8,6 +8,8 @@ import { ActivityBudgetEngine } from "./_lib/activity-budget.js";
 import { findReusableAsset, visualFingerprint, type ReusableAssetCandidate } from "./_lib/asset-intelligence.js";
 import { normalizeBrandVisualIdentity } from "./_lib/brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./_lib/brand-visual-assets.js";
+import { visualHeadlineForBrief } from "./_lib/visual-headline.js";
+import { editorialPlacementForContent } from "./_lib/social-creative-direction.js";
 import { neonDataApiUrl } from "./_lib/neon-endpoints.js";
 import { dataApiFetch } from "./_lib/cold-start-fetch.js";
 
@@ -187,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
     }
 
-    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null, logoDataUrl, style: brandTextStyle(brandVisual.activeSocialPalette) } : null;
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || visualHeadlineForBrief(visualBrief, savedVariant.hook || visualBrief), subheadline: savedSlide?.body || null, logoDataUrl, style: { ...brandTextStyle(brandVisual.activeSocialPalette), layout: editorialPlacementForContent({ format: requestedFormat, visualBrief, caption }) } } : null;
     if (typography) {
       const [width, height] = imageSizeForFormat(requestedFormat, requestedProvider).split("x").map(Number);
       await preflightDeterministicTypography({ width, height, ...typography });

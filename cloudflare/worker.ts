@@ -13,6 +13,8 @@ import { assetContentHashFromBase64, findReusableAsset, visualFingerprint, type 
 import { boundedScanPageLimit, SAFE_SCAN_MAX_SITEMAPS, SAFE_SCAN_MAX_STYLESHEETS, SAFE_SCAN_MAX_SITEMAP_SEEDS, SAFE_SCAN_MAX_TOTAL_PAGES } from "../api/_lib/website-scan-policy.js";
 import { normalizeBrandVisualIdentity } from "../api/_lib/brand-visual-identity.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "../api/_lib/brand-visual-assets.js";
+import { visualHeadlineForBrief } from "../api/_lib/visual-headline.js";
+import { editorialPlacementForContent } from "../api/_lib/social-creative-direction.js";
 import { dataApiFetch } from "../api/_lib/cold-start-fetch.js";
 
 const DATA_API = "https://ep-divine-band-arrkz7vq.apirest.c-4.us-west-2.aws.neon.tech/neondb/rest/v1";
@@ -373,7 +375,7 @@ async function handleGenerateImage(request: Request, env: Env) {
       }
       return json({ image: { dataUrl: asset.storage_url, mimeType: asset.mime_type, model: null, size: null, quality: null, provider: "REUSED_ASSET", aspectRatio }, asset, reused: true, reuseReason: reusable.reason, usage: { estimatedCostUsd: 0 }, budget: { currency: "EUR", avoidedCostEur: 0.25 } });
     }
-    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || savedVariant.hook || visualBrief, subheadline: savedSlide?.body || null, logoDataUrl, style: brandTextStyle(brandVisual.activeSocialPalette) } : null;
+    const typography = savedVariant ? { brand: profile.name, headline: savedSlide?.headline || visualHeadlineForBrief(visualBrief, savedVariant.hook || visualBrief), subheadline: savedSlide?.body || null, logoDataUrl, style: { ...brandTextStyle(brandVisual.activeSocialPalette), layout: editorialPlacementForContent({ format, visualBrief, caption }) } } : null;
     if (typography) {
       const [width, height] = imageSizeForFormat(format, provider).split("x").map(Number);
       await preflightDeterministicTypography({ width, height, ...typography });
