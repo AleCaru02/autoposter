@@ -8,7 +8,7 @@ const base = (process.env.UI_SMOKE_BASE || "http://127.0.0.1:4173").replace(/\/$
 let localServer = null;
 async function startLocalServer() {
   if (process.env.UI_SMOKE_START_LOCAL !== "1") return;
-  localServer = spawn("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", "4173"], {
+  localServer = spawn("npm", ["run", process.env.UI_SMOKE_PREVIEW === "1" ? "preview" : "dev", "--", "--host", "127.0.0.1", "--port", "4173"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
@@ -480,10 +480,55 @@ async function verifyLoginValidation(browser) {
   }
 }
 
+async function verifyGoogleAccountLink(browser) {
+  for (const scenario of ["success", "rejected", "unconfirmed", "sdk-retry"]) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const blockedWrites = await installFixtureRoutes(page);
+    let linked = false;
+    let calls = 0;
+    let scriptLoads = 0;
+    const payloads = [];
+    await page.route("**/api/auth/list-accounts", (route) => route.fulfill({ json: linked ? [{ providerId: "google" }] : [] }));
+    await page.route("**/api/auth/link-social", async (route) => {
+      calls++;
+      payloads.push(route.request().postDataJSON());
+      linked = scenario === "success" || scenario === "sdk-retry";
+      await route.fulfill(scenario === "rejected"
+        ? { status: 401, json: { code: "INVALID_TOKEN", message: "Fixture rejection" } }
+        : { json: { status: true, redirect: false, url: "" } });
+    });
+    await page.route("https://accounts.google.com/gsi/client", async (route) => {
+      scriptLoads++;
+      if (scenario === "sdk-retry" && scriptLoads === 1) return route.abort();
+      await route.fulfill({ contentType: "application/javascript", body: `window.google={accounts:{id:{initialize(options){this.options=options},renderButton(container){const button=document.createElement('button');button.textContent='Continua con Google (test)';button.onclick=()=>{this.options.callback({credential:'fixture-google-id-token'});this.options.callback({credential:'fixture-google-id-token'})};container.append(button)}}}};` });
+    });
+    try {
+      await open(page, "/collega-google", "Collega il tuo account Google");
+      if (scenario === "sdk-retry") await page.getByRole("button", { name: "Riprova Google", exact: true }).click();
+      const button = page.getByRole("button", { name: "Continua con Google (test)", exact: true });
+      await button.click();
+      if (scenario === "success" || scenario === "sdk-retry") await page.getByRole("status").filter({ hasText: "Google risulta collegato" }).waitFor();
+      else await page.getByRole("alert").filter({ hasText: "Collegamento non confermato" }).waitFor();
+      assert.equal(calls, 1, "duplicate GIS callback must not send a second linking request");
+      assert.equal(payloads[0].provider, "google");
+      assert.equal(payloads[0].idToken.token, "fixture-google-id-token");
+      assert.match(payloads[0].idToken.nonce, /^[0-9a-f-]{36}$/);
+      assert.equal(payloads[0].callbackURL, undefined, "linking must not start the broken cross-origin redirect");
+      assert.deepEqual(blockedWrites, [], "Google linking attempted an unexpected write");
+      await assertNoDocumentOverflow(page, "390x844 Google account link " + scenario);
+      console.log("GOOGLE_ACCOUNT_LINK_BROWSER_PASS", scenario);
+    } finally { await context.close(); }
+  }
+}
+
 await startLocalServer();
 
 const browser = await chromium.launch({ headless: true });
 try {
+  if (process.env.UI_QA_GOOGLE_ONLY === "1") {
+    await verifyGoogleAccountLink(browser);
+  } else {
   for (const item of [
     { viewport: { width: 1440, height: 900 }, label: "1440x900" },
     { viewport: { width: 1280, height: 720 }, label: "1280x720" },
@@ -493,6 +538,7 @@ try {
   await verifySocialErrorState(browser);
   await verifyLoginValidation(browser);
   console.log("MOBILE_DESKTOP_UI_BROWSER_QA = PASS");
+  }
 } finally {
   await browser.close();
   stopLocalServer();

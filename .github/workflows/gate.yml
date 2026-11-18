@@ -7,6 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  google-account-link-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - { name: Checkout, uses: actions/checkout@v4 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --no-audit --no-fund
+      - name: Build with test-only public Google client
+        env: { VITE_GOOGLE_AUTH_CLIENT_ID: "qa-only.apps.googleusercontent.com" }
+        run: npm run build
+      - run: npm install --no-save --package-lock=false --no-audit --no-fund playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - name: Google token linking browser regressions without external writes
+        env:
+          UI_SMOKE_BASE: http://127.0.0.1:4173
+          UI_SMOKE_START_LOCAL: "1"
+          UI_SMOKE_PREVIEW: "1"
+          UI_QA_GOOGLE_ONLY: "1"
+        run: node tests/mobile-desktop-ui-browser.mjs
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 12
