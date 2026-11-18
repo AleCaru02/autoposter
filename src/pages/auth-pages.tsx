@@ -123,10 +123,12 @@ export function LoginPage() {
     }
   }
 
-  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button>{oauthError && <p role="alert" className="form-error">{googleOAuthFailureMessage(oauthError)} <strong>Codice: {oauthError.replace(/[^a-z_]/g, "").slice(0, 60)}</strong>.</p>}<div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to="/password-dimenticata">Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
+  return <AuthLayout title="Bentornato" subtitle="Accedi per riprendere il lavoro sui tuoi social."><button className="google-auth-button" disabled={busy} type="button" onClick={() => void startGoogleAccess(setError, setBusy)}><GoogleMark /> Continua con Google</button>{oauthError && <p role="alert" className="form-error">{googleOAuthFailureMessage(oauthError)} <strong>Codice: {oauthError.replace(/[^a-z_]/g, "").slice(0, 60)}</strong>.</p>}<div className="auth-divider"><span>oppure</span></div><form onSubmit={submit} className="auth-form"><label>Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" /><p className="auth-switch"><NavLink to={oauthError === "provider_account_not_linked" ? "/password-dimenticata?oauth=provider_account_not_linked" : "/password-dimenticata"}>Password dimenticata?</NavLink></p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy} type="submit">{busy ? "Accesso…" : "Accedi"}</button></form><p className="auth-switch">Non hai un account? <NavLink to="/registrazione">Registrati</NavLink></p></AuthLayout>;
 }
 
 export function ForgotPasswordPage() {
+  const [recoverySearch] = useSearchParams();
+  const linkingGoogle = recoverySearch.get("oauth") === "provider_account_not_linked";
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -140,7 +142,7 @@ export function ForgotPasswordPage() {
     try {
       const result = await withAuthTimeout(authClient.requestPasswordReset({
         email: email.trim(),
-        redirectTo: `${window.location.origin}/reimposta-password`,
+        redirectTo: `${window.location.origin}/reimposta-password${linkingGoogle ? "?oauth=provider_account_not_linked" : ""}`,
       }));
       if (result.error) {
         // Do not reveal whether the address is registered.
@@ -188,7 +190,7 @@ export function ResetPasswordPage() {
         setError("Non è stato possibile reimpostare la password. Richiedi un nuovo link e riprova.");
         return;
       }
-      navigate("/login", { replace: true });
+      navigate(searchParams.get("oauth") === "provider_account_not_linked" ? "/login?oauth=provider_account_not_linked" : "/login", { replace: true });
     } catch (reason) {
       setError(readableAuthError(reason, "Non è stato possibile reimpostare la password."));
     } finally {
