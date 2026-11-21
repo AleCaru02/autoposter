@@ -18,7 +18,7 @@ export default async function handler(req:VercelRequest,res:VercelResponse) {
   if(!cronAuthorized(req.headers.authorization,process.env.CRON_SECRET))
     return res.status(401).json({error:"UNAUTHORIZED_CRON"});
   const scope=resolveGbpDailyDraftConfig(process.env);
-  if(!scope.allowed)
+  if("reason" in scope)
     return res.status(scope.reason==="DISABLED"?200:503).json({ready:false,reason:scope.reason});
   if(!process.env.DATABASE_URL || !process.env.OPENAI_API_KEY)
     return res.status(503).json({ready:false,reason:"AI_RUNTIME_NOT_CONFIGURED"});
