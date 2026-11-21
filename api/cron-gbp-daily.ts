@@ -30,6 +30,7 @@ export default async function handler(req:VercelRequest,res:VercelResponse) {
       OPENAI_API_KEY:process.env.OPENAI_API_KEY,
       AUTOPILOT_RETEST_PROFILE_ID:process.env.AUTOPILOT_RETEST_PROFILE_ID,
       AUTOPILOT_RETEST_CUTOFF_UTC:process.env.AUTOPILOT_RETEST_CUTOFF_UTC,
+      GBP_DAILY_PROFILE_ID:scope.profileId,
     },{
       profileId:scope.profileId,
       providerFilter:"GBP",

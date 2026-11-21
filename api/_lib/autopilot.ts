@@ -22,6 +22,7 @@ import { decideVisualRuntime } from "./visual-runtime-decision.js";
 import { buildEditorialMemoryInstruction, deriveContinuityDecision, refreshProfileEditorialMemory } from "./editorial-memory.js";
 import { chooseSubjectStrategy, profileTypeStrategyInstruction } from "./subject-strategy.js";
 import { normalizeBrandVisualIdentity } from "./brand-visual-identity.js";
+import { isMilanPropertyDailyGbpProfile, milanPropertyGbpBrandContext, milanPropertyGbpVisualIdentity, MILAN_PROPERTY_GBP_EDITORIAL_GUIDE } from "./gbp-milan-property-brand.js";
 import { brandTextStyle, confirmedBrandLogoId, verifiedBrandLogoDataUrl } from "./brand-visual-assets.js";
 import { selectAutonomousFormat } from "./format-selection.js";
 import { instagramWebsitePilotBrief, instagramWebsitePilotEnabled, instagramWebsitePilotTopic } from "./instagram-website-pilot.js";
@@ -31,7 +32,7 @@ import { visualHeadlineForBrief, assertAutopilotGraphicBrief } from "./visual-he
 import { editorialPlacementForContent } from "./social-creative-direction.js";
 
 export type ApprovalMode = "MANUAL_REVIEW" | "AUTOMATIC";
-export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string; AUTOPILOT_RETEST_PROFILE_ID?: string; AUTOPILOT_RETEST_CUTOFF_UTC?: string };
+export type AutopilotEnv = { DATABASE_URL?: string; OPENAI_API_KEY?: string; OPENAI_TEXT_MONTHLY_BUDGET_USD?: string; OPENAI_IMAGE_MONTHLY_LIMIT?: string; HF_CREDENTIALS?: string; AUTOPILOT_RETEST_PROFILE_ID?: string; AUTOPILOT_RETEST_CUTOFF_UTC?: string; GBP_DAILY_PROFILE_ID?: string };
 
 function createSql(connectionString: string) { return neon(connectionString); }
 type Sql = ReturnType<typeof createSql>;
@@ -200,7 +201,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   if (previousRejections.some(record=>shouldDeferRejectedAutopilotSlot(record))) {
     return {scheduled:false,blocked:false,skipped:true,deferred:true};
   }
-  const loaded=await loadBrandContext(sql,profile);const context=loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
+  const loaded=await loadBrandContext(sql,profile);const enforceSiteBrand=isMilanPropertyDailyGbpProfile(profile.id,env.GBP_DAILY_PROFILE_ID,provider);const context=enforceSiteBrand?milanPropertyGbpBrandContext(loaded.context):loaded.context;if(!context.confirmedWebsiteContent.length)throw new Error(profile.profile_type==="PERSONAL_BRAND"?"AUTOPILOT_PERSONAL_BRAND_SOURCE_CONTEXT_MISSING":"AUTOPILOT_WEBSITE_CONTEXT_MISSING");
   const topics=await recentTopics(sql,profile.id);const count=await recentVariantCount(sql,profile.id,provider);const websitePilot=provider==="INSTAGRAM"&&instagramWebsitePilotEnabled(strategy?.platform_strategy);const availableFormats:SocialFormat[]=websitePilot?["POST"]:AUTOPILOT_PUBLISH_FORMATS[provider];const learning=await activeLearningInsights(sql,profile.id);const planItem=websitePilot?null:selectPlanItem(strategy?.platform_strategy,provider,scheduledAt);const learnedFormat=learnedFormatPreference(profile.id,provider,availableFormats,learning);const objective=websitePilot?"Ricevere richieste qualificate di bozza gratuita per siti web a 99 euro al mese":planItem?.objective||strings(strategy?.objectives)[0]||context.goals[0]||null;
   const strategyAi=asObject(asObject(strategy?.platform_strategy).aiStrategy);
   const memory=await refreshProfileEditorialMemory({sql,profileId:profile.id,profileType:profile.profile_type,strategyPillars:stringSignals(strategyAi.contentPillars)});
@@ -290,7 +291,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const learningInstruction=buildAutopilotLearningInstruction(profile.id,provider,learning);
   const profileStrategyInstruction=profileTypeStrategyInstruction({profileType:profile.profile_type,industry:profile.industry,businessModel:context.businessModel,offer:context.description,audience:context.target,objective,provider});
   const memoryInstruction=buildEditorialMemoryInstruction(memory);
-  const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction].filter(Boolean).join("\n\n");
+  const topicRequest=[baseTopicRequest,profileStrategyInstruction,memoryInstruction,learningInstruction,enforceSiteBrand?MILAN_PROPERTY_GBP_EDITORIAL_GUIDE:null].filter(Boolean).join("\n\n");
   const meter=new TextGenerationMetering(env.DATABASE_URL!);
   const reservation=await meter.reserve({profileId:profile.id,source:"AUTOPILOT",operationIdentity,requestFingerprint:{provider,format,scheduledAt,topicRequest,objective,researchMode}});
   if(reservation.status==="DENIED")throw new Error(reservation.code);
@@ -343,7 +344,7 @@ async function createPlannedContent(input:{sql:Sql;env:Required<Pick<AutopilotEn
   const contentId=crypto.randomUUID();const variantId=crypto.randomUUID();const now=new Date().toISOString();
   master.contentId=contentId;master.topic=generated.content.editorialTopic;master.angle=generated.content.editorialAngle;master.visualStrategy=variant.visualBrief;await persistMasterDecision(sql,profile.id,strategy,master);
   const generatedPillar=generated.content.pillar?.trim()||pillar.pillar?.name||loaded.personalBrand?.pillar||null;
-  const brandVisual=normalizeBrandVisualIdentity(loaded.visualIdentity,profile.industry);
+  const brandVisual=normalizeBrandVisualIdentity(enforceSiteBrand?milanPropertyGbpVisualIdentity(loaded.visualIdentity):loaded.visualIdentity,profile.industry);
   const logoAssetId=confirmedBrandLogoId(loaded.visualIdentity);
   const logoRows=logoAssetId?await sql`select storage_url,mime_type from public.assets where id=${logoAssetId}::uuid and profile_id=${profile.id}::uuid and kind='IMAGE' limit 1` as unknown as Array<{storage_url:string;mime_type:string|null}>:[];
   const logoDataUrl=verifiedBrandLogoDataUrl(logoRows[0]);
