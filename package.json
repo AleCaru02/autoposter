@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:gbp-daily-draft": "tsx tests/gbp-daily-draft.test.ts",
     "test:fase7i-learning-runtime": "node --import tsx tests/fase7i-learning-runtime.test.ts",
     "test:fase7j-settings-account": "node --import tsx tests/fase7j-settings-account.test.ts",
     "test:fase7h-analytics-engine": "node --import tsx tests/fase7h-analytics-engine.test.ts",
