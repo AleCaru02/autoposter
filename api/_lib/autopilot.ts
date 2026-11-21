@@ -48,7 +48,7 @@ type RecentItemRow = { topic: string };
 type RecentContentRow = { id: string; topic: string; title: string | null; pillar: string | null; visual_archetype: string | null; subject_strategy: string | null; narrative_structure: string | null; hook: string | null; caption: string | null; cta: string | null };
 type CountRow = { count: number | string };
 type SpendRow = { spend: number | string | null };
-type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean };
+type RunOptions = { profileId?: string; maxGenerations?: number; allowImageGeneration?: boolean; providerFilter?: "GBP"; dailyGbpSchedule?: boolean };
 type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
 type PlannedContentOutcome = { scheduled: boolean; blocked: boolean; skipped?: boolean; deferred?: boolean };
 
@@ -610,8 +610,18 @@ export async function runContentAutopilot(env:AutopilotEnv,options:RunOptions={}
         and connected.last_validated_at >= now()-interval '48 hours')
     order by created_at asc limit ${MAX_PROFILES_PER_RUN}` as unknown as ProfileRow[];
   const result:RunResult={profilesChecked:0,generated:0,scheduled:0,blockedForReview:0,skipped:0,errors:[]};const now=new Date();const horizon=new Date(now.getTime()+8*DAY_MS).toISOString();
-  for(const profile of profiles){if(result.generated>=maxGenerations)break;result.profilesChecked+=1;try{await ensureStrategy(sql,profile.id);await ensureSchedules(sql,profile);const strategies=await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profile.id}::uuid limit 1` as unknown as StrategyRow[];const strategy=strategies[0];const settings=settingsFromStrategy(strategy?.platform_strategy);if(!settings.enabled){result.skipped+=1;continue;}const schedules=await sql`select provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled from public.schedules
+  for(const profile of profiles){if(result.generated>=maxGenerations)break;result.profilesChecked+=1;try{await ensureStrategy(sql,profile.id);await ensureSchedules(sql,profile);
+    if(options.dailyGbpSchedule && options.providerFilter==="GBP"){
+      // One reviewed draft per day for the specified GBP pilot profile only.
+      const slots=Array.from({length:7},(_,i)=>({day:i+1,time:"10:00"}));
+      await sql`update public.schedules
+        set posts_per_week=7,timezone='Europe/Rome',preferred_slots=${JSON.stringify(slots)}::jsonb,
+            auto_choose=false,enabled=true,updated_at=now()
+        where profile_id=${profile.id}::uuid and provider='GBP'`;
+    }
+    const strategies=await sql`select objectives,platform_strategy from public.content_strategies where profile_id=${profile.id}::uuid limit 1` as unknown as StrategyRow[];const strategy=strategies[0];const settings=settingsFromStrategy(strategy?.platform_strategy);if(!settings.enabled){result.skipped+=1;continue;}const schedules=await sql`select provider,timezone,posts_per_week,preferred_slots,auto_choose,enabled from public.schedules
     where profile_id=${profile.id}::uuid and provider is not null and enabled=true and posts_per_week>0
+      and (${options.providerFilter??null}::text is null or provider::text=${options.providerFilter??null}::text)
       and (${Boolean(options.profileId)}::boolean or exists (
         select 1 from public.social_connections connected
         where connected.profile_id=public.schedules.profile_id and connected.provider=public.schedules.provider

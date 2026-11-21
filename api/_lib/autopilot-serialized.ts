@@ -5,7 +5,7 @@ import { ensureOpenAIStrategyPlannerFresh, strategyPlannerRefreshDecision } from
 import { ActivityBudgetEngine } from "./activity-budget.js";
 import { failureBreakerOpen, FAILURE_BREAKER_THRESHOLD, type AutopilotAttemptRecord } from "./autopilot-spend-guards.js";
 
-type RunOptions = { profileId?: string; maxGenerations?: number };
+type RunOptions = { profileId?: string; maxGenerations?: number; providerFilter?: "GBP"; generateImagesBeforeApproval?: boolean; dailyGbpSchedule?: boolean };
 type RunResult = { profilesChecked: number; generated: number; scheduled: number; blockedForReview: number; skipped: number; deferred?: number; errors: string[] };
 type UsageSnapshot = { globalTextUsd: number; profileTotalUsd: number; globalImages: number; profileImages: number; generated24h: number; generated7d: number };
 
@@ -27,13 +27,14 @@ export const AUTO_ELIGIBLE_PROFILE_SQL = `
       where conn.profile_id=p.id and conn.status='ACTIVE' and conn.token_reference is not null
         and conn.provider_account_id is not null and length(btrim(conn.provider_account_id))>0
         and conn.last_validated_at > now()-interval '48 hours'
+        and ($2::text is null or conn.provider::text=$2::text)
         and (conn.provider='GBP' or conn.expires_at is null or conn.expires_at>now())
     )
     and ($1::uuid is null or p.id=$1::uuid)
   order by activity.last_generated asc nulls first, p.created_at asc limit 100
 `;
-async function profileIds(client: Client, requestedProfileId?: string) {
-  const rows=await client.query<{id:string}>(AUTO_ELIGIBLE_PROFILE_SQL,[requestedProfileId??null]);
+async function profileIds(client: Client, requestedProfileId?: string, providerFilter?: "GBP") {
+  const rows=await client.query<{id:string}>(AUTO_ELIGIBLE_PROFILE_SQL,[requestedProfileId??null,providerFilter??null]);
   return rows.rows.map(row=>row.id);
 }
 
@@ -70,7 +71,7 @@ async function usageSnapshot(client: Client, profileId: string): Promise<UsageSn
 export async function runContentAutopilotSerialized(env: AutopilotEnv, options: RunOptions = {}) {
   if(!env.DATABASE_URL)throw new Error("DATABASE_NOT_CONFIGURED");const client=new Client(env.DATABASE_URL);await client.connect();let locked=false;
   try{
-    await client.query("select pg_advisory_lock(hashtextextended($1::text, 0))",[LOCK_NAME]);locked=true;const ids=await profileIds(client,options.profileId);if(!ids.length)return emptyResult();const aggregate=emptyResult();let remainingRun=Math.min(Math.max(options.maxGenerations??DEFAULT_GENERATIONS_PER_RUN,1),50);
+    await client.query("select pg_advisory_lock(hashtextextended($1::text, 0))",[LOCK_NAME]);locked=true;const ids=await profileIds(client,options.profileId,options.providerFilter);if(!ids.length)return emptyResult();const aggregate=emptyResult();let remainingRun=Math.min(Math.max(options.maxGenerations??DEFAULT_GENERATIONS_PER_RUN,1),50);
     for(const profileId of ids){
       if(remainingRun<=0)break;let strategy=await platformStrategy(client,profileId);let strategyObject=strategy&&typeof strategy==="object"&&!Array.isArray(strategy)?strategy as Record<string,unknown>:{};if(strategyObject.autopilotEnabled===false){aggregate.profilesChecked+=1;aggregate.skipped+=1;continue;}const policy=profileAiEconomicsPolicy(strategy);let usage=await usageSnapshot(client,profileId);
       const recentAttempts=await client.query<AutopilotAttemptRecord>("select state, metadata->>'release_reason' as reason, created_at::text as created_at from public.capability_usage_events where profile_id=$1::uuid and capability_key='ai.content.generate_text' and source='AI_TEXT_AUTOPILOT' and state in ('RELEASED','COMMITTED') order by created_at desc limit $2",[profileId,FAILURE_BREAKER_THRESHOLD]);
@@ -85,7 +86,9 @@ export async function runContentAutopilotSerialized(env: AutopilotEnv, options: 
       if(refresh.refreshStrategy||refresh.refreshPlan){await ensureOpenAIStrategyPlannerFresh(env,profileId,{strategyRefreshDays:policy.strategyRefreshDays,planRefreshDays:policy.planRefreshDays});strategy=await platformStrategy(client,profileId);strategyObject=strategy&&typeof strategy==="object"&&!Array.isArray(strategy)?strategy as Record<string,unknown>:{};usage=await usageSnapshot(client,profileId);const afterPlanning=await budgetEngine.snapshot(profileId);if(afterPlanning.band==="HARD_STOP"){aggregate.profilesChecked+=1;aggregate.skipped+=1;aggregate.errors.push(`${profileId}:AUTOPILOT_AI_LIMIT_REACHED:ACTIVITY_HARD_STOP_AFTER_PLANNING`);continue;}}
       const remainingDaily=Math.max(policy.maxGenerationsPerDay-usage.generated24h,0);const remainingWeekly=Math.max(policy.maxGenerationsPerWeek-usage.generated7d,0);const profileGenerationCap=Math.min(remainingRun,remainingDaily,remainingWeekly);
       if(profileGenerationCap<=0){aggregate.profilesChecked+=1;aggregate.skipped+=1;const reason=remainingDaily<=0?"DAILY_GENERATION_LIMIT":"WEEKLY_GENERATION_LIMIT";aggregate.errors.push(`${profileId}:AUTOPILOT_AI_LIMIT_REACHED:${reason}`);continue;}
-      const approvalMode=typeof strategyObject.approvalMode==="string"?strategyObject.approvalMode:null;const allowImageGeneration=strategyObject.instagramWebsitePilot===true||approvalMode==="AUTOMATIC"||policy.generateImagesAfterApproval===false;const result=await runContentAutopilot(env,{profileId,maxGenerations:profileGenerationCap,allowImageGeneration});addResult(aggregate,result);remainingRun-=result.generated;
+      const approvalMode=typeof strategyObject.approvalMode==="string"?strategyObject.approvalMode:null;const allowImageGeneration=options.generateImagesBeforeApproval===true||strategyObject.instagramWebsitePilot===true||approvalMode==="AUTOMATIC"||policy.generateImagesAfterApproval===false;const result=options.providerFilter==="GBP"
+        ? await runContentAutopilot(env,{profileId,maxGenerations:profileGenerationCap,allowImageGeneration,providerFilter:"GBP",dailyGbpSchedule:options.dailyGbpSchedule})
+        : await runContentAutopilot(env,{profileId,maxGenerations:profileGenerationCap,allowImageGeneration});addResult(aggregate,result);remainingRun-=result.generated;
     }
     return aggregate;
   }finally{if(locked)await client.query("select pg_advisory_unlock(hashtextextended($1::text, 0))",[LOCK_NAME]).catch(()=>undefined);await client.end().catch(()=>undefined);}
