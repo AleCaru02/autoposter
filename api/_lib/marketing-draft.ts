@@ -32,3 +32,17 @@ export function marketingOutput(body:unknown) {
   if(!output.trim())throw new Error("MARKETING_OUTPUT_EMPTY");
   return output.trim().slice(0,18000);
 }
+
+export type MarketingHistoryEntry = { id:string; createdAt:string; channel:MarketingChannel; draft:string; estimatedCostUsd:number|null };
+export function marketingHistoryEntry(row:unknown):MarketingHistoryEntry|null {
+  if(!row||typeof row!=="object")return null;
+  const r=row as Record<string,unknown>;
+  const response=r.response;
+  if(!response||typeof response!=="object")return null;
+  const d=response as Record<string,unknown>;
+  if(typeof r.id!=="string"||typeof r.created_at!=="string"||!Number.isFinite(Date.parse(r.created_at))||
+    !marketingChannels.includes(d.channel as MarketingChannel)||typeof d.draft!=="string"||!d.draft.trim()||
+    d.reviewRequired!==true||d.externalActionsExecuted!==false)return null;
+  return {id:r.id,createdAt:r.created_at,channel:d.channel as MarketingChannel,draft:d.draft.slice(0,18000),
+    estimatedCostUsd:typeof d.estimatedCostUsd==="number"&&Number.isFinite(d.estimatedCostUsd)&&d.estimatedCostUsd>=0?d.estimatedCostUsd:null};
+}

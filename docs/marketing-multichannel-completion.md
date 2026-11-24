@@ -13,3 +13,7 @@ Production baseline checked via Vercel and read-only Neon queries: deployment RE
 - Email: metered drafts, consent/suppression list, unsubscribe and test send; provider integration only after owner confirmation. No bulk sends or contact imports by default.
 
 Each phase requires CI PASS and isolated runtime evidence before production release. Brief workspace has no network, no persistence, no AI calls, no campaign activation or email sending. It is not equivalent to Holo's integrations yet.
+
+## Aggiornamento archivio bozze
+
+Le bozze marketing AI completate vengono conservate nel risultato già registrato dal sistema di metering. L'endpoint GET espone al solo titolare dell'attività le ultime 30 bozze, senza nuove generazioni e senza modificare lo schema DB. Nessuna pubblicazione o campagna reale è implicita. La cronologia è limitata e soggetta alla conservazione dei record di metering.

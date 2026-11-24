@@ -5,13 +5,40 @@ import { TextGenerationMetering } from "./_lib/text-generation-metering.js";
 import { verifiedCustomerAuthUserId } from "./_lib/verified-customer-auth.js";
 import { loadEditorialProfile,loadProfileBrandContext } from "./_lib/personal-brand-sources.js";
 import { estimateTerraCostUsd } from "./_lib/openai-text.js";
-import { marketingRequest,marketingPrompt,marketingOutput,MARKETING_INSTRUCTIONS,MARKETING_MODEL,MARKETING_MAX_OUTPUT } from "./_lib/marketing-draft.js";
+import { marketingRequest,marketingPrompt,marketingOutput,MARKETING_INSTRUCTIONS,MARKETING_MODEL,MARKETING_MAX_OUTPUT,marketingHistoryEntry } from "./_lib/marketing-draft.js";
 export const config={maxDuration:60};
 export default async function handler(req:VercelRequest,res:VercelResponse){
   res.setHeader("cache-control","no-store");
-  if(req.method!=="POST")return res.status(405).json({error:"METHOD_NOT_ALLOWED"});
+  if(req.method!=="POST"&&req.method!=="GET")return res.status(405).json({error:"METHOD_NOT_ALLOWED"});
   const token=req.headers.authorization?.startsWith("Bearer ")?req.headers.authorization.slice(7).trim():"";
   if(!token)return res.status(401).json({error:"AUTH_REQUIRED"});
+  if(req.method==="GET"){
+    const databaseUrl=process.env.DATABASE_URL;
+    if(!databaseUrl)return res.status(503).json({error:"DATABASE_NOT_CONFIGURED"});
+    const profileId=typeof req.query.profileId==="string"?req.query.profileId:"";
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(profileId))return res.status(400).json({error:"MARKETING_PROFILE_REQUIRED"});
+    try{
+      const owner=await verifiedCustomerAuthUserId(token,databaseUrl);
+      if(!owner)return res.status(401).json({error:"AUTH_REQUIRED"});
+      const sql=neon(databaseUrl);
+      await loadEditorialProfile(sql,profileId,owner);
+      // Read only committed, cached marketing outputs for the authorized activity.
+      // Do not expose metering metadata, reservations, prompts or other draft types.
+      const rows=await sql`
+        select id::text, created_at::text,
+               metadata->'cached_result'->'response' as response
+        from public.capability_usage_events
+        where profile_id=${profileId}::uuid
+          and capability_key='ai.content.generate_text'
+          and source='AI_TEXT_MANUAL' and state='COMMITTED'
+          and metadata->>'client_operation_identity' like 'marketing:%'
+          and metadata->'cached_result'->'response'->>'reviewRequired'='true'
+          and metadata->'cached_result'->'response'->>'externalActionsExecuted'='false'
+        order by created_at desc,id desc limit 30
+      `;
+      return res.status(200).json({drafts:rows.map(marketingHistoryEntry).filter(row=>row!==null)});
+    }catch(reason){return res.status(reason instanceof Error&&reason.message==="PROFILE_NOT_FOUND"?404:503).json({error:"MARKETING_HISTORY_UNAVAILABLE"});}
+  }
   const operation=req.headers["x-post-automatici-operation-id"];
   if(typeof operation!=="string"||!/^marketing:[a-f0-9-]{36}$/i.test(operation))return res.status(400).json({error:"OPERATION_ID_REQUIRED"});
   const databaseUrl=process.env.DATABASE_URL,apiKey=process.env.OPENAI_API_KEY;
