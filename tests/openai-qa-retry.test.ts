@@ -31,4 +31,14 @@ assert.equal(quota.attempts, 1);
 assert.equal(quotaCalls, 1);
 assert.equal(openAiQaFailureCode("OPENAI_AGENT", quota.response, quota.raw), "OPENAI_AGENT_HTTP_429_INSUFFICIENT_QUOTA");
 
+for (const header of ["60", new Date(Date.now() + 60_000).toUTCString()]) {
+  let calls = 0;
+  const limited = await fetchOpenAiQaWithRetry({
+    fetcher: async () => { calls++; return new Response('{"error":{"code":"rate_limit_exceeded"}}', { status: 429, headers: { "retry-after": header } }); },
+    url: "https://api.openai.com/v1/responses", init: { method: "POST" },
+    sleep: async () => { throw new Error("must not sleep or retry before provider permits"); },
+  });
+  assert.equal(limited.attempts, 1);
+  assert.equal(calls, 1);
+}
 console.log("OpenAI QA retry regression: PASS — transient throttles retry; quota throttles remain actionable.");

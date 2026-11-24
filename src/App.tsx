@@ -23,6 +23,7 @@ const SocialPage = lazy(() => import("./pages/social-page").then((module) => ({ 
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
 const AnalyticsPage = lazy(() => import("./pages/analytics-page").then((module) => ({ default: module.AnalyticsPage })));
 const LearningPage = lazy(() => import("./pages/learning-page").then((module) => ({ default: module.LearningPage })));
+const MarketingPage = lazy(() => import("./pages/marketing-page").then((module) => ({ default: module.MarketingPage })));
 const AssetsPage = lazy(() => import("./pages/assets-page").then((module) => ({ default: module.AssetsPage })));
 const PrivacyPage = lazy(() => import("./pages/legal-pages").then((module) => ({ default: module.PrivacyPage })));
 const TermsPage = lazy(() => import("./pages/legal-pages").then((module) => ({ default: module.TermsPage })));
@@ -124,6 +125,7 @@ export default function App() {
       <Route path="analytics" element={<AnalyticsPage />} />
       <Route path="apprendimento" element={<LearningPage />} />
       <Route path="libreria" element={<AssetsPage />} />
+      <Route path="marketing" element={<MarketingPage />} />
       <Route path="impostazioni" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />

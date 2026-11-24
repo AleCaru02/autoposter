@@ -75,7 +75,7 @@ function metric(metrics: PerformanceSample["metrics"], ...names: string[]) {
 }
 
 function explicitEngagementRate(metrics: PerformanceSample["metrics"]) {
-  const raw = metric(metrics, "engagement_rate", "engagementRate", "engagement");
+  const raw = metric(metrics, "engagement_rate", "engagementRate");
   if (raw === null || raw < 0) return null;
   if (raw <= 1) return raw;
   if (raw <= 100) return raw / 100;
@@ -83,12 +83,16 @@ function explicitEngagementRate(metrics: PerformanceSample["metrics"]) {
 }
 
 function weightedEngagement(metrics: PerformanceSample["metrics"]) {
-  const reactions = metric(metrics, "reactions", "likes", "like_count") ?? 0;
-  const comments = metric(metrics, "comments", "comment_count") ?? 0;
-  const shares = metric(metrics, "shares", "reshares", "share_count") ?? 0;
-  const saves = metric(metrics, "saves", "saved") ?? 0;
-  const clicks = metric(metrics, "clicks", "link_clicks") ?? 0;
-  return reactions + comments * 2 + shares * 3 + saves * 3 + clicks * 1.5;
+  const reactions = metric(metrics, "reactions", "likes", "like_count");
+  const comments = metric(metrics, "comments", "comment_count");
+  const shares = metric(metrics, "shares", "reshares", "share_count");
+  const saves = metric(metrics, "saves", "saved");
+  const clicks = metric(metrics, "clicks", "link_clicks");
+  const measured = [reactions, comments, shares, saves, clicks];
+  // Provider "engagement" is a count, not a rate. An aggregate alone cannot
+  // establish this weighted score, and missing counters are not real zeros.
+  if (measured.every(value => value === null) || measured.some(value => value !== null && value < 0)) return null;
+  return (reactions ?? 0) + (comments ?? 0) * 2 + (shares ?? 0) * 3 + (saves ?? 0) * 3 + (clicks ?? 0) * 1.5;
 }
 
 function exposure(metrics: PerformanceSample["metrics"]) {
@@ -104,7 +108,7 @@ export function scorePerformanceSample(sample: PerformanceSample): { score: numb
   const denominator = exposure(sample.metrics);
   if (denominator === null) return null;
   const numerator = weightedEngagement(sample.metrics);
-  if (!Number.isFinite(numerator) || numerator < 0) return null;
+  if (numerator === null || !Number.isFinite(numerator) || numerator < 0) return null;
   return { score: Math.min(numerator / denominator, 1), basis: "WEIGHTED_ENGAGEMENT_PER_EXPOSURE" };
 }
 
