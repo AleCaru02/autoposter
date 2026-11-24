@@ -36,7 +36,10 @@ assert.match(autopilot, /approvalMode:settings.websitePilot\?"MANUAL_REVIEW":set
 assert.match(autopilot, /const baseTopicRequest=websitePilot\?instagramWebsitePilotBrief\(count\)/);
 
 const serialized = await readFile(new URL("../api/_lib/autopilot-serialized.ts", import.meta.url), "utf8");
-assert.match(serialized, /allowImageGeneration=strategyObject.instagramWebsitePilot===true/);
+// The GBP draft pilot adds an explicitly scoped option; the Instagram opt-in
+// must remain an independent path and must not bypass manual approval.
+assert.match(serialized, /allowImageGeneration=options\.generateImagesBeforeApproval===true\|\|strategyObject\.instagramWebsitePilot===true\|\|approvalMode==="AUTOMATIC"\|\|policy\.generateImagesAfterApproval===false/);
+assert.match(serialized, /options\.providerFilter==="GBP"[\s\S]*providerFilter:"GBP"/);
 assert.match(serialized, /if\(strategyObject.autopilotEnabled===false\)\{aggregate.profilesChecked\+=1;aggregate.skipped\+=1;continue;\}/);
 
 const store = await readFile(new URL("../src/features/content/autopilot-store.ts", import.meta.url), "utf8");
