@@ -20,10 +20,13 @@ function errorKind(raw: string) {
 }
 
 function retryDelayMs(response: Response, attempt: number) {
-  const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "0");
-  const requested = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1_000 : 0;
-  // Keep the interactive QA responsive while still giving a transient provider limit time to clear.
-  return Math.min(Math.max(requested, 750 * 2 ** (attempt - 1)), 10_000);
+  const header = response.headers.get("retry-after")?.trim() ?? "";
+  const requested = /^\d+$/.test(header) ? Number(header) * 1000
+    : /^[A-Za-z]{3}, /.test(header) ? Math.max(0, Date.parse(header) - Date.now()) : 0;
+  // Do not make another paid request earlier than the provider permits.
+  // Long waits are surfaced to the caller instead of holding an interactive function.
+  if (requested > 10_000) return null;
+  return Math.min(Math.max(Number.isFinite(requested) ? requested : 0, 750 * 2 ** (attempt - 1)), 10_000);
 }
 
 export type OpenAiQaResponse = {
@@ -53,7 +56,9 @@ export async function fetchOpenAiQaWithRetry(input: {
     latest = { response, raw, attempts: attempt };
     const kind = errorKind(raw);
     if (response.ok || response.status !== 429 || NON_RETRYABLE_429.has(kind) || attempt === maxAttempts) return latest;
-    await sleep(retryDelayMs(response, attempt));
+    const delay = retryDelayMs(response, attempt);
+    if (delay === null) return latest;
+    await sleep(delay);
   }
 
   // The loop always returns; this protects TypeScript narrowing if it changes later.

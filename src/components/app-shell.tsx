@@ -19,14 +19,15 @@ const links = [
   ["Analytics", "/app/analytics", BarChart3],
   ["Apprendimento", "/app/apprendimento", Bot],
   ["Impostazioni", "/app/impostazioni", Settings2],
+  ["Marketing", "/app/marketing", FileText],
 ] as const;
 
 const mobilePrimaryLinks = [links[0], links[4], links[6], links[8]] as const;
-const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[7], links[9], links[10], links[11]] as const;
+const mobileMoreLinks = [links[1], links[2], links[3], links[5], links[7], links[9], links[10], links[11], links[12]] as const;
 
 const navigationGroups = [
   { label: "Oggi", items: [links[0]] },
-  { label: "Crea e pubblica", items: [links[4], links[5], links[6], links[7]] },
+  { label: "Crea e pubblica", items: [links[4], links[5], links[6], links[7], links[12]] },
   { label: "Canali e risultati", items: [links[8], links[9], links[10]] },
   { label: "La tua attività", items: [links[1], links[2], links[3], links[11]] },
 ] as const;

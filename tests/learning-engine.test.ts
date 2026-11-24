@@ -7,6 +7,17 @@ const profileB = "00000000-0000-4000-8000-000000000002";
 assert.deepEqual(scorePerformanceSample({ profileId: profileA, provider: "INSTAGRAM", format: "POST", topic: "Tema", publishedAt: "2026-08-01T10:00:00Z", metrics: { engagement_rate: 4.5 } }), { score: 0.045, basis: "ENGAGEMENT_RATE" });
 assert.equal(scorePerformanceSample({ profileId: profileA, provider: "INSTAGRAM", format: "POST", topic: "Tema", publishedAt: "2026-08-01T10:00:00Z", metrics: { likes: 10 } }), null, "raw reactions without exposure must not become a comparable performance score");
 
+const metricSample = (metrics: PerformanceSample["metrics"]): PerformanceSample => ({
+  profileId: profileA, provider: "FACEBOOK", format: "POST", topic: "Tema",
+  publishedAt: "2026-08-01T10:00:00Z", metrics,
+});
+assert.deepEqual(scorePerformanceSample(metricSample({ engagement: 50, reach: 1000, likes: 10 })), { score: 0.01, basis: "WEIGHTED_ENGAGEMENT_PER_EXPOSURE" });
+assert.equal(scorePerformanceSample(metricSample({ engagement: 1 })), null);
+assert.equal(scorePerformanceSample(metricSample({ engagement: 50, reach: 1000 })), null);
+assert.equal(scorePerformanceSample(metricSample({ reach: 1000 })), null);
+assert.equal(scorePerformanceSample(metricSample({ reach: 1000, likes: -1, comments: 5 })), null);
+assert.deepEqual(scorePerformanceSample(metricSample({ reach: 1000, likes: 0 })), { score: 0, basis: "WEIGHTED_ENGAGEMENT_PER_EXPOSURE" });
+
 const samples: PerformanceSample[] = [];
 for (let index = 0; index < 12; index += 1) {
   const strong = index < 6;

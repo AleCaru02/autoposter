@@ -1,0 +1,11 @@
+.marketing-workspace{max-width:800px;margin:0 auto;padding:16px;min-width:0;display:grid;gap:18px;overflow-wrap:anywhere}
+.marketing-workspace h1,.marketing-workspace h2{margin:0 0 8px}
+.marketing-kicker{font-size:.75rem;font-weight:700;letter-spacing:.08em}
+.marketing-note{border:1px solid currentColor;border-radius:12px;padding:12px;font-size:.9rem}
+.marketing-channel{display:flex;flex-wrap:wrap;gap:8px}
+.marketing-channel button{min-height:44px;border:1px solid #88938b;background:transparent;color:inherit;padding:8px 14px;border-radius:10px}
+.marketing-channel button[aria-pressed=true]{background:#19c95d;color:#111713;border-color:#19c95d;font-weight:700}
+.marketing-form{display:grid;gap:14px;min-width:0}
+.marketing-form label{display:grid;gap:6px;font-weight:600;min-width:0}
+.marketing-form input,.marketing-form textarea,.marketing-output{font:inherit;color:inherit;background:transparent;border:1px solid #88938b;border-radius:10px;padding:12px;width:100%;box-sizing:border-box;min-width:0;font-size:16px}
+.marketing-output{margin:8px 0;resize:vertical}
