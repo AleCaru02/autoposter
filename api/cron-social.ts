@@ -16,7 +16,8 @@ function authorized(req: VercelRequest, secret: string | undefined) {
 
 function enabled(value: string | undefined) { return value?.trim().toLowerCase() === "true"; }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export function createSocialCronHandler(deps = { processDuePublications, processDueAnalytics }) {
+return async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "no-store");
   if (req.method !== "GET") return res.status(405).json({ error: "METHOD_NOT_ALLOWED" });
   if (!process.env.CRON_SECRET) return res.status(503).json({ error: "CRON_NOT_CONFIGURED" });
@@ -51,20 +52,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({ error: "SOCIAL_SECURITY_NOT_CONFIGURED" });
   }
   const safeMode = socialSafeModeState(env);
-  if (publishEnabled && safeMode !== "OFF") {
-    return res.status(200).json({
-      ok: true,
-      publishing: safeMode === "ON" ? "SAFE_MODE_ACTIVE" : "SAFE_MODE_UNDETERMINED",
-      analytics: "SKIPPED",
-    });
+  // Publication safety must never disable explicitly enabled read-only
+  // provider analytics. Analytics does not publish or edit remote content.
+  const publicationBlock = publishEnabled && safeMode !== "OFF"
+    ? (safeMode === "ON" ? "SAFE_MODE_ACTIVE" : "SAFE_MODE_UNDETERMINED")
+    : null;
+  if (publicationBlock && !analyticsEnabled) {
+    return res.status(200).json({ ok: true, publishing: publicationBlock, analytics: "SKIPPED" });
   }
 
   try {
-    const publishing = publishEnabled
-      ? await processDuePublications(env, 5)
-      : { ready: false, reason: "DISABLED_CONFIG", checked: 0, published: 0, failed: 0 };
+    const publishing = publishEnabled && !publicationBlock
+      ? await deps.processDuePublications(env, 5)
+      : { ready: false, reason: publicationBlock ?? "DISABLED_CONFIG", checked: 0, published: 0, failed: 0 };
     const analytics = analyticsEnabled
-      ? await processDueAnalytics(env, 10)
+      ? await deps.processDueAnalytics(env, 10)
       : { ready: false, reason: "DISABLED_CONFIG", checked: 0, synced: 0, failed: 0 };
     console.log("vercel.social.cron", {
       publishEnabled,
@@ -76,11 +78,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metricsSynced: analytics.synced,
       metricsFailed: analytics.failed,
     });
-    return res.status(200).json({ ok: true, publishing, analytics });
+    return res.status(200).json({ ok: true, publishing: publicationBlock ?? publishing, analytics });
   } catch {
     // Provider tokens, URLs, access credentials, account IDs and raw response
     // bodies must never appear in the cron response or logs.
     console.error("vercel.social.cron", { error: "SOCIAL_CRON_FAILED" });
     return res.status(500).json({ error: "SOCIAL_CRON_FAILED" });
   }
+};
 }
+
+export default createSocialCronHandler();

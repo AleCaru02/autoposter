@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import handler from "../api/cron-social.js";
+import handler, { createSocialCronHandler } from "../api/cron-social.js";
 
 const config = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
 assert.ok(config.crons.some((item: {path?:string;schedule?:string}) => item.path === "/api/cron-social" && item.schedule === "*/5 * * * *"), "A separate schedule must exist");
@@ -54,6 +54,30 @@ try {
   const invalid = await invoke("test-secure-cron-secret");
   assert.equal(invalid.code,200);
   assert.equal((invalid.body as {publishing:string}).publishing,"SAFE_MODE_UNDETERMINED");
+  // Both flags enabled: SAFE_MODE ON or unknown still permits opted-in analytics,
+  // but must never reach the publication processor. No actual provider is called.
+  let publicationCalls = 0;
+  let analyticsCalls = 0;
+  const isolated = createSocialCronHandler({
+    processDuePublications: async () => { publicationCalls++; throw new Error("unexpected publication"); },
+    processDueAnalytics: async () => {
+      analyticsCalls++;
+      return { ready: true, checked: 1, synced: 1, failed: 0, blocked: 0, notFound: 0 };
+    },
+  });
+  process.env.AUTO_SOCIAL_ANALYTICS_ENABLED = "true";
+  for (const mode of ["true", undefined]) {
+    if (mode === undefined) delete process.env.SAFE_MODE;
+    else process.env.SAFE_MODE = mode;
+    const { snapshot, out } = response();
+    await isolated(request("test-secure-cron-secret") as never, out as never);
+    assert.equal(snapshot.code, 200);
+    assert.equal((snapshot.body as { publishing: string }).publishing,
+      mode === "true" ? "SAFE_MODE_ACTIVE" : "SAFE_MODE_UNDETERMINED");
+    assert.equal((snapshot.body as { analytics: { synced: number } }).analytics.synced, 1);
+  }
+  assert.equal(publicationCalls, 0);
+  assert.equal(analyticsCalls, 2);
   console.log("Vercel opt-in social cron security: PASS (no external writes)");
 } finally {
   for (const key of keys) {
