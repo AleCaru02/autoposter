@@ -172,6 +172,7 @@ jobs:
       - { name: Authorized single-attempt dated AI canary, run: "npx tsx tests/autopilot-one-shot-canary.test.ts" }
       - { name: Autopilot released QA metering regression, run: "npx tsx tests/autopilot-released-metering.test.ts" }
       - { name: Marketing brief safety and validation, run: "npm run test:marketing-brief" }
+      - { name: Marketing AI draft boundary, run: "npm run test:marketing-draft" }
       - { name: Learning engine regression, run: "npm run test:learning-engine" }
       - { name: Vercel authenticated learning route regression, run: "npm run test:vercel-learning-route" }
       - { name: Vercel native QA and generation status route regression, run: "npx tsx tests/vercel-native-qa-status-routes.test.ts" }
