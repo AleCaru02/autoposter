@@ -35,8 +35,15 @@ function failure(provider: AnalyticsProvider, status: number | null, retryAfterS
 }
 
 function retryAfter(response: Response) {
-  const raw = Number(response.headers.get("retry-after"));
-  return Number.isFinite(raw) ? Math.min(Math.max(Math.ceil(raw), 60), 86400) : 900;
+  const header = response.headers.get("retry-after")?.trim();
+  if (!header) return 900;
+  // RFC Retry-After accepts either delta-seconds or an HTTP-date.
+  const seconds = /^\d+$/.test(header)
+    ? Number(header)
+    : /^[A-Za-z]{3}, /.test(header)
+      ? (Date.parse(header) - Date.now()) / 1000
+      : Number.NaN;
+  return Number.isFinite(seconds) ? Math.min(Math.max(Math.ceil(seconds), 60), 86400) : 900;
 }
 
 async function request(url: URL, provider: AnalyticsProvider, accessToken: string, runtime: FetchRuntime, tolerateUnsupported = false, providerVersion?: string) {

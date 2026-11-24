@@ -148,6 +148,24 @@ await assert.rejects(
     && reason.retryable,
 );
 
+// No header or a malformed header must use the 15-minute backoff,
+ // not the 60-second floor caused by Number(null) or Number("").
+for (const header of [undefined, "", "invalid", "0", "120", "999999"]) {
+  await assert.rejects(fetchProviderMetrics(claim, connection,
+    { SOCIAL_TOKEN_KEY: secret },
+    { fetch: async () => new Response("{}", {
+      status: 429, headers: header === undefined ? {} : { "retry-after": header },
+    }) }),
+    (reason: unknown) => reason instanceof AnalyticsProviderError
+      && reason.retryAfterSeconds === (header === "0" ? 60 : header === "120" ? 120 : header === "999999" ? 86400 : 900));
+}
+const futureDate = new Date(Date.now() + 600_000).toUTCString();
+await assert.rejects(fetchProviderMetrics(claim, connection,
+  { SOCIAL_TOKEN_KEY: secret },
+  { fetch: async () => new Response("{}", { status: 429, headers: { "retry-after": futureDate } }) }),
+  (reason: unknown) => reason instanceof AnalyticsProviderError
+    && reason.retryAfterSeconds >= 590 && reason.retryAfterSeconds <= 600);
+
 for (const name of [
   "ANALYTICS_PROVIDER_MAPPING",
   "ANALYTICS_REMOTE_ID_MAPPING",
