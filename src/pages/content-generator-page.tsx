@@ -9,6 +9,7 @@ import { loadAutopilotOverview, saveAutopilotSettings, type AutopilotOverview, t
 import { CustomerWorkflowJourney } from "../components/customer-workflow-journey";
 import { ManualContentComposer } from "../components/manual-content-composer";
 import { ReelStudioPanel } from "../components/reel-studio-panel";
+import { PersonalBrandEditorialPanel } from "../components/personal-brand-editorial-panel";
 import { AvatarStudioPanel } from "../components/avatar-studio-panel";
 
 type AnalysisResponse = { pagesAnalyzed?: number; error?: string; detail?: string };
@@ -358,6 +359,7 @@ export function ContentGeneratorPage() {
 
     <AvatarStudioPanel profileId={selectedProfile.id} />
     <ReelStudioPanel profileId={selectedProfile.id} />
+    {selectedProfile.profile_type === "PERSONAL_BRAND" && <PersonalBrandEditorialPanel key={selectedProfile.id} />}
 
     <section className="panel editorial-manual">
       <div><h2>Un contenuto fuori piano?</h2><p>La creazione manuale è facoltativa: usala solo per una richiesta speciale.</p></div>
